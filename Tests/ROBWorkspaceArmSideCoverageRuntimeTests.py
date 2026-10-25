@@ -40,10 +40,11 @@ final class Vision {
  }
 }
 struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let captured:[Frame];let map:Map?}
-@MainActor func exercise(side:String="right",permit:Bool=true,fixed:Bool=false,objects:Bool=true,mode:String="normal")async throws->Result {
+@MainActor func exercise(side:String="right",permit:Bool=true,fixed:Bool=false,objects:Bool=true,canOnly:Bool=false,mode:String="normal")async throws->Result {
  ProcessInfo.processInfo.systemUptime=100;ROBFixedHeadBodyMotionIdentity.currentIdentity="body"
  let requireDepth=true,collectCollisionDepth=true,fixedRegisteredView:ROBWorkspaceView?=fixed ? .init(panDegrees:0,upperTarget:6306):nil
  let found:[Target:Int]=objects ? [.can:1,.orangeBucket:2]:[.can:1]
+ let targets:[Target]=canOnly ? [.can]:[.can,.orangeBucket]
  let model=Model(physicalSide:side),vision=Vision();vision.mode=mode
  let sceneCaptureAnchor=Anchor(generation:vision.cameraGeneration),sceneGatewayGeneration:UInt64=1
  var collisionMap:Map? = .init(sceneID:UUID(),estimatedCameraProjectionIdentity:"projection",bodyMotionIdentity:"body")
@@ -71,13 +72,15 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
 @main struct CoverageFixtures {
  @MainActor static func main()async throws {
   let right=try await exercise()
-  precondition(right.views==[.init(panDegrees:-55,upperTarget:5650),.init(panDegrees:-55,upperTarget:5300)])
+  precondition(right.views==[.init(panDegrees:-55,upperTarget:5650),.init(panDegrees:-35,upperTarget:5650)])
   precondition(right.captured.map(\.sequence)==[2,3] && right.captured.map(\.capturedAt)==[1200,1300])
   precondition(right.evidence.filter{$0["depth_only_arm_coverage"] as? Bool==true}.count==2)
   precondition(right.evidence.allSatisfy{$0["detector_invoked"] as? Bool != true && $0["free_space_inferred"] as? Bool != true})
   let summary=right.evidence.last!;precondition(summary["captured_views"] as! Int==2 && summary["budget_seconds"] as! Double==9.5)
   precondition(summary["scene_id"] as! String==right.map!.sceneID.uuidString)
-  let left=try await exercise(side:"left");precondition(left.views.allSatisfy{$0.panDegrees==55})
+  let left=try await exercise(side:"left");precondition(left.views==[.init(panDegrees:55,upperTarget:5650),.init(panDegrees:35,upperTarget:5650)])
+  let firstGrasp=try await exercise(objects:false,canOnly:true)
+  precondition(firstGrasp.views.count==2 && firstGrasp.captured.count==2,"Can-only grasp must retain whole-arm coverage without finding a bucket first")
   for mode in 0..<3 {
    let x=try await exercise(permit:mode != 0,fixed:mode==1,objects:mode != 2)
    precondition(x.views.isEmpty && x.captured.isEmpty && x.evidence.isEmpty)

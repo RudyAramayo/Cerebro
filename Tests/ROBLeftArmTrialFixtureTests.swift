@@ -9,7 +9,32 @@ enum ROBRecyclingVisualInspection {
     static var fixedContext=false
     @_optimize(none)
     @MainActor static func fixedHeadContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {fixedContext}
-    struct Context {}
+    struct VisualProjection {var cameraToModel=matrix_identity_double4x4}
+    enum Projection {case visualTrial(VisualProjection)}
+    struct Context {var projection=Projection.visualTrial(.init());var viewIdentity="fixture"
+        var scope=ROBFixedHeadRegistrationScope(modelID:"fixture",geometryID:"fixture",mappingID:"fixture",cameraGeneration:UUID(),
+            gatewaySessionGeneration:1,displayCorrectionIdentity:"fixture",panTarget:6015,lowerTarget:6011,upperTarget:6160,intrinsicsIdentity:"fixture")}
+    final class ServoContext {
+        var baseline=Context(),lastSequence:UInt64=0,targetBox:[Double]=[0.4,0.4,0.6,0.7]
+        var observations:[[String:Any]]=[]
+        var retainedFrames:[ROBGripperVisualServo.Frame]=[]
+        var provisionalCoMotion=false
+    }
+    struct ServoObservation {let frame:ROBGripperVisualServo.Frame;let decision:ROBGripperVisualServo.Decision;let canBox:[Double]}
+    @MainActor static func beginIncrementalVisualServo(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
+        map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
+        feedbackForFrame:@escaping(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,check:()throws->Void) async throws->ServoContext {
+        try check();throw ROBArmRoutineError.blocked("No actual jaw pixels were supplied to this hardware-free task seam.")
+    }
+    @MainActor static func observeIncrementalVisualServo(context:ServoContext,model:ROBGhostRobotModel,
+        frame:ROBArmRoutineVision.Frame,feedback:ROBAmberGatewayTelemetry,currentFeedback:ROBAmberGatewayTelemetry,
+        heldSinceMilliseconds:Double,openingCommandAtMilliseconds:Double?,requireTableSupport:Bool=true,check:()throws->Void)throws->ServoObservation {
+        try check();throw ROBArmRoutineError.blocked("No observed jaw pixels in fixture.")
+    }
+    @MainActor static func verifyIncrementalServoLift(context:ServoContext,beforeLift:ServoObservation,model:ROBGhostRobotModel,
+        heldSinceMilliseconds:Double,observe:()async throws->ServoObservation,check:()throws->Void) async throws->ROBVisualGraspVerifier.Evidence {
+        try check();throw ROBArmRoutineError.blocked("No observed jaw/can lift in fixture.")
+    }
     @_optimize(none)
     @MainActor static func begin(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,gatewayArm:String,check:() throws ->Void) async throws ->Context {
         throw ROBArmRoutineError.blocked("No synthetic visual baseline has been supplied to this fixture.")
@@ -399,14 +424,15 @@ final class ROBArmRoutineVision {
         let rgbOutputUndistorted:Bool?=true,depthRGBGeometryCorrespondence:Correspondence?=Correspondence()
         func isValid(forWidth:Int,height:Int)->Bool {forWidth==24 && height==24 && fx>0 && fy>0}
     }
-    struct Depth {let width=24,height=24;func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
-    struct Frame {let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth()}
+    struct Depth {var width=24,height=24;func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
+    struct Frame {let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true}
     var frameSequence:UInt64=10,captureFocalLength=24.0
+    var captureWidth=24,captureHeight=24
     func snapshot()->[String:Frame] {
         frameSequence+=1
         var k=Intrinsics(runtimeCalibration:.init(identity:runtimeIdentity,stereoPolicySHA256:stereoPolicyIdentity));k.fx=captureFocalLength;k.fy=captureFocalLength
         return frameAvailable ? ["face":.init(cameraGeneration:cameraGeneration,intrinsics:k,
-            capturedAt:Date().timeIntervalSince1970*1000,sequence:frameSequence)] : [:]
+            capturedAt:Date().timeIntervalSince1970*1000,sequence:frameSequence,depth:.init(width:captureWidth,height:captureHeight))] : [:]
     }
     @MainActor func settledDepthFrame(deadlineUptime:Double?=nil)async throws->Frame {
         try await Task.sleep(nanoseconds:10_000_000)
@@ -415,6 +441,12 @@ final class ROBArmRoutineVision {
     }
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
+    func observeWorkspace() async throws->(ROBWorkspaceObservation,Frame) {
+        let absent=ROBWorkspaceDetection(visible:false,confidence:0,box:[],aim:[],depthPoint:[])
+        guard let frame=snapshot()["face"] else {throw ROBArmRoutineError.blocked("No synthetic workspace pixels")}
+        return(.init(can:absent,orangeBucket:absent,leftArmHanging:false,rightArmHanging:false,hangingConfidence:0,cans:[]),frame)
+    }
+    func ensureActiveForTaskObservation() {if !frameAvailable {setActive(true)}}
     func setActive(_ active: Bool, teaching: Bool = false) {
         activationHistory.append(active)
         if clearsFramesOnSetActive {frameAvailable=false}
@@ -679,6 +711,66 @@ final class ROBArmRoutineCoordinator {
         let device = UUID(), session = UUID()
         let hello = ROBRobotActionMessage.controllerHello(senderID: "fixture-controller", acceptsActions: true, capabilities: ["arm_operation"])
         _ = broker.receive(hello, device: device, session: session)
+        if ["standing-camera-start","standing-auto-recovery"].contains(CommandLine.arguments.last ?? "") {
+            let recovering=CommandLine.arguments.last=="standing-auto-recovery"
+            broker.standingCanCampaignDirectory=folder.appendingPathComponent("standing-camera-campaign")
+            broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("standing-camera-audit")
+            let source="Synthetic fixture only: one authorized four-can campaign, not a real operator instruction."
+            let instruction="Synthetic fixture only: automatically prepare fresh camera and source context."
+            let value:[String:Any]=["schemaVersion":1,"kind":"local_user_standing_can_campaign_authorization","campaignID":UUID().uuidString,
+                "issuedAtMilliseconds":Date().timeIntervalSince1970*1000,"source":"explicit_user_session_instruction",
+                "sourceMessage":source,"sourceMessageSHA256":ROBGhostRobotModel.hash(Data(source.utf8)),
+                "additionalUserInstruction":instruction,"additionalUserInstructionSHA256":ROBGhostRobotModel.hash(Data(instruction.utf8)),
+                "scope":["canCount":4,"targetObject":"empty_coke_can","destination":"orange_bucket","arms":["left","right"],
+                    "treads":false,"torso":false,"manualGestures":false,"permitsUnmeasuredVisualCalibrationTrial":true,
+                    "automaticConnectionRecovery":true,"validUntil":"four_transfers_or_user_intervention"]]
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            let file=folder.appendingPathComponent("synthetic-standing-camera.json")
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:file)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+            try broker.importLocalCanCampaignAuthorization(fromReceiptURL:file)
+            ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64)
+            let v=ROBArmRoutineVision.shared;v.frameAvailable=false;v.fresh=false;v.captureWidth=640;v.captureHeight=400
+            g.mode=["left":0,"right":0];g.calibrated=["left","right"];g.commands=[]
+            var result:NSDictionary?,second:NSDictionary?
+            var observedGenerations:[UInt64]=[],pendingIDs:[String]=[]
+            if recovering {ROBWorkspaceSearch.shared.onInspect={
+                observedGenerations.append(g.generation)
+                if let id=broker.activeLocalRecyclingApprovalEvidence?["pendingID"] as?String {pendingIDs.append(id)}
+                if observedGenerations.count==1 {
+                    g.ready=false
+                    DispatchQueue.main.asyncAfter(deadline:.now()+1.5){g.generation+=1;g.ready=true}
+                }
+            }}
+            trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){result=$0}
+            trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){second=$0}
+            precondition(second?["status"] as?String=="busy")
+            try await Task.sleep(nanoseconds:150_000_000)
+            precondition(g.commands.isEmpty && !trial.isRunning && result==nil)
+            v.frameAvailable=true;v.fresh=true
+            try await Task.sleep(nanoseconds:150_000_000)
+            precondition(g.commands.isEmpty && !trial.isRunning && result==nil,"An old640x400frame froze a standing task context")
+            v.captureHeight=480;v.cameraGeneration=UUID()
+            let end=ProcessInfo.processInfo.systemUptime+15
+            while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
+            guard let output=result else{fatalError("Standing camera warmup did not start a fresh can-only perception task")}
+            if recovering {
+                precondition(output["status"] as?String=="blocked" && output["requires_new_plan"] as?Bool==true,output.description)
+                precondition(output["interruption_reason"] as?String=="transportLost" && output["possible_payload_held"] as?Bool==false)
+                let retryEnd=ProcessInfo.processInfo.systemUptime+12
+                while (observedGenerations.count<2 || trial.isRunning) && ProcessInfo.processInfo.systemUptime<retryEnd {try await Task.sleep(nanoseconds:50_000_000)}
+                precondition(observedGenerations==[1,2],"No automatic fresh-generation can task after telemetry reconnect")
+                precondition(pendingIDs.count==2 && pendingIDs[0] != pendingIDs[1],"Recovery reused an old receipt/proof scope")
+                precondition(ROBAmberGatewayTunnel.shared.connections>=1)
+                ROBWorkspaceSearch.shared.onInspect=nil
+                print("PASS actual standing AUTO recovery:typedtransportloss stopsoldjob, nativepassivereconnect, advancingBOTH-armstablefeedback/new480image, NEWpendingID/gatewaygeneration/canplan, no oldwaypoint or manualretry")
+            }else{precondition(output["status"] as?String=="not_found",output.description)}
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can])
+            precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("position_mode") || $0.hasPrefix("gripper") || $0.hasPrefix("activate")})
+            broker.cancel(reason:"Synthetic camera-start fixture complete")
+            print("PASS actual standing Trial camera startup: serializedpassive enrollment, rejectsold400frame, waitsadvancing640480source, freshnormalcan-onlyjob withoutcalibrationcapture or arm/jaw outputs")
+            return
+        }
         if ["one-degree-empty","one-degree-empty-delayed-endpoint"].contains(CommandLine.arguments.last ?? "") {
             let delayedEndpoint=CommandLine.arguments.last=="one-degree-empty-delayed-endpoint"
             g.delayOneDegreeEndpoint=delayedEndpoint
@@ -800,6 +892,7 @@ final class ROBArmRoutineCoordinator {
             precondition(first["perception_only_rejection"] as? Bool==true && broker.localRecyclingApprovalState?["state"] as? String=="available",first.description)
             precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==1)
             precondition(ROBWorkspaceSearch.shared.localCanShapePriorPermissions==[true],"Dedicated actual receipt did not explicitly authorize its optional shape prior")
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can],"Local single-can entry must not wait for the future bucket search")
             precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("waypoint") || $0.hasPrefix("gripper") || $0.hasPrefix("calibrate")})
             precondition(trial.localRecyclingContextDiagnostics["status"] as? String=="current")
             precondition(trial.localRecyclingContextDiagnostics["camera_frame_fresh"] as? Bool==false)

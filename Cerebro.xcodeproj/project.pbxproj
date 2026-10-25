@@ -22,6 +22,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		AC2510260000000000000002 /* ROBGripperVisualServo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2510260000000000000001 /* ROBGripperVisualServo.swift */; };
 		AC2410260000000000000010 /* ROBBellyQRCalibrationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC241026000000000000000F /* ROBBellyQRCalibrationWindowController.swift */; };
 		AC241026000000000000000C /* ROBEstimatedFixedHeadCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC241026000000000000000B /* ROBEstimatedFixedHeadCapture.swift */; };
 		AC241026000000000000000E /* ROBNeckRGBPoseDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC241026000000000000000D /* ROBNeckRGBPoseDisplay.swift */; };
@@ -286,6 +287,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC2510260000000000000001 /* ROBGripperVisualServo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGripperVisualServo.swift; sourceTree = "<group>"; };
 		AC241026000000000000000F /* ROBBellyQRCalibrationWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBellyQRCalibrationWindowController.swift; sourceTree = "<group>"; };
 		AC241026000000000000000B /* ROBEstimatedFixedHeadCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBEstimatedFixedHeadCapture.swift; sourceTree = "<group>"; };
 		AC241026000000000000000D /* ROBNeckRGBPoseDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBNeckRGBPoseDisplay.swift; sourceTree = "<group>"; };
@@ -756,6 +758,7 @@
 				AC2410260000000000000003 /* ROBFixedHeadCalibrationWindowController.swift */,
 				AC241026000000000000000F /* ROBBellyQRCalibrationWindowController.swift */,
 				AC2410260000000000000005 /* ROBVisualGraspVerifier.swift */,
+				AC2510260000000000000001 /* ROBGripperVisualServo.swift */,
 				AC2410260000000000000009 /* ROBNeckBundleEvidence.swift */,
 				AC241026000000000000000B /* ROBEstimatedFixedHeadCapture.swift */,
 				AC241026000000000000000D /* ROBNeckRGBPoseDisplay.swift */,
@@ -1206,6 +1209,7 @@
 				AC2410260000000000000004 /* ROBFixedHeadCalibrationWindowController.swift in Sources */,
 				AC2410260000000000000010 /* ROBBellyQRCalibrationWindowController.swift in Sources */,
 				AC2410260000000000000006 /* ROBVisualGraspVerifier.swift in Sources */,
+				AC2510260000000000000002 /* ROBGripperVisualServo.swift in Sources */,
 				AC241026000000000000000A /* ROBNeckBundleEvidence.swift in Sources */,
 				AC241026000000000000000C /* ROBEstimatedFixedHeadCapture.swift in Sources */,
 				AC241026000000000000000E /* ROBNeckRGBPoseDisplay.swift in Sources */,

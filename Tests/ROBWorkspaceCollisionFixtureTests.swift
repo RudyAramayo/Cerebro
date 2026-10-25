@@ -34,11 +34,38 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
 }
 
 @main struct WorkspaceCollisionFixtures {
-    static func blocked(_ expected: String? = nil,_ body: () throws -> Void) {
+    static func blocked(_ expected: String? = nil,line:UInt = #line,_ body: () throws -> Void) {
         do { try body(); preconditionFailure("An unsafe workspace path was admitted") }
-        catch { if let expected { precondition(error.localizedDescription.contains(expected),error.localizedDescription) } }
+        catch { if let expected { precondition(error.localizedDescription.contains(expected),"Fixture line \(line): \(error.localizedDescription)") } }
     }
     static func main() throws {
+        setbuf(stdout,nil)
+        let tetra="""
+        v 0 0 0
+        v 1 0 0
+        v 0 1 0
+        v 0 0 1
+        f 1 3 2
+        f 1 2 4
+        f 1 4 3
+        f 2 3 4
+        """
+        let identity=matrix_identity_double4x4
+        let cornerGap=try ROBWorkspaceVerifiedConvexEnvelope.distance(hullText:tetra,frame:identity,low:SIMD3(0.75,0.75,0.75),high:SIMD3(0.80,0.80,0.80))
+        precondition(cornerGap>0.70,"AABB-overlapping corners must not become convex contact")
+        let contactGap=try ROBWorkspaceVerifiedConvexEnvelope.distance(hullText:tetra,frame:identity,low:SIMD3(0.1,0.1,0.1),high:SIMD3(0.2,0.2,0.2))
+        precondition(contactGap==0,"True occupied/unknown whole-box contact remains blocked")
+        // A 25mm whole-cell distance ALREADY accounts for its extent. The
+        // center-sphere lower bound is conservative, never an extra error.
+        let cellLow=SIMD3<Double>(-0.085,0.10,0.10),cellHigh=SIMD3<Double>(-0.060,0.125,0.125)
+        let faceGap=try ROBWorkspaceVerifiedConvexEnvelope.distance(hullText:tetra,frame:identity,low:cellLow,high:cellHigh)
+        precondition(abs(faceGap-0.060)<1e-9)
+        let centerDistance=try ROBEstimatedConvexHull(text:tetra).distance(to:(cellLow+cellHigh)/2)
+        precondition(centerDistance-sqrt(3)*0.025/2<=faceGap && faceGap<=centerDistance)
+        let distantRaw=try ROBWorkspaceVerifiedConvexEnvelope.distance(hullText:tetra,frame:identity,low:SIMD3(-0.12,0.10,0.10),high:SIMD3(-0.12,0.10,0.10))
+        precondition(abs(distantRaw-0.12)<1e-9 && distantRaw>faceGap,"Original return bounds and dilated cell are distinct representations, never discarded samples")
+        blocked("malformed") {_ = try ROBWorkspaceVerifiedConvexEnvelope.distance(hullText:"v 0 0 0",frame:identity,low:.zero,high:.zero)}
+        print("Exact convex: AABB corner artifact removed; whole-cell/raw bounds retain contact, uncertainty and conservative center-sphere relation; malformed hull rejects")
         let root = URL(fileURLWithPath:CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory:root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         let scene = UUID(), camera = UUID(), generation: UInt64 = 42

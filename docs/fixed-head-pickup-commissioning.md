@@ -4,6 +4,64 @@ The sandbox separates a measured camera view from a general neck calibration.
 One validated view can support a local experiment without claiming that every
 neck angle or arm encoder offset is commissioned.
 
+## Standing can campaign and visual correction
+
+Rudy's standing authorization covers the current four empty cans and orange
+bucket. Import its private local campaign file once in Testing Sandbox, then
+use **Run standing can campaign**. Normal can executions bind their actual
+current context without another voice, receipt or waypoint approval. The
+private authorization and its hashes stay outside Git. This does not authorize
+arbitrary gestures, treads or torso movement. Stop durably revokes the campaign;
+completion consumes it. Commanded transfers and camera-verified bucket landings
+are counted separately.
+
+A connection interruption stops the current motion. The campaign can reconnect
+telemetry and retry a fresh request at most three times, with new measured poses,
+camera observations and path review. It never resumes an old waypoint, resets
+encoders or restarts CAN/core torque while an arm may be raised or carrying.
+Possible payloads and uncertain gripper actions require a hold and observation.
+An application relaunch preserves authorization, not the interrupted path.
+
+Standing tasks enroll their camera directly and request the full 640 × 480
+view before freezing context. They do not need a calibration capture to turn
+observation on. Already-active frames remain intact; the actual camera source
+identity still changes when its hardware configuration changes. Explicit
+recording and calibration demands retain priority. The selected-arm depth
+coverage uses two lateral pan views to seek space hidden behind the shoulder.
+
+The incremental grasp task reviews its empty entry first. At a visible held
+pose, the jaw observer uses actual finger edges and their symmetric opening
+after a real release request, with a stationary background. A model projection
+is only a search region. Command acceptance does not prove jaw position or force;
+Amber does not report those measurements. An already-open or occluded gripper
+may require a gentle empty close/open identification at an independently clear
+held pose. If that evidence is unavailable, the task reports the missing image
+evidence instead of substituting predicted pixels.
+
+Small corrections use observed jaw-to-can image error. Up to two explicitly
+estimated image-response directions can start the task; observed joint/image
+responses then supply a local correction model. Each correction still needs
+fresh live feedback and an independently reviewed whole-arm sweep. Historical
+joint samples match the image exposure without restamping; current feedback and
+the held pose are checked separately. Closing requires a new alignment
+observation after contact/lift review. A short lift checks visual co-motion and
+ends in a hold; it does not establish measured possession or authorize an
+unreviewed carry.
+
+Visual-trial collision review now narrows broad boxes against hash-verified
+closed convex envelopes and retained source-return bounds. Unknown cells remain
+whole unknown volumes. Exact whole-box distance already contains voxel extent,
+so its margin keeps mechanical clearance, assumed registration error and sweep
+allowance without adding the voxel half-diagonal a second time. Ordinary
+registered-route admission and all original occupied returns remain intact.
+These geometric improvements do not certify the provisional scan assignments
+or remove an actual unobserved segment of the route.
+
+Synthetic jaw tests establish software behavior, not real-camera detection
+reliability. Record the actual jaw/can images, feedback, corrections and outcome
+for each physical trial. A missed grasp is an experimental result; it must not
+be reported as a grasp or a recycled can.
+
 The separate, default-off **One-degree empty-arm calibration step** is an
 actuator observation rather than a pickup or clearance certificate. Its exact
 private session receipt permits physical RIGHT J2 −0.02 rad over four seconds,

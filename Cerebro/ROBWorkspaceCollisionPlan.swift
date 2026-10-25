@@ -1020,6 +1020,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         let started = ProcessInfo.processInfo.systemUptime
         var checked = 0
         var staticRobotLinkEvidence:[ROBWorkspaceStaticRobotLinkEvidence]? = nil
+        var verifiedShapes:[String:ROBNominalShape] = [:]
+        var unavailableConvexLinks=Set<String>()
         var limits: [ClosedRange<Double>] { ROBWorkspaceCollisionPlan.jointBounds(model:model) }
         var exhausted: Bool { checked >= maximumPoseChecks || ProcessInfo.processInfo.systemUptime-started > maximumPlanningSeconds }
         mutating func segment(from start:[Double],to end:[Double],payload:ROBWorkspaceCarriedObject?) -> String? {
@@ -1047,6 +1049,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             checked += 1
             guard q.count == 7, zip(q,limits).allSatisfy({ $0.isFinite && $1.contains($0) }) else { return "Arm pose exceeds the model or transport joint bounds." }
             let positions = model.positions(vendorLeft:q), bounds = model.worldCollisionBounds(positions:positions)
+            let frames=model.frames(positions)
             let arms = bounds.keys.filter { $0.hasPrefix(model.physicalSide + "_") && ($0.hasSuffix("_Link") || $0 == model.toolLink || $0 == model.physicalSide + "_base_link") }.sorted()
             guard arms.count >= 8 else {return "The complete arm collision model is missing."}
             var selfGap=model.treadSeparation(vendorLeft:q)
@@ -1062,9 +1065,13 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                 }
                 return "The complete arm model is missing or enters its tread clearance margin."
             }
-            // Sweep sampling is bounded by a conservative 1.5m lever; inflate
-            // by one full sample travel as well as registration/voxel error.
-            let margin = mechanicalClearanceMeters+context.spatialErrorAllowanceMeters+sweptPointTravelMeters+sqrt(3)*map.voxelSizeMeters/2
+            // Physical uncertainty remains mechanical + registration + one
+            // full swept sample travel. Exact queries below use WHOLE voxel
+            // or original-return bounds, already containing their extent.
+            // The old center-sphere halfdiagonal remains broad-phase/fallback
+            // conservatism only; adding it again to box distance double counts.
+            let margin = mechanicalClearanceMeters+context.spatialErrorAllowanceMeters+sweptPointTravelMeters
+            let broadVoxelAllowance=sqrt(3)*map.voxelSizeMeters/2
             for link in arms {
                 let box = bounds[link]!, extra = margin+(link == model.toolLink ? openJawAdditionalMarginMeters : 0)
                 var invariantStaticBase=false
@@ -1077,8 +1084,26 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                     } else {staticRobotLinkEvidence=[evidence]}
                     invariantStaticBase=true
                 }
-                if let reason = volume(low:box.low-SIMD3(repeating:extra),high:box.high+SIMD3(repeating:extra),label:link,payload:payload,
-                    invariantStaticBase:invariantStaticBase) { return reason }
+                let queryLow=box.low-SIMD3(repeating:extra+broadVoxelAllowance),queryHigh=box.high+SIMD3(repeating:extra+broadVoxelAllowance)
+                if context.visualTrial==nil {
+                    // Existing measured-route admission remains unchanged;
+                    // the explicit visual trial opts into exact-box queries.
+                    if let reason=volume(low:queryLow,high:queryHigh,label:link,payload:payload){return reason}
+                    continue
+                }
+                if map.state(inBoundsLow:queryLow,high:queryHigh) == .free {continue}
+                if verifiedShapes[link]==nil && !unavailableConvexLinks.contains(link) {
+                    do {verifiedShapes[link]=try ROBWorkspaceVerifiedConvexEnvelope.load(model:model,link:link)}catch{unavailableConvexLinks.insert(link)}
+                }
+                guard let shape=verifiedShapes[link],let frame=frames[link] else {
+                    // An open/unverified scan envelope cannot narrow a query.
+                    // Retain the pre-existing conservative AABB veto instead.
+                    if let reason=volume(low:queryLow,high:queryHigh,label:link,payload:payload,invariantStaticBase:invariantStaticBase){return reason}
+                    continue
+                }
+                let convex=ROBNominalWorldShape(shape,frame)
+                if let reason = narrowVolume(shape:convex,low:queryLow,high:queryHigh,
+                    margin:extra,label:link,payload:payload,invariantStaticBase:invariantStaticBase) { return reason }
             }
             if let payload {
                 guard payload.valid, let tool = model.frames(positions)[model.toolLink] else { return "The carried-object envelope or tool transform is invalid." }
@@ -1089,10 +1114,46 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                     let point = tool*local
                     points.append(SIMD3(point.x,point.y,point.z))
                 } } }
-                let low = points.reduce(points[0]) { simd_min($0,$1) }-SIMD3<Double>(repeating:margin)
-                let high = points.reduce(points[0]) { simd_max($0,$1) }+SIMD3<Double>(repeating:margin)
-                if let reason = volume(low:low,high:high,label:"carried object",payload:payload) { return reason }
+                let low = points.reduce(points[0]) { simd_min($0,$1) }-SIMD3<Double>(repeating:margin+broadVoxelAllowance)
+                let high = points.reduce(points[0]) { simd_max($0,$1) }+SIMD3<Double>(repeating:margin+broadVoxelAllowance)
+                if context.visualTrial==nil {
+                    if let reason=volume(low:low,high:high,label:"carried object",payload:payload){return reason}
+                } else if map.state(inBoundsLow:low,high:high) != .free {do {
+                    let localLow=SIMD3(center[0]-half[0],center[1]-half[1],center[2]-half[2]),localHigh=SIMD3(center[0]+half[0],center[1]+half[1],center[2]+half[2])
+                    let convex=ROBNominalWorldShape(try ROBNominalShape.box(low:localLow,high:localHigh),tool)
+                    if let reason=narrowVolume(shape:convex,low:low,high:high,margin:margin,label:"carried object",payload:payload,invariantStaticBase:false){return reason}
+                }catch{return error.localizedDescription}}
             }
+            return nil
+        }
+        /// AABB is broad phase only. Unknown remains unknown wherever the
+        /// WHOLE voxel intersects the protected verified convex envelope.
+        /// Occupied cells use EVERY retained source endpoint's union bounds;
+        /// this removes dilation/AABB corner artifacts without deleting data.
+        func narrowVolume(shape:ROBNominalWorldShape,low:SIMD3<Double>,high:SIMD3<Double>,margin:Double,
+            label:String,payload:ROBWorkspaceCarriedObject?,invariantStaticBase:Bool)->String? {
+            if map.state(inBoundsLow:low,high:high) == .free {return nil}
+            let size=map.voxelSizeMeters
+            guard margin.isFinite,margin>=0,size.isFinite,size>0,(0..<3).allSatisfy({low[$0].isFinite && high[$0].isFinite && abs(low[$0])<=20 && abs(high[$0])<=20 && low[$0]<=high[$0]}) else{return "The convex workspace query is invalid."}
+            let lo=(0..<3).map{Int(floor(low[$0]/size))},hi=(0..<3).map{Int(floor(high[$0]/size))}
+            guard zip(lo,hi).allSatisfy({$1 >= $0 && $1-$0<=200}),zip(lo,hi).reduce(1,{$0*($1.1-$1.0+1)})<=250_000 else{return "Convex workspace review exceeded its bounded volume."}
+            for x in lo[0]...hi[0] {for y in lo[1]...hi[1] {for z in lo[2]...hi[2] {
+                let center=SIMD3((Double(x)+0.5)*size,(Double(y)+0.5)*size,(Double(z)+0.5)*size),state=map.state(at:center)
+                if state == .free || (state == .unknown && invariantStaticBase) {continue}
+                let whole=ROBNominalRawBox(low:center-SIMD3(repeating:size/2),high:center+SIMD3(repeating:size/2),key:"\(x),\(y),\(z)")
+                let raw=state == .occupied ? map.occupiedSampleBounds(at:center):nil
+                let query=raw.map{ROBNominalRawBox(low:$0.low,high:$0.high,key:whole.key)} ?? whole
+                guard (0..<3).allSatisfy({query.low[$0].isFinite && query.high[$0].isFinite && query.low[$0]<=query.high[$0]}) else{return "An original occupied-return envelope is invalid."}
+                if shape.separationLowerBound(query)>margin+0.000001 {continue}
+                let distance:Double
+                do {distance=try shape.distance(query,stopAtDistance:margin)}catch{return error.localizedDescription}
+                if distance>margin+0.000001 {continue}
+                if state == .occupied,let contact=intentionalContact,contact.permits(label:label,payload:payload,stepIndex:contactStepIndex),
+                   (raw != nil ? contact.containsMeasuredBounds(low:query.low,high:query.high):contact.containsWholeVoxel(center:center,size:size)) {continue}
+                let detail=String(format:" Convex distance upper bound %.3f mm; retained envelope margin %.3f mm; voxel [%d,%d,%d]; representation %@.",distance*1000,margin*1000,x,y,z,raw == nil ? "whole_voxel":"all_original_return_bounds")
+                if state == .occupied {return "\(label) would intersect an observed workspace obstacle."+detail}
+                return "\(label) enters unobserved space. Scan the whole arm route before moving."+detail
+            }}}
             return nil
         }
         func volume(low:SIMD3<Double>,high:SIMD3<Double>,label:String,payload:ROBWorkspaceCarriedObject?,invariantStaticBase:Bool = false) -> String? {
@@ -1146,12 +1207,41 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     }
 }
 
+/// Pure geometry query; it neither changes map state nor grants motion.
+enum ROBWorkspaceVerifiedConvexEnvelope {
+    static func distance(hullText:String,frame:simd_double4x4,low:SIMD3<Double>,high:SIMD3<Double>)throws->Double {
+        guard (0..<3).allSatisfy({low[$0].isFinite && high[$0].isFinite && low[$0]<=high[$0]}) else {throw ROBGhostMotionError.blocked("Invalid convex query bounds.")}
+        return try ROBNominalWorldShape(ROBNominalShape(text:hullText),frame).distance(.init(low:low,high:high,key:""))
+    }
+    fileprivate static func load(model:ROBGhostRobotModel,link requested:String)throws->ROBNominalShape {
+        let data=try Data(contentsOf:model.directory.appendingPathComponent("surfaces.json"))
+        guard ROBGhostRobotModel.hash(data)==model.geometryID,
+              let catalog=try JSONSerialization.jsonObject(with:data)as?[String:Any],catalog["modelID"]as?String==model.modelID,
+              let records=catalog["surfaces"]as?[[String:Any]] else {throw ROBGhostMotionError.blocked("The convex collision geometry catalog changed.")}
+        var result:ROBNominalShape?
+        for row in records {
+            guard let link=row["link"]as?String,link==requested else{continue}
+            guard let path=row["hull"]as?String,model.hulls[link]==path,!path.hasPrefix("/"),!path.contains(".."),let sha=row["hullSHA256"]as?String,result==nil else {throw ROBGhostMotionError.blocked("The convex arm hull identity is invalid.")}
+            let bytes=try Data(contentsOf:model.directory.appendingPathComponent(path))
+            guard ROBGhostRobotModel.hash(bytes)==sha,let text=String(data:bytes,encoding:.utf8) else {throw ROBGhostMotionError.blocked("A convex arm hull changed.")}
+            result=try ROBNominalShape(text:text)
+        }
+        guard let result else {throw ROBGhostMotionError.blocked("The verified convex arm geometry is missing.")};return result
+    }
+}
 private struct ROBNominalRawBox {let low:SIMD3<Double>,high:SIMD3<Double>;let key:String
  var center:SIMD3<Double>{(low+high)/2};var half:SIMD3<Double>{(high-low)/2}
  func gap(to b:ROBNominalRawBox)->Double {simd_length(simd_max(.zero,simd_max(low-b.high,b.low-high)))}
 }
 private struct ROBNominalShape {
  let local:ROBEstimatedConvexHull,vertices:[SIMD3<Double>],edges:[(Int,Int)],normals:[SIMD3<Double>]
+ static func box(low:SIMD3<Double>,high:SIMD3<Double>)throws->Self {
+  guard (0..<3).allSatisfy({low[$0].isFinite && high[$0].isFinite && low[$0]<high[$0]}) else{throw ROBGhostMotionError.blocked("Invalid tool-local carried-object box.")}
+  var vertices:[SIMD3<Double>]=[];for x in [low.x,high.x]{for y in [low.y,high.y]{for z in [low.z,high.z]{vertices.append(SIMD3(x,y,z))}}}
+  let faces=[[1,2,4],[1,4,3],[5,7,8],[5,8,6],[1,5,6],[1,6,2],[3,4,8],[3,8,7],[1,3,7],[1,7,5],[2,6,8],[2,8,4]]
+  let text=vertices.map{"v \($0.x) \($0.y) \($0.z)"}.joined(separator:"\n")+"\n"+faces.map{"f \($0[0]) \($0[1]) \($0[2])"}.joined(separator:"\n")
+  return try Self(text:text)
+ }
  init(text:String)throws {local=try ROBEstimatedConvexHull(text:text);var v:[SIMD3<Double>]=[],f:[[Int]]=[]
   for line in text.split(separator:"\n") {let a=line.split(whereSeparator:\.isWhitespace);if a.first=="v" {v.append(SIMD3(Double(a[1])!,Double(a[2])!,Double(a[3])!))};if a.first=="f" {f.append(a.dropFirst().map{Int($0)!-1})}}
   vertices=v;var e=Set<String>(),out:[(Int,Int)]=[],ns:[SIMD3<Double>]=[]
@@ -1159,7 +1249,7 @@ private struct ROBNominalShape {
  }
 }
 private struct ROBNominalWorldShape {
- let source:ROBNominalShape,frame:simd_double4x4,inverse:simd_double4x4,vertices:[SIMD3<Double>],box:ROBNominalRawBox,axes:[SIMD3<Double>]
+ let source:ROBNominalShape,frame:simd_double4x4,inverse:simd_double4x4,vertices:[SIMD3<Double>],box:ROBNominalRawBox,axes:[SIMD3<Double>],supportIntervals:[(Double,Double)]
  init(_ shape:ROBNominalShape,_ frame:simd_double4x4) {source=shape;self.frame=frame;inverse=simd_inverse(frame)
   let v=shape.vertices.map{p->SIMD3<Double> in let q=frame*SIMD4(p,1);return SIMD3(q.x,q.y,q.z)};vertices=v
   box=ROBNominalRawBox(low:v.reduce(v[0]){simd_min($0,$1)},high:v.reduce(v[0]){simd_max($0,$1)},key:"")
@@ -1167,19 +1257,25 @@ private struct ROBNominalWorldShape {
   func add(_ x:SIMD3<Double>){let l=simd_length(x);guard l>1e-9 else{return};var n=x/l;if n.x < -1e-8 || (abs(n.x)<1e-8 && n.y < -1e-8) || (abs(n.x)<1e-8 && abs(n.y)<1e-8 && n.z<0){n = -n};let k="\(Int((n.x*1e7).rounded())):\(Int((n.y*1e7).rounded())):\(Int((n.z*1e7).rounded()))";if seen.insert(k).inserted {out.append(n)}}
   for n in shape.normals {let a=frame*SIMD4(n,0);add(SIMD3(a.x,a.y,a.z))}
   for (i,j) in shape.edges {let d=v[j]-v[i];for b in [SIMD3<Double>(1,0,0),SIMD3<Double>(0,1,0),SIMD3<Double>(0,0,1)] {add(simd_cross(d,b))}};axes=out
+  supportIntervals=out.map{n in var lo=Double.infinity,hi = -Double.infinity;for p in v {let d=simd_dot(n,p);lo=min(lo,d);hi=max(hi,d)};return(lo,hi)}
+ }
+ func separationLowerBound(_ b:ROBNominalRawBox)->Double {
+  var best=box.gap(to:b)
+  for (n,interval) in zip(axes,supportIntervals) {let mid=simd_dot(n,b.center),r=simd_dot(simd_abs(n),b.half);best=max(best,max(interval.0-(mid+r),(mid-r)-interval.1))}
+  return best
  }
  func point(_ p:SIMD3<Double>)throws->Double {let q=inverse*SIMD4(p,1);return try source.local.distance(to:SIMD3(q.x,q.y,q.z))}
- func distance(_ b:ROBNominalRawBox)throws->Double {
+ func distance(_ b:ROBNominalRawBox,stopAtDistance:Double?=nil)throws->Double {
   if simd_length(b.high-b.low)<1e-10 {return try point(b.low)}
   var separated=false
-  for n in axes {var lo=Double.infinity,hi = -Double.infinity;for p in vertices {let d=simd_dot(n,p);lo=min(lo,d);hi=max(hi,d)};let mid=simd_dot(n,b.center),r=simd_dot(simd_abs(n),b.half);if max(lo-(mid+r),(mid-r)-hi)>1e-10 {separated=true;break}}
+  for (n,interval) in zip(axes,supportIntervals) {let mid=simd_dot(n,b.center),r=simd_dot(simd_abs(n),b.half);if max(interval.0-(mid+r),(mid-r)-interval.1)>1e-10 {separated=true;break}}
   if !separated{return 0}
   var corners:[SIMD3<Double>]=[];for x in [b.low.x,b.high.x] {for y in [b.low.y,b.high.y] {for z in [b.low.z,b.high.z] {corners.append(SIMD3(x,y,z))}}}
   var result=Double.infinity
-  for p in corners {result=min(result,try point(p))}
-  for p in vertices {result=min(result,simd_length(simd_max(.zero,simd_max(b.low-p,p-b.high))))}
+  for p in corners {result=min(result,try point(p));if let stopAtDistance,result<=stopAtDistance{return result}}
+  for p in vertices {result=min(result,simd_length(simd_max(.zero,simd_max(b.low-p,p-b.high))));if let stopAtDistance,result<=stopAtDistance{return result}}
   let be=[(0,1),(0,2),(0,4),(1,3),(1,5),(2,3),(2,6),(3,7),(4,5),(4,6),(5,7),(6,7)]
-  for (i,j) in source.edges {for (k,l) in be {result=min(result,robNominalSegmentDistance(vertices[i],vertices[j],corners[k],corners[l]))}}
+  for (i,j) in source.edges {for (k,l) in be {result=min(result,robNominalSegmentDistance(vertices[i],vertices[j],corners[k],corners[l]));if let stopAtDistance,result<=stopAtDistance{return result}}}
   return result
  }
 }

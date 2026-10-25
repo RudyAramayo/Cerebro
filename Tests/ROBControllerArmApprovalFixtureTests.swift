@@ -34,6 +34,7 @@ final class ROBAmberGatewayClient: NSObject {
 
     static func broker() -> ROBControllerArmApproval {
         let b = ROBControllerArmApproval()
+        b.standingCanCampaignDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("isolated-standing-campaign-" + UUID().uuidString)
         b.sessionIsActive = { $0 == device && $1 == session }
         return b
     }
@@ -621,6 +622,218 @@ final class ROBAmberGatewayClient: NSObject {
                 execute: { _ in check(false, "Invalid local scope executed") }, cancel: {},
                 completion: { rejected = $0["status"] as? String == "rejected" })
             check(rejected && !b.isPending, "Local receipts cannot broaden to another count, gesture or unspecified arm")
+        }
+        func standingFile(_ b: ROBControllerArmApproval, mutate: (inout [String: Any]) -> Void = { _ in }) throws -> URL {
+            let source = "Synthetic actual user task: remove these four empty Coke cans into the orange bucket."
+            let instruction = "Synthetic actual user instruction: continue this arms-only campaign and recover connections until I intervene."
+            var value: [String: Any] = ["schemaVersion": 1, "kind": "local_user_standing_can_campaign_authorization",
+                "campaignID": UUID().uuidString, "issuedAtMilliseconds": b.now().timeIntervalSince1970 * 1000,
+                "source": "explicit_user_session_instruction", "sourceMessage": source, "sourceMessageSHA256": hash(source),
+                "additionalUserInstruction": instruction, "additionalUserInstructionSHA256": hash(instruction),
+                "scope": ["canCount": 4, "targetObject": "empty_coke_can", "destination": "orange_bucket", "arms": ["left", "right"],
+                    "treads": false, "torso": false, "manualGestures": false, "permitsUnmeasuredVisualCalibrationTrial": true,
+                    "automaticConnectionRecovery": true, "validUntil": "four_transfers_or_user_intervention"]]
+            mutate(&value)
+            let file = localDirectory.appendingPathComponent(UUID().uuidString + "-standing.json")
+            try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]).write(to: file)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            return file
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-positive")
+            let input=try standingFile(b);var executions=0,prompts=0,stops=0,context:String?="fresh-source-A"
+            var done:((NSDictionary)->Void)?;b.announceApproval={_ in prompts+=1}
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:input)
+            check(b.standingLocalCanCampaignActive && !b.isPending && executions==0,"Standing import is passive, not startup motion")
+            func run(_ broker:ROBControllerArmApproval,_ title:String){
+                broker.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,
+                    summary:title,contextIdentity:{context},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                    execute:{executions+=1;done=$0},cancel:{stops+=1},completion:{_ in})
+            }
+            run(b,"First fresh ordinary can plan")
+            let firstID=b.activeLocalRecyclingApprovalEvidence?["receiptID"] as?String
+            check(executions==1 && prompts==0 && firstID != nil && b.authorizesRightArmTrial("First fresh ordinary can plan"),
+                "Standing campaign binds a fresh exact ordinary can plan without another voice/file approval")
+            check(b.activeLocalRecyclingApprovalEvidence?["standingCampaignID"] != nil &&
+                b.activeLocalRecyclingApprovalEvidence?["sourceMessage"]==nil,"Fresh evidence binds standing source without leaking private instructions")
+            done?(["status":"partial_grasp_held","transfer_completed":false,"batch_completed":4])
+            check((b.standingLocalCanCampaignState?["completedTransfers"]as?NSNumber)?.intValue==0,
+                "A grasp/hold or unverified count never consumes four transfers")
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(restarted.standingLocalCanCampaignActive && !restarted.isPending && executions==1,
+                "Same campaign survives relaunch without resuming any old waypoint")
+            context="fresh-source-B";run(restarted,"New app fresh normal plan")
+            check(executions==2 && restarted.activeLocalRecyclingApprovalEvidence?["receiptID"]as?String != firstID,
+                "Relaunch derives a new exact context and job identity")
+            context=nil;restarted.tick()
+            check(stops==1 && !restarted.isPending && restarted.standingLocalCanCampaignActive,
+                "Lost connection/context holds the job but preserves standing authorization for revalidation")
+            context="fresh-source-C"
+            var restarts=0
+            check(restarted.scheduleStandingLocalCanCampaignRecovery(reason:.transportLost,restart:{restarts+=1;run(restarted,"Fresh plan after recovery")}),
+                "Typed transport recovery schedules a bounded fresh request")
+            RunLoop.current.run(until:Date().addingTimeInterval(1.15))
+            check(restarts==1 && executions==3 && restarted.authorizesRightArmTrial("Fresh plan after recovery"),
+                "Automatic recovery invokes a new fresh plan, not the previous job/waypoint")
+            done?(["status":"blocked","transfer_completed":false,"requires_intervention":true,"detail":"Real obstacle"])
+            check(!restarted.scheduleStandingLocalCanCampaignRecovery(reason:.feedbackLost,restart:{check(false,"Collision auto retried")}),
+                "A real obstacle/intervention result forbids automatic retry")
+            let stateURL=restarted.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            let oldState=try Data(contentsOf:stateURL)
+            restarted.cancel(reason:"User Stop: intervene now")
+            check(!restarted.standingLocalCanCampaignActive && !restarted.scheduleStandingLocalCanCampaignRecovery(reason:.transportLost,restart:{}),
+                "Stop revokes standing authority and queued retries")
+            try oldState.write(to:stateURL)
+            let afterStop=localBroker();afterStop.standingCanCampaignDirectory=restarted.standingCanCampaignDirectory
+            check(!afterStop.standingLocalCanCampaignActive,"A restored old state cannot replay past the durable Stop tombstone")
+            do{try afterStop.importLocalCanCampaignAuthorization(fromReceiptURL:input);check(false,"Stopped campaign reimported")}catch{check(true,"Stopped campaign cannot reimport")}
+        }
+        for change in ["scope","source","instruction","sourceType"] {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-invalid-"+change)
+            let input=try standingFile(b){v in
+                if change=="scope" {var scope=v["scope"]as![String:Any];scope["treads"]=true;v["scope"]=scope}
+                if change=="source" {v["sourceMessageSHA256"]="bad"}
+                if change=="instruction" {v["additionalUserInstruction"]="";v["additionalUserInstructionSHA256"]=hash("")}
+                if change=="sourceType" {v["source"]="model_output"}
+            }
+            do{try b.importLocalCanCampaignAuthorization(fromReceiptURL:input);check(false,"Invalid standing authorization imported")}catch{check(!b.standingLocalCanCampaignActive,"Standing scope/source failure cannot grant")}
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-consumed")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            var done:((NSDictionary)->Void)?
+            b.requestRecyclingWorkspaceTask(command:"left_recycle_cans",arm:"left",canCount:4,summary:"Four native transfers",
+                contextIdentity:{"fresh"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                execute:{done=$0},cancel:{},completion:{_ in})
+            done?(["status":"accepted_unverified","transfer_completed":true,"batch_completed":4,"placement_verified":false])
+            check(!b.standingLocalCanCampaignActive && b.standingLocalCanCampaignState?["state"]as?String=="consumed",
+                "Four explicitly completed transfers consume the campaign")
+            check((b.standingLocalCanCampaignState?["completedTransfers"]as?NSNumber)?.intValue==4 &&
+                (b.standingLocalCanCampaignState?["verifiedLandings"]as?NSNumber)?.intValue==0,
+                "Commanded/native transfer completion never claims camera-verified bucket landing")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-calibration-excluded")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b));var executions=0
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:"Separate old actuator mode",
+                contextIdentity:{"fresh"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                oneDegreeEmptyCalibrationStepEnabled:true,execute:{_ in executions+=1},cancel:{},completion:{_ in})
+            check(executions==0 && !b.receiveSpokenAuthorization("yes proceed"),"Standing can authorization never grants old calibration modes or microphone strings")
+            b.cancel(reason:"Fixture cleanup")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-queued-stop")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b));var restarted=0
+            check(b.scheduleStandingLocalCanCampaignRecovery(reason:.feedbackLost,restart:{restarted+=1}),"Fresh recovery can be queued")
+            b.cancel(reason:"Explicit user intervention before retry")
+            RunLoop.current.run(until:Date().addingTimeInterval(1.10))
+            check(restarted==0 && !b.standingLocalCanCampaignActive,"Stop cancels the queued retry callback as well as its durable authorization")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-bounded-retries")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            for _ in 0..<3 {check(b.scheduleStandingLocalCanCampaignRecovery(reason:.transportLost,restart:{}),"A bounded recovery attempt is available")}
+            check(!b.scheduleStandingLocalCanCampaignRecovery(reason:.transportLost,restart:{}) &&
+                b.standingLocalCanCampaignState?["state"]as?String=="waiting_for_intervention",
+                "Three attempts exhaust automatic recovery without silently retrying forever")
+            b.cancel(reason:"Fixture cleanup")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-stop-after-read-failure")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            let stateURL=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            let oldState=try Data(contentsOf:stateURL)
+            let id=(try JSONSerialization.jsonObject(with:oldState)as![String:Any])["campaignID"]as!String
+            let authURL=b.standingCanCampaignDirectory.appendingPathComponent("authorization-"+id+".json")
+            let original=try Data(contentsOf:authURL)
+            try Data("corrupt source evidence".utf8).write(to:authURL)
+            check(!b.standingLocalCanCampaignActive,"Corrupt archived source evidence closes the loader")
+            b.cancel(reason:"User Stop while evidence is unavailable")
+            try original.write(to:authURL);try oldState.write(to:stateURL)
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(!restarted.standingLocalCanCampaignActive,"Stop remains durable even if source validation failed before revocation")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-possible-payload")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b));var executions=0
+            var done:((NSDictionary)->Void)?
+            func run(_ broker:ROBControllerArmApproval){
+                broker.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,
+                    summary:"Fresh EMPTY can attempt",contextIdentity:{"current"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                    execute:{executions+=1;done=$0},cancel:{},completion:{_ in})
+            }
+            run(b);try b.markLocalCanCampaignPossiblePayloadHeld()
+            check(b.standingLocalCanCampaignState?["possiblePayloadHeld"]as?Bool==true,"Payload uncertainty is durable BEFORE actual close")
+            done?(["status":"partial_held","possible_payload_held":true,"grasp_attempted":true,"transfer_completed":false])
+            run(b)
+            check(executions==1 && !b.isPending && b.standingLocalCanCampaignActive,
+                "A held partial grasp blocks a new EMPTY job without revoking standing authorization")
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory;run(restarted)
+            check(executions==1 && !restarted.isPending && restarted.standingLocalCanCampaignState?["possiblePayloadHeld"]as?Bool==true,
+                "A new app session cannot reset possible payload into an empty grasp")
+            check(!restarted.scheduleStandingLocalCanCampaignRecovery(reason:.transportLost,restart:{check(false,"Possible payload auto retried")}),
+                "Connection recovery cannot automatically regrasp a possible payload")
+            restarted.cancel(reason:"Fixture Stop")
+            check(restarted.standingCanCampaignMayHoldPayload,"Stop revokes permission without declaring a held object empty")
+            try restarted.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(restarted))
+            check(restarted.standingLocalCanCampaignActive && restarted.standingCanCampaignMayHoldPayload,
+                "Importing a different campaign cannot reset terminal held-payload state")
+            run(restarted)
+            check(executions==1 && !restarted.isPending,"A new authorization is not object-clear evidence")
+            restarted.cancel(reason:"Fixture Stop")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-supported-release")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b));var executions=0;var done:((NSDictionary)->Void)?
+            func run(){b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:"EMPTY identification then can",
+                contextIdentity:{"current"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                execute:{executions+=1;done=$0},cancel:{},completion:{_ in})}
+            run();try b.markLocalCanCampaignPossiblePayloadHeld();try b.recordLocalCanCampaignSupportedRelease()
+            done?(["status":"blocked","possible_payload_held":false,"transfer_completed":false])
+            check(b.standingLocalCanCampaignState?["possiblePayloadHeld"]as?Bool==false,
+                "Observed EMPTY identification opening clears only its own transient hold uncertainty")
+            run();try b.markLocalCanCampaignPossiblePayloadHeld()
+            done?(["status":"accepted_unverified","possible_payload_held":true,"transfer_completed":true,"batch_completed":1,"placement_verified":false])
+            check(b.standingLocalCanCampaignState?["possiblePayloadHeld"]as?Bool==false &&
+                (b.standingLocalCanCampaignState?["completedTransfers"]as?NSNumber)?.intValue==1,
+                "Typed completed transfer/release evidence can clear a possible payload, without claiming a verified landing")
+            run();check(executions==3,"A supported release allows a genuinely new empty attempt under the same authorization")
+            b.cancel(reason:"Fixture Stop")
+        }
+        for legacy in [true,false] {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-unresolved-"+String(legacy))
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            let stateURL=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            if legacy {
+                var state=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+                state.removeValue(forKey:"possiblePayloadHeld")
+                try JSONSerialization.data(withJSONObject:state,options:[.sortedKeys]).write(to:stateURL)
+            } else {
+                b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:"Unfinished old process",
+                    contextIdentity:{"old"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                    execute:{_ in},cancel:{},completion:{_ in})
+            }
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory;var executed=false
+            restarted.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:"New EMPTY request",
+                contextIdentity:{"new"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                execute:{_ in executed=true},cancel:{},completion:{_ in})
+            check(!executed && restarted.standingLocalCanCampaignActive,
+                "Legacy unknown payload or unresolved prior app job cannot silently become EMPTY")
+            check(restarted.standingCanCampaignMayHoldPayload,"Startup guard exposes legacy/unresolved object uncertainty")
+            restarted.cancel(reason:"Fixture Stop")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-startup-read-only")
+            check(!b.standingCanCampaignMayHoldPayload,"Never-used campaign storage does not invent a payload")
+            try FileManager.default.createDirectory(at:b.standingCanCampaignDirectory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            let state=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            try Data("unreadable campaign state".utf8).write(to:state)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:state.path)
+            check(b.standingCanCampaignMayHoldPayload,"Unreadable existing state blocks automatic startup jaw calibration")
+            try FileManager.default.removeItem(at:state)
+            let orphan=b.standingCanCampaignDirectory.appendingPathComponent("authorization-orphan.json")
+            try Data("orphaned authorization after interrupted persistence".utf8).write(to:orphan)
+            check(b.standingCanCampaignMayHoldPayload,"Missing state with prior campaign history cannot silently imply EMPTY")
         }
         print("Controller/spoken arm approval and session reuse: \(checks) checks passed; no hardware access")
     }

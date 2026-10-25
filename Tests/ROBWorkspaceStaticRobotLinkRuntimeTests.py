@@ -72,10 +72,18 @@ private struct Map:ROBWorkspaceCollisionMap {
   // This occupied cell is OUTSIDE the existing base body, later than the
   // first unknown cell in x/y/z order, but inside its unchanged margin.
   let low=base.low-SIMD3(repeating:margin),high=base.high+SIMD3(repeating:margin),size=map.voxelSizeMeters
-  obstacle.occupiedPoint=SIMD3((floor(high.x/size)-0.5)*size,(floor(high.y/size)-0.5)*size,(floor(high.z/size)-0.5)*size)
+  // Use an actual near-surface cell, rather than the old inflated AABB's
+  // diagonal corner (which the exact convex narrow phase correctly clears).
+  let hull=try ROBEstimatedConvexHull(text:String(contentsOf:model.directory.appendingPathComponent(model.hulls["left_base_link"]!),encoding:.utf8))
+  let baseFrame=model.frames(model.positions(vendorLeft:q))["left_base_link"]!
+  let vertices=hull.vertices.map{p->SIMD3<Double> in let v=baseFrame*SIMD4(p,1);return SIMD3(v.x,v.y,v.z)}
+  let surface=vertices.max{$0.x<$1.x}!,outside=surface+SIMD3(0.025,0,0)
+  obstacle.occupiedPoint=SIMD3((floor(outside.x/size)+0.5)*size,(floor(outside.y/size)+0.5)*size,(floor(outside.z/size)+0.5)*size)
+  let local=simd_inverse(baseFrame)*SIMD4(obstacle.occupiedPoint!,1)
+  let measuredHullDistance=try hull.distance(to:SIMD3(local.x,local.y,local.z));precondition(measuredHullDistance<0.060)
   precondition(obstacle.occupiedPoint!.x>low.x && obstacle.occupiedPoint!.x>base.high.x)
   precondition(obstacle.state(inBoundsLow:low,high:high) == .unknown)
-  blocked("invariant mount does not exempt occupied") {_=try make(obstacle)}
+  blocked("observed workspace obstacle") {_=try make(obstacle)}
   var bodyChanged=map;bodyChanged.visualCalibrationScope = .init(bodyMotionIdentity:"different body",bodyContextIsCurrent:true,estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,observedFrameCount:2)
   blocked("scope") {_=try make(bodyChanged)}
   print("PASS actual LEFT/RIGHT invariant mounting FK+bounds; local-only static unknown omission; moving-link/body/ordinary negatives; unknown-first occupied-later veto; immutable evidence roundtrip; no voxel changes")

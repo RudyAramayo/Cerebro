@@ -1150,7 +1150,9 @@ final class CameraViewController: NSViewController {
         // profile. Explicit footage resolution still has priority; freshness
         // gates may refuse motion if that recording configuration is too slow.
         let realtime = armRoutineDemand || geminiVideoIsActive || followVideoIsActive
-        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (realtime ? "640x400" : nil))
+        let taskResolution = armRoutineDemand && ROBArmRoutineVision.shared.fullHeightTaskObservationRequested
+            ? "640x480" : "640x400"
+        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (realtime ? taskResolution : nil))
     }
 
     private func applyProcessingSettings() {

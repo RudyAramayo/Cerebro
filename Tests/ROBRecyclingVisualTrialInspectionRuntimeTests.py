@@ -15,6 +15,7 @@ fixture = r'''
 import Foundation
 import CryptoKit
 import simd
+import CoreImage
 /* SCENE */
 /* TRIAL */
 enum ROBGhostMotionError:Error {case blocked(String)}
@@ -44,6 +45,7 @@ struct ROBWorkspaceDetection {
 }
 struct ROBWorkspaceCanSections {
     let middle:[Double]
+    var diameterMeters:Double {0.066}
     struct ShapePriorEvidence {var valid=true}
     var shapePriorEvidence:ShapePriorEvidence?=nil
     static var displacement=0.0
@@ -124,6 +126,7 @@ final class ROBGhostRobotModel {
 }
 @MainActor enum ROBWorkspaceCollisionPlan {
     static var validMap=true
+    static func jointBounds(model:ROBGhostRobotModel)->[ClosedRange<Double>] {Array(repeating:-3...3,count:7)}
     static func validateVisualCalibrationTrialMap(_ map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,generation:UInt64,
         sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial)throws->Bool {
         guard validMap,trial.valid,map.registrationID==nil,map.cameraGeneration==cameraGeneration,
@@ -131,14 +134,17 @@ final class ROBGhostRobotModel {
         return true
     }
 }
-struct Feedback {var effectiveSampleAgeMilliseconds=0.0;var positionsRadians:[NSNumber];var statuses=[NSNumber](repeating:2,count:7)}
+typealias ROBAmberGatewayTelemetry=Feedback
+struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMilliseconds=0.0;var effectiveGripperFeedbackAgeMilliseconds=0.0;var positionsRadians:[NSNumber];var statuses=[NSNumber](repeating:2,count:7)}
 @MainActor final class ROBAmberGatewayClient {
     static let shared=ROBAmberGatewayClient()
     var feedback=Feedback(positionsRadians:[-0.0035,0.1638,0.7,0,0,0,0].map(NSNumber.init(value:)))
     func telemetry(forArm:String)->Feedback? {feedback}
 }
 @MainActor final class ROBArmRoutineVision {
-    struct Frame {let sequence:UInt64,capturedAt:Double,cameraGeneration:UUID;var intrinsics:CameraIntrinsics?=CameraIntrinsics();var depth:Depth?=Depth()}
+    struct Frame {let sequence:UInt64,capturedAt:Double,cameraGeneration:UUID;var intrinsics:CameraIntrinsics?=CameraIntrinsics();var depth:Depth?=Depth();var handsClear=true
+        var image:CIImage {CIImage(color:CIColor(red:0.5,green:0.5,blue:0.5)).cropped(to:CGRect(x:0,y:0,width:320,height:240))}}
+
     static let shared=ROBArmRoutineVision()
     var scene=Scene(),counter:UInt64=2,lift=false,canMoves=true,observation=ROBWorkspaceObservation()
     var intrinsics=CameraIntrinsics()
@@ -148,6 +154,13 @@ struct Feedback {var effectiveSampleAgeMilliseconds=0.0;var positionsRadians:[NS
     }
     func observeWorkspace()async throws->(ROBWorkspaceObservation,Frame) {
         (observation,Frame(sequence:1,capturedAt:Date().timeIntervalSince1970*1000-50,cameraGeneration:scene.camera,intrinsics:intrinsics))
+    }
+    func makeGripperVisualServoFrame(frame:Frame,scopeIdentity:String,jointPositions:[Double],jointCapturedAtMilliseconds:Double,
+        poseHeldDuringCapture:Bool,openingCommandAtMilliseconds:Double?=nil,nowMilliseconds:Double=Date().timeIntervalSince1970*1000)throws->ROBGripperVisualServo.Frame {
+        var f=ROBGripperVisualServo.Frame(width:320,height:240,rgb:Data(repeating:128,count:320*240*3),depthMillimeters:Array(repeating:750,count:320*240),
+            fx:100,fy:100,cx:160,cy:120,sequence:frame.sequence,capturedAtMilliseconds:frame.capturedAt,scopeIdentity:scopeIdentity,
+            jointPositions:jointPositions,jointCapturedAtMilliseconds:jointCapturedAtMilliseconds,poseHeldDuringCapture:poseHeldDuringCapture)
+        f.openingCommandAtMilliseconds=openingCommandAtMilliseconds;return f
     }
     func makeVisualGraspSample(frame:Frame,fixedViewIdentity:String,targetIdentity:String,
         measuredToolCenter:ROBVisualGraspVerifier.Point,measuredToolDepthMeters:Double,
@@ -182,6 +195,39 @@ struct Feedback {var effectiveSampleAgeMilliseconds=0.0;var positionsRadians:[NS
         let first=try await begin()
         if case .registered = first.projection {preconditionFailure("Estimated inspection manufactured registration")}
         precondition(c.registrationCalls==0 && map.registrationID==nil)
+        // Exercise the actual NEW no-carry result aggregator with explicitly
+        // synthetic observed-pixel seams; no FK projection becomes a jaw.
+        func servoFrame(_ seq:UInt64,_ dx:Int,_ dy:Int)->ROBGripperVisualServo.Frame {
+            let raw=v.scene.sample(sequence:seq,time:Date().timeIntervalSince1970*1000,canDX:dx,canDY:dy)
+            return .init(width:raw.width,height:raw.height,rgb:Data(raw.gray.flatMap{[$0,$0,$0]}),
+                depthMillimeters:raw.depthMeters.map{UInt16($0*1000)},fx:100,fy:100,cx:80,cy:60,
+                sequence:seq,capturedAtMilliseconds:raw.capturedAtMilliseconds,scopeIdentity:"synthetic-servo",jointPositions:Array(repeating:0,count:7),
+                jointCapturedAtMilliseconds:raw.capturedAtMilliseconds,poseHeldDuringCapture:true)
+        }
+        func servoSample(_ seq:UInt64,_ canDX:Int,_ canDY:Int,_ jawDX:Int,_ jawDY:Int)->ROBRecyclingVisualInspection.ServoObservation {
+            let frame=servoFrame(seq,canDX,canDY)
+            let jaw=ROBGripperVisualServo.JawObservation(centerPixels:[80+Double(jawDX),66+Double(jawDY)],
+                tipsPixels:[[64+Double(jawDX),75+Double(jawDY)],[96+Double(jawDX),75+Double(jawDY)]],openingPixels:32,openingMeters:0.08,
+                confidence:0.99,evidenceKind:"synthetic_fixture_observed_pixels_not_hardware",sequence:seq,
+                capturedAtMilliseconds:frame.capturedAtMilliseconds,scopeIdentity:frame.scopeIdentity)
+            let decision=ROBGripperVisualServo.Decision(status:"observedOnly",reason:"Synthetic pixel observation only",observation:jaw,
+                canMiddlePixels:[80+Double(canDX),66+Double(canDY)],pixelError:[0,0],jointTarget:nil,readyToGrip:false,diagnostics:[:])
+            return .init(frame:frame,decision:decision,canBox:[0.4,0.4,0.6,0.7])
+        }
+        let servoBase=ROBRecyclingVisualInspection.ServoBaseline(projection:first.projection,scope:first.scope,
+            targetIdentity:first.targetIdentity,viewIdentity:first.viewIdentity)
+        let servoContext=ROBRecyclingVisualInspection.ServoContext(baseline:servoBase,can:can,model:model,box:[0.4,0.4,0.6,0.7])
+        let beforeServo=servoSample(100,0,0,0,0)
+        var servoSeq:UInt64=100
+        let provisional=try await ROBRecyclingVisualInspection.verifyIncrementalServoLift(context:servoContext,beforeLift:beforeServo,model:model,
+            heldSinceMilliseconds:0,observe:{servoSeq+=1;return servoSample(servoSeq,12,-8,12,-8)},check:{})
+        precondition(provisional.verdict == .unknown && servoContext.provisionalCoMotion && !provisional.possessionMeasured)
+        precondition(provisional.reason.contains("NOT verified") && provisional.samples>=3,"Box co-motion must not confirm grasp or carry")
+        let missContext=ROBRecyclingVisualInspection.ServoContext(baseline:servoBase,can:can,model:model,box:[0.4,0.4,0.6,0.7])
+        let missed=try await ROBRecyclingVisualInspection.verifyIncrementalServoLift(context:missContext,beforeLift:beforeServo,model:model,
+            heldSinceMilliseconds:0,observe:{servoSeq+=1;return servoSample(servoSeq,0,0,12,-8)},check:{})
+        precondition(missed.verdict == .failed && !missContext.provisionalCoMotion)
+        print("PASS actual incremental lift inspection:3observedcan-box/jawframes remainprovisionalUNKNOWN/noappearanceclaim; stationarycan missFAILED; bothhold/no carry")
         func lift() {
             v.lift=true
             let z=0.675,x=((0.5+12.0/160)*319-160)*z/100,y=((0.6-8.0/120)*239-120)*z/100
@@ -265,5 +311,5 @@ struct Feedback {var effectiveSampleAgeMilliseconds=0.0;var positionsRadians:[NS
 
 with tempfile.TemporaryDirectory(prefix='rob-visual-trial-inspection-', dir='/private/tmp') as folder:
     root=Path(folder); path=root/'Fixture.swift';path.write_text(fixture)
-    subprocess.run(['xcrun','swiftc','-swift-version','5','-parse-as-library',str(ROOT/'Cerebro/ROBVisualGraspVerifier.swift'),str(inspection),str(path),'-o',str(root/'fixture')],check=True,timeout=60)
+    subprocess.run(['xcrun','swiftc','-swift-version','5','-parse-as-library',str(ROOT/'Cerebro/ROBVisualGraspVerifier.swift'),str(ROOT/'Cerebro/ROBGripperVisualServo.swift'),str(inspection),str(path),'-o',str(root/'fixture')],check=True,timeout=60)
     subprocess.run([str(root/'fixture')],check=True,timeout=15)

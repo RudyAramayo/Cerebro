@@ -13,6 +13,8 @@ helper = braced_declaration(source, 'enum ROBLocalRecyclingSandboxRouting {')
 prepare = braced_declaration(source, '    private func prepareLocalRecyclingSessionJob()')
 nominal_change = braced_declaration(source, '    @objc private func changeNominalEmptyCommissioningStep()').replace('@objc ', '')
 degree_change = braced_declaration(source, '    @objc private func changeOneDegreeEmptyCalibrationStep()').replace('@objc ', '')
+standing_run = braced_declaration(source, '    private func runStandingCanCampaign()')
+standing_import = braced_declaration(source, '    private func importStandingCanCampaign()')
 route = braced_declaration(source, '    @objc private func performTrialAction(')
 refresh = braced_declaration(source, '    @objc private func refresh()')
 export = braced_declaration(source, '    private func exportLocalRecyclingApprovalTemplate()')
@@ -36,6 +38,10 @@ assert 'sandbox-one-degree-empty-calibration-step' in source
 assert 'Contact could push the table or lift ROB.' in source
 assert 'contact predictions are diagnostic only' in source
 assert 'oneDegreeEmptyCalibrationStep.isEnabled = canEdit' in refresh
+assert 'NSOpenPanel()' in standing_import and 'importLocalCanCampaignAuthorization(fromReceiptURL: url)' in standing_import
+assert 'standingLocalCanCampaignState' in refresh and 'standingDescription(' in refresh
+assert 'nominalEmptyCommissioningStepEnabled = false' in standing_run and 'oneDegreeEmptyCalibrationStepEnabled = false' in standing_run
+assert 'prepareLocalRecyclingSessionJob()' in standing_run
 assert 'ROBArmRoutineCoordinator' not in prepare
 assert 'localReceiptFilesEnabled' in refresh and '? localReceiptFilesEnabled' in refresh
 assert 'NSSavePanel()' in export and 'localRecyclingReceiptTemplate' in export
@@ -58,6 +64,7 @@ for name in ('Cerebro/ROBAI.swift', 'Cerebro/ROBArmRoutineCoordinator.swift'):
     assert 'importLocalRecyclingSessionApproval' not in other
     assert 'performUsingLocalRecyclingReceipt' not in other
     assert 'localRecyclingReceiptTemplate' not in other
+    assert 'importLocalCanCampaignAuthorization' not in other
 
 fixture = r'''
 import Foundation
@@ -78,6 +85,7 @@ final class ROBControllerArmApproval {
     static let shared=ROBControllerArmApproval()
     var localRecyclingApprovalState:NSDictionary?,pendingLocalRecyclingApprovalScope:NSDictionary?
     var isPending = false
+    var standingLocalCanCampaignActive = false
     var cancellations=0,ticks=0
     func cancel(reason:String){cancellations+=1;localRecyclingApprovalState=nil;pendingLocalRecyclingApprovalScope=nil}
     func tick(){ticks+=1}
@@ -97,9 +105,11 @@ final class Sandbox {
     /* PREPARE */
     /* NOMINAL_CHANGE */
     /* DEGREE_CHANGE */
+    /* STANDING_RUN */
     func prepare(){prepareLocalRecyclingSessionJob()}
     func toggleNominal(){changeNominalEmptyCommissioningStep()}
     func toggleDegree(){changeOneDegreeEmptyCalibrationStep()}
+    func runStanding(){runStandingCanCampaign()}
 }
 @main enum Test {
     static func main() {
@@ -134,6 +144,18 @@ final class Sandbox {
                 "A late callback overwrote a live task or pending receipt phase")
         }
         trial.isRunning=false;ROBControllerArmApproval.shared.isPending=false;trial.completionResult=["status":"prepared"]
+        let standing=Sandbox();let standingBroker=ROBControllerArmApproval.shared
+        let beforeStanding=trial.calls.count;standing.runStanding()
+        precondition(trial.calls.count==beforeStanding && standing.parameterMessage.contains("No active standing"))
+        standingBroker.standingLocalCanCampaignActive=true
+        standing.nominalEmptyCommissioningStep.state = .on;standing.oneDegreeEmptyCalibrationStep.state = .on
+        standing.runStanding()
+        precondition(trial.calls.count==beforeStanding+1 && !trial.nominalEmptyCommissioningStepEnabled &&
+            !trial.oneDegreeEmptyCalibrationStepEnabled,"Standing Run inherited an old tiny calibration mode")
+        let standingStatus=ROBLocalRecyclingSandboxRouting.standingDescription(["state":"recovering","completedTransfers":1,
+            "verifiedLandings":0,"detail":"Fresh CAN and camera revalidation","sourceMessage":"PRIVATE USER TEXT"])
+        precondition(standingStatus.contains("recovering") && standingStatus.contains("Transfers reported 1/4") &&
+            standingStatus.contains("camera-verified 0") && !standingStatus.contains("PRIVATE"))
         let degree=Sandbox();degree.oneDegreeEmptyCalibrationStep.state = .on;degree.prepare()
         precondition(trial.oneDegreeEmptyCalibrationStepEnabled && !trial.nominalEmptyCommissioningStepEnabled)
         let both=Sandbox();both.oneDegreeEmptyCalibrationStep.state = .on;both.nominalEmptyCommissioningStep.state = .on
@@ -222,7 +244,7 @@ final class Sandbox {
         print("PASS live sandbox status: active phase precedes broker scope, common-mode progress fallback; selected RIGHT recording cannot open latest LEFT evidence")
     }
 }
-'''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare).replace('/* NOMINAL_CHANGE */', nominal_change).replace('/* DEGREE_CHANGE */', degree_change)
+'''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare).replace('/* NOMINAL_CHANGE */', nominal_change).replace('/* DEGREE_CHANGE */', degree_change).replace('/* STANDING_RUN */', standing_run)
 
 with tempfile.TemporaryDirectory(prefix='rob-local-recycling-sandbox-', dir='/private/tmp') as folder:
     root = Path(folder); path = root / 'Fixture.swift'; path.write_text(fixture)
