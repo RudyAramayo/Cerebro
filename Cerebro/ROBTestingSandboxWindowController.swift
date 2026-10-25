@@ -486,7 +486,16 @@ import UniformTypeIdentifiers
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
         parameterMessage = ""; observingLeftOperation = true
-        ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: "4") { [weak self] _ in self?.refresh() }
+        ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: "4") { [weak self] result in
+            guard let self else { return }
+            if !ROBLeftArmTrial.shared.isRunning, !ROBControllerArmApproval.shared.isPending,
+               ["blocked", "rejected", "busy", "failed"].contains(result["status"] as? String ?? ""),
+               let detail = result["detail"] as? String, !detail.isEmpty {
+                self.parameterMessage = detail
+                self.observingLeftOperation = false
+            }
+            self.refresh()
+        }
         refresh()
     }
     @objc private func changeNominalEmptyCommissioningStep() {

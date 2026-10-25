@@ -178,6 +178,8 @@ final class ROBAmberGatewayClient: NSObject {
     }
     var onGhostStep: (() -> Void)?
     var beforeGhostAdmission: (() -> Void)?
+    var delayOneDegreeEndpoint = false
+    var oneDegreeSentAt: Double?, oneDegreeConvergedAt: Double?, oneDegreeFirstHoldAt: Double?
     func sendApprovedLeftGestureStep(proposalID: UUID, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
         beforeGhostAdmission?()
         guard let target = ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index,
@@ -189,9 +191,25 @@ final class ROBAmberGatewayClient: NSObject {
         let selected=ROBLeftArmTrial.shared.executionGatewayArm
         q[selected] = target
         activeLeases.insert(selected)
+        if delayOneDegreeEndpoint {
+            precondition(duration==4 && target==[0,-0.02,0,0,0,0,0])
+            oneDegreeSentAt=ProcessInfo.processInfo.systemUptime
+            // Match the observed49 failure: after the nominal4s the motor
+            // may still be at−1degree, inside the generic25mrad tolerance
+            // but outside the actual final3mm endpoint requirement.
+            q[selected]=[0,-Double.pi/180,0,0,0,0,0]
+            DispatchQueue.main.asyncAfter(deadline:.now()+4.45) { [self] in
+                precondition(activeLeases.contains(selected),"A current-pose hold cut off the calibration trajectory before endpoint convergence")
+                q[selected]=target;oneDegreeConvergedAt=ProcessInfo.processInfo.systemUptime
+            }
+        }
         let id = ack("ghost_step_\(index)", selected); onGhostStep?(); return id
     }
     func priorityHold(forArm arm: String) -> UInt64 {
+        if delayOneDegreeEndpoint,oneDegreeSentAt != nil,oneDegreeFirstHoldAt==nil {
+            precondition(oneDegreeConvergedAt != nil,"The bounded calibration held early at−1degree before tight endpoint convergence")
+            oneDegreeFirstHoldAt=ProcessInfo.processInfo.systemUptime
+        }
         if !rejectHold { activeLeases.remove(arm) }
         return ack("priority_hold", arm, accepted: !rejectHold, holdConfirmed: confirmHold)
     }
@@ -661,7 +679,9 @@ final class ROBArmRoutineCoordinator {
         let device = UUID(), session = UUID()
         let hello = ROBRobotActionMessage.controllerHello(senderID: "fixture-controller", acceptsActions: true, capabilities: ["arm_operation"])
         _ = broker.receive(hello, device: device, session: session)
-        if CommandLine.arguments.last=="one-degree-empty" {
+        if ["one-degree-empty","one-degree-empty-delayed-endpoint"].contains(CommandLine.arguments.last ?? "") {
+            let delayedEndpoint=CommandLine.arguments.last=="one-degree-empty-delayed-endpoint"
+            g.delayOneDegreeEndpoint=delayedEndpoint
             precondition(!trial.oneDegreeEmptyCalibrationStepEnabled)
             let model=try ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"),physicalSide:"right")
             let frame=model.frames(model.positions(vendorLeft:Array(repeating:0,count:7)))[model.toolLink]!
@@ -713,6 +733,11 @@ final class ROBArmRoutineCoordinator {
             precondition(g.commands.filter{$0.hasPrefix("ghost_step")}.count==1 && !g.commands.contains{$0.hasPrefix("calibrate") || $0.hasPrefix("gripper") || $0.hasPrefix("deactivate")})
             precondition(ROBGripperStartupCalibration.shared.setupCalls==0 && g.q["left"]==[0,-0.02,0,0,0,0,0] && g.q["right"]==Array(repeating:0,count:7))
             precondition(g.activeLeases.isEmpty && neck["pan_degrees"] as?Double == -55 && neck["upper"] as?Int==5650)
+            if delayedEndpoint {
+                guard let sent=g.oneDegreeSentAt,let arrived=g.oneDegreeConvergedAt,let held=g.oneDegreeFirstHoldAt else {fatalError("Missing advancing delayed endpoint/hold evidence")}
+                precondition(arrived-sent>=4.45 && held>=arrived+0.14,"Priority hold preceded distinct tightly converged stable samples")
+                print("PASS delayed actuator endpoint:−1degree remains outside unchanged3mm endpoint past4s; no early priority hold; advancing converged samples then hold")
+            }
             precondition(ROBWorkspaceSearch.shared.collisionScanCalls==0 && ROBArmRoutineVision.shared.observationCount==0)
             precondition(broker.localRecyclingApprovalState==nil && !trial.isRunning)
             let evidence=URL(fileURLWithPath:trial.lastRecordingPath).deletingPathExtension().appendingPathExtension("one-degree-empty-evidence")

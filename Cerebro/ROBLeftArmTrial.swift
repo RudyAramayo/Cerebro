@@ -1498,7 +1498,16 @@ enum ROBInitialRetreatFailureExport {
         let began=ProcessInfo.processInfo.systemUptime;var settler=ROBArmRoutineSettler()
         try await wait(7){
             guard let feedback=try?self.measured() else{return false}
-            return settler.observe(sequence:feedback.sequence,positions:feedback.positionsRadians.map(\.doubleValue),target:proof.goal,
+            let positions=feedback.positionsRadians.map(\.doubleValue)
+            // A4s command is not proof that the motor has arrived. The
+            // generic25mrad settler can accept this entire20mrad move;
+            // priorityHold would then replace the goal with an early pose.
+            // Require the SAME final3mm aggregate endpoint bound throughout
+            // distinct stable samples before requesting a measured-pose hold.
+            guard 1.5*zip(positions,proof.goal).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+                settler=ROBArmRoutineSettler();return false
+            }
+            return settler.observe(sequence:feedback.sequence,positions:positions,target:proof.goal,
                 now:ProcessInfo.processInfo.systemUptime) && ProcessInfo.processInfo.systemUptime-began>=4
         }
         try await holdTaskPosition(proof.goal);taskJawTarget=nil

@@ -67,14 +67,17 @@ final class ROBLeftArmTrial {
     var localVisualTrialAssumedSpatialErrorMeters = 0.05
     var nominalEmptyCommissioningStepEnabled = false
     var oneDegreeEmptyCalibrationStepEnabled = false
+    var isRunning = false
+    var completionResult:NSDictionary = ["status":"prepared"]
     var calls:[(String,String)] = []
     func performUsingLocalRecyclingReceipt(_ command:String,target:String,completion:@escaping(NSDictionary)->Void) {
-        calls.append((command,target)); completion(["status":"prepared"])
+        calls.append((command,target)); completion(completionResult)
     }
 }
 final class ROBControllerArmApproval {
     static let shared=ROBControllerArmApproval()
     var localRecyclingApprovalState:NSDictionary?,pendingLocalRecyclingApprovalScope:NSDictionary?
+    var isPending = false
     var cancellations=0,ticks=0
     func cancel(reason:String){cancellations+=1;localRecyclingApprovalState=nil;pendingLocalRecyclingApprovalScope=nil}
     func tick(){ticks+=1}
@@ -118,6 +121,19 @@ final class Sandbox {
         precondition(trial.nominalEmptyCommissioningStepEnabled,"Explicit local checkbox was not frozen before preparation")
         let ordinary=Sandbox(); ordinary.prepare()
         precondition(!trial.nominalEmptyCommissioningStepEnabled,"New ordinary UI state inherited the commissioning option")
+        for status in ["blocked","rejected","busy","failed"] {
+            let noReceipt=Sandbox();trial.completionResult=["status":status,"detail":"Fresh enrolled RGB-D is required"]
+            noReceipt.prepare()
+            precondition(noReceipt.parameterMessage=="Fresh enrolled RGB-D is required" && !noReceipt.observingLeftOperation,
+                "A rejected preparation stayed stuck on the old awaiting-receipt phase")
+        }
+        for (running,pending) in [(true,false),(false,true),(true,true)] {
+            trial.isRunning=running;ROBControllerArmApproval.shared.isPending=pending
+            let live=Sandbox();trial.completionResult=["status":"busy","detail":"Late preparation detail"]
+            live.prepare();precondition(live.parameterMessage.isEmpty && live.observingLeftOperation,
+                "A late callback overwrote a live task or pending receipt phase")
+        }
+        trial.isRunning=false;ROBControllerArmApproval.shared.isPending=false;trial.completionResult=["status":"prepared"]
         let degree=Sandbox();degree.oneDegreeEmptyCalibrationStep.state = .on;degree.prepare()
         precondition(trial.oneDegreeEmptyCalibrationStepEnabled && !trial.nominalEmptyCommissioningStepEnabled)
         let both=Sandbox();both.oneDegreeEmptyCalibrationStep.state = .on;both.nominalEmptyCommissioningStep.state = .on
