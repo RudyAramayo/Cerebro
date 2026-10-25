@@ -231,6 +231,18 @@ Run `python3 Tests/ROBCameraIngressRuntimeTests.py` for the stalled-session-queu
 regression, and `python3 Tests/DepthCameraIPCFixtureTests.py` for timestamp and
 packet validation without hardware.
 
+The native IPC reader caches a validated packet header while its fragmented
+image payload arrives, rather than decoding that same JSON header for every
+socket fragment. The cache clears when a packet is consumed, on invalid input
+and whenever the connection resets. Source timestamps and packet-length checks
+remain unchanged.
+
+The controller's SceneKit display separately coalesces incoming notifications
+into one latest head frame and one latest belly frame before handing work to
+the main queue. Trials, including neck-only scans, publish cloud updates at
+most twice per second while the scene continues rendering. This display
+backpressure does not change camera capture, vision admission or watchdogs.
+
 ### Application-side RGB conversion
 
 Later controller-approved trials still stopped at analyzed frame ages of

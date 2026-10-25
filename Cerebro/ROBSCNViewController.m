@@ -17,6 +17,61 @@ static NSUInteger const ROBMaximumDisplayedCloudPoints = 20000;
 static NSUInteger const ROBMaximumFloorCandidatePoints = 2048;
 static NSTimeInterval const ROBFloorNoiseHoldInterval = 0.25;
 
+// Display-only backpressure. Other notification observers and raw camera/vision
+// feeds still receive every frame through their existing independent admission.
+// No SceneKit access or dispatch occurs while this mailbox lock is held.
+@interface ROBSCNDepthCloudDisplayMailbox : NSObject {
+    NSLock *_lock;
+    ROBDepthCloudFrame *_latestHead;
+    ROBDepthCloudFrame *_latestBelly;
+    BOOL _mainDrainScheduled;
+    BOOL _closed;
+}
+- (BOOL)offerFrame:(ROBDepthCloudFrame *)frame;
+- (NSArray<ROBDepthCloudFrame *> *)takeLatestFrames;
+- (void)close;
+@end
+
+@implementation ROBSCNDepthCloudDisplayMailbox
+- (instancetype)init
+{
+    self = [super init];
+    if (self) _lock = [[NSLock alloc] init];
+    return self;
+}
+- (BOOL)offerFrame:(ROBDepthCloudFrame *)frame
+{
+    [_lock lock];
+    if (_closed) { [_lock unlock]; return NO; }
+    if (frame.isBelly) _latestBelly = frame; else _latestHead = frame;
+    BOOL schedule = !_mainDrainScheduled;
+    _mainDrainScheduled = YES;
+    [_lock unlock];
+    return schedule;
+}
+- (NSArray<ROBDepthCloudFrame *> *)takeLatestFrames
+{
+    [_lock lock];
+    ROBDepthCloudFrame *head = _closed ? nil : _latestHead;
+    ROBDepthCloudFrame *belly = _closed ? nil : _latestBelly;
+    _latestHead = nil; _latestBelly = nil;
+    _mainDrainScheduled = NO;
+    [_lock unlock];
+    if (head && belly) return @[head, belly];
+    if (head) return @[head];
+    if (belly) return @[belly];
+    return @[];
+}
+- (void)close
+{
+    [_lock lock];
+    _closed = YES;
+    _latestHead = nil; _latestBelly = nil;
+    _mainDrainScheduled = NO;
+    [_lock unlock];
+}
+@end
+
 // The operator identified the wooden floor as a level reference. Select only
 // lower-image points outside the robot's footprint. The candidate height wedge
 // must admit every plane allowed by the fitter; a narrow raw-Y band clips a
@@ -109,6 +164,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, retain) SCNNode *liveRGBCloudNode;
 @property (readwrite, retain) SCNNode *liveBellyRGBCloudNode;
 @property (readwrite, strong) dispatch_queue_t cloudQueue;
+@property (nonatomic, strong) ROBSCNDepthCloudDisplayMailbox *cloudDisplayMailbox;
 @property (readwrite, assign) BOOL cloudUpdatePending;
 @property (readwrite, assign) BOOL bellyCloudUpdatePending;
 @end
@@ -124,6 +180,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         [self loadScene];
         self.ghostGestureEditor = [[ROBGhostGestureEditor alloc] initWithSceneView:scnView originalRobot:self.robotNode];
         self.cloudQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.live-rgb-cloud", DISPATCH_QUEUE_SERIAL);
+        self.cloudDisplayMailbox = [[ROBSCNDepthCloudDisplayMailbox alloc] init];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(receivedDepthCloudFrame:)
                                                      name:@"ROBDepthCloudFrame" object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(armTrialViewPrepared:)
@@ -144,6 +201,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)invalidate
 {
+    [self.cloudDisplayMailbox close];
     [self.ghostGestureEditor invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBDepthCloudFrame" object:nil];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBLeftArmTrialViewPrepared" object:nil];
@@ -701,19 +759,27 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)receivedDepthCloudFrame:(NSNotification *)notification
 {
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [self receivedDepthCloudFrame:notification]; });
-        return;
-    }
     ROBDepthCloudFrame *frame = [notification.object isKindOfClass:ROBDepthCloudFrame.class] ? notification.object : nil;
+    if (frame == nil || ![self.cloudDisplayMailbox offerFrame:frame]) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (ROBDepthCloudFrame *latest in [self.cloudDisplayMailbox takeLatestFrames]) {
+            [self displayDepthCloudFrame:latest];
+        }
+    });
+}
+
+// The mailbox hands off only the latest role frame. All existing freshness,
+// pending-job, pose and projection admission remains on the main thread.
+- (void)displayDepthCloudFrame:(ROBDepthCloudFrame *)frame
+{
     if (frame == nil || self.robo_scnView.scene == nil) return;
     BOOL belly = frame.isBelly;
     if (belly ? self.bellyCloudUpdatePending : self.cloudUpdatePending) return;
     double now = NSProcessInfo.processInfo.systemUptime;
     // Keep display live with one pending background job per camera. Reduce
-    // publication during physical arm operations; capture/watchdogs are separate.
-    BOOL armMotion = (ROBLeftArmTrial.shared.isRunning && !ROBLeftArmTrial.shared.isNeckOnlyInspection) || ROBArmRoutineCoordinator.shared.isRunning;
-    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (armMotion ? 0.5 : 0.125)) return;
+    // publication during all trials, including neck scans; capture/watchdogs are separate.
+    BOOL trialBusy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning;
+    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (trialBusy ? 0.5 : 0.125)) return;
     if (belly) self.lastBellyCloudSubmission = now; else self.lastHeadCloudSubmission = now;
     [self refreshHeadModelEstimate];
     NSArray<NSNumber *> *affine = [self.ghostGestureEditor depthCloudCameraTransform:belly];

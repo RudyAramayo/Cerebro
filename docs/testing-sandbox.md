@@ -11,8 +11,10 @@ The sandbox catalog contains these independent test items:
 | Test | Actions |
 | --- | --- |
 | Recycle can | Run the physical test, search with the neck camera, scan workspace geometry, preview the grasp |
-| Recycle can · right arm | Recycle one or two empty cans with physical right/L10, separate reach tuning and visual grasp checks |
+| Recycle can · right arm | Recycle one, two or three empty cans with physical right/L10, separate reach tuning and visual grasp checks |
 | Camera-to-arm registration | Capture, fit and independently validate one fixed head/body view |
+| Neck / QR calibration | Record fixed targets at held neck poses and inspect calibration evidence |
+| Belly camera calibration | Capture five native RGB-D frames of B01/B02 and report target geometry, pixel alignment and raw depth |
 | Right-arm calibration step | Passively capture the registered view, review one small empty-arm outward step, run and hold |
 | Depth alignment | Adjust head-depth placement toward ROB and the face-camera downward mounting angle, then inspect the live cloud |
 | Estimated calibration trial | Build a small estimated empty-arm ghost movement, inspect it, run the reviewed test and hold for observation |
@@ -24,6 +26,47 @@ The sandbox catalog contains these independent test items:
 | Spoken feedback | Test the spoken warning without arm movement |
 
 Status is shared across the sandbox. The scrollable status area shows the complete pending operation scope; the spoken prompt remains **“Can I move my arms?”**. Stop + hold stays available regardless of the selected test.
+
+## Passive belly calibration
+
+Place the B01 and B02 sheets flat on the floor with their 120 mm black squares
+fully visible, centers 400 mm apart and TOP arrows pointing away from ROB.
+Choose **Belly camera calibration → Open belly QR calibration… → Capture 5 belly frames**.
+The capture temporarily requests native 1280 × 800 RGB and aligned depth,
+waits five seconds for exposure to settle, saves five advancing source frames,
+then restores the previous camera demand. It sends no robot commands.
+
+The concise report separates printed-target consistency, SDK pixel-alignment
+evidence and raw-depth agreement. Equal image dimensions alone do not establish
+alignment. Saved evidence includes the actual RGB/depth intrinsics, source crop,
+SDK transformation comparisons, source distortion metadata, timestamps and
+image/depth hashes. A successful diagnostic process does not mean calibration
+passed or that an arm transform was installed.
+
+The worker also supports an offline, local floor-display reference after the
+operator has confirmed that both sheets lie on a flat floor:
+
+```sh
+"$ROB_CALIBRATION_PYTHON" Cerebro/Resources/ShadowPlanner/belly_qr_diagnostic.py \
+  --input "$ROB_BELLY_CAPTURE/capture-input.json" \
+  --output "$ROB_BELLY_CAPTURE/diagnostic.json" \
+  --local-floor-reference-output "$ROB_BELLY_FLOOR_REFERENCE" \
+  --operator-confirmed-flat-floor
+```
+
+Use the calibration Python environment with OpenCV and NumPy. The first three
+frames fit the raw floor plane inside the verified symbols; two later frames
+validate that unchanged plane. Valid native returns are retained without
+outlier deletion. Missing pixel-alignment evidence, nonplanar data or failed
+held-out checks prevent a reference from being written. Printed-pair PnP
+rejection remains visible independently of this local raw-plane test.
+
+The per-robot display profile can pin the resulting file through
+`bellyFloorDisplayReference.evidencePath` and `evidenceSHA256`. The loader checks
+the reference, capture and individual source hashes. It rotates the belly
+housing and cloud together around the unchanged optical origin, accounting
+for the common display-up gauge. It does not install a height shift, rescale
+depth, change the head projection, register an arm or authorize motion.
 
 ## Startup gripper setup
 

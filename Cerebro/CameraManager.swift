@@ -1164,6 +1164,12 @@ private final class DepthCameraServiceClient {
     private var socketPath: String?
     private var connection: NWConnection?
     private var receiveBuffer = Data()
+    private struct PendingPacket {
+        let header: DepthCameraPacketHeader
+        let headerLength: Int
+        let packetLength: Int
+    }
+    private var pendingPacket: PendingPacket?
     private var shouldRun = false
     private var reconnectAttempt = 0
     private var reconnectWorkItem: DispatchWorkItem?
@@ -1430,18 +1436,21 @@ private final class DepthCameraServiceClient {
             case .ready:
                 self.reconnectAttempt = 0
                 self.reportedStreaming = false
-                self.receiveBuffer.removeAll(keepingCapacity: true)
+                self.resetPacketBuffer()
                 self.receiveNext(on: newConnection)
             case .failed(let error):
                 self.connection = nil
+                self.resetPacketBuffer()
                 newConnection.cancel()
                 self.scheduleReconnect(detail: "Depth camera IPC failed: \(error.localizedDescription)")
             case .cancelled:
                 if self.connection === newConnection {
                     self.connection = nil
+                    self.resetPacketBuffer()
                 }
             case .waiting(let error):
                 self.connection = nil
+                self.resetPacketBuffer()
                 newConnection.cancel()
                 self.scheduleReconnect(detail: "Depth camera IPC is waiting: \(error.localizedDescription)")
             default:
@@ -1487,54 +1496,75 @@ private final class DepthCameraServiceClient {
     }
 
     private func drainPackets() throws {
+        do {
+            try drainBufferedPackets()
+        } catch {
+            pendingPacket = nil
+            throw error
+        }
+    }
+
+    private func drainBufferedPackets() throws {
         while receiveBuffer.count >= 8 {
-            guard receiveBuffer.prefix(4) == Self.protocolMagic else {
-                throw DepthCameraIPCError.invalidMagic
-            }
-            let headerLength = try integer32BigEndian(in: receiveBuffer, offset: 4)
-            guard headerLength > 0, headerLength <= Self.maximumHeaderBytes else {
-                throw DepthCameraIPCError.invalidLength
-            }
-            guard receiveBuffer.count >= 8 + headerLength else { return }
+            let packet: PendingPacket
+            if let pendingPacket {
+                packet = pendingPacket
+            } else {
+                guard receiveBuffer.prefix(4) == Self.protocolMagic else {
+                    throw DepthCameraIPCError.invalidMagic
+                }
+                let headerLength = try integer32BigEndian(in: receiveBuffer, offset: 4)
+                guard headerLength > 0, headerLength <= Self.maximumHeaderBytes else {
+                    throw DepthCameraIPCError.invalidLength
+                }
+                guard receiveBuffer.count >= 8 + headerLength else { return }
 
-            let headerData = Data(receiveBuffer[8..<(8 + headerLength)])
-            let header = try JSONDecoder().decode(DepthCameraPacketHeader.self, from: headerData)
-            let expectedRGBLength = Self.expectedPayloadLength(
-                width: header.rgbWidth,
-                height: header.rgbHeight,
-                bytesPerPixel: 3
-            )
-            let expectedDepthLength = Self.expectedPayloadLength(
-                width: header.depthWidth,
-                height: header.depthHeight,
-                bytesPerPixel: 2
-            )
-            let expectedStereoLength = Self.expectedPayloadLength(
-                width: header.stereoWidth,
-                height: header.stereoHeight,
-                bytesPerPixel: 1
-            )
-            guard header.protocolVersion == Self.protocolVersion,
-                  header.rgbFormat == "RGB888",
-                  header.depthFormat == "DEPTH16LE",
-                  header.depthUnit == "millimeter",
-                  header.stereoFormat == "GRAY8",
-                  header.rgbWidth == header.depthWidth,
-                  header.rgbHeight == header.depthHeight,
-                  let expectedRGBLength,
-                  let expectedDepthLength,
-                  let expectedStereoLength,
-                  header.rgbLength == expectedRGBLength,
-                  header.depthLength == expectedDepthLength,
-                  header.rgbLength <= Self.maximumPayloadBytes,
-                  header.leftLength == expectedStereoLength,
-                  header.rightLength == expectedStereoLength,
-                  header.rgbLength + header.depthLength + header.leftLength + header.rightLength <= Self.maximumPayloadBytes else {
-                throw DepthCameraIPCError.invalidHeader
-            }
+                let headerData = Data(receiveBuffer[8..<(8 + headerLength)])
+                let header = try JSONDecoder().decode(DepthCameraPacketHeader.self, from: headerData)
+                let expectedRGBLength = Self.expectedPayloadLength(
+                    width: header.rgbWidth,
+                    height: header.rgbHeight,
+                    bytesPerPixel: 3
+                )
+                let expectedDepthLength = Self.expectedPayloadLength(
+                    width: header.depthWidth,
+                    height: header.depthHeight,
+                    bytesPerPixel: 2
+                )
+                let expectedStereoLength = Self.expectedPayloadLength(
+                    width: header.stereoWidth,
+                    height: header.stereoHeight,
+                    bytesPerPixel: 1
+                )
+                guard header.protocolVersion == Self.protocolVersion,
+                      header.rgbFormat == "RGB888",
+                      header.depthFormat == "DEPTH16LE",
+                      header.depthUnit == "millimeter",
+                      header.stereoFormat == "GRAY8",
+                      header.rgbWidth == header.depthWidth,
+                      header.rgbHeight == header.depthHeight,
+                      let expectedRGBLength,
+                      let expectedDepthLength,
+                      let expectedStereoLength,
+                      header.rgbLength == expectedRGBLength,
+                      header.depthLength == expectedDepthLength,
+                      header.rgbLength <= Self.maximumPayloadBytes,
+                      header.leftLength == expectedStereoLength,
+                      header.rightLength == expectedStereoLength,
+                      header.rgbLength + header.depthLength + header.leftLength + header.rightLength <= Self.maximumPayloadBytes else {
+                    throw DepthCameraIPCError.invalidHeader
+                }
 
-            let packetLength = 8 + headerLength + header.rgbLength + header.depthLength
-                + header.leftLength + header.rightLength
+                let packetLength = 8 + headerLength + header.rgbLength + header.depthLength
+                    + header.leftLength + header.rightLength
+                // Decode and validate once while fragmented RGB/depth bytes arrive.
+                // The buffer prefix stays unchanged until this whole packet is consumed.
+                packet = PendingPacket(header: header, headerLength: headerLength, packetLength: packetLength)
+                pendingPacket = packet
+            }
+            let header = packet.header
+            let headerLength = packet.headerLength
+            let packetLength = packet.packetLength
             guard receiveBuffer.count >= packetLength else { return }
 
             let rgbStart = 8 + headerLength
@@ -1546,6 +1576,7 @@ private final class DepthCameraServiceClient {
             let leftData = Data(receiveBuffer[leftStart..<rightStart])
             let rightData = Data(receiveBuffer[rightStart..<packetLength])
             receiveBuffer.removeSubrange(0..<packetLength)
+            pendingPacket = nil
 
             // Preserve normal streaming capacity. Compact only after an unusually
             // large packet leaves little live data relative to consumed storage.
@@ -1746,6 +1777,11 @@ private final class DepthCameraServiceClient {
         connection?.cancel()
         connection = nil
         reportedStreaming = false
+        resetPacketBuffer()
+    }
+
+    private func resetPacketBuffer() {
+        pendingPacket = nil
         receiveBuffer.removeAll(keepingCapacity: true)
     }
 
