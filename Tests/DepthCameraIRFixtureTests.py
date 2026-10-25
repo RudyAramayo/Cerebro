@@ -130,7 +130,11 @@ def run_fixtures():
             self.inputAlignTo, self.depth = Input(), Output()
             self.preset, self.left_right, self.subpixel, self.output_size = None, None, None, None
             self.extended=False;self.initialConfig=self;self.mode_calls=[]
+            self.rectification_calls=[]
         def setDefaultProfilePreset(self, value): self.preset = value
+        def useHomographyRectification(self, value):
+            assert self.preset == "robotics" and not device.started
+            self.rectification_calls.append(value)
         def setLeftRightCheck(self, value): self.left_right = value
         def setSubpixel(self, value): self.subpixel = value;self.mode_calls.append(("subpixel",value))
         def setExtendedDisparity(self, value): self.extended=value;self.mode_calls.append(("extended",value))
@@ -181,13 +185,14 @@ def run_fixtures():
             self.device.started = True
         def isRunning(self): return False
 
-    for supported, size, mono, usb, expected_fps,mode in [
-            (True, (640, 400), (640, 400), "high", 10.,"standard"),
-            (True, (1280, 800), (1280, 800), "high", 2.5,"standard"),
-            (True, (1920, 1080), (1280, 720), "high", 2.,"standard"),
-            (True, (1280, 800), (1280, 800), "super", service.FRAME_RATE,"standard"),
-            (False, (640, 400), (640, 400), "super", service.FRAME_RATE,"standard"),
-            (True, (640, 400), (640, 400), "high", 10.,"near_field")]:
+    for supported, size, mono, usb, expected_fps,mode,role in [
+            (True, (640, 400), (640, 400), "high", 10.,"standard","face"),
+            (True, (1280, 800), (1280, 800), "high", 2.5,"standard","face"),
+            (True, (1920, 1080), (1280, 720), "high", 2.,"standard","face"),
+            (True, (1280, 800), (1280, 800), "super", service.FRAME_RATE,"standard","face"),
+            (False, (640, 400), (640, 400), "super", service.FRAME_RATE,"standard","face"),
+            (True, (640, 400), (640, 400), "high", 10.,"near_field","face"),
+            (True, (1280, 800), (1280, 800), "high", 2.5,"standard","belly")]:
         Camera.requests = []; Pipeline.stereo_nodes = []
         device = Device(result=supported, usb_speed=usb)
         fake = SimpleNamespace(Device=lambda *args: device, DeviceInfo=lambda value: value,
@@ -201,14 +206,16 @@ def run_fixtures():
              patch.object(service, "color_camera_socket", return_value="rgb"), \
              patch.object(service, "configure_rgb_calibrated_focus", return_value=None), \
              patch.object(service, "configure_optional_imu", return_value=(None, None)):
-            _, log = capture(service.stream_camera, None, stop, width=size[0], height=size[1], model_name="nonexistent_fixture_model",stereo_mode=mode)
-        assert device.closed and device.calls == [("flood", 0.0), ("dot", 0.5)]
+            _, log = capture(service.stream_camera, None, stop, width=size[0], height=size[1], role=role,model_name="nonexistent_fixture_model",stereo_mode=mode)
+        assert device.closed and device.calls == [("flood", 0.0), ("dot", 0.5 if role=="face" else 0.0)]
         assert "CEREBRO_DEPTHCAM_STREAMING" in log
-        assert "CEREBRO_DEPTHCAM_CALIBRATION role=face" in log
-        evidence_pointer = json.loads((Path(service.ir_status_directory())/"face-calibration-latest.json").read_text())
+        assert "CEREBRO_DEPTHCAM_CALIBRATION role="+role in log
+        assert "requested=explicit_mesh resolved_strategy_observed=false" in log
+        evidence_pointer = json.loads((Path(service.ir_status_directory())/(role+"-calibration-latest.json")).read_text())
         evidence = json.loads(Path(evidence_pointer["evidencePath"]).read_text())
         assert evidence["requestedPipeline"]["stereoMode"] == mode
         assert evidence["requestedPipeline"]["resolvedStrategyObserved"] is False
+        assert evidence["requestedPipeline"]["rectificationPolicy"] == "explicit_mesh"
         assert evidence["metricAccuracyVerified"] is False and evidence["eepromExport"]["status"] == "unavailable"
         assert len(Camera.requests) == 3
         assert [entry[1] for entry in Camera.requests] == [size, mono, mono]
@@ -216,6 +223,7 @@ def run_fixtures():
         assert Camera.requests[0][2]["enableUndistortion"] is True
         assert all(entry[2]["enableUndistortion"] is False for entry in Camera.requests[1:])
         stereo = Pipeline.stereo_nodes[0]
+        assert stereo.rectification_calls == [False], "Both camera roles must request only mesh rectification"
         assert stereo.output_size == size and stereo.left_right is True and stereo.subpixel is (mode=="standard")
         assert stereo.extended is (mode=="near_field")
         assert stereo.mode_calls==([("subpixel",False),("extended",True)] if mode=="near_field" else [("subpixel",True)])
@@ -233,6 +241,19 @@ def run_fixtures():
         except RuntimeError as error:assert "not confirmed by SDK readback" in str(error)
         else:raise AssertionError("Rejected near-field configuration streamed as requested")
     assert device.closed and not device.calls,"Failed near-field readback reached IR/streaming"
+
+    # An unavailable/rejected mesh API must stop setup, never retain AUTO and
+    # emit normal frames under a merely requested explicit-mesh label.
+    device=Device();stop=threading.Event();stop.set()
+    with patch.object(service,"load_depthai",return_value=fake), \
+         patch.object(service,"color_camera_socket",return_value="rgb"), \
+         patch.object(service,"configure_rgb_calibrated_focus",return_value=None), \
+         patch.object(service,"configure_optional_imu",return_value=(None,None)), \
+         patch.object(Stereo,"useHomographyRectification",side_effect=RuntimeError("mesh API unavailable")):
+        try:capture(service.stream_camera,None,stop,width=640,height=400)
+        except RuntimeError as error:assert "mesh API unavailable" in str(error)
+        else:raise AssertionError("Failed explicit mesh request silently retained the old rectification policy")
+    assert device.closed and not device.started and not device.calls
 
     print("Depth camera IR fixtures passed: validated face/belly CLI defaults, normalized bounds, unsupported/rejected/error reporting, after-start SDK ordering; real RGB-D setup retains metric settings and requests matched SDK dimensions/aspect with USB2/USB3 capture rates")
 

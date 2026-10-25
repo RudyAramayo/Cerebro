@@ -212,7 +212,7 @@ def write_calibration_evidence(device, calibration, dai, role, frame_size, mono_
             "stereoRightRectificationRotation": observe(calibration, "getStereoRightRectificationRotation"),
             "requestedPipeline": {"rgbSize": list(frame_size), "monoSize": list(mono_size),
                 "rgbUndistortion": RGB_OUTPUT_UNDISTORTED, "monoUndistortion": False,
-                "stereoMode": requested_stereo_mode, "rectificationPolicy": "UNSET/AUTO",
+                "stereoMode": requested_stereo_mode, "rectificationPolicy": "explicit_mesh",
                 "disparityToDepthUseSpecTranslation": "UNSET", "depthAlignmentUseSpecTranslation": "UNSET",
                 "rectificationUseSpecTranslation": "UNSET", "resolvedStrategyObserved": False},
             "intrinsicsScope": "EEPROM/default and explicit requested-size queries only; actual processed frame K remains in per-frame packet metadata",
@@ -1316,6 +1316,10 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             )
             stereo = pipeline.create(dai.node.StereoDepth)
             stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.ROBOTICS)
+            # Explicit SDK mesh rectification includes lens distortion. Never
+            # silently retain AUTO/homography if this required v3.8 API fails.
+            stereo.useHomographyRectification(False)
+            emit("CEREBRO_DEPTHCAM_RECTIFICATION requested=explicit_mesh resolved_strategy_observed=false")
             stereo.setLeftRightCheck(True)
             configure_stereo_mode(stereo,stereo_mode)
             configure_latest_input(stereo.left)

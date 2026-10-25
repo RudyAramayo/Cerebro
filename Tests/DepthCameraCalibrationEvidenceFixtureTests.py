@@ -90,7 +90,9 @@ class CalibrationEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence["cameraServiceSourceSHA256"], self.service.RUNNING_SERVICE_SOURCE_SHA256)
         self.assertEqual(evidence["processID"], os.getpid())
         self.assertEqual(first["evidenceSHA256"], hashlib.sha256(original).hexdigest())
-        self.assertEqual(evidence["requestedPipeline"]["rectificationPolicy"], "UNSET/AUTO")
+        self.assertEqual(evidence["requestedPipeline"]["rectificationPolicy"], "explicit_mesh")
+        for key in ("disparityToDepthUseSpecTranslation", "depthAlignmentUseSpecTranslation", "rectificationUseSpecTranslation"):
+            self.assertEqual(evidence["requestedPipeline"][key], "UNSET")
         self.assertFalse(evidence["requestedPipeline"]["resolvedStrategyObserved"])
         self.assertFalse(evidence["calibrationWrittenToDevice"] or evidence["metricAccuracyVerified"] or evidence["registrationVerified"])
         for pair in evidence["cameraPairs"]:
