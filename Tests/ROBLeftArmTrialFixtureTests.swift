@@ -246,11 +246,22 @@ final class ROBAmberGatewayClient: NSObject {
 enum ROBNeckRGBPoseDisplay {
     static var projectionIdentity:String? = nil
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {projectionIdentity}
+    static var nominalCameraToModel=matrix_identity_double4x4
+    static func provisionalCameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
+        projectionIdentity==nil ? nil:nominalCameraToModel
+    }
 }
 
 final class ROBFixedHeadCalibrationWindowController {
     static let shared=ROBFixedHeadCalibrationWindowController()
     var readNeck:(()->NSDictionary)? = { ["known":true,"stationary":true,"pan":6015,"pan_degrees":0.0,"lower":6011,"upper":6160,"ready_at":0.0] }
+    func scope(model:ROBGhostRobotModel,frame:ROBArmRoutineVision.Frame)throws->ROBFixedHeadRegistrationScope {
+        let n=readNeck?() ?? [:]
+        return .init(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+            cameraGeneration:frame.cameraGeneration,gatewaySessionGeneration:ROBAmberGatewayClient.shared.generation,
+            displayCorrectionIdentity:"synthetic-fixture",panTarget:n["pan"] as?Int ?? 0,lowerTarget:n["lower"] as?Int ?? 0,
+            upperTarget:n["upper"] as?Int ?? 0,intrinsicsIdentity:String(repeating:"a",count:64))
+    }
 }
 
 struct ROBWorkspaceCanSelection {
@@ -363,9 +374,27 @@ final class ROBArmRoutineVision {
     var stereoPolicyIdentity=String(repeating:"c",count:64)
     var clearsFramesOnSetActive=false,frameAvailable=true
     struct RuntimeCalibration {let identity:String;let stereoPolicySHA256:String}
-    struct Intrinsics {let runtimeCalibration:RuntimeCalibration?}
-    struct Frame {let cameraGeneration:UUID;let intrinsics:Intrinsics?}
-    func snapshot()->[String:Frame] {frameAvailable ? ["face":.init(cameraGeneration:cameraGeneration,intrinsics:.init(runtimeCalibration:.init(identity:runtimeIdentity,stereoPolicySHA256:stereoPolicyIdentity)))] : [:]}
+    struct Correspondence {let status="matched"}
+    struct Intrinsics {
+        let runtimeCalibration:RuntimeCalibration?
+        var fx=24.0,fy=24.0,cx=12.0,cy=12.0
+        let rgbOutputUndistorted:Bool?=true,depthRGBGeometryCorrespondence:Correspondence?=Correspondence()
+        func isValid(forWidth:Int,height:Int)->Bool {forWidth==24 && height==24 && fx>0 && fy>0}
+    }
+    struct Depth {let width=24,height=24;func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
+    struct Frame {let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth()}
+    var frameSequence:UInt64=10,captureFocalLength=24.0
+    func snapshot()->[String:Frame] {
+        frameSequence+=1
+        var k=Intrinsics(runtimeCalibration:.init(identity:runtimeIdentity,stereoPolicySHA256:stereoPolicyIdentity));k.fx=captureFocalLength;k.fy=captureFocalLength
+        return frameAvailable ? ["face":.init(cameraGeneration:cameraGeneration,intrinsics:k,
+            capturedAt:Date().timeIntervalSince1970*1000,sequence:frameSequence)] : [:]
+    }
+    @MainActor func settledDepthFrame(deadlineUptime:Double?=nil)async throws->Frame {
+        try await Task.sleep(nanoseconds:10_000_000)
+        guard fresh,let f=snapshot()["face"] else {throw ROBArmRoutineError.blocked("Synthetic camera unavailable")}
+        return f
+    }
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
     func setActive(_ active: Bool, teaching: Bool = false) {
@@ -614,6 +643,7 @@ final class ROBArmRoutineCoordinator {
         precondition(plan.stationaryFrontTarget(plan.target(index: plan.waveIndex)!) == nil)
         print("Interaction plan: tested approach unchanged, one joint at a time at front, reverse unwinds before descent, off-route poses rejected")
         let trial = ROBLeftArmTrial.shared, g = ROBAmberGatewayClient.shared
+        precondition(!trial.nominalEmptyCommissioningStepEnabled && !trial.oneDegreeEmptyCalibrationStepEnabled)
         precondition(!trial.authorizesTaughtWaypoint(arm: "right", expectedSessionGeneration: g.generation))
         precondition(!trial.continueOperation(stage: "object_placed"), "Idle readiness admitted an operation")
         let broker = ROBControllerArmApproval.shared
@@ -631,6 +661,69 @@ final class ROBArmRoutineCoordinator {
         let device = UUID(), session = UUID()
         let hello = ROBRobotActionMessage.controllerHello(senderID: "fixture-controller", acceptsActions: true, capabilities: ["arm_operation"])
         _ = broker.receive(hello, device: device, session: session)
+        if CommandLine.arguments.last=="one-degree-empty" {
+            precondition(!trial.oneDegreeEmptyCalibrationStepEnabled)
+            let model=try ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"),physicalSide:"right")
+            let frame=model.frames(model.positions(vendorLeft:Array(repeating:0,count:7)))[model.toolLink]!
+            let text=try String(contentsOf:model.directory.appendingPathComponent(model.hulls[model.toolLink]!),encoding:.utf8)
+            let points=text.split(separator:"\n").compactMap { line -> SIMD3<Double>? in
+                let a=line.split(whereSeparator:\.isWhitespace);guard a.first=="v",a.count>=4,let x=Double(a[1]),let y=Double(a[2]),let z=Double(a[3])else{return nil}
+                let p=frame*SIMD4(x,y,z,1);return SIMD3(p.x,p.y,p.z)
+            }
+            // Deliberately retain a synthetic raw return at the tool surface: this
+            // experiment reports contact predictions rather than certifying clearance.
+            let rawPoint=points.max{$0.y<$1.y}!+SIMD3(0,0.001,0)
+            var camera=matrix_identity_double4x4;camera.columns.3=SIMD4(rawPoint-SIMD3(0,0,0.9),1)
+            ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64);ROBNeckRGBPoseDisplay.nominalCameraToModel=camera
+            ROBArmRoutineVision.shared.captureFocalLength=10000;ROBArmRoutineVision.shared.frameAvailable=true
+            ROBArmRoutineVision.shared.clearsFramesOnSetActive=true
+            var neck:NSDictionary=["known":true,"stationary":true,"pan":6015,"pan_degrees":0.0,"lower":6011,"upper":6160,"ready_at":0.0]
+            ROBFixedHeadCalibrationWindowController.shared.readNeck={neck}
+            ROBWorkspaceSearch.shared.prepareView={p,u in neck=["known":true,"stationary":true,"pan":Int((6000+p/0.03).rounded()),"pan_degrees":p,"lower":6011,"upper":u,"ready_at":0.0];return true}
+            ROBWorkspaceSearch.shared.viewReady={p,u in neck["upper"] as?Int==u && neck["pan_degrees"] as?Double==p}
+            ROBArmRoutineCoordinator.shared.viewIsStationary={true}
+            trial.oneDegreeEmptyCalibrationStepEnabled=true;trial.localVisualTrialAssumedSpatialErrorMeters=0.035
+            g.mode=["left":0,"right":0];g.q=["left":Array(repeating:0,count:7),"right":Array(repeating:0,count:7)];g.calibrated=[];g.commands=[]
+            var requests=0,prompts=0
+            broker.send={m,_,_ in if m.kind == .actionRequest {requests+=1};return true};broker.announceApproval={_ in prompts+=1}
+            broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("one-degree-private-audit")
+            var result:NSDictionary?
+            Task{@MainActor in trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){result=$0}}
+            let pendingEnd=ProcessInfo.processInfo.systemUptime+2
+            while broker.pendingLocalRecyclingApprovalScope==nil && ProcessInfo.processInfo.systemUptime<pendingEnd {try await Task.sleep(nanoseconds:10_000_000)}
+            precondition(broker.pendingLocalRecyclingApprovalScope?["oneDegreeEmptyCalibrationStepEnabled"] as?Bool==true)
+            precondition((broker.pendingLocalRecyclingApprovalScope?["summary"] as?String)?.contains("NOT verified motion clearance")==true)
+            precondition(!broker.authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary:broker.pendingLocalRecyclingApprovalScope?["summary"] as?String ?? "",arm:"right"))
+            precondition(g.commands.isEmpty && requests==0 && prompts==0)
+            var receipt=broker.localRecyclingReceiptTemplate as! [String:Any]
+            receipt["sourceMessage"]="Synthetic fixture only: one bounded one-degree EMPTY experiment, not a real user instruction."
+            receipt["sourceMessageSHA256"]=ROBGhostRobotModel.hash(Data((receipt["sourceMessage"] as!String).utf8))
+            receipt["additionalUserInstruction"]="Synthetic fixture: permit exact one-degree flag with contact diagnostics and35mm unverified uncertainty."
+            receipt["additionalUserInstructionSHA256"]=ROBGhostRobotModel.hash(Data((receipt["additionalUserInstruction"] as!String).utf8))
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            let url=folder.appendingPathComponent("one-degree-receipt.json");try JSONSerialization.data(withJSONObject:receipt,options:.sortedKeys).write(to:url)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+            try broker.importLocalRecyclingSessionApproval(fromReceiptURL:url)
+            let end=ProcessInfo.processInfo.systemUptime+30
+            while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
+            guard let value=result else {fatalError("One-degree synthetic integration did not complete")}
+            precondition(value["status"] as?String=="partial_empty_calibration_step_held",value.description)
+            precondition(value["batch_completed"] as?Int==0 && value["jaw_command_sent"] as?Bool==false && value["reach_sent"] as?Bool==false)
+            precondition(value["arm_motion_sent"] as?Bool==true && value["collision_protection_certified"] as?Bool==false)
+            precondition(g.commands.filter{$0.hasPrefix("ghost_step")}.count==1 && !g.commands.contains{$0.hasPrefix("calibrate") || $0.hasPrefix("gripper") || $0.hasPrefix("deactivate")})
+            precondition(ROBGripperStartupCalibration.shared.setupCalls==0 && g.q["left"]==[0,-0.02,0,0,0,0,0] && g.q["right"]==Array(repeating:0,count:7))
+            precondition(g.activeLeases.isEmpty && neck["pan_degrees"] as?Double == -55 && neck["upper"] as?Int==5650)
+            precondition(ROBWorkspaceSearch.shared.collisionScanCalls==0 && ROBArmRoutineVision.shared.observationCount==0)
+            precondition(broker.localRecyclingApprovalState==nil && !trial.isRunning)
+            let evidence=URL(fileURLWithPath:trial.lastRecordingPath).deletingPathExtension().appendingPathExtension("one-degree-empty-evidence")
+            let map=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:Data(contentsOf:evidence.appendingPathComponent("collision-map.json")))
+            let proof=try JSONDecoder().decode(ROBWorkspaceOneDegreeEmptyCalibrationStep.self,from:Data(contentsOf:evidence.appendingPathComponent("proof.json")))
+            precondition(proof.environmentPredictionIsDiagnosticOnly && !proof.collisionCertificate)
+            precondition(proof.environmentDiagnostics.predictedNominalContact,"Synthetic surface return must remain diagnostic evidence")
+            precondition(map.registrationID==nil && map.observedFrameCount==3 && map.observations.allSatisfy{$0.recordedPanDegrees == -55 && $0.recordedUpperTarget==5650 && !$0.measuredSelfMaskApplied})
+            print("PASS one-degree EMPTY actual Trial+broker+core: defaultOFF exactreceipt,3advancing synthetic raw frames retained including predictedcontact, ONE4sminus.02step/no jaw/detector/return/autochain, fresh endpointheld,0transfers,private diagnosticproof; no hardware transport")
+            return
+        }
         if CommandLine.arguments.last == "local-receipt" {
             var requests=0,prompts=0
             broker.send={message,_,_ in if message.kind == .actionRequest {requests += 1};return true}

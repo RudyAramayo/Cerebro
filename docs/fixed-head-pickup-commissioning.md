@@ -4,6 +4,18 @@ The sandbox separates a measured camera view from a general neck calibration.
 One validated view can support a local experiment without claiming that every
 neck angle or arm encoder offset is commissioned.
 
+The separate, default-off **One-degree empty-arm calibration step** is an
+actuator observation rather than a pickup or clearance certificate. Its exact
+private session receipt permits physical RIGHT J2 −0.02 rad over four seconds,
+at most 20 mm modeled full-hull travel, then measured hold. The full raw map,
+predicted environmental contacts and unknown regions remain in the diagnostic
+record; the unverified camera transform does not certify clearance. Fresh
+feedback, source/body identity, ownership, joint bounds, nonworsening modeled
+self clearance, a tight measured motion corridor and Stop remain required.
+It issues no jaw command, carries no payload, chains no further movement and
+reports zero can transfers. It is mutually exclusive with the nominal
+commissioning experiment and cannot authorize ordinary recycling routes.
+
 ## Optional runtime stereo calibration
 
 The camera worker can load a device-specific stereo correction into **RAM** at

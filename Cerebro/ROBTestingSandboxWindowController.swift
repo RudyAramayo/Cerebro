@@ -61,6 +61,7 @@ import UniformTypeIdentifiers
     private let collisionInfo = NSTextField(wrappingLabelWithString: "")
     private let localApprovalInfo = NSTextField(wrappingLabelWithString: "")
     private let nominalEmptyCommissioningStep = NSButton(checkboxWithTitle: "One slow empty-arm commissioning step", target: nil, action: nil)
+    private let oneDegreeEmptyCalibrationStep = NSButton(checkboxWithTitle: "One-degree empty-arm calibration step", target: nil, action: nil)
     private var collisionRefreshTimer: Timer?
     private let continueCycle = NSButton(title: "Continue", target: nil, action: nil)
     private let save = NSButton(title: "Save test parameters", target: nil, action: nil)
@@ -231,6 +232,12 @@ import UniformTypeIdentifiers
             nominalEmptyCommissioningStep.state = ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled ? .on : .off
             detailStack.addArrangedSubview(nominalEmptyCommissioningStep)
             addHelp("Commissioning only: one slow outward empty-arm step, then hold. Current robot occupancy is assumed from the model; calibration error and nearby unobserved space remain unverified. No grip, carry, release or automatic return. Zero cans are transferred.")
+            oneDegreeEmptyCalibrationStep.identifier = NSUserInterfaceItemIdentifier("sandbox-one-degree-empty-calibration-step")
+            oneDegreeEmptyCalibrationStep.target = self
+            oneDegreeEmptyCalibrationStep.action = #selector(changeOneDegreeEmptyCalibrationStep)
+            oneDegreeEmptyCalibrationStep.state = ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
+            detailStack.addArrangedSubview(oneDegreeEmptyCalibrationStep)
+            addHelp("Actuator/model calibration only: RIGHT J2 −0.02 rad over 4 seconds, at most 2 cm modeled travel, then hold. Collision clearance is unverified; contact predictions are diagnostic only. Contact could push the table or lift ROB. No payload, jaw command, grasp, carry, release, return or chained motion. Zero transfers. Stop and fresh feedback remain required.")
             localApprovalInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-local-recycling-approval-scope")
             localApprovalInfo.isSelectable = true
             detailStack.addArrangedSubview(localApprovalInfo)
@@ -471,8 +478,13 @@ import UniformTypeIdentifiers
             refresh(); return
         }
         // The exact summary/context freezes this assumption before any receipt.
+        guard nominalEmptyCommissioningStep.state != .on || oneDegreeEmptyCalibrationStep.state != .on else {
+            parameterMessage = "Choose only one empty-arm calibration experiment before preparing its exact receipt."
+            refresh(); return
+        }
         ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters = spatial
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
         parameterMessage = ""; observingLeftOperation = true
         ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: "4") { [weak self] _ in self?.refresh() }
         refresh()
@@ -484,9 +496,29 @@ import UniformTypeIdentifiers
             approval.cancel(reason: "The one-step commissioning option changed; review a new exact job receipt.")
         }
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
+        if nominalEmptyCommissioningStep.state == .on {
+            oneDegreeEmptyCalibrationStep.state = .off
+            ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
+        }
         parameterMessage = nominalEmptyCommissioningStep.state == .on
             ? "Next local receipt: one slow empty-arm outward step, then hold; zero transfers."
             : "One-step commissioning is off; ordinary recycling admission applies."
+        approval.tick(); refresh()
+    }
+    @objc private func changeOneDegreeEmptyCalibrationStep() {
+        guard canEdit else { return }
+        let approval = ROBControllerArmApproval.shared
+        if approval.localRecyclingApprovalState != nil || approval.pendingLocalRecyclingApprovalScope != nil {
+            approval.cancel(reason: "The one-degree actuator calibration option changed; review a new exact job receipt.")
+        }
+        ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
+        if oneDegreeEmptyCalibrationStep.state == .on {
+            nominalEmptyCommissioningStep.state = .off
+            ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
+        }
+        parameterMessage = oneDegreeEmptyCalibrationStep.state == .on
+            ? "Next local receipt: one four-second RIGHT J2 −0.02 rad calibration step, then hold; contact clearance is unverified; zero transfers."
+            : "One-degree calibration is off; ordinary recycling admission applies."
         approval.tick(); refresh()
     }
     public func controlTextDidChange(_ notification: Notification) {
@@ -624,6 +656,8 @@ import UniformTypeIdentifiers
         for field in fields.values { field.isEnabled = canEdit }
         nominalEmptyCommissioningStep.isEnabled = canEdit
         nominalEmptyCommissioningStep.state = left.nominalEmptyCommissioningStepEnabled ? .on : .off
+        oneDegreeEmptyCalibrationStep.isEnabled = canEdit
+        oneDegreeEmptyCalibrationStep.state = left.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
         save.isEnabled = canEdit
         for button in actionButtons {
             let command = selectedTrial.actions.indices.contains(button.tag) ? selectedTrial.actions[button.tag].command : ""
@@ -715,6 +749,9 @@ enum ROBLocalRecyclingSandboxRouting {
         }
         if scope["nominalEmptyCommissioningStepEnabled"] as? Bool == true {
             lines.append("Commissioning only: one slow empty-arm outward step, then hold. Current robot occupancy is assumed from the model; calibration and local unknown space unverified. No grip, carry, release or automatic return. Zero transfers.")
+        }
+        if scope["oneDegreeEmptyCalibrationStepEnabled"] as? Bool == true {
+            lines.append("Actuator/model calibration only: RIGHT J2 −0.02 rad, 4 seconds, at most 2 cm modeled travel, then hold. Collision clearance unverified; contact predictions diagnostic only. Contact may push the table or lift ROB. No payload, jaws, grasp, carry, release, return or chaining. Zero transfers; Stop and fresh feedback required.")
         }
         lines.append("Both arms may hold stationary; only the selected arm travels. Treads, torso and manual gestures are excluded. Stop revokes this approval.")
         return lines.joined(separator: "\n")

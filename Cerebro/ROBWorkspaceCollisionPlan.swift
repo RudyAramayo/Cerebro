@@ -1386,3 +1386,187 @@ extension ROBWorkspaceCollisionPlan {
             emptyStateEvidenceSource:emptyStateEvidenceSource,calibrationUncertaintyCertified:false,occupiedVoxelsMutated:false,automaticChainingPermitted:false)
     }
 }
+
+/// One explicitly risk-accepted EMPTY actuator-calibration observation.
+/// Environment estimates are diagnostics ONLY. This is neither a collision
+/// certificate nor a recycling/grasp/carry capability.
+struct ROBWorkspaceOneDegreeEmptyCalibrationStep:Codable,Equatable {
+    struct EnvironmentDiagnostics:Codable,Equatable {
+        let diagnosticOnly:Bool
+        let sourceBoundsAllRetained:Bool
+        let originalOccupiedBoundsCount:Int,deduplicatedOccupiedBoundsCount:Int
+        let originalOccupiedBoundsSHA256:String
+        let minimumRawClearanceMeters:Double?
+        let minimumAfterJawEnvelopeMeters:Double?
+        let minimumSweptNominalClearanceMeters:Double?
+        let closestMovingLink:String?
+        let closestRawBounds:ROBWorkspaceOccupiedReturnBounds?
+        let predictedNominalContact:Bool
+        let isotropicJawEnvelopeMeters:Double
+        let assumedCalibrationUncertaintyMeters:Double
+        let intersampleAllowanceMeters:Double
+    }
+    let id:UUID
+    let mode:String
+    let context:ROBWorkspaceCollisionContext
+    let baseline:[Double],goal:[Double]
+    let measuredAtMilliseconds:Double
+    let maximumHullTravelMeters:Double
+    let checkedPoseCount:Int
+    let staticRobotLinks:[ROBWorkspaceStaticRobotLinkEvidence]
+    let initialSelfMinimumMeters:Double,endpointSelfMinimumMeters:Double
+    let unknownVoxelCount:Int
+    let unknownLocalRegions:[ROBWorkspaceNominalEmptyCommissioningRetreat.LocalRegion]
+    let environmentDiagnostics:EnvironmentDiagnostics
+    let environmentPredictionIsDiagnosticOnly:Bool
+    let collisionCertificate:Bool
+    let occupiedVoxelsMutated:Bool
+    let automaticChainingPermitted:Bool
+    let emptyStateAssumed:Bool
+    let emptyStateEvidenceSource:String
+    let completedTransferCount:Int
+    var step:ROBLeftGestureProposal.Step {.init(positions:goal,seconds:4,stage:"One EMPTY RIGHT J2 actuator calibration step, then hold; environment unverified")}
+    func validateContext(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
+        cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
+        measuredBaseline:[Double],oneDegreeEmptyCalibrationStepEnabled:Bool,emptyStateEvidenceSource:String)throws {
+        let current=try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(map,model:model,generation:generation,
+            sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
+        let drift=1.5*zip(baseline,measuredBaseline).reduce(0.0){$0+abs($1.0-$1.1)}
+        guard oneDegreeEmptyCalibrationStepEnabled,mode=="risk_accepted_one_degree_empty_actuator_calibration",model.physicalSide=="right",
+              context.visualTrial==trial,current.mapFingerprint==context.mapFingerprint,
+              context.modelID==current.modelID,context.geometryID==current.geometryID,context.mappingID==current.mappingID,
+              measuredBaseline.count==7,drift.isFinite,drift<=0.003,maximumHullTravelMeters+drift<=0.020,
+              nowMilliseconds-measuredAtMilliseconds>=0,nowMilliseconds-measuredAtMilliseconds<=150,
+              baseline==trial.baseline,goal==zip(baseline,[0.0,-0.020,0,0,0,0,0]).map(+),checkedPoseCount==65,
+              maximumHullTravelMeters.isFinite,(0...0.020).contains(maximumHullTravelMeters),
+              environmentPredictionIsDiagnosticOnly,environmentDiagnostics.diagnosticOnly,environmentDiagnostics.sourceBoundsAllRetained,
+              !collisionCertificate,!occupiedVoxelsMutated,!automaticChainingPermitted,emptyStateAssumed,completedTransferCount==0,
+              self.emptyStateEvidenceSource==emptyStateEvidenceSource,!unknownLocalRegions.isEmpty,
+              (0...60_000).contains(nowMilliseconds-context.checkedAtMilliseconds) else {
+            throw ROBGhostMotionError.blocked("The distinct one-degree EMPTY actuator permission, fresh start or frozen body/source/receipt context changed. Hold; no calibration command admitted.")
+        }
+    }
+    func validate(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
+        cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
+        measuredBaseline:[Double],oneDegreeEmptyCalibrationStepEnabled:Bool,emptyStateEvidenceSource:String)throws {
+        try validateContext(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,
+            nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,measuredBaseline:measuredBaseline,
+            oneDegreeEmptyCalibrationStepEnabled:oneDegreeEmptyCalibrationStepEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource)
+        let expected=try ROBWorkspaceCollisionPlan.buildOneDegreeEmptyCalibrationStep(id:id,from:baseline,map:map,model:model,
+            generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:context.checkedAtMilliseconds,
+            trial:trial,measuredAtMilliseconds:self.measuredAtMilliseconds,oneDegreeEmptyCalibrationStepEnabled:oneDegreeEmptyCalibrationStepEnabled,
+            emptyStateEvidenceSource:emptyStateEvidenceSource)
+        guard expected==self else {throw ROBGhostMotionError.blocked("The one-degree actuator proof or retained environment diagnostics changed.")}
+    }
+}
+extension ROBWorkspaceCollisionPlan {
+    static func reviewOneDegreeEmptyCalibrationStep(from baseline:[Double],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
+        trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,oneDegreeEmptyCalibrationStepEnabled:Bool,
+        emptyStateEvidenceSource:String)throws->ROBWorkspaceOneDegreeEmptyCalibrationStep {
+        try buildOneDegreeEmptyCalibrationStep(id:UUID(),from:baseline,map:map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,
+            oneDegreeEmptyCalibrationStepEnabled:oneDegreeEmptyCalibrationStepEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource)
+    }
+    fileprivate static func buildOneDegreeEmptyCalibrationStep(id:UUID,from baseline:[Double],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
+        trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,oneDegreeEmptyCalibrationStepEnabled:Bool,
+        emptyStateEvidenceSource:String)throws->ROBWorkspaceOneDegreeEmptyCalibrationStep {
+        let context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
+        guard oneDegreeEmptyCalibrationStepEnabled,model.physicalSide=="right",baseline.count==7,baseline==trial.baseline,
+              baseline.allSatisfy({$0.isFinite && abs($0)<=0.004}),
+              ["operator_declared_empty","local_first_attempt_no_arm_travel_or_task_grip"].contains(emptyStateEvidenceSource),
+              measuredAtMilliseconds.isFinite,(0...150).contains(nowMilliseconds-measuredAtMilliseconds),
+              let supplied=map.originalOccupiedReturnBounds,!supplied.isEmpty,supplied.count<=400_000 else {
+            throw ROBGhostMotionError.blocked("The one-degree actuator calibration needs its NEW distinct permission, fresh EMPTY q0 and retained raw source diagnostics.")
+        }
+        let goal=zip(baseline,[0.0,-0.020,0,0,0,0,0]).map(+),limits=jointBounds(model:model)
+        guard zip(goal,limits).allSatisfy({$0.isFinite && $1.contains($0)}),zip(baseline,goal).allSatisfy({abs($1-$0)<=0.020000001}) else {
+            throw ROBGhostMotionError.blocked("The one-degree actuator endpoint exceeds unchanged raw/model joint bounds.")
+        }
+        var raw:[ROBNominalRawBox]=[],seen=Set<String>()
+        for value in supplied {let lo=value.lowMeters,hi=value.highMeters
+            guard lo.count==3,hi.count==3,(lo+hi).allSatisfy({$0.isFinite && abs($0)<=10}),zip(lo,hi).allSatisfy({$0<=$1}) else {
+                throw ROBGhostMotionError.blocked("An original occupied-return bound is invalid; no nominal trial admitted.")
+            }
+            let key=(lo+hi).map{String($0.bitPattern)}.joined(separator:":")
+            if seen.insert(key).inserted {raw.append(.init(low:SIMD3(lo[0],lo[1],lo[2]),high:SIMD3(hi[0],hi[1],hi[2]),key:key))}
+        }
+        raw.sort{$0.key<$1.key}
+        let rawHash=ROBGhostRobotModel.hash(Data(raw.map(\.key).joined(separator:"\n").utf8))
+        let catalogData=try Data(contentsOf:model.directory.appendingPathComponent("surfaces.json"))
+        guard ROBGhostRobotModel.hash(catalogData)==model.geometryID,
+              let catalog=try JSONSerialization.jsonObject(with:catalogData)as?[String:Any],catalog["modelID"]as?String==model.modelID,
+              let records=catalog["surfaces"]as?[[String:Any]] else {throw ROBGhostMotionError.blocked("The nominal trial geometry catalog changed.")}
+        var shapes:[String:ROBNominalShape]=[:]
+        for row in records {
+            guard let link=row["link"]as?String,link.hasPrefix(model.physicalSide+"_"),
+                  link.hasSuffix("_Link") || link==model.toolLink || link==model.physicalSide+"_base_link" else {continue}
+            guard let path=row["hull"]as?String,model.hulls[link]==path,!path.hasPrefix("/"),!path.contains(".."),
+                  let sha=row["hullSHA256"]as?String,shapes[link]==nil else {throw ROBGhostMotionError.blocked("A nominal arm hull identity is invalid.")}
+            let data=try Data(contentsOf:model.directory.appendingPathComponent(path))
+            guard ROBGhostRobotModel.hash(data)==sha,let text=String(data:data,encoding:.utf8) else {throw ROBGhostMotionError.blocked("A nominal arm hull changed.")}
+            shapes[link]=try ROBNominalShape(text:text)
+        }
+        guard shapes.count>=9 else {throw ROBGhostMotionError.blocked("The complete arm and gripper hulls are required for a nominal trial.")}
+        let links=shapes.keys.sorted(),startFrames=model.frames(model.positions(vendorLeft:baseline)),count=64
+        var fixed=Set<String>()
+        for link in links {var child=link,seen=Set<String>(),depends=false
+            while child != "base_link" {guard seen.insert(child).inserted,let joint=model.joints.first(where:{$0.child==child}) else {throw ROBGhostMotionError.blocked("The actuator calibration chain is incomplete.")};if joint.name==model.armJointPrefix+"2" {depends=true};child=joint.parent}
+            if !depends {fixed.insert(link)}
+        }
+        let intersample=1.5*0.020/(2*Double(count)),curvature=0.75*pow(0.020/Double(count),2)
+        var previous:[String:[SIMD3<Double>]]=[:],cumulative:[String:[Double]]=[:],maximumTravel=0.0
+        var regionLow:[String:SIMD3<Double>]=[:],regionHigh:[String:SIMD3<Double>]=[:],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]=[]
+        var selfChecker=ROBWorkspaceSelfProxyClearance(model:model),initialSelf:[String:Double]?,priorSelf:[String:Double]?,lastSelf:[String:Double]=[:]
+        var minimumRaw=Double.infinity,minimumJaw=Double.infinity,closestLink:String?,closestBox:ROBNominalRawBox?
+        for sample in 0...count {
+            let t=Double(sample)/Double(count),q=zip(baseline,goal).map{$0+($1-$0)*t},positions=model.positions(vendorLeft:q),frames=model.frames(positions)
+            let pairs=try selfChecker.separations(vendorLeft:q);if initialSelf==nil{initialSelf=pairs}
+            if let before=priorSelf {for (key,value) in pairs {guard value+1e-9>=min(before[key]!,0.030) else {throw ROBGhostMotionError.blocked("The one-degree actuator step worsens the existing modeled arm/tread clearance.")}}};priorSelf=pairs;lastSelf=pairs
+            for link in links {guard let frame=frames[link],let first=startFrames[link] else {throw ROBGhostMotionError.blocked("The one-degree step lost an arm transform.")}
+                let shape=ROBNominalWorldShape(shapes[link]!,frame)
+                if let prior=previous[link] {var lengths=cumulative[link] ?? Array(repeating:0,count:shape.vertices.count)
+                    for i in shape.vertices.indices {lengths[i]+=simd_distance(prior[i],shape.vertices[i])+curvature};cumulative[link]=lengths;maximumTravel=max(maximumTravel,lengths.max() ?? 0)
+                };previous[link]=shape.vertices
+                guard maximumTravel<=0.020 else {throw ROBGhostMotionError.blocked("The one-degree calibration exceeds20mm modeled full-hull travel.")}
+                if fixed.contains(link) {guard (0..<4).allSatisfy({c in (0..<4).allSatisfy{abs(frame[c][$0]-first[c][$0])<=1e-12}}) else {throw ROBGhostMotionError.blocked("A fixed link moved in the one-degree model.")}
+                    if sample==0 {staticLinks.append(.init(kind:"invariant_robot_link_no_new_sweep",link:link,bodyMotionIdentity:trial.bodyMotionIdentity,
+                        frameColumnMajor:(0..<4).flatMap{c in (0..<4).map{r in frame[c][r]}},lowMeters:[shape.box.low.x,shape.box.low.y,shape.box.low.z],highMeters:[shape.box.high.x,shape.box.high.y,shape.box.high.z]))};continue
+                }
+                let jaw=link==model.toolLink ? 0.040:0
+                // DIAGNOSTICS ONLY for this explicitly risk-accepted actuator
+                // observation. Every retained return stays in the raw map.
+                // Predicted contact is recorded, never renamed as clearance.
+                for b in raw where shape.box.gap(to:b)<=jaw+0.100 {
+                    let distance=try shape.distance(b);minimumRaw=min(minimumRaw,distance)
+                    if distance-jaw<minimumJaw {minimumJaw=distance-jaw;closestLink=link;closestBox=b}
+                }
+                let pad=jaw+intersample+curvature+trial.assumedSpatialErrorMeters
+                let low=shape.box.low-SIMD3(repeating:pad),high=shape.box.high+SIMD3(repeating:pad)
+                regionLow[link]=regionLow[link].map{simd_min($0,low)} ?? low;regionHigh[link]=regionHigh[link].map{simd_max($0,high)} ?? high
+            }
+        }
+        var unknown=Set<SIMD3<Int>>(),regions:[ROBWorkspaceNominalEmptyCommissioningRetreat.LocalRegion]=[]
+        for link in links where !fixed.contains(link) {let low=regionLow[link]!,high=regionHigh[link]!,size=map.voxelSizeMeters
+            let lo=(0..<3).map{Int(floor(low[$0]/size))},hi=(0..<3).map{Int(floor(high[$0]/size))}
+            guard zip(lo,hi).allSatisfy({$1 >= $0 && $1-$0<=100}),zip(lo,hi).reduce(1,{$0*($1.1-$1.0+1)})<=250_000 else {throw ROBGhostMotionError.blocked("The actuator observation's diagnostic region exceeds its local bound.")}
+            for x in lo[0]...hi[0] {for y in lo[1]...hi[1] {for z in lo[2]...hi[2] {if map.state(at:SIMD3((Double(x)+0.5)*size,(Double(y)+0.5)*size,(Double(z)+0.5)*size)) == .unknown {unknown.insert(SIMD3(x,y,z))}}}}
+            regions.append(.init(link:link,lowMeters:[low.x,low.y,low.z],highMeters:[high.x,high.y,high.z]))
+        }
+        let rawMinimum=minimumRaw.isFinite ? minimumRaw:nil,afterJaw=minimumJaw.isFinite ? minimumJaw:nil
+        let swept=afterJaw.map{$0-intersample-curvature}
+        let diagnostics=ROBWorkspaceOneDegreeEmptyCalibrationStep.EnvironmentDiagnostics(diagnosticOnly:true,sourceBoundsAllRetained:true,
+            originalOccupiedBoundsCount:supplied.count,deduplicatedOccupiedBoundsCount:raw.count,originalOccupiedBoundsSHA256:rawHash,
+            minimumRawClearanceMeters:rawMinimum,minimumAfterJawEnvelopeMeters:afterJaw,minimumSweptNominalClearanceMeters:swept,
+            closestMovingLink:closestLink,closestRawBounds:closestBox.map{.init(lowMeters:[$0.low.x,$0.low.y,$0.low.z],highMeters:[$0.high.x,$0.high.y,$0.high.z])},
+            predictedNominalContact:swept.map{$0<=0} ?? false,isotropicJawEnvelopeMeters:0.040,
+            assumedCalibrationUncertaintyMeters:trial.assumedSpatialErrorMeters,intersampleAllowanceMeters:intersample+curvature)
+        return .init(id:id,mode:"risk_accepted_one_degree_empty_actuator_calibration",context:context,baseline:baseline,goal:goal,
+            measuredAtMilliseconds:measuredAtMilliseconds,maximumHullTravelMeters:maximumTravel,checkedPoseCount:count+1,staticRobotLinks:staticLinks,
+            initialSelfMinimumMeters:initialSelf!.values.min()!,endpointSelfMinimumMeters:lastSelf.values.min()!,unknownVoxelCount:unknown.count,
+            unknownLocalRegions:regions,environmentDiagnostics:diagnostics,environmentPredictionIsDiagnosticOnly:true,collisionCertificate:false,
+            occupiedVoxelsMutated:false,automaticChainingPermitted:false,emptyStateAssumed:true,emptyStateEvidenceSource:emptyStateEvidenceSource,completedTransferCount:0)
+    }
+}

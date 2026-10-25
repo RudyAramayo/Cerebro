@@ -389,6 +389,9 @@ final class ROBAmberGatewayClient: NSObject {
             check(b.activeLocalRecyclingApprovalEvidence?["nominalEmptyCommissioningStepEnabled"] as? Bool == false &&
                 !b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: "Exact four-can job", arm: "right"),
                 "An ordinary visual-trial receipt cannot enable the separate nominal commissioning step")
+            check(b.activeLocalRecyclingApprovalEvidence?["oneDegreeEmptyCalibrationStepEnabled"] as? Bool == false &&
+                !b.authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary: "Exact four-can job", arm: "right"),
+                "An ordinary visual-trial receipt cannot enable one-degree actuator calibration")
             expectReceiptRejection(b, url, "Executing receipt cannot import twice")
             let files = try FileManager.default.contentsOfDirectory(at: b.localRecyclingApprovalAuditDirectory, includingPropertiesForKeys: nil)
             check(files.count == 1, "A private replay tombstone is written before the first execution")
@@ -437,6 +440,47 @@ final class ROBAmberGatewayClient: NSObject {
                 execute: { _ in executed += 1 }, cancel: {}, completion: { rejected = $0["status"] as? String == "rejected" })
             check(rejected && executed == 0 && !b.isPending,
                 "The nominal option requires both the dedicated receipt-only lane and explicit visual trial scope")
+        }
+        do {
+            let b=localBroker();var executed=0;var done:((NSDictionary)->Void)?
+            let summary="ONE RIGHT J2 minus0.02rad over4seconds actuator calibration, then hold; contact unverified, ZERO transfers"
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,
+                summary:summary,contextIdentity:{"one-degree-calibration-context"},receiptOnly:true,
+                permitsUnmeasuredVisualCalibrationTrial:true,oneDegreeEmptyCalibrationStepEnabled:true,
+                execute:{executed+=1;done=$0},cancel:{},completion:{_ in})
+            check(b.pendingLocalRecyclingApprovalScope?["oneDegreeEmptyCalibrationStepEnabled"] as? Bool == true &&
+                b.pendingLocalRecyclingApprovalScope?["nominalEmptyCommissioningStepEnabled"] as? Bool == false,
+                "One-degree actuator calibration must have its own exact mutually exclusive scope")
+            check(!b.receiveSpokenAuthorization("yes proceed") && executed==0,
+                "Ordinary microphone input cannot enable or grant actuator calibration")
+            let wrong=try receipt(b){value in
+                var scope=value["scope"]as![String:Any];scope["oneDegreeEmptyCalibrationStepEnabled"]=false;value["scope"]=scope
+            }
+            expectReceiptRejection(b,wrong,"A prior ordinary receipt cannot enable the one-degree calibration experiment")
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt(b))
+            check(executed==1 && b.authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary:summary,arm:"right"),
+                "Only the exact private one-degree receipt grants the dedicated calibration permission")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right") &&
+                !b.authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary:summary,arm:"left") &&
+                !b.authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary:"Ordinary can grab",arm:"right"),
+                "Actuator calibration cannot grant nominal commissioning, another arm or another operation")
+            check(b.activeLocalRecyclingApprovalEvidence?["oneDegreeEmptyCalibrationStepEnabled"]as?Bool==true &&
+                b.activeLocalRecyclingApprovalEvidence?["sourceMessage"]==nil,
+                "Calibration evidence must retain its flag without leaking the private user source")
+            done?(["status":"partial_empty_calibration_step_held","batch_completed":0])
+            check(!b.authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary:summary,arm:"right") &&
+                b.localRecyclingApprovalState==nil,"One completed calibration step consumes its grant without chaining")
+        }
+        for (side,receiptOnly,visual,nominal) in [("left",true,true,false),("right",false,true,false),
+            ("right",true,false,false),("right",true,true,true)] {
+            let b=localBroker();var executed=0,rejected=false
+            b.requestRecyclingWorkspaceTask(command:side+"_recycle_cans",arm:side,canCount:4,
+                summary:"Invalid actuator calibration lane",contextIdentity:{"context"},receiptOnly:receiptOnly,
+                permitsUnmeasuredVisualCalibrationTrial:visual,nominalEmptyCommissioningStepEnabled:nominal,
+                oneDegreeEmptyCalibrationStepEnabled:true,execute:{_ in executed+=1},cancel:{},
+                completion:{rejected=$0["status"]as?String=="rejected"})
+            check(rejected && executed==0 && !b.isPending,
+                "Actuator calibration requires RIGHT, private receipt, explicit visual trial and no nominal flag")
         }
         for change in ["count", "arm", "command", "summary", "context", "treads", "torso", "gestures", "future", "expired", "too_long", "other_session", "source_hash", "missing_source", "extra_key", "additional_hash"] {
             let b = localBroker(); var executed = 0

@@ -37,6 +37,7 @@ import Darwin
         let contextIdentity: String
         let permitsUnmeasuredVisualCalibrationTrial: Bool
         let nominalEmptyCommissioningStepEnabled: Bool
+        let oneDegreeEmptyCalibrationStepEnabled: Bool
         var object: [String: Any] {
             ["command": command, "arm": arm, "canCount": 4, "summary": summary,
              "summarySHA256": ROBControllerArmApproval.localHash(Data(summary.utf8)),
@@ -44,7 +45,8 @@ import Darwin
              "destination": "orange_bucket", "bothArmsStationaryHolds": true,
              "treads": false, "torso": false, "manualGestures": false,
              "permitsUnmeasuredVisualCalibrationTrial": permitsUnmeasuredVisualCalibrationTrial,
-             "nominalEmptyCommissioningStepEnabled": nominalEmptyCommissioningStepEnabled]
+             "nominalEmptyCommissioningStepEnabled": nominalEmptyCommissioningStepEnabled,
+             "oneDegreeEmptyCalibrationStepEnabled": oneDegreeEmptyCalibrationStepEnabled]
         }
     }
     private struct LocalRecyclingApproval {
@@ -98,11 +100,14 @@ import Darwin
         summary: String, contextIdentity: @escaping () -> String?, receiptOnly: Bool,
         permitsUnmeasuredVisualCalibrationTrial: Bool = false,
         nominalEmptyCommissioningStepEnabled: Bool = false,
+        oneDegreeEmptyCalibrationStepEnabled: Bool = false,
         execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
         cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
         guard canCount == 4, ["left", "right"].contains(arm), command == arm + "_recycle_cans",
               !nominalEmptyCommissioningStepEnabled || (receiptOnly && permitsUnmeasuredVisualCalibrationTrial),
+              !oneDegreeEmptyCalibrationStepEnabled || (arm == "right" && receiptOnly && permitsUnmeasuredVisualCalibrationTrial),
+              !(nominalEmptyCommissioningStepEnabled && oneDegreeEmptyCalibrationStepEnabled),
               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, summary.count <= 2048,
               let identity = contextIdentity(), !identity.isEmpty, identity.utf8.count <= 8192 else {
             completion(["status": "rejected", "detail": "A local session approval requires the exact four-can recycling task and a current camera/body/arm context."])
@@ -110,7 +115,8 @@ import Darwin
         }
         let scope = LocalRecyclingScope(command: command, arm: arm, summary: summary, contextIdentity: identity,
             permitsUnmeasuredVisualCalibrationTrial: permitsUnmeasuredVisualCalibrationTrial,
-            nominalEmptyCommissioningStepEnabled: nominalEmptyCommissioningStepEnabled)
+            nominalEmptyCommissioningStepEnabled: nominalEmptyCommissioningStepEnabled,
+            oneDegreeEmptyCalibrationStepEnabled: oneDegreeEmptyCalibrationStepEnabled)
         request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm == "right" ? "both" : "left", "summary": summary],
             summary: summary, executionLimit: 600, localRecyclingScope: scope,
             localContextIdentity: contextIdentity, receiptOnly: receiptOnly,
@@ -185,10 +191,20 @@ import Darwin
     /// a general visual trial or a previously imported ordinary recycling job.
     @nonobjc func authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: String, arm: String) -> Bool {
         guard let p = pending, let scope = p.localRecyclingScope,
-              scope.nominalEmptyCommissioningStepEnabled, p.awaitingLocalReceipt,
+              scope.nominalEmptyCommissioningStepEnabled, !scope.oneDegreeEmptyCalibrationStepEnabled, p.awaitingLocalReceipt,
               scope.arm == arm, scope.summary == summary,
               scope.permitsUnmeasuredVisualCalibrationTrial,
               p.localSessionApprovalID != nil else { return false }
+        return authorizationIsLive(p)
+    }
+
+    /// Actuator/model calibration only. Environment contact predictions remain
+    /// diagnostic; this permission never grants an ordinary collision route.
+    @nonobjc func authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary: String, arm: String) -> Bool {
+        guard let p = pending, let scope = p.localRecyclingScope,
+              scope.oneDegreeEmptyCalibrationStepEnabled, !scope.nominalEmptyCommissioningStepEnabled,
+              p.awaitingLocalReceipt, arm == "right", scope.arm == arm, scope.summary == summary,
+              scope.permitsUnmeasuredVisualCalibrationTrial, p.localSessionApprovalID != nil else { return false }
         return authorizationIsLive(p)
     }
 

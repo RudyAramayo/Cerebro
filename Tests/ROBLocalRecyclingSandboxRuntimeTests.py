@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / 'Cerebro/ROBTestingSandboxWindowController.swift').read_text()
 helper = braced_declaration(source, 'enum ROBLocalRecyclingSandboxRouting {')
 prepare = braced_declaration(source, '    private func prepareLocalRecyclingSessionJob()')
+nominal_change = braced_declaration(source, '    @objc private func changeNominalEmptyCommissioningStep()').replace('@objc ', '')
+degree_change = braced_declaration(source, '    @objc private func changeOneDegreeEmptyCalibrationStep()').replace('@objc ', '')
 route = braced_declaration(source, '    @objc private func performTrialAction(')
 refresh = braced_declaration(source, '    @objc private func refresh()')
 export = braced_declaration(source, '    private func exportLocalRecyclingApprovalTemplate()')
@@ -29,6 +31,11 @@ assert 'sandbox-nominal-empty-commissioning-step' in source
 assert 'Current robot occupancy is assumed from the model; calibration error and nearby unobserved space remain unverified.' in source
 assert 'No grip, carry, release or automatic return. Zero cans are transferred.' in source
 assert 'nominalEmptyCommissioningStep.isEnabled = canEdit' in refresh
+assert prepare.index('oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on') < prepare.index('performUsingLocalRecyclingReceipt')
+assert 'sandbox-one-degree-empty-calibration-step' in source
+assert 'Contact could push the table or lift ROB.' in source
+assert 'contact predictions are diagnostic only' in source
+assert 'oneDegreeEmptyCalibrationStep.isEnabled = canEdit' in refresh
 assert 'ROBArmRoutineCoordinator' not in prepare
 assert 'localReceiptFilesEnabled' in refresh and '? localReceiptFilesEnabled' in refresh
 assert 'NSSavePanel()' in export and 'localRecyclingReceiptTemplate' in export
@@ -59,10 +66,18 @@ final class ROBLeftArmTrial {
     static let shared = ROBLeftArmTrial()
     var localVisualTrialAssumedSpatialErrorMeters = 0.05
     var nominalEmptyCommissioningStepEnabled = false
+    var oneDegreeEmptyCalibrationStepEnabled = false
     var calls:[(String,String)] = []
     func performUsingLocalRecyclingReceipt(_ command:String,target:String,completion:@escaping(NSDictionary)->Void) {
         calls.append((command,target)); completion(["status":"prepared"])
     }
+}
+final class ROBControllerArmApproval {
+    static let shared=ROBControllerArmApproval()
+    var localRecyclingApprovalState:NSDictionary?,pendingLocalRecyclingApprovalScope:NSDictionary?
+    var cancellations=0,ticks=0
+    func cancel(reason:String){cancellations+=1;localRecyclingApprovalState=nil;pendingLocalRecyclingApprovalScope=nil}
+    func tick(){ticks+=1}
 }
 final class Sandbox {
     struct Toggle { enum State { case on, off }; var state:State = .off }
@@ -74,9 +89,14 @@ final class Sandbox {
     var canEdit = true, observingLeftOperation = false, refreshes = 0
     var parameterMessage = "old"
     var nominalEmptyCommissioningStep = Toggle()
+    var oneDegreeEmptyCalibrationStep = Toggle()
     func refresh(){refreshes += 1}
     /* PREPARE */
+    /* NOMINAL_CHANGE */
+    /* DEGREE_CHANGE */
     func prepare(){prepareLocalRecyclingSessionJob()}
+    func toggleNominal(){changeNominalEmptyCommissioningStep()}
+    func toggleDegree(){changeOneDegreeEmptyCalibrationStep()}
 }
 @main enum Test {
     static func main() {
@@ -98,6 +118,21 @@ final class Sandbox {
         precondition(trial.nominalEmptyCommissioningStepEnabled,"Explicit local checkbox was not frozen before preparation")
         let ordinary=Sandbox(); ordinary.prepare()
         precondition(!trial.nominalEmptyCommissioningStepEnabled,"New ordinary UI state inherited the commissioning option")
+        let degree=Sandbox();degree.oneDegreeEmptyCalibrationStep.state = .on;degree.prepare()
+        precondition(trial.oneDegreeEmptyCalibrationStepEnabled && !trial.nominalEmptyCommissioningStepEnabled)
+        let both=Sandbox();both.oneDegreeEmptyCalibrationStep.state = .on;both.nominalEmptyCommissioningStep.state = .on
+        let beforeBoth=trial.calls.count;both.prepare();precondition(trial.calls.count==beforeBoth && both.parameterMessage.contains("only one"))
+        let switcher=Sandbox(),approval=ROBControllerArmApproval.shared
+        approval.pendingLocalRecyclingApprovalScope=["prepared":true]
+        switcher.nominalEmptyCommissioningStep.state = .on;switcher.toggleNominal()
+        precondition(trial.nominalEmptyCommissioningStepEnabled && !trial.oneDegreeEmptyCalibrationStepEnabled && approval.cancellations==1)
+        approval.localRecyclingApprovalState=["imported":true]
+        switcher.oneDegreeEmptyCalibrationStep.state = .on;switcher.toggleDegree()
+        precondition(trial.oneDegreeEmptyCalibrationStepEnabled && !trial.nominalEmptyCommissioningStepEnabled &&
+            switcher.nominalEmptyCommissioningStep.state == .off && approval.cancellations==2)
+        switcher.canEdit=false;switcher.nominalEmptyCommissioningStep.state = .on;switcher.toggleNominal()
+        precondition(trial.oneDegreeEmptyCalibrationStepEnabled && !trial.nominalEmptyCommissioningStepEnabled,
+            "Disabled settings changed an active prepared experiment")
         let adjusted=Sandbox();adjusted.fields["localVisualAllowanceMillimeters"] = .init(stringValue:"35");adjusted.prepare()
         precondition(trial.localVisualTrialAssumedSpatialErrorMeters==0.035)
         for raw in ["24.9","150.1","nan","inf","invalid"] {
@@ -135,6 +170,11 @@ final class Sandbox {
             commissioningDescription.contains("Zero transfers") && commissioningDescription.contains("unverified") &&
             commissioningDescription.contains("Current robot occupancy is assumed from the model") &&
             !commissioningDescription.contains("PRIVATE"),"The exact commissioning scope/risk must remain visible without private source text")
+        imported["nominalEmptyCommissioningStepEnabled"]=false;imported["oneDegreeEmptyCalibrationStepEnabled"]=true
+        let degreeDescription=ROBLocalRecyclingSandboxRouting.scopeDescription(pending:nil,imported:imported)
+        precondition(degreeDescription.contains("J2 −0.02 rad, 4 seconds") && degreeDescription.contains("Collision clearance unverified") &&
+            degreeDescription.contains("contact predictions diagnostic only") && degreeDescription.contains("lift ROB") &&
+            degreeDescription.contains("Zero transfers") && !degreeDescription.contains("PRIVATE"))
         precondition(ROBLocalRecyclingSandboxRouting.scopeDescription(pending:nil,imported:nil).contains("no imported job"))
         let live=ROBLocalRecyclingSandboxRouting.activityStatus(trialRunning:true,trialStatus:"Searching: third camera view",
             approvalPending:true,approvalStatus:"Authorized immutable scope",localReceiptState:imported)!
@@ -166,7 +206,7 @@ final class Sandbox {
         print("PASS live sandbox status: active phase precedes broker scope, common-mode progress fallback; selected RIGHT recording cannot open latest LEFT evidence")
     }
 }
-'''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare)
+'''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare).replace('/* NOMINAL_CHANGE */', nominal_change).replace('/* DEGREE_CHANGE */', degree_change)
 
 with tempfile.TemporaryDirectory(prefix='rob-local-recycling-sandbox-', dir='/private/tmp') as folder:
     root = Path(folder); path = root / 'Fixture.swift'; path.write_text(fixture)
