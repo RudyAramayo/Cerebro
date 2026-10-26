@@ -40,6 +40,8 @@ final class ROBArmRoutineVision {
  var frames:[String:Frame]=[:]
  __ACTUAL_METHODS__
  func ordinarySettled()async throws->Frame {try await settledInspectionFrame(epoch:inspectionEpoch())}
+ func passiveObjectSettled()async throws->Frame {try await settledInspectionFrame(epoch:inspectionEpoch(),requireStaticScene:false,depthMappingOnly:true)}
+ func passiveObjectAdvancing(_ frame:Frame,after sequence:UInt64)->Bool {isDepthMappingEligible(frame) && frame.sequence>sequence}
 }
 final class Feed {
  let vision:ROBArmRoutineVision,mode:String,coverage:Double
@@ -72,12 +74,13 @@ final class Feed {
  }
 }
 @main enum PartialDepthFixture {
- static func run(_ mode:String="normal",coverage:Double=0.18,mapping:Bool=true,deadlineSeconds:Double?=nil)async throws->(ROBArmRoutineVision.Frame,Feed,Double) {
+ static func run(_ mode:String="normal",coverage:Double=0.18,mapping:Bool=true,passiveObject:Bool=false,deadlineSeconds:Double?=nil)async throws->(ROBArmRoutineVision.Frame,Feed,Double) {
   Clock.milliseconds=1_000_000;Clock.cancelled=false
   let feed=Feed(mode,coverage);Clock.tick={feed.tick()};defer{Clock.tick=nil}
   let start=Clock.milliseconds
   let result:ROBArmRoutineVision.Frame
-  if mapping {result=try await feed.vision.settledDepthFrame(deadlineUptime:deadlineSeconds.map{ProcessInfo.processInfo.systemUptime+$0})}
+  if passiveObject {result=try await feed.vision.passiveObjectSettled()}
+  else if mapping {result=try await feed.vision.settledDepthFrame(deadlineUptime:deadlineSeconds.map{ProcessInfo.processInfo.systemUptime+$0})}
   else {result=try await feed.vision.ordinarySettled()}
   return(result,feed,Clock.milliseconds-start)
  }
@@ -89,6 +92,15 @@ final class Feed {
   let partial=try await run()
   precondition(partial.0.sequence==22 && partial.2==300,"Mapping did not require three advancing exposures over300ms")
   precondition(!partial.1.vision.fresh && !partial.1.vision.handsClear,"Partial map frame changed general motion readiness")
+  let object=try await run("changing",passiveObject:true)
+  precondition(object.0.sequence==22 && object.2==300,"Passive object attention did not retain3fresh advancing exposures/300ms")
+  precondition(!object.1.vision.fresh && !object.1.vision.handsClear,"Object attention granted arm/human readiness")
+  precondition(object.1.vision.passiveObjectAdvancing(object.0,after:21))
+  precondition(!object.1.vision.passiveObjectAdvancing(object.0,after:22),"Duplicate object frame passed advancing gate")
+  var invalidObject=object.0;invalidObject.intrinsics=nil
+  precondition(!object.1.vision.passiveObjectAdvancing(invalidObject,after:21),"Post-inference object gate omitted intrinsics")
+  invalidObject=object.0;invalidObject.capturedAt-=701
+  precondition(!object.1.vision.passiveObjectAdvancing(invalidObject,after:21),"Post-inference object gate refreshed old capture")
   await rejected("normal",mapping:false,contains:"did not settle")
   let ordinary=try await run(coverage:0.25,mapping:false)
   precondition(ordinary.0.sequence==22 && ordinary.1.vision.fresh && ordinary.1.vision.handsClear)
@@ -129,7 +141,12 @@ def main():
     assert vision.count('depthMappingOnly:true')==1
     assert 'depthMappingOnly:true' in block(vision,'func settledDepthFrame(')
     assert 'depthMappingOnly:Bool=false' in block(vision,'private func settledInspectionFrame(')
-    assert 'settledInspectionFrame(epoch: token, requireStaticScene: false)' in vision
+    object_branch=vision[vision.index('func observeWorkspace('):].split('if objectDetection {',1)[1].split('let result = try await ROBMLXEngine',1)[0]
+    assert 'nonactuatingSparseDepth:Bool = false' in vision
+    assert 'settledInspectionFrame(epoch: token, requireStaticScene: false,depthMappingOnly:nonactuatingSparseDepth)' in object_branch
+    assert '(nonactuatingSparseDepth ? isDepthMappingEligible(current):isFresh(current)),current.sequence > frame.sequence' in object_branch
+    assert vision.count('nonactuatingSparseDepth:true')==1
+    assert 'vision.observeWorkspace(objectDetection: !targets.isEmpty,nonactuatingSparseDepth:true)' in vision
     source=SUPPORT.replace('__ACTUAL_METHODS__',actual).replace('__ACTUAL_K_VALIDITY__',block(camera,'func isValid(forWidth width: Int, height: Int)'))
     with tempfile.TemporaryDirectory(prefix='rob-partial-depth-settle-')as folder:
         p=Path(folder);swift=p/'fixture.swift';binary=p/'fixture';swift.write_text(source)

@@ -652,13 +652,15 @@ final class ROBArmRoutineVision {
     /// Acquire the actual pixels after the local model/GPU is ready. The caller
     /// holds a specific settled neck view throughout both inference and depth
     /// projection; a current callback never refreshes the capture timestamp.
-    func observeWorkspace(objectDetection: Bool = true,
+    func observeWorkspace(objectDetection: Bool = true,nonactuatingSparseDepth:Bool = false,
         onCaptured: @MainActor (Frame) async throws -> Void = { _ in }) async throws -> (ROBWorkspaceObservation, Frame) {
         if objectDetection {
             try await ROBWorkspaceObjectDetector.shared.warmUp()
             try Task.checkCancellation()
             let token = try inspectionEpoch()
-            let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false)
+            // Passive search may inspect sparse depth without hiding readable
+            // RGB objects. Other callers retain ordinary readiness admission.
+            let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false,depthMappingOnly:nonactuatingSparseDepth)
             try await onCaptured(frame)
             try Task.checkCancellation()
             guard frame.cameraGeneration == cameraGeneration else { throw CancellationError() }
@@ -686,7 +688,8 @@ final class ROBArmRoutineVision {
             var advancing = false
             while ProcessInfo.processInfo.systemUptime < liveDeadline {
                 try Task.checkCancellation()
-                if let current = try inspectionFrame(epoch: token), isFresh(current), current.sequence > frame.sequence {
+                if let current = try inspectionFrame(epoch: token),
+                   (nonactuatingSparseDepth ? isDepthMappingEligible(current):isFresh(current)),current.sequence > frame.sequence {
                     advancing = true; break
                 }
                 try await Task.sleep(nanoseconds: 50_000_000)
@@ -938,6 +941,27 @@ enum ROBWorkspaceLocalCanShapePrior {
 /// Attention only: current detector boxes can request at most two fresh
 /// views. A rejected plane/shape never becomes an accepted can by recentering.
 enum ROBWorkspaceCanRecenterPlan {
+    /// One current RGB exposure may request attention, never object geometry.
+    /// Recenter a clipped silhouette before another full workspace raster.
+    static func clippedAttentionViews(sightings:[ROBWorkspaceRecall.Sighting],
+        nowMilliseconds:Double,boundedPan:(Double)->Double)->[ROBWorkspaceView] {
+        guard nowMilliseconds.isFinite else{return []}
+        var result:[ROBWorkspaceView]=[]
+        for item in sightings.sorted(by:{$0.confidence>$1.confidence}) where item.target == .can && item.valid &&
+            item.confidence>=0.60 && (0...30_000).contains(nowMilliseconds-item.capturedAt) &&
+            item.box.contains(where:{$0<0.02 || $0>0.98}) {
+            let centered=item.centeredView,pan=boundedPan(centered.panDegrees)
+            guard pan.isFinite else{continue}
+            let view=ROBWorkspaceView(panDegrees:pan,upperTarget:centered.upperTarget)
+            guard abs(view.panDegrees-item.view.panDegrees)>3 || abs(view.upperTarget-item.view.upperTarget)>100 else{continue}
+            if !result.contains(where:{abs($0.panDegrees-view.panDegrees)<3 && abs($0.upperTarget-view.upperTarget)<100}) {
+                result.append(view)
+            }
+            if result.count==2 {break}
+        }
+        return result
+    }
+
     static func views(sightings:[ROBWorkspaceRecall.Sighting],physicalSide:String,
         nowMilliseconds:Double,boundedPan:(Double)->Double)->[ROBWorkspaceView] {
         guard ["left","right"].contains(physicalSide),nowMilliseconds.isFinite else{return []}
@@ -2269,6 +2293,7 @@ struct ROBWorkspaceCanSelection {
         var bestRecallQuality: [ROBWorkspaceTarget: Double] = [:]
         var recenterViews: [(target: ROBWorkspaceTarget, view: ROBWorkspaceView)] = []
         var recenteredViews: [ROBWorkspaceView] = []
+        var clippedCanAttentionViews:[ROBWorkspaceView]=[]
         let reportID = UUID().uuidString
         let startedAt = ISO8601DateFormatter().string(from: Date())
         var finished = false
@@ -2428,7 +2453,7 @@ struct ROBWorkspaceCanSelection {
                         throw ROBArmRoutineError.blocked("Search camera moved during startup inspection.")
                     }
                     do {
-                        let candidate = try await vision.observeWorkspace(objectDetection: !targets.isEmpty) { sourceFrame in
+                        let candidate = try await vision.observeWorkspace(objectDetection: !targets.isEmpty,nonactuatingSparseDepth:true) { sourceFrame in
                             try await accumulateCollisionDepth(view,capturedFrame:sourceFrame)
                         }
                         guard observationCaptureAnchor.accept(frameGeneration:candidate.1.cameraGeneration,
@@ -2493,6 +2518,23 @@ struct ROBWorkspaceCanSelection {
                     if target == .can, let depth = frame.depth, let k = frame.intrinsics {
                         currentCanSightings=(observation.cans ?? [observation.can]).filter(\.visuallyUsable).map {
                             ROBWorkspaceRecall.Sighting(target:.can,view:view,box:$0.box,confidence:$0.confidence,capturedAt:frame.capturedAt)
+                        }
+                        if targets.contains(.orangeBucket),clippedCanAttentionViews.count<2 {
+                            let attention=ROBWorkspaceCanRecenterPlan.clippedAttentionViews(sightings:currentCanSightings,
+                                nowMilliseconds:Date().timeIntervalSince1970*1000,
+                                boundedPan:boundedPan ?? {max(-45,min(45,$0))})
+                            var attentionInsertIndex=0
+                            for centered in attention where clippedCanAttentionViews.count<2 &&
+                                !schedule.hasAttempted(centered) &&
+                                !clippedCanAttentionViews.contains(where:{abs($0.panDegrees-centered.panDegrees)<3 && abs($0.upperTarget-centered.upperTarget)<100}) {
+                                clippedCanAttentionViews.append(centered)
+                                recenterViews.insert((.can,centered),at:attentionInsertIndex)
+                                attentionInsertIndex+=1
+                                evidence.append(["clipped_can_attention_only":true,"pan":centered.panDegrees,
+                                    "upper":centered.upperTarget,"source_sequence":NSNumber(value:frame.sequence),
+                                    "source_captured_at_ms":frame.capturedAt,"maximum_views":2,
+                                    "located_object":false,"path_admitted":false])
+                            }
                         }
                         var candidates: [(detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)] = []
                         var sectionDiagnostics: [[String:Any]] = []

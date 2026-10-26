@@ -53,6 +53,7 @@ struct Outcome {let views:[ROBWorkspaceView];let selection:ROBWorkspaceCanSelect
   let boundedPan:((Double)->Double)?={max(-60,min(60,$0))}
   func permitsLocalCanShapePrior()throws->Bool {permission}
   func check()throws {}
+  func searchCheckpoint()async throws {try check()}
   func requireSceneProjectionIdentity()throws {if model.projection != estimatedProjectionIdentity {throw ROBWorkspaceDepthMapError.invalidFrame}}
   func progress(_ message:String) {}
   func inspectWithRetry(_ view:ROBWorkspaceView)async throws {
@@ -82,6 +83,24 @@ struct Outcome {let views:[ROBWorkspaceView];let selection:ROBWorkspaceCanSelect
 }
 @main enum TargetedCanFixture {
  @MainActor static func main()async throws {
+  let now=Date().timeIntervalSince1970*1000
+  let source=ROBWorkspaceView(panDegrees:0,upperTarget:5956)
+  let boxes=[[0.3524,0.0088,0.4462,0.2243],[0.0523,0.1928,0.2155,0.4559],
+             [0.8628,0.1578,0.9863,0.4159],[0.1811,0.0701,0.3093,0.3151],[0.8329,0.0408,0.9820,0.2899]]
+  let sightings=zip(boxes,[0.720,0.701,0.691,0.690,0.668]).map {
+   ROBWorkspaceRecall.Sighting(target:.can,view:source,box:$0.0,confidence:$0.1,capturedAt:now)
+  }
+  let attention=ROBWorkspaceCanRecenterPlan.clippedAttentionViews(sightings:sightings,nowMilliseconds:now,boundedPan:{$0})
+  precondition(attention.count==2 && attention[0].upperTarget>source.upperTarget && attention[1].panDegrees<0,
+   "Actual five-can clipped silhouettes did not request bounded current attention")
+  precondition(ROBWorkspaceCanRecenterPlan.clippedAttentionViews(sightings:[sightings[1],sightings[3]],nowMilliseconds:now,boundedPan:{$0}).isEmpty,
+   "Unclipped can requested the clipped-only fallback")
+  let low=ROBWorkspaceRecall.Sighting(target:.can,view:source,box:boxes[0],confidence:0.59,capturedAt:now)
+  let staleSighting=ROBWorkspaceRecall.Sighting(target:.can,view:source,box:boxes[0],confidence:0.9,capturedAt:now-30_001)
+  let bucket=ROBWorkspaceRecall.Sighting(target:.orangeBucket,view:source,box:boxes[0],confidence:0.9,capturedAt:now)
+  precondition(ROBWorkspaceCanRecenterPlan.clippedAttentionViews(sightings:[low,staleSighting,bucket],nowMilliseconds:now,boundedPan:{$0}).isEmpty)
+  precondition(ROBWorkspaceCanRecenterPlan.clippedAttentionViews(sightings:sightings,nowMilliseconds:now,boundedPan:{_ in .nan}).isEmpty)
+  precondition(ROBWorkspaceCanRecenterPlan.clippedAttentionViews(sightings:[sightings[0],sightings[0]],nowMilliseconds:now,boundedPan:{$0}).count==1)
   let s=SearchFixture()
   for side in ["right","left"] {
    let first=try await s.exercise(side:side)
@@ -124,6 +143,12 @@ def main():
     assert '"nearest_reachable_can_selections":reachSelections' in run
     assert 'let noReachableCan=localReachSelectionRequired && localReachSelection?.object==nil' in run
     assert '"no_reachable_can"' in run and "a can with valid geometry and a reachable grasp" in run
+    attention=base.block(run,'if targets.contains(.orangeBucket),clippedCanAttentionViews.count<2 {')
+    assert 'clippedCanAttentionViews.count<2' in attention and 'recenterViews.insert((.can,centered)' in attention
+    assert '"source_sequence":NSNumber(value:frame.sequence)' in attention
+    assert '"located_object":false,"path_admitted":false' in attention
+    assert all(x not in attention for x in ['found[','.observe(', 'ROBWorkspaceLocatedObject', 'sections:'])
+    assert run.index('if targets.contains(.orangeBucket),clippedCanAttentionViews.count<2 {')<run.index('var candidates: [(detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)]')
     fixture=FIXTURE.replace('__ACTUAL_SELECTOR__',selection).replace('__ACTUAL_TARGETED_TAIL__',tail)
     with tempfile.TemporaryDirectory(prefix='rob-targeted-can-') as folder:
         p=Path(folder);swift=p/'fixture.swift';binary=p/'fixture'
