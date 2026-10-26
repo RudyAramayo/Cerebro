@@ -1157,12 +1157,10 @@ struct ROBWorkspaceCanSelection {
         model:ROBGhostRobotModel)throws->(matrix:simd_double4x4,identity:String?,lowerTarget:Int?) {
         let identity=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
         try requireEstimatedProjectionIdentity(identity,model:model)
-        guard ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:frame.cameraGeneration,
-            runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
-            cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256) else {
-            throw ROBWorkspaceDepthMapError.acquisition("The requested estimated camera refinement does not cover this actual RGB-D source.")
-        }
         guard identity != nil else {
+            guard ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:frame.cameraGeneration,
+                runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
+                cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256) else {throw ROBWorkspaceDepthMapError.invalidFrame}
             guard let legacy=view.cameraFrame(model:model) else{throw ROBWorkspaceDepthMapError.invalidFrame}
             return (legacy,nil,nil)
         }
@@ -1172,6 +1170,13 @@ struct ROBWorkspaceCanSelection {
         }
         let scope=try controller.scope(model:model,frame:frame)
         try scope.validate()
+        guard ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,actualFrame:.init(cameraGeneration:frame.cameraGeneration,
+                actualDeviceMXID:frame.intrinsics?.runtimeCalibration?.actualDeviceMXID,
+                runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
+                cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256,scope:scope,
+                inertialJSON:(frame.intrinsics?.inertial).flatMap{try?JSONEncoder().encode($0)})) else {
+            throw ROBWorkspaceDepthMapError.acquisition("The requested estimated camera refinement does not cover this actual RGB-D source.")
+        }
         let neck=controller.readNeck?() ?? [:],now=ProcessInfo.processInfo.systemUptime
         let captureUptime=now-(Date().timeIntervalSince1970*1000-frame.capturedAt)/1000
         guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,

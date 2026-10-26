@@ -117,6 +117,43 @@ extension ROBNeckRGBPoseDisplayFixture {
         precondition(!ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:generations[0],runtimeCalibrationIdentity:runtimeID,cameraServiceSourceSHA256:service))
         precondition(!ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:generations.last!,runtimeCalibrationIdentity:nil,cameraServiceSourceSHA256:service))
         precondition(!ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:generations.last!,runtimeCalibrationIdentity:runtimeID,cameraServiceSourceSHA256:nil))
+        // A new stream must supply a fresh actual IMU/source/held-scope check;
+        // historical calibration identities and the strict scalar API stay intact.
+        let liveGeneration=UUID(),referenceFrames=documents[3]["frames"]as![[String:Any]]
+        let actualIMU=referenceFrames[0]["imu"]as![String:Any]
+        func acceptsLive(deviceID:String=device,runtimeValue:String=runtimeID,serviceValue:String=service,
+            bodyValue:String=body,intrinsicsValue:String=String(repeating:"e",count:64),
+            imuValue:[String:Any]?=nil,scopeGeneration:UUID?=nil,frameGeneration:UUID?=nil)throws->Bool {
+            let scope=ROBFixedHeadRegistrationScope(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+                cameraGeneration:scopeGeneration ?? frameGeneration ?? liveGeneration,gatewaySessionGeneration:1,displayCorrectionIdentity:"fixture:body:"+bodyValue,
+                panTarget:6167,lowerTarget:6411,upperTarget:5800,intrinsicsIdentity:intrinsicsValue)
+            return ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,actualFrame:.init(cameraGeneration:frameGeneration ?? liveGeneration,
+                actualDeviceMXID:deviceID,runtimeCalibrationIdentity:runtimeValue,cameraServiceSourceSHA256:serviceValue,scope:scope,
+                inertialJSON:try JSONSerialization.data(withJSONObject:imuValue ?? actualIMU)))
+        }
+        precondition(try! acceptsLive(),"Same physical source with actual matching gravity must survive a stream restart")
+        precondition(try! acceptsLive(frameGeneration:generations.last!),"Original-generation actual frame still requires and passes physical source/gravity validation")
+        var originalMovingIMU=actualIMU;originalMovingIMU["stationary"]=false
+        precondition(try! !acceptsLive(imuValue:originalMovingIMU,frameGeneration:generations.last!),"Original-generation actual frames must not bypass stationary IMU validation")
+        precondition(!ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:liveGeneration,
+            runtimeCalibrationIdentity:runtimeID,cameraServiceSourceSHA256:service),"Frame-free scalar overload must remain generation-strict")
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==refinedID,"Actual-frame acceptance must not rebind calibration provenance")
+        precondition(try! !acceptsLive(deviceID:"different-device"))
+        precondition(try! !acceptsLive(runtimeValue:String(repeating:"f",count:64)))
+        precondition(try! !acceptsLive(serviceValue:String(repeating:"f",count:64)))
+        precondition(try! !acceptsLive(bodyValue:UUID().uuidString))
+        precondition(try! !acceptsLive(intrinsicsValue:"different-K"))
+        precondition(try! !acceptsLive(scopeGeneration:UUID()))
+        for (key,bad) in [("stationary",false as Any),("sample_count",19),("window_milliseconds",299.0),
+            ("age_milliseconds",101.0),("sensor","different-sensor"),("gravity_std_mps2",[0.11,0,0]),
+            ("gyro_rad_s",[0.04,0,0]),("imu_to_rgb_rotation",[1.0,0,0,0,0,1,0,-1,0])] {
+            var badIMU=actualIMU;badIMU[key]=bad
+            precondition(try! !acceptsLive(imuValue:badIMU),"Invalid actual IMU accepted: \(key)")
+        }
+        var tiltedIMU=actualIMU
+        let tilted=simd_inverse(current()!.provisionalCameraToModel)*SIMD4<Double>(sin(0.05)*9.81,0,cos(0.05)*9.81,0)
+        tiltedIMU["gravity_mps2"]=[tilted.x,tilted.y,tilted.z]
+        precondition(try! !acceptsLive(imuValue:tiltedIMU),"Actual 3D gravity mismatch above one degree accepted")
         for key in ["kind","method","modelID","referenceID","geometryID","mappingID","oldEstimatedCameraProjectionIdentity","bodyMotionIdentity",
                     "activeCameraGeneration","cameraRole","actualDeviceMXID","runtimeCalibrationIdentity","cameraServiceSourceSHA256","deltaRadians",
                     "registrationVerified","armMotionAuthority","rawDepthCorrected","modelBaseUpAssumed","opticalOriginPriorUnchanged","imageRightHeadingPriorUnchanged"] {

@@ -1896,8 +1896,11 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             let controller=ROBFixedHeadCalibrationWindowController.shared,scope=try controller.scope(model:model,frame:frame)
             let neck=controller.readNeck?() ?? [:]
             guard scope.lowerTarget==6011,scope.upperTarget==upper,scope.gatewaySessionGeneration==session,
-                  ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:frame.cameraGeneration,
-                    runtimeCalibrationIdentity:k.runtimeCalibration?.identity,cameraServiceSourceSHA256:k.cameraServiceSourceSHA256),
+                  ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,actualFrame:.init(cameraGeneration:frame.cameraGeneration,
+                actualDeviceMXID:frame.intrinsics?.runtimeCalibration?.actualDeviceMXID,
+                runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
+                cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256,scope:scope,
+                inertialJSON:(frame.intrinsics?.inertial).flatMap{try?JSONEncoder().encode($0)})),
                   let actualPan=neck["pan_degrees"] as? Double,abs(actualPan-pan)<=0.05,
                   expectedScope.map({$0==scope}) ?? true,
                   let matrix=ROBNeckRGBPoseDisplay.provisionalCameraToModel(model:model,panTarget:scope.panTarget,

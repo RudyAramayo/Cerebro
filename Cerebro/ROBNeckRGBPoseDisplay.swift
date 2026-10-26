@@ -138,6 +138,7 @@ enum ROBNeckRGBPoseDisplay {
         let reference:GravityPitchReference,deltaRadians:Double,bodyMotionIdentity:String
         let referenceUpperTarget:Int?,slopeRadiansPerRawUnit:Double
         let cameraGeneration:UUID,runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
+        let actualDeviceMXID:String,imuSensor:String,imuToRGBRotation:[Double],intrinsicsIdentities:Set<String>
         let sources:[PinnedGravitySource]
         func angle(upperTarget:Int)->Double {
             guard let referenceUpperTarget else{return deltaRadians}
@@ -278,7 +279,7 @@ enum ROBNeckRGBPoseDisplay {
         }
         struct Row {let role:String,pose:String,upperTarget:Int,requiredPitch:Double,gravity:SIMD3<Double>,camera:simd_double4x4}
         var rows:[Row]=[],sources:[PinnedGravitySource]=[],totalRawBytes=0,heldGenerationSeen=false
-        var commonSensor:String?,commonIMURotation:[Double]?
+        var commonSensor:String?,commonIMURotation:[Double]?,intrinsicsIdentities=Set<String>()
         func numbers(_ x:Any?,count:Int)throws->[Double] {
             guard let v=x as?[Double],v.count==count,v.allSatisfy(\.isFinite) else{throw Failure.invalid};return v
         }
@@ -300,7 +301,7 @@ enum ROBNeckRGBPoseDisplay {
                   document["schemaVersion"]as?Int==1,document["cameraRole"]as?String=="face",
                   let scopeJSON=document["scope"]as?[String:Any],let frames=document["frames"]as?[[String:Any]],(3...8).contains(frames.count) else{throw Failure.invalid}
             let scope=try JSONDecoder().decode(ROBFixedHeadRegistrationScope.self,from:JSONSerialization.data(withJSONObject:scopeJSON))
-            try scope.validate()
+            try scope.validate();intrinsicsIdentities.insert(scope.intrinsicsIdentity)
             guard scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==e.mappingID,
                   scope.displayCorrectionIdentity.hasSuffix(":body:"+e.bodyMotionIdentity) else{throw Failure.invalid}
             let sourceChain=try chain(model:sourceModel,parameters:parameters,panTarget:scope.panTarget,
@@ -393,7 +394,8 @@ enum ROBNeckRGBPoseDisplay {
         return GravityPitch(reference:reference,deltaRadians:intercept,bodyMotionIdentity:e.bodyMotionIdentity,
             referenceUpperTarget:e.referenceUpperTarget,slopeRadiansPerRawUnit:slope,
             cameraGeneration:activeGeneration,runtimeCalibrationIdentity:e.runtimeCalibrationIdentity,
-            cameraServiceSourceSHA256:e.cameraServiceSourceSHA256,sources:sources)
+            cameraServiceSourceSHA256:e.cameraServiceSourceSHA256,actualDeviceMXID:e.actualDeviceMXID,
+            imuSensor:commonSensor!,imuToRGBRotation:commonIMURotation!,intrinsicsIdentities:intrinsicsIdentities,sources:sources)
     }
     private static func bellyFloorEvidence(_ reference:BellyFloorDisplayReference)throws->(Data,SIMD3<Double>) {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
@@ -583,6 +585,50 @@ enum ROBNeckRGBPoseDisplay {
         guard let pitch=value.gravityPitch else{return true}
         return pitch.cameraGeneration==cameraGeneration && pitch.runtimeCalibrationIdentity==runtimeCalibrationIdentity &&
             pitch.cameraServiceSourceSHA256==cameraServiceSourceSHA256 && pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity
+    }
+    /// Immutable values from ONE actual RGB-D frame and its recorded neck scope.
+    /// Calibration evidence retains its original generation; this is fresh source
+    /// validation, never a generation rebind or a registration certificate.
+    struct ActualFrameSource {
+        let cameraGeneration:UUID,actualDeviceMXID:String?,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?
+        let scope:ROBFixedHeadRegistrationScope
+        let inertialJSON:Data?
+    }
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Bool {
+        guard let value=profile(model:model) else{return !gravityPitchRefinementRequested}
+        guard let pitch=value.gravityPitch else{return true}
+        let scope=actualFrame.scope
+        guard (try? scope.validate()) != nil,scope.cameraGeneration==actualFrame.cameraGeneration,
+              scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==model.selectedMappingID,
+              pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,
+              scope.displayCorrectionIdentity.hasSuffix(":body:"+pitch.bodyMotionIdentity),
+              actualFrame.actualDeviceMXID==pitch.actualDeviceMXID,
+              actualFrame.runtimeCalibrationIdentity==pitch.runtimeCalibrationIdentity,
+              actualFrame.cameraServiceSourceSHA256==pitch.cameraServiceSourceSHA256,
+              pitch.intrinsicsIdentities.contains(scope.intrinsicsIdentity),
+              let bytes=actualFrame.inertialJSON,bytes.count<16_000,
+              let imu=(try?JSONSerialization.jsonObject(with:bytes))as?[String:Any],
+              imu["stationary"]as?Bool==true,imu["sensor"]as?String==pitch.imuSensor,
+              imu["axes"]as?String=="sensor_native",imu["gravity_source"]as?String=="stationary_accelerometer_mean",
+              let count=imu["sample_count"]as?Int,(20...1000).contains(count),
+              let window=imu["window_milliseconds"]as?Double,window.isFinite,(300...1000).contains(window),
+              let age=imu["age_milliseconds"]as?Double,age.isFinite,(0...100).contains(age),
+              let latest=imu["latest_timestamp_ns"]as?UInt64,latest>0,
+              let reference=imu["reference_timestamp_ns"]as?UInt64,reference>=latest,
+              abs(Double(reference-latest)/1e6-age)<=0.02 else{return false}
+        func vector(_ key:String)->[Double]? {
+            guard let a=imu[key]as?[Double],a.count==3,a.allSatisfy(\.isFinite) else{return nil};return a
+        }
+        guard let gravity=vector("gravity_mps2"),let std=vector("gravity_std_mps2"),let gyro=vector("gyro_rad_s"),
+              std.allSatisfy({(0...0.1).contains($0)}),
+              let r=imu["imu_to_rgb_rotation"]as?[Double],r==pitch.imuToRGBRotation,
+              let camera=provisionalCameraToModel(model:model,panTarget:scope.panTarget,lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget) else{return false}
+        let g=SIMD3(gravity[0],gravity[1],gravity[2]),omega=SIMD3(gyro[0],gyro[1],gyro[2])
+        guard (7...12).contains(simd_length(g)),simd_length(omega)<=0.03 else{return false}
+        let rotation=simd_double3x3(columns:(SIMD3(r[0],r[3],r[6]),SIMD3(r[1],r[4],r[7]),SIMD3(r[2],r[5],r[8])))
+        let projected=camera*SIMD4(simd_normalize(rotation*g),0)
+        // Same accelerometer sign and full 3D residual used by the evidence loader.
+        return acos(min(1,max(-1,projected.z)))<=Double.pi/180
     }
     private static var gravityPitchRefinementRequested:Bool {
         guard FileManager.default.fileExists(atPath:activationURL.path) else{return false}
