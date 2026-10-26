@@ -1322,11 +1322,26 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         try await wait(12){ROBWorkspaceSearch.shared.prepareView?(pan,upper)==true}
         try await wait(10){ROBWorkspaceSearch.shared.viewReady?(pan,upper)==true && self.vision.fresh && ROBArmRoutineCoordinator.shared.viewIsStationary?()==true}
         let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
-        guard neck["lower"] as? Int==lower,neck["upper"] as? Int==upper,
-              let degrees=neck["pan_degrees"] as? Double,abs(degrees-pan)<=0.01,
-              vision.cameraGeneration==map.cameraGeneration,let held=localNeckIdentity(),
-              ROBWorkspaceSearch.shared.estimatedCameraProjectionIsCurrent(model:try workspaceModel(),map:map) else {
-            throw ROBArmRoutineError.blocked("The settled grasp view does not match the can's source neck, camera and physical projection.")
+        let expectedPan=ROBWorkspaceSearch.shared.panTargetForView?(pan)?.intValue
+        let held=localNeckIdentity(),projectionCurrent=ROBWorkspaceSearch.shared.estimatedCameraProjectionIsCurrent(model:try workspaceModel(),map:map)
+        var fields:[String]=[]
+        if expectedPan==nil {fields.append("pan_target_unavailable")}
+        if expectedPan==nil || neck["pan"]as?Int != expectedPan {fields.append("raw_pan_target")}
+        if neck["lower"]as?Int != lower {fields.append("raw_lower_target")}
+        if neck["upper"]as?Int != upper {fields.append("raw_upper_target")}
+        if vision.cameraGeneration != map.cameraGeneration {fields.append("camera_generation")}
+        if held==nil {fields.append("stationary_neck_identity")}
+        if !projectionCurrent {fields.append("physical_projection")}
+        guard fields.isEmpty,let held else {
+            let facts:[String:Any]=["reason":"selected_can_view_mismatch","failed_fields":fields,
+                "requested_pan_degrees":pan,"expected_raw_pan":expectedPan as Any? ?? NSNull(),
+                "actual_raw_pan":neck["pan"] ?? NSNull(),"actual_pan_degrees":neck["pan_degrees"] ?? NSNull(),
+                "expected_lower":lower,"actual_lower":neck["lower"] ?? NSNull(),"expected_upper":upper,"actual_upper":neck["upper"] ?? NSNull(),
+                "expected_camera_generation":map.cameraGeneration.uuidString,"actual_camera_generation":vision.cameraGeneration.uuidString,
+                "stationary_neck_identity_available":held != nil,"physical_projection_current":projectionCurrent]
+            var report=collisionReviewStatus as? [String:Any] ?? [:];report["selected_can_view_diagnostic"]=facts
+            collisionReviewStatus=report as NSDictionary
+            throw ROBArmRoutineError.blocked("The settled can-source view changed: "+fields.joined(separator:", ")+". Requested pan \(pan)°, expected raw \(expectedPan.map(String.init) ?? "unavailable"), actual raw \(neck["pan"] ?? NSNull()); no reach sent.")
         }
         localReceiptHeldNeckIdentity=held
     }
@@ -4392,6 +4407,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         var output = result as! [String: Any]
         output["physical_arm"]=physicalSide
         if let refresh=collisionReviewStatus["initial_empty_view_refresh"] {output["initial_empty_view_refresh"]=refresh}
+        if let view=collisionReviewStatus["selected_can_view_diagnostic"] {output["selected_can_view_diagnostic"]=view}
         if activeApproachUnknownAdvisory {
             output["approach_unknown_advisory"]=true;output["unknown_space_policy"]="operator_cleared_advisory_only"
             output["unknown_cells_observed"]=false;output["unknown_cells_relabeled_free"]=false

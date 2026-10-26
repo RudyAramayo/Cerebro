@@ -13,6 +13,55 @@ struct ROBVisionFrameAgeBudget {
     }
 }
 
+/// Native image observations, not a statement that a motion corridor is clear.
+/// Coordinates use the original normalized RGB raster with its origin at top left.
+struct ROBArmHumanObservationEvidence {
+    enum Kind { case hand, person }
+    struct Rect {
+        let xMin:Double,yMin:Double,xMax:Double,yMax:Double
+        var isValid:Bool {
+            [xMin,yMin,xMax,yMax].allSatisfy { $0.isFinite && (0...1).contains($0) }
+                && xMin<xMax && yMin<yMax
+        }
+    }
+    struct Region {
+        let kind:Kind,confidence:Double,normalizedTopLeft:Rect,upperBodyOnly:Bool
+    }
+    struct Point { let x:Double,y:Double,confidence:Double }
+    let sequence:UInt64,capturedAtMilliseconds:Double,cameraGeneration:UUID
+    let width:Int,height:Int
+    let handRequestSucceeded:Bool,personRequestSucceeded:Bool
+    let handObservationCount:Int?,personObservationCount:Int?
+    let hasUnlocalizedRelevantObservation:Bool
+    let unavailableReason:String?
+    let regions:[Region]
+
+    var localizationSucceeded:Bool {
+        guard handRequestSucceeded,personRequestSucceeded,!hasUnlocalizedRelevantObservation,
+              unavailableReason==nil,sequence>0,capturedAtMilliseconds.isFinite,
+              (1...8192).contains(width),(1...8192).contains(height),
+              let handObservationCount,let personObservationCount,
+              (0..<6).contains(handObservationCount),(0..<32).contains(personObservationCount),
+              regions.count<=38 else {return false}
+        return regions.allSatisfy { $0.confidence.isFinite && (0...1).contains($0.confidence)
+            && $0.normalizedTopLeft.isValid }
+    }
+
+    /// Hand pose observations have no rectangle. Use all 21 actual recognized
+    /// joints and add an image-space envelope; incomplete relevant hands hold.
+    static func handBounds(points:[Point])->Rect? {
+        guard points.count==21,points.allSatisfy({$0.x.isFinite && $0.y.isFinite
+            && (0...1).contains($0.x) && (0...1).contains($0.y)
+            && $0.confidence.isFinite && (0.1...1).contains($0.confidence)}) else {return nil}
+        let minX=points.map(\.x).min()!,maxX=points.map(\.x).max()!
+        let minY=points.map(\.y).min()!,maxY=points.map(\.y).max()!
+        guard maxX>minX,maxY>minY else {return nil}
+        let padX=max(0.04,(maxX-minX)*0.5),padY=max(0.04,(maxY-minY)*0.5)
+        return .init(xMin:max(0,minX-padX),yMin:max(0,1-maxY-padY),
+            xMax:min(1,maxX+padX),yMax:min(1,1-minY+padY))
+    }
+}
+
 /// Capture provenance is independent of whether a perception consumer is on.
 /// Restarting an inspection must not erase a completed scene preview, while a
 /// real stream/source/calibration restart must invalidate its coordinate frame.
@@ -154,6 +203,65 @@ final class ROBArmRoutineVision {
         var pointing: ROBWorkspacePointingHint? = nil
         var nearestPerson: (x: Double, y: Double, distance: Double)? = nil
         var cameraGeneration: UUID = UUID()
+        var humanObservations:ROBArmHumanObservationEvidence? = nil
+    }
+
+    /// A native, nonserializable adapter result for one actual image and frozen
+    /// EMPTY-arm route. It grants no arm authority and changes no Frame value.
+    struct HumanClearance {
+        let assessment:ROBWorkspaceHumanProximity.Assessment
+        let routeIdentity:String
+        fileprivate let sequence:UInt64,capturedAt:Double,generation:UUID,scope:String
+        fileprivate let width:Int,height:Int,k:[Double],service:String?,runtime:String?
+        fileprivate init(assessment:ROBWorkspaceHumanProximity.Assessment,routeIdentity:String,frame:Frame,scope:String) {
+            self.assessment=assessment;self.routeIdentity=routeIdentity
+            sequence=frame.sequence;capturedAt=frame.capturedAt;generation=frame.cameraGeneration;self.scope=scope
+            width=frame.depth!.width;height=frame.depth!.height
+            let source=frame.intrinsics!;k=[source.fx,source.fy,source.cx,source.cy]
+            service=source.cameraServiceSourceSHA256;runtime=source.runtimeCalibration?.identity
+        }
+        func matches(frame:Frame,scopeIdentity:String)->Bool {
+            guard assessment.clear,scope==scopeIdentity,sequence==frame.sequence,capturedAt==frame.capturedAt,
+                  generation==frame.cameraGeneration,let depth=frame.depth,let source=frame.intrinsics,
+                  let observations=frame.humanObservations,observations.localizationSucceeded,
+                  observations.sequence==sequence,observations.capturedAtMilliseconds==capturedAt,
+                  observations.cameraGeneration==generation,observations.width==width,observations.height==height else {return false}
+            return width==depth.width && height==depth.height && k==[source.fx,source.fy,source.cx,source.cy]
+                && service==source.cameraServiceSourceSHA256 && runtime==source.runtimeCalibration?.identity
+        }
+    }
+
+    func makeHumanClearance(frame:Frame,scopeIdentity:String,model:ROBGhostRobotModel,baseline:[Double],
+        route:[[Double]],cameraToRobot:simd_double4x4,spatialErrorMeters:Double=0.05) throws ->HumanClearance {
+        guard isFresh(frame),frame.cameraGeneration==cameraGeneration,!scopeIdentity.isEmpty,
+              scopeIdentity.utf8.count<=8192,let depth=frame.depth,let k=frame.intrinsics,
+              k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,
+              k.depthRGBGeometryCorrespondence?.status=="matched",let observed=frame.humanObservations,
+              observed.sequence==frame.sequence,observed.capturedAtMilliseconds==frame.capturedAt,
+              observed.cameraGeneration==frame.cameraGeneration,observed.width==depth.width,observed.height==depth.height,
+              observed.localizationSucceeded,baseline.count==7,baseline.allSatisfy(\.isFinite),
+              !route.isEmpty,route.count<=80,route.allSatisfy({$0.count==7 && $0.allSatisfy(\.isFinite)}) else {
+            throw ROBVisualGraspVerifier.Unavailable.evidence("Current localized hand/person observations and a frozen empty-arm route are required.")
+        }
+        let regions=observed.regions.compactMap { region -> [Double]? in
+            guard region.confidence >= (region.kind == .hand ? 0.3:0.4) else {return nil}
+            let r=region.normalizedTopLeft
+            if region.kind == .person && region.upperBodyOnly {
+                // Unobserved legs are not declared absent. Conservatively cover
+                // down to the image edge and widen the upper-body observation.
+                let pad=max(0.08,(r.xMax-r.xMin)*0.5)
+                return [max(0,r.xMin-pad),max(0,r.yMin-0.04),min(1,r.xMax+pad),1]
+            }
+            return [r.xMin,r.yMin,r.xMax,r.yMax]
+        }
+        let assessment=ROBWorkspaceHumanProximity.assess(model:model,baseline:baseline,route:route,
+            cameraToRobot:cameraToRobot,width:depth.width,height:depth.height,fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,
+            humanRegions:regions,localizationSucceeded:observed.localizationSucceeded,spatialErrorMeters:spatialErrorMeters)
+        guard assessment.clear else {throw ROBVisualGraspVerifier.Unavailable.evidence(assessment.reason)}
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        let identityPrefix=Data([model.modelID,model.geometryID,model.selectedMappingID].joined(separator:"|").utf8)
+        let routeIdentity=ROBGhostRobotModel.hash(identityPrefix+(try encoder.encode([baseline]+route)))
+        return HumanClearance(assessment:assessment,routeIdentity:routeIdentity,frame:frame,scope:scopeIdentity)
     }
 
     func setActive(_ value: Bool, teaching: Bool = false) {
@@ -240,8 +348,10 @@ final class ROBArmRoutineVision {
             var pointing: ROBWorkspacePointingHint?
             var nearestPerson: (x: Double, y: Double, distance: Double)?
             var clear = false
+            var humanRequestsSucceeded=false
             do {
                 try VNImageRequestHandler(cvPixelBuffer: pixels).perform(needsBody ? [hands, people, body] : [hands, people])
+                humanRequestsSucceeded=true
                 if needsBody, let observations = body.results, observations.count == 1,
                    let points = try? observations[0].recognizedPoints(.all) {
                     let names: [VNHumanBodyPoseObservation.JointName] = [.leftShoulder, .rightShoulder, .leftHip, .rightHip, .leftWrist, .rightWrist]
@@ -303,6 +413,9 @@ final class ROBArmRoutineVision {
                     if pointing == nil || hint.distanceMeters < pointing!.distanceMeters { pointing = hint }
                 }
             } catch { clear = false }
+            let humanObservations=Self.makeHumanObservations(hands:hands.results,people:people.results,
+                requestSucceeded:humanRequestsSucceeded,sequence:frame.sequence,capturedAt:captured,
+                cameraGeneration:captureGeneration,width:CVPixelBufferGetWidth(pixels),height:CVPixelBufferGetHeight(pixels))
             var valid = 0, total = 0
             for y in stride(from: 0, to: depth.height, by: 12) {
                 for x in stride(from: 0, to: depth.width, by: 12) {
@@ -336,8 +449,43 @@ final class ROBArmRoutineVision {
                                      sequence: frame.sequence, handsClear: clear,
                                      depthCoverage: Double(valid) / Double(max(1, total)), thumbnail: thumbnail,
                                      demonstration: demonstration, depth: depth, intrinsics: frame.intrinsics,
-                                     pointing: pointing, nearestPerson: nearestPerson, cameraGeneration: captureGeneration)
+                                     pointing: pointing, nearestPerson: nearestPerson, cameraGeneration: captureGeneration,
+                                     humanObservations:humanObservations)
         }
+    }
+
+    private static func makeHumanObservations(hands:[VNHumanHandPoseObservation]?,people:[VNHumanObservation]?,
+        requestSucceeded:Bool,sequence:UInt64,capturedAt:Double,cameraGeneration:UUID,width:Int,height:Int)
+        ->ROBArmHumanObservationEvidence {
+        var regions:[ROBArmHumanObservationEvidence.Region]=[],unlocalized=false
+        var reason:String? = requestSucceeded ? nil:"vision_request_failed"
+        if requestSucceeded && (hands==nil || people==nil) {reason="vision_results_unavailable"}
+        if let hands,hands.count>=6 {reason="hand_observation_limit"}
+        if let people,people.count>=32 {reason="person_observation_limit"}
+        if requestSucceeded {
+            for hand in (hands ?? []).prefix(6) {
+                let confidence=Double(hand.confidence)
+                guard confidence.isFinite,(0...1).contains(confidence) else {unlocalized=true;continue}
+                guard let points=try? hand.recognizedPoints(.all),
+                      let bounds=ROBArmHumanObservationEvidence.handBounds(points:points.values.map {
+                          .init(x:Double($0.location.x),y:Double($0.location.y),confidence:Double($0.confidence))
+                      }) else {if confidence>=0.3 {unlocalized=true};continue}
+                regions.append(.init(kind:.hand,confidence:confidence,normalizedTopLeft:bounds,upperBodyOnly:false))
+            }
+            for person in (people ?? []).prefix(32) {
+                let confidence=Double(person.confidence),box=person.boundingBox
+                guard confidence.isFinite,(0...1).contains(confidence) else {unlocalized=true;continue}
+                let bounds=ROBArmHumanObservationEvidence.Rect(xMin:Double(box.minX),yMin:Double(1-box.maxY),
+                    xMax:Double(box.maxX),yMax:Double(1-box.minY))
+                guard bounds.isValid else {if confidence>=0.4 {unlocalized=true};continue}
+                regions.append(.init(kind:.person,confidence:confidence,normalizedTopLeft:bounds,upperBodyOnly:true))
+            }
+        }
+        return .init(sequence:sequence,capturedAtMilliseconds:capturedAt,cameraGeneration:cameraGeneration,
+            width:width,height:height,handRequestSucceeded:requestSucceeded && hands != nil,
+            personRequestSucceeded:requestSucceeded && people != nil,
+            handObservationCount:hands?.count,personObservationCount:people?.count,
+            hasUnlocalizedRelevantObservation:unlocalized,unavailableReason:reason,regions:regions)
     }
 
     func snapshot() -> [String: Frame] {
@@ -353,10 +501,12 @@ final class ROBArmRoutineVision {
         jointPositions: [Double], jointCapturedAtMilliseconds: Double,
         poseHeldDuringCapture: Bool,
         openingCommandAtMilliseconds: Double? = nil,
-        nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000) throws -> ROBGripperVisualServo.Frame {
+        nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000,
+        humanClearance:HumanClearance? = nil) throws -> ROBGripperVisualServo.Frame {
         guard nowMilliseconds.isFinite, frame.capturedAt.isFinite,
               (0...700).contains(nowMilliseconds-frame.capturedAt), frame.sequence>0,
-              frame.cameraGeneration==cameraGeneration, frame.handsClear,
+              frame.cameraGeneration==cameraGeneration,
+              (frame.handsClear || humanClearance?.matches(frame:frame,scopeIdentity:scopeIdentity)==true),
               !scopeIdentity.isEmpty, scopeIdentity.utf8.count<=8192,
               poseHeldDuringCapture, jointPositions.count==7,
               jointPositions.allSatisfy(\.isFinite), jointCapturedAtMilliseconds.isFinite,

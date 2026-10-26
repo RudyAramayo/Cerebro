@@ -60,11 +60,14 @@ final class Adapter {
  var observedJawFullHeightDemand=false
  var frames:[String:Frame]=[:],busy=Set<String>(),lastOffer:[String:Double]=[:],inputNotes:[String:String]=[:]
  var lastIncomingCapture:Double?=nil,lastIncomingSequence:UInt64=0,processingMilliseconds=0.0
- var lastInspection:[String:Any]=[:]
+ var lastInspection:[String:Any]=[:],lastSettlingDiagnostics:[String:Any]=[:]
  struct Frame {
   var image:CIImage,capturedAt:Double,sequence:UInt64=10,cameraGeneration:UUID
   var handsClear=true,depth:Depth?=Depth(),intrinsics:K?=K()
  }
+ // This fixture exercises the unchanged default adapter path. The actual
+ // native token/factory and its source/route binding have a separate fixture.
+ struct HumanClearance {func matches(frame:Frame,scopeIdentity:String)->Bool {false}}
  /* ACTUAL METHOD */
  /* ACTUAL ENROLLMENT */
 }

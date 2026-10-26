@@ -1,6 +1,107 @@
 import Foundation
 import simd
 
+/// Image-space separation from the actual frozen EMPTY-arm route. This pure
+/// geometry result is not a human detector, motion grant or unseen-space claim.
+/// The caller must bind successful localization to the same fresh held frame,
+/// source, body and exact route, and preserve the other native motion guards.
+enum ROBWorkspaceHumanProximity {
+    struct Assessment:Codable,Equatable {
+        let clear:Bool,reason:String,fullCorridorVisible:Bool
+        let checkedPoseCount:Int,projectedLinkCount:Int,humanRegionCount:Int
+        let rejectedLinks:[String]
+        let rejectedBoundsNormalized:[Double]?
+        /// Diagnostic union only; overlap is tested per complete link/pose.
+        let corridorBoundsNormalized:[Double]?
+        let modelAllowanceMeters:Double,humanBufferMeters:Double
+        let sweptSampleAllowanceMeters:Double,openJawAdditionalMarginMeters:Double
+    }
+
+    /// Human regions use the actual image's normalized TOP-LEFT coordinates.
+    /// The supplied regions must conservatively cover every relevant detected
+    /// hand/person; an unlocalized detection is a localization failure. No
+    /// sparse person-depth sample is used to dismiss an overlapping hand.
+    static func assess(model:ROBGhostRobotModel,baseline:[Double],route:[[Double]],
+        cameraToRobot:simd_double4x4,width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
+        humanRegions:[[Double]],localizationSucceeded:Bool,spatialErrorMeters:Double=0.05,
+        humanBufferMeters:Double=0.10)->Assessment {
+        let sampleAllowance=ROBWorkspaceCollisionPlan.sweptPointTravelMeters
+        let jawAllowance=ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters
+        var checked=0,projected=0,union:[Double]?
+        func result(_ clear:Bool,_ reason:String,_ visible:Bool=false,_ rejected:[String]=[],_ rejectedBounds:[Double]?=nil)->Assessment {
+            .init(clear:clear,reason:reason,fullCorridorVisible:visible,checkedPoseCount:checked,
+                projectedLinkCount:projected,humanRegionCount:humanRegions.count,rejectedLinks:Array(rejected.prefix(16)),rejectedBoundsNormalized:rejectedBounds,
+                corridorBoundsNormalized:union,modelAllowanceMeters:spatialErrorMeters,humanBufferMeters:humanBufferMeters,
+                sweptSampleAllowanceMeters:sampleAllowance,openJawAdditionalMarginMeters:jawAllowance)
+        }
+        guard localizationSucceeded else{return result(false,"Actual-frame human localization is unavailable or incomplete.")}
+        guard humanRegions.count<=64,humanRegions.allSatisfy({r in
+            r.count==4 && r.allSatisfy(\.isFinite) && r[0]>=0 && r[1]>=0 && r[2]<=1 && r[3]<=1 && r[0]<r[2] && r[1]<r[3]
+        }) else{return result(false,"Actual-frame human regions are malformed.")}
+        // A successful no-detection frame keeps legacy behavior. This says
+        // nothing about people outside the actual camera image.
+        guard !humanRegions.isEmpty else{return result(true,"No relevant human region was localized in this actual frame; unseen space is not assessed.")}
+        let matrix=(0..<4).flatMap{c in (0..<4).map{cameraToRobot[c][$0]}}
+        let rotation=simd_double3x3(columns:(SIMD3(cameraToRobot[0].x,cameraToRobot[0].y,cameraToRobot[0].z),
+            SIMD3(cameraToRobot[1].x,cameraToRobot[1].y,cameraToRobot[1].z),SIMD3(cameraToRobot[2].x,cameraToRobot[2].y,cameraToRobot[2].z)))
+        guard (16...4096).contains(width),(16...4096).contains(height),[fx,fy,cx,cy].allSatisfy(\.isFinite),fx>0,fy>0,
+              (0...Double(width-1)).contains(cx),(0...Double(height-1)).contains(cy),matrix.allSatisfy(\.isFinite),
+              abs(cameraToRobot[0].w)<=1e-9,abs(cameraToRobot[1].w)<=1e-9,abs(cameraToRobot[2].w)<=1e-9,abs(cameraToRobot[3].w-1)<=1e-9,
+              abs(simd_determinant(rotation)-1)<=1e-6,
+              (0..<3).allSatisfy({i in (0..<3).allSatisfy({j in abs(simd_dot(rotation[i],rotation[j])-(i==j ? 1:0))<=1e-6})}),
+              spatialErrorMeters.isFinite,(0.05...0.20).contains(spatialErrorMeters),
+              humanBufferMeters.isFinite,(0.10...0.50).contains(humanBufferMeters),
+              !route.isEmpty,route.count<=80 else{return result(false,"The current held projection, physical uncertainty or frozen arm route is invalid.")}
+        let limits=ROBWorkspaceCollisionPlan.jointBounds(model:model)
+        func valid(_ q:[Double])->Bool {q.count==7 && zip(q,limits).allSatisfy{$0.isFinite && $1.contains($0)}}
+        guard valid(baseline),route.allSatisfy(valid) else{return result(false,"The frozen human-proximity route has invalid joint coordinates.")}
+        let robotToCamera=simd_inverse(cameraToRobot),insetX=2/Double(width-1),insetY=2/Double(height-1)
+        var previous=baseline
+        for target in route {
+            let countValue=max(1,ceil(1.5*zip(previous,target).reduce(0.0){$0+abs($1.0-$1.1)}/sampleAllowance))
+            guard countValue.isFinite,countValue<=Double(ROBWorkspaceCollisionPlan.maximumPoseChecks-checked-1) else {
+                return result(false,"The complete human-proximity route exceeds its bounded swept sampling budget.")
+            }
+            let count=Int(countValue)
+            for sample in 0...count {
+                checked+=1
+                let t=Double(sample)/Double(count),q=zip(previous,target).map{$0+($1-$0)*t}
+                let bounds=model.worldCollisionBounds(positions:model.positions(vendorLeft:q))
+                let links=bounds.keys.filter{$0.hasPrefix(model.physicalSide+"_") && ($0.hasSuffix("_Link") || $0==model.toolLink || $0==model.physicalSide+"_base_link")}.sorted()
+                guard links.count>=8 else{return result(false,"The complete arm/jaw envelope is unavailable.")}
+                for link in links {
+                    let box=bounds[link]!,padding=spatialErrorMeters+humanBufferMeters+sampleAllowance+(link==model.toolLink ? jawAllowance:0)
+                    let low=box.low-SIMD3(repeating:padding),high=box.high+SIMD3(repeating:padding)
+                    guard (0..<3).allSatisfy({low[$0].isFinite && high[$0].isFinite && low[$0]<=high[$0]}) else {
+                        return result(false,"An arm envelope is malformed.",false,[link])
+                    }
+                    var rectangle=[Double.infinity,Double.infinity,-Double.infinity,-Double.infinity]
+                    for x in [low.x,high.x] {for y in [low.y,high.y] {for z in [low.z,high.z] {
+                        let p=robotToCamera*SIMD4(x,y,z,1)
+                        guard p.x.isFinite,p.y.isFinite,p.z.isFinite,p.z>0.001 else {
+                            return result(false,"People are visible but a padded whole-arm envelope is behind or crosses the camera plane.",false,[link])
+                        }
+                        let u=(fx*p.x/p.z+cx)/Double(width-1),v=(fy*p.y/p.z+cy)/Double(height-1)
+                        guard u.isFinite,v.isFinite else{return result(false,"An arm projection is nonfinite.",false,[link])}
+                        rectangle[0]=min(rectangle[0],u);rectangle[1]=min(rectangle[1],v)
+                        rectangle[2]=max(rectangle[2],u);rectangle[3]=max(rectangle[3],v)
+                    }}}
+                    guard rectangle[0]>=insetX,rectangle[1]>=insetY,rectangle[2]<=1-insetX,rectangle[3]<=1-insetY else {
+                        return result(false,"People are visible but the padded whole-arm corridor is partly outside the actual image.",false,[link],rectangle)
+                    }
+                    projected+=1
+                    if let old=union {union=[min(old[0],rectangle[0]),min(old[1],rectangle[1]),max(old[2],rectangle[2]),max(old[3],rectangle[3])]}else{union=rectangle}
+                    if humanRegions.contains(where:{r in rectangle[0]<=r[2] && rectangle[2]>=r[0] && rectangle[1]<=r[3] && rectangle[3]>=r[1]}) {
+                        return result(false,"A localized hand/person overlaps the padded swept whole-arm/jaw corridor.",false,[link])
+                    }
+                }
+            }
+            previous=target
+        }
+        return result(true,"Every padded swept arm/jaw envelope is visible and disjoint from all localized human regions.",true)
+    }
+}
+
 /// Verified closed-convex queries. OBJ precision is at most one micron;
 /// the inside tolerance is conservative and never increases clearance.
 struct ROBEstimatedConvexHull {
