@@ -148,7 +148,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
     public static let shared = ROBServoControlStore()
 
     private static let defaultsKey = "ROBServoControlConfigurationV1"
-    private static let schemaVersion = 3
+    private static let schemaVersion = 4
     private static let uprightLowerTarget = 6011
     private static let legacyUprightUpperTarget = 6073
     // Compensates for the front camera's approximately -25 degree mounting.
@@ -465,8 +465,8 @@ public enum ROBServoControlConfigurationError: LocalizedError {
             ),
             ROBServoSequencePhase(
                 sequenceName: "startup", phaseIndex: 3,
-                phaseName: "Lean forward", cameraPositionName: "lean_forward",
-                panTarget: 5799, lowerTarget: 7014, upperTarget: 7698, holdSeconds: 0
+                phaseName: "Hold upright", cameraPositionName: "upright",
+                panTarget: 5799, lowerTarget: 6011, upperTarget: 6906, holdSeconds: 0
             ),
         ]
     }
@@ -519,6 +519,34 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         var delta: Int
         var repetitions: Int
         var intervalSeconds: Double
+    }
+
+    /// Replace only the exact persisted legacy automatic sequence. Named
+    /// camera presets and edited startup sequences remain operator choices;
+    /// reconnecting should not turn the old factory rest into a deep lean.
+    private static func migrateLegacyAutomaticStartup(
+        phases: [ROBServoSequencePhase]
+    ) -> Bool {
+        let startup = phases.filter { $0.sequenceName == "startup" }
+            .sorted(by: Self.phaseSort)
+        guard startup.count == 3 else { return false }
+        let expected: [(Int, String, String, Int, Int, Int, Double)] = [
+            (1, "Lift to upright clearance", "upright", 0, 6011, 6906, 0.5),
+            (2, "Center pan", "upright", 5799, 6011, 6906, 0.5),
+            (3, "Lean forward", "lean_forward", 5799, 7014, 7698, 0),
+        ]
+        guard zip(startup, expected).allSatisfy({ phase, old in
+            phase.phaseIndex == old.0 && phase.phaseName == old.1
+                && phase.cameraPositionName == old.2 && phase.panTarget == old.3
+                && phase.lowerTarget == old.4 && phase.upperTarget == old.5
+                && phase.holdSeconds == old.6
+        }) else { return false }
+        let final = startup[2]
+        final.phaseName = "Hold upright"
+        final.cameraPositionName = "upright"
+        final.lowerTarget = uprightLowerTarget
+        final.upperTarget = uprightUpperTarget
+        return true
     }
 
     /// Migrates only the exact upright tuples shipped before the front-camera
@@ -639,6 +667,10 @@ public enum ROBServoControlConfigurationError: LocalizedError {
                 upperTarget: $0.upperTarget, holdSeconds: $0.holdSeconds
             )
         }
+        // Match the decoded values before other migrations change any tuple.
+        // A version-4 sequence is an explicit current operator configuration.
+        let migratedAutomaticStartup = payload.version < 4
+            && Self.migrateLegacyAutomaticStartup(phases: phases)
         let migratedUprightCameraMountOffset = payload.version < 2
             && Self.migrateLegacyUprightCameraMountOffset(
                 positions: positions,
@@ -666,6 +698,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         if payload.version != Self.schemaVersion
             || positionsNeedPanMigration
             || positions.count != persistedPositionCount
+            || migratedAutomaticStartup
             || migratedUprightCameraMountOffset
             || migratedGestureCadence {
             persistLocked()
