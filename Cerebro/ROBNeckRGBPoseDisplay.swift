@@ -22,11 +22,19 @@ enum ROBNeckRGBPoseDisplay {
         let bellyFloorDisplayReferenceID: String?
         let usesPhotoHardwareOpticalOrigin: Bool
         let operatorPanCalibrationDescription: String?
+        let frozenOpticalPitchRefinementRadians:Double?
         /// An opt-in estimated origin, not registration. Keep the pinned RGB
         /// rotation while drawing/projecting from the measured hardware glass.
         var provisionalCameraToModel: simd_double4x4 {
             guard usesPhotoHardwareOpticalOrigin,let glass=hardwareFrames?["rgb_glass_frame"] else{return cameraToModel}
-            var result=cameraToModel;result.columns.3=glass.columns.3;return result
+            var result=cameraToModel;result.columns.3=glass.columns.3
+            if let angle=frozenOpticalPitchRefinementRadians {
+                // Post-optical-X: image-right and the optical origin stay
+                // exactly unchanged. This is an estimated mounting refinement.
+                let y=result.columns.1,z=result.columns.2,c=cos(angle),s=sin(angle)
+                result.columns.1=c*y+s*z;result.columns.2 = -s*y+c*z
+            }
+            return result
         }
         var displayCameraToModel: simd_double4x4 { modelToDisplay * provisionalCameraToModel }
         var depthCloudCameraToModel: simd_double4x4 {
@@ -90,6 +98,40 @@ enum ROBNeckRGBPoseDisplay {
         let bellyFloorDisplayReference:BellyFloorDisplayReference?
         let usePhotoHardwareOpticalOrigin:Bool?
         let operatorPanCalibration:OperatorPanCalibration?
+        let estimatedGravityPitchRefinement:GravityPitchReference?
+    }
+    private struct GravityPitchReference:Decodable {
+        let evidencePath:String,evidenceSHA256:String
+    }
+    private struct GravityPitchEvidence:Decodable {
+        struct Capture:Decodable {let role:String,captureInputPath:String,captureInputSHA256:String}
+        let schemaVersion:Int,kind:String,method:String
+        let modelID:String,referenceID:String,geometryID:String,mappingID:String
+        let oldEstimatedCameraProjectionIdentity:String,bodyMotionIdentity:String
+        let activeCameraGeneration:String,cameraRole:String,actualDeviceMXID:String
+        let runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
+        let deltaRadians:Double
+        let registrationVerified:Bool,armMotionAuthority:Bool,rawDepthCorrected:Bool
+        let modelBaseUpAssumed:Bool,opticalOriginPriorUnchanged:Bool,imageRightHeadingPriorUnchanged:Bool
+        let captures:[Capture]
+    }
+    private struct PinnedGravitySource {
+        let path:String,size:Int,modified:Date,fileNumber:UInt64
+        init(_ path:String)throws {
+            let a=try FileManager.default.attributesOfItem(atPath:path)
+            guard a[.type]as?FileAttributeType == .typeRegular,let size=a[.size]as?NSNumber,
+                  let modified=a[.modificationDate]as?Date,let number=a[.systemFileNumber]as?NSNumber else {throw Failure.invalid}
+            self.path=path;self.size=size.intValue;self.modified=modified;fileNumber=number.uint64Value
+        }
+        var unchanged:Bool {
+            guard let a=try?PinnedGravitySource(path) else{return false}
+            return size==a.size && modified==a.modified && fileNumber==a.fileNumber
+        }
+    }
+    private struct GravityPitch {
+        let reference:GravityPitchReference,deltaRadians:Double,bodyMotionIdentity:String
+        let cameraGeneration:UUID,runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
+        let sources:[PinnedGravitySource]
     }
     /// A measured operator angle and a provisional forward reference refine
     /// the estimated pan mapping. They never authorize a servo command.
@@ -148,6 +190,7 @@ enum ROBNeckRGBPoseDisplay {
         let usePhotoHardwareOpticalOrigin:Bool
         let estimatedCameraProjectionIdentity:String?
         let operatorPanCalibration:OperatorPanCalibration?
+        let gravityPitch:GravityPitch?
     }
     private static let lock=NSLock()
     private static var cachedKey=""
@@ -178,6 +221,140 @@ enum ROBNeckRGBPoseDisplay {
               e.observationSource=="operator_observed_physical_pan_angle",
               !e.registrationVerified,!e.armMotionAuthority else {throw Failure.invalid}
         return bytes
+    }
+    private static func gravityPitchEvidence(_ reference:GravityPitchReference,model:ROBGhostRobotModel,
+        parameters:[String:Double],operatorPan:OperatorPanCalibration?,oldProjectionIdentity:String)throws->GravityPitch {
+        let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
+        guard bytes.count<100_000 else{throw Failure.invalid}
+        let e=try JSONDecoder().decode(GravityPitchEvidence.self,from:bytes)
+        func hash(_ x:String)->Bool{x.count==64 && x.allSatisfy(\.isHexDigit)}
+        guard e.schemaVersion==1,e.kind=="estimated_stationary_imu_optical_x_pitch_refinement",
+              e.method=="mean_training_post_optical_x_preserve_origin_image_right_v1",
+              e.modelID==model.modelID,e.referenceID==model.referenceID,e.geometryID==model.geometryID,
+              e.oldEstimatedCameraProjectionIdentity==oldProjectionIdentity,
+              e.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,UUID(uuidString:e.bodyMotionIdentity) != nil,
+              let activeGeneration=UUID(uuidString:e.activeCameraGeneration),e.cameraRole=="face",
+              !e.actualDeviceMXID.isEmpty,e.actualDeviceMXID.count<=128,
+              hash(e.runtimeCalibrationIdentity),hash(e.cameraServiceSourceSHA256),
+              e.deltaRadians.isFinite,abs(e.deltaRadians)<=20 * .pi/180,
+              !e.registrationVerified,!e.armMotionAuthority,!e.rawDepthCorrected,
+              e.modelBaseUpAssumed,e.opticalOriginPriorUnchanged,e.imageRightHeadingPriorUnchanged,
+              (4...16).contains(e.captures.count),Set(e.captures.map(\.captureInputPath)).count==e.captures.count,
+              let torso=model.frames(model.reference)["torso_link"] else{throw Failure.invalid}
+        // The capture UI's selected arm mapping is source provenance, not a
+        // camera mounting parameter. Resolve either actual legal arm model;
+        // never reflect arm FK or rewrite the captured mapping to the caller.
+        let sourceModel:ROBGhostRobotModel
+        if e.mappingID==model.selectedMappingID {sourceModel=model}
+        else {
+            let other=try ROBGhostRobotModel(directory:model.directory,physicalSide:model.physicalSide=="left" ? "right":"left")
+            guard e.mappingID==other.selectedMappingID,other.modelID==model.modelID,
+                  other.referenceID==model.referenceID,other.geometryID==model.geometryID,
+                  other.reference==model.reference else{throw Failure.invalid}
+            let a=model.frames(model.reference),b=other.frames(other.reference)
+            guard ["torso_link","neck_pan_link","lower_neck_link","upper_neck_link","oak_link","oak_optical_frame","insta360_link"].allSatisfy({
+                a[$0] != nil && a[$0]==b[$0]
+            }) else{throw Failure.invalid}
+            sourceModel=other
+        }
+        struct Row {let role:String,pose:String,requiredPitch:Double,gravity:SIMD3<Double>,camera:simd_double4x4}
+        var rows:[Row]=[],sources:[PinnedGravitySource]=[],totalRawBytes=0,heldGenerationSeen=false
+        var commonSensor:String?,commonIMURotation:[Double]?
+        func numbers(_ x:Any?,count:Int)throws->[Double] {
+            guard let v=x as?[Double],v.count==count,v.allSatisfy(\.isFinite) else{throw Failure.invalid};return v
+        }
+        func runtimeMatches(_ r:[String:Any])->Bool {
+            guard r["schemaVersion"]as?Int==1,r["actualDeviceMXID"]as?String==e.actualDeviceMXID,r["cameraRole"]as?String=="face",
+                  let sdk=r["sdkVersion"]as?String,!sdk.isEmpty,sdk.count<=128,
+                  let factory=r["factoryEEPROMSHA256"]as?String,hash(factory),
+                  let effective=r["effectiveRuntimeCalibrationSHA256"]as?String,hash(effective),
+                  let policy=r["stereoPolicySHA256"]as?String,hash(policy),r.keys.contains("candidateSHA256"),r.keys.contains("profileSHA256") else{return false}
+            let candidate=r["candidateSHA256"]as?String,profile=r["profileSHA256"]as?String
+            guard (candidate==nil)==(profile==nil),candidate.map(hash) ?? true,profile.map(hash) ?? true else{return false}
+            return sha(Data(["runtime-camera-calibration-v1",e.actualDeviceMXID,"face",sdk,factory,effective,policy,
+                candidate ?? "-",profile ?? "-"].joined(separator:"\n").utf8))==e.runtimeCalibrationIdentity
+        }
+        for capture in e.captures {
+            guard ["training","held_out"].contains(capture.role),capture.captureInputPath.hasPrefix("/") else{throw Failure.invalid}
+            let input=try read(capture.captureInputPath,sha:capture.captureInputSHA256)
+            guard input.count<=2_000_000,let document=try JSONSerialization.jsonObject(with:input)as?[String:Any],
+                  document["schemaVersion"]as?Int==1,document["cameraRole"]as?String=="face",
+                  let scopeJSON=document["scope"]as?[String:Any],let frames=document["frames"]as?[[String:Any]],(3...8).contains(frames.count) else{throw Failure.invalid}
+            let scope=try JSONDecoder().decode(ROBFixedHeadRegistrationScope.self,from:JSONSerialization.data(withJSONObject:scopeJSON))
+            try scope.validate()
+            guard scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==e.mappingID,
+                  scope.displayCorrectionIdentity.hasSuffix(":body:"+e.bodyMotionIdentity) else{throw Failure.invalid}
+            let sourceChain=try chain(model:sourceModel,parameters:parameters,panTarget:scope.panTarget,
+                lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget)
+            let currentChain=try chain(model:model,parameters:parameters,panTarget:scope.panTarget,
+                lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget)
+            guard sourceChain.camera==currentChain.camera,sourceChain.frames==currentChain.frames else{throw Failure.invalid}
+            var camera=torso * sourceChain.camera
+            if let pan=operatorPan,scope.panTarget != pan.forwardTarget {
+                let angle=Double(scope.panTarget-pan.forwardTarget)*Double.pi/6000*(pan.scale-parameters["panScale"]!)
+                let pivot=SIMD3<Double>(-0.0207044288303,0,0.355408962871)
+                camera=torso*translated(pivot)*rotated(SIMD3(0,0,angle))*translated(-pivot)*simd_inverse(torso)*camera
+            }
+            let root=URL(fileURLWithPath:capture.captureInputPath).deletingLastPathComponent().standardizedFileURL
+            sources.append(try PinnedGravitySource(capture.captureInputPath))
+            var directions:[SIMD3<Double>]=[],priorSequence:UInt64=0,priorTime=0.0,seenDepth=Set<String>(),seenIMU=Set<UInt64>()
+            for (index,frame) in frames.enumerated() {
+                guard let seq=frame["sequence"]as?UInt64,seq>priorSequence,
+                      let time=frame["capturedAtMilliseconds"]as?Double,time.isFinite,time>priorTime,
+                      frame["cameraGeneration"]as?String==scope.cameraGeneration.uuidString,
+                      frame["runtimeCalibrationIdentity"]as?String==e.runtimeCalibrationIdentity,
+                      frame["cameraServiceSourceSHA256"]as?String==e.cameraServiceSourceSHA256,
+                      let runtime=frame["runtimeCalibration"]as?[String:Any],runtimeMatches(runtime),
+                      frame["rgbOutputUndistorted"]as?Bool==true,
+                      let geometry=frame["depthRGBGeometryCorrespondence"]as?[String:Any],geometry["status"]as?String=="matched",
+                      let w=frame["width"]as?Int,let h=frame["height"]as?Int,(16...1920).contains(w),(16...1080).contains(h),
+                      let depthPath=frame["depthPath"]as?String,depthPath=="frame-\(index).depth-u16le",
+                      let depthSHA=frame["captureSHA256"]as?String,seenDepth.insert(depthSHA).inserted,
+                      let imu=frame["imu"]as?[String:Any],imu["stationary"]as?Bool==true,
+                      imu["axes"]as?String=="sensor_native",imu["gravity_source"]as?String=="stationary_accelerometer_mean",
+                      let sensor=imu["sensor"]as?String,!sensor.isEmpty,sensor.count<=128,
+                      let count=imu["sample_count"]as?Int,(10...1000).contains(count),
+                      let window=imu["window_milliseconds"]as?Double,window.isFinite,(100...1000).contains(window),
+                      let age=imu["age_milliseconds"]as?Double,age.isFinite,(0...100).contains(age),
+                      let latest=imu["latest_timestamp_ns"]as?UInt64,latest>0,seenIMU.insert(latest).inserted,
+                      let timestamp=imu["reference_timestamp_ns"]as?UInt64,timestamp>=latest,
+                      abs(Double(timestamp-latest)/1e6-age)<=0.02 else{throw Failure.invalid}
+                let depthURL=root.appendingPathComponent(depthPath),depth=try read(depthURL.path,sha:depthSHA)
+                totalRawBytes+=depth.count
+                guard depth.count==w*h*2,totalRawBytes<=64_000_000 else{throw Failure.invalid}
+                sources.append(try PinnedGravitySource(depthURL.path))
+                let gravity=try numbers(imu["gravity_mps2"],count:3),std=try numbers(imu["gravity_std_mps2"],count:3)
+                let gyro=try numbers(imu["gyro_rad_s"],count:3),r=try numbers(imu["imu_to_rgb_rotation"],count:9)
+                let rotation=simd_double3x3(columns:(SIMD3(r[0],r[3],r[6]),SIMD3(r[1],r[4],r[7]),SIMD3(r[2],r[5],r[8])))
+                let g=SIMD3(gravity[0],gravity[1],gravity[2]),omega=SIMD3(gyro[0],gyro[1],gyro[2])
+                guard (7...12).contains(simd_length(g)),std.allSatisfy({(0...0.1).contains($0)}),simd_length(omega)<=0.03,
+                      abs(simd_determinant(rotation)-1)<=1e-6,
+                      (0..<3).allSatisfy({i in (0..<3).allSatisfy({j in abs(simd_dot(rotation[i],rotation[j])-(i==j ? 1:0))<=1e-6})}),
+                      commonSensor.map({$0==sensor}) ?? true,commonIMURotation.map({$0==r}) ?? true else{throw Failure.invalid}
+                commonSensor=sensor;commonIMURotation=r;directions.append(simd_normalize(rotation*g));priorSequence=seq;priorTime=time
+            }
+            let sum=directions.reduce(SIMD3<Double>.zero,+)
+            guard simd_length(sum)>=Double(directions.count)*0.99 else{throw Failure.invalid}
+            let g=simd_normalize(sum)
+            guard directions.allSatisfy({acos(min(1,max(-1,simd_dot($0,g))))<=Double.pi/180}) else{throw Failure.invalid}
+            let s=SIMD3(camera.columns.0.z,camera.columns.1.z,camera.columns.2.z)
+            guard hypot(g.y,g.z)>0.1,hypot(s.y,s.z)>0.1 else{throw Failure.invalid}
+            let angle=atan2(s.z*g.y-s.y*g.z,s.y*g.y+s.z*g.z)
+            rows.append(Row(role:capture.role,pose:"\(scope.panTarget):\(scope.lowerTarget):\(scope.upperTarget)",requiredPitch:angle,gravity:g,camera:camera))
+            if capture.role=="held_out",scope.cameraGeneration==activeGeneration {heldGenerationSeen=true}
+        }
+        let training=rows.filter{$0.role=="training"},held=rows.filter{$0.role=="held_out"},poses=Set(training.map(\.pose))
+        guard training.count>=3,poses.count==training.count,!held.isEmpty,Set(held.map(\.pose)).count==held.count,
+              held.allSatisfy({!poses.contains($0.pose)}),heldGenerationSeen,
+              abs(training.map(\.requiredPitch).reduce(0,+)/Double(training.count)-e.deltaRadians)<=1e-9 else{throw Failure.invalid}
+        let correction=rotated(SIMD3(e.deltaRadians,0,0))
+        guard rows.allSatisfy({row in
+            let projected=row.camera*correction*SIMD4(row.gravity,0)
+            return acos(min(1,max(-1,projected.z)))<=Double.pi/180
+        }) else{throw Failure.invalid}
+        return GravityPitch(reference:reference,deltaRadians:e.deltaRadians,bodyMotionIdentity:e.bodyMotionIdentity,
+            cameraGeneration:activeGeneration,runtimeCalibrationIdentity:e.runtimeCalibrationIdentity,
+            cameraServiceSourceSHA256:e.cameraServiceSourceSHA256,sources:sources)
     }
     private static func bellyFloorEvidence(_ reference:BellyFloorDisplayReference)throws->(Data,SIMD3<Double>) {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
@@ -224,13 +401,19 @@ enum ROBNeckRGBPoseDisplay {
     private static func profile(model:ROBGhostRobotModel)->Profile? {
         lock.lock();defer{lock.unlock()}
         guard let bytes=try? Data(contentsOf:activationURL),bytes.count<100_000 else {cachedKey="";cachedProfile=nil;return nil}
-        let key=sha(bytes)+model.modelID+model.referenceID+model.geometryID
+        let key=sha(bytes)+model.modelID+model.referenceID+model.geometryID+model.selectedMappingID
         if key==cachedKey,cachedProfile != nil {
             // Unlike appearance settings, an operator anchor is physical
             // projection provenance. Do not retain it after its pinned file
             // disappears or changes while the activation file stays fixed.
             if let pan=cachedProfile?.operatorPanCalibration,
                (try? read(pan.evidencePath,sha:pan.evidenceSHA256)) == nil {
+                cachedKey="";cachedProfile=nil;return nil
+            }
+            if let pitch=cachedProfile?.gravityPitch,
+               (pitch.bodyMotionIdentity != ROBFixedHeadBodyMotionIdentity.currentIdentity ||
+                (try?read(pitch.reference.evidencePath,sha:pitch.reference.evidenceSHA256)) == nil ||
+                !pitch.sources.allSatisfy(\.unchanged)) {
                 cachedKey="";cachedProfile=nil;return nil
             }
             return cachedProfile
@@ -313,12 +496,24 @@ enum ROBNeckRGBPoseDisplay {
                 }
                 estimatedIdentity=sha(try JSONSerialization.data(withJSONObject:physical,options:[.sortedKeys]))
             }else{estimatedIdentity=nil}
+            let gravityPitch:GravityPitch?
+            let finalEstimatedIdentity:String?
+            if let reference=a.estimatedGravityPitchRefinement {
+                guard a.usePhotoHardwareOpticalOrigin==true,let old=estimatedIdentity else{throw Failure.invalid}
+                gravityPitch=try gravityPitchEvidence(reference,model:model,parameters:p,operatorPan:a.operatorPanCalibration,oldProjectionIdentity:old)
+                finalEstimatedIdentity=sha(try JSONSerialization.data(withJSONObject:["kind":"estimated_post_optical_x_pitch_v1",
+                    "oldEstimatedCameraProjectionIdentity":old,"evidenceSHA256":reference.evidenceSHA256,
+                    "deltaRadians":gravityPitch!.deltaRadians,"bodyMotionIdentity":gravityPitch!.bodyMotionIdentity,
+                    "activeCameraGeneration":gravityPitch!.cameraGeneration.uuidString,
+                    "runtimeCalibrationIdentity":gravityPitch!.runtimeCalibrationIdentity,
+                    "cameraServiceSourceSHA256":gravityPitch!.cameraServiceSourceSHA256],options:[.sortedKeys]))
+            }else{gravityPitch=nil;finalEstimatedIdentity=estimatedIdentity}
             cachedProfile=Profile(id:sha(bytes+fitData+referenceData+(bellyEvidence?.0 ?? Data())+(panEvidence ?? Data())),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
                 robotModelDisplayLiftMeters:modelLift,
                 hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees,
                 bellyFloorNormalOptical:bellyEvidence?.1,bellyFloorDisplayReferenceID:a.bellyFloorDisplayReference?.evidenceSHA256,
-                usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:estimatedIdentity,
-                operatorPanCalibration:a.operatorPanCalibration)
+                usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:finalEstimatedIdentity,
+                operatorPanCalibration:a.operatorPanCalibration,gravityPitch:gravityPitch)
         } catch {cachedProfile=nil}
         return cachedProfile
     }
@@ -336,6 +531,21 @@ enum ROBNeckRGBPoseDisplay {
     static func configurationIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.id}
     static func operatorPanCalibrationDescription(model:ROBGhostRobotModel)->String? {profile(model:model)?.operatorPanCalibration?.shortDescription}
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.estimatedCameraProjectionIdentity}
+    /// A frame-free pose cannot attest to the live camera source. Actual-frame
+    /// consumers call this in addition to their held-pose and source gates.
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,cameraGeneration:UUID,
+        runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?)->Bool {
+        guard let value=profile(model:model) else{return !gravityPitchRefinementRequested}
+        guard let pitch=value.gravityPitch else{return true}
+        return pitch.cameraGeneration==cameraGeneration && pitch.runtimeCalibrationIdentity==runtimeCalibrationIdentity &&
+            pitch.cameraServiceSourceSHA256==cameraServiceSourceSHA256 && pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity
+    }
+    private static var gravityPitchRefinementRequested:Bool {
+        guard FileManager.default.fileExists(atPath:activationURL.path) else{return false}
+        guard let data=try?Data(contentsOf:activationURL),data.count<100_000,
+              let value=try?JSONSerialization.jsonObject(with:data)as?[String:Any] else{return true}
+        return value["estimatedGravityPitchRefinement"] != nil
+    }
     static func robotModelDisplayLiftMeters(model:ROBGhostRobotModel)->Double {profile(model:model)?.robotModelDisplayLiftMeters ?? 0}
     /// Child-group presentation only. Conjugate display-up through the common
     /// gauge so mesh lift stays vertical without translating camera rays or
@@ -485,7 +695,8 @@ enum ROBNeckRGBPoseDisplay {
             bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees,
             bellyFloorDisplayReferenceID:profile.bellyFloorDisplayReferenceID,
             usesPhotoHardwareOpticalOrigin:profile.usePhotoHardwareOpticalOrigin,
-            operatorPanCalibrationDescription:profile.operatorPanCalibration?.shortDescription)
+            operatorPanCalibrationDescription:profile.operatorPanCalibration?.shortDescription,
+            frozenOpticalPitchRefinementRadians:profile.gravityPitch?.deltaRadians)
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget)?.cameraToModel

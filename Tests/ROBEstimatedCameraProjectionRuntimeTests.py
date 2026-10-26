@@ -24,8 +24,9 @@ struct ROBWorkspaceCollisionSnapshot {
     var registrationID:String?;var estimatedCameraProjectionIdentity:String?;var observations:[Observation]
 }
 enum ROBWorkspaceDepthMapError:Error {case acquisition(String),invalidFrame}
-struct FakeIntrinsics {var rgbOutputUndistorted:Bool?=true}
-enum ROBArmRoutineVision {struct Frame {var capturedAt:Double;var intrinsics:FakeIntrinsics?=FakeIntrinsics()}}
+struct Runtime {var identity="fixture-runtime"}
+struct FakeIntrinsics {var rgbOutputUndistorted:Bool?=true;var runtimeCalibration:Runtime?=Runtime();var cameraServiceSourceSHA256:String?="fixture-service"}
+enum ROBArmRoutineVision {struct Frame {var capturedAt:Double;var intrinsics:FakeIntrinsics?=FakeIntrinsics();var cameraGeneration=UUID()}}
 struct Scope {
     var panTarget=6015,lowerTarget=6011,upperTarget=6160
     var valid=true
@@ -42,6 +43,10 @@ struct Scope {
 @MainActor enum ROBNeckRGBPoseDisplay {
     static var identity:String?,photoHardwareOpticalOriginRequested=false,unavailable=false
     static var onResolve:(()->Void)?
+    static var sourceAccepted=true,lastSource:(UUID,String?,String?)?
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,cameraGeneration:UUID,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?)->Bool {
+        lastSource=(cameraGeneration,runtimeCalibrationIdentity,cameraServiceSourceSHA256);return sourceAccepted
+    }
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {identity}
     static func provisionalCameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         onResolve?();if unavailable {return nil};var value=matrix_identity_double4x4;value.columns.3=SIMD4(0.1,0.2,0.3,1);return value
@@ -68,6 +73,7 @@ struct Scope {
             controller.readNeck={controller.neck}
             ROBNeckRGBPoseDisplay.identity=a;ROBNeckRGBPoseDisplay.photoHardwareOpticalOriginRequested=true
             ROBNeckRGBPoseDisplay.unavailable=false;ROBNeckRGBPoseDisplay.onResolve=nil
+            ROBNeckRGBPoseDisplay.sourceAccepted=true;ROBNeckRGBPoseDisplay.lastSource=nil
         }
         func rejects(_ reason:String,_ body:()throws->Void) {
             do {try body();fatalError("Admitted \(reason)")}catch{}
@@ -75,6 +81,10 @@ struct Scope {
         func rejectsProjection(_ reason:String) {rejects(reason){_ = try guarder.project(frame,view,model)}}
         reset();let estimated=try guarder.project(frame,view,model)
         precondition(estimated.identity==a && estimated.lowerTarget==6011 && estimated.matrix.columns.3==SIMD4(0.1,0.2,0.3,1))
+        precondition(ROBNeckRGBPoseDisplay.lastSource?.0==frame.cameraGeneration && ROBNeckRGBPoseDisplay.lastSource?.1=="fixture-runtime" && ROBNeckRGBPoseDisplay.lastSource?.2=="fixture-service")
+        reset();ROBNeckRGBPoseDisplay.sourceAccepted=false;rejectsProjection("gravity refinement source mismatch")
+        reset();ROBNeckRGBPoseDisplay.identity=nil;ROBNeckRGBPoseDisplay.photoHardwareOpticalOriginRequested=false
+        ROBNeckRGBPoseDisplay.sourceAccepted=false;rejectsProjection("invalid requested refinement cannot fall through to a legacy projection")
         reset();ROBNeckRGBPoseDisplay.identity=nil;ROBNeckRGBPoseDisplay.photoHardwareOpticalOriginRequested=false
         let legacy=try guarder.project(frame,view,model)
         precondition(legacy.identity==nil && legacy.lowerTarget==nil && legacy.matrix==matrix_identity_double4x4 && controller.scopeCalls==0)

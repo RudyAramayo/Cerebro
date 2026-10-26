@@ -517,6 +517,7 @@ import simd
             ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==physicalBeforeFloor,
             "Belly display evidence changed head/raw rotation, physical projection identity or depth authority")
         try operatorPanFixture(model:model,base:a,temporary:temp,restore:activation)
+        try gravityPitchFixture(model:model,base:a,temporary:temp,restore:activation)
         // A bare normal, edited source, rejected report or insufficient held-out
         // evidence cannot become a cosmetic pose merely by changing its hash.
         for field in ["kind","normalOptical","validationRMSEMeters","validationP95AbsMeters","validationMaxAbsMeters",

@@ -82,6 +82,9 @@ import CoreImage
         let scope=try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame)
         let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
         guard gatewayArm == (model.physicalSide == "right" ? "left" : "right"),can.registrationID == nil,
+              ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:frame.cameraGeneration,
+                runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
+                cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256),
               scope.upperTarget==can.view.upperTarget,
               (neck["pan_degrees"] as? Double).map({$0.isFinite && abs($0-can.view.panDegrees)<=0.05}) == true,
               let source=map.observations.first(where:{$0.sequence==can.sequence && abs($0.capturedAtMilliseconds-can.capturedAt)<=1}),
@@ -233,6 +236,9 @@ import CoreImage
         let controller=ROBFixedHeadCalibrationWindowController.shared,scope=try controller.scope(model:model,frame:reference)
         let neck=controller.readNeck?() ?? [:]
         guard can.registrationID==nil,gatewayArm==(model.physicalSide=="right" ? "left":"right"),
+              ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:reference.cameraGeneration,
+                runtimeCalibrationIdentity:reference.intrinsics?.runtimeCalibration?.identity,
+                cameraServiceSourceSHA256:reference.intrinsics?.cameraServiceSourceSHA256),
               scope.upperTarget==can.view.upperTarget,
               (neck["pan_degrees"] as?Double).map({abs($0-can.view.panDegrees)<=0.05})==true,
               let source=map.observations.first(where:{$0.sequence==can.sequence && abs($0.capturedAtMilliseconds-can.capturedAt)<=1}),
@@ -477,6 +483,9 @@ import CoreImage
               neck["upper"] as? Int==scope.upperTarget,
               let ready=neck["ready_at"] as? Double,ready.isFinite,ready<=now,captured>=ready,
               ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==trial.estimatedCameraProjectionIdentity,
+              ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:frame.cameraGeneration,
+                runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
+                cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256),
               let camera=ROBNeckRGBPoseDisplay.provisionalCameraToModel(model:model,panTarget:scope.panTarget,
                 lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget),
               (0..<4).allSatisfy({column in (0..<4).allSatisfy{abs(camera[column][$0]-value.cameraToModel[column][$0])<=1e-10}}),

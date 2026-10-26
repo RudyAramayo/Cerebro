@@ -121,6 +121,8 @@ final class ROBGhostRobotModel {
 @MainActor enum ROBNeckRGBPoseDisplay {
     static var pid=String(repeating:"b",count:64)
     static var matrix=matrix_identity_double4x4
+    static var sourceAccepted=true
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,cameraGeneration:UUID,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?)->Bool {sourceAccepted}
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {pid}
     static func provisionalCameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {matrix}
 }
@@ -209,8 +211,8 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
         let first=try await begin()
         if case .registered = first.projection {preconditionFailure("Estimated inspection manufactured registration")}
         precondition(c.registrationCalls==0 && map.registrationID==nil)
-        // Exercise the actual NEW no-carry result aggregator with explicitly
-        // synthetic observed-pixel seams; no FK projection becomes a jaw.
+        // Synthetic box/jaw co-motion without an independent pre-approach
+        // appearance reference cannot manufacture positive lift evidence.
         func servoFrame(_ seq:UInt64,_ dx:Int,_ dy:Int)->ROBGripperVisualServo.Frame {
             let raw=v.scene.sample(sequence:seq,time:Date().timeIntervalSince1970*1000,canDX:dx,canDY:dy)
             return .init(width:raw.width,height:raw.height,rgb:Data(raw.gray.flatMap{[$0,$0,$0]}),
@@ -226,7 +228,10 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
                 capturedAtMilliseconds:frame.capturedAtMilliseconds,scopeIdentity:frame.scopeIdentity)
             let decision=ROBGripperVisualServo.Decision(status:"observedOnly",reason:"Synthetic pixel observation only",observation:jaw,
                 canMiddlePixels:[80+Double(canDX),66+Double(canDY)],pixelError:[0,0],jointTarget:nil,readyToGrip:false,diagnostics:[:])
-            return .init(frame:frame,decision:decision,canBox:[0.4,0.4,0.6,0.7])
+            let source:String
+            if case .visualTrial(let projection)=first.projection {source=projection.frameContractIdentity} else {source="fixture"}
+            return .init(frame:frame,decision:decision,canBox:[0.4,0.4,0.6,0.7],handsClear:true,
+                cameraGeneration:v.scene.camera,sourceIdentity:source)
         }
         let servoBase=ROBRecyclingVisualInspection.ServoBaseline(projection:first.projection,scope:first.scope,
             targetIdentity:first.targetIdentity,viewIdentity:first.viewIdentity)
@@ -235,13 +240,14 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
         var servoSeq:UInt64=100
         let provisional=try await ROBRecyclingVisualInspection.verifyIncrementalServoLift(context:servoContext,beforeLift:beforeServo,model:model,
             heldSinceMilliseconds:0,observe:{servoSeq+=1;return servoSample(servoSeq,12,-8,12,-8)},check:{})
-        precondition(provisional.verdict == .unknown && servoContext.provisionalCoMotion && !provisional.possessionMeasured)
-        precondition(provisional.reason.contains("NOT verified") && provisional.samples>=3,"Box co-motion must not confirm grasp or carry")
+        precondition(provisional.verdict == .unknown && !provisional.possessionMeasured)
+        precondition(provisional.reason.contains("No independent pre-approach can appearance"),"Box co-motion must not confirm grasp or carry without independent appearance")
         let missContext=ROBRecyclingVisualInspection.ServoContext(baseline:servoBase,can:can,model:model,box:[0.4,0.4,0.6,0.7])
         let missed=try await ROBRecyclingVisualInspection.verifyIncrementalServoLift(context:missContext,beforeLift:beforeServo,model:model,
             heldSinceMilliseconds:0,observe:{servoSeq+=1;return servoSample(servoSeq,0,0,12,-8)},check:{})
-        precondition(missed.verdict == .failed && !missContext.provisionalCoMotion)
-        print("PASS actual incremental lift inspection:3observedcan-box/jawframes remainprovisionalUNKNOWN/noappearanceclaim; stationarycan missFAILED; bothhold/no carry")
+        precondition(missed.verdict == .unknown && !missContext.provisionalCoMotion,
+            "A missing appearance reference remains unknown even when synthetic boxes disagree")
+        print("PASS actual incremental lift inspection: synthetic box/jaw motion without independent pre-approach appearance remains UNKNOWN; no possession or transfer claim")
         func lift() {
             v.lift=true
             let z=0.675,x=((0.5+12.0/160)*319-160)*z/100,y=((0.6-8.0/120)*239-120)*z/100
@@ -253,11 +259,12 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
         precondition(supported.reason.contains("estimated-camera projection") && supported.fixedViewIdentity.contains("unmeasured-visual-trial"))
         v.lift=false;ROBAmberGatewayClient.shared.feedback.positionsRadians=[-0.0035,0.1638,0.7,0,0,0,0].map(NSNumber.init(value:))
         let original=try await begin()
-        for mutation in ["profile","runtime","source","head","stationary","hold","feedback","receipt","pending","map","depth","lens","K","gateway"] {
+        for mutation in ["profile","runtime","source","refinementSource","head","stationary","hold","feedback","receipt","pending","map","depth","lens","K","gateway"] {
             switch mutation {
             case "profile":ROBNeckRGBPoseDisplay.pid=String(repeating:"e",count:64)
             case "runtime":v.intrinsics.runtimeCalibration?.identity=String(repeating:"e",count:64)
             case "source":v.intrinsics.cameraServiceSourceSHA256=String(repeating:"e",count:64)
+            case "refinementSource":ROBNeckRGBPoseDisplay.sourceAccepted=false
             case "head":c.scopeValue.upperTarget=6200
             case "stationary":c.neck=["known":true,"stationary":false,"pan":6015,"lower":6011,"upper":6160,"pan_degrees":0.0,"ready_at":0.0]
             case "hold":ROBAmberGatewayClient.shared.feedback.statuses[0]=1
@@ -274,6 +281,7 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
             v.counter+=1
             do {_=try await ROBRecyclingVisualInspection.verifyAfterLift(context:original,model:model,gatewayArm:mutation=="gateway" ? "left":"right",check:{});preconditionFailure("Unsafe inspection accepted: "+mutation)}catch{}
             ROBNeckRGBPoseDisplay.pid=trial.estimatedCameraProjectionIdentity;v.intrinsics=CameraIntrinsics();c.scopeValue.upperTarget=6160
+            ROBNeckRGBPoseDisplay.sourceAccepted=true
             ROBAmberGatewayClient.shared.feedback.statuses=[NSNumber](repeating:2,count:7);ROBAmberGatewayClient.shared.feedback.effectiveSampleAgeMilliseconds=0
             b.authorized=true;b.evidence=originalEvidence;ROBWorkspaceCollisionPlan.validMap=true
             c.neck=["known":true,"stationary":true,"pan":6015,"lower":6011,"upper":6160,"pan_degrees":0.0,"ready_at":0.0]

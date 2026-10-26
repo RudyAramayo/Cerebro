@@ -291,6 +291,7 @@ final class ROBAmberGatewayClient: NSObject {
 
 enum ROBNeckRGBPoseDisplay {
     static var projectionIdentity:String? = nil
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,cameraGeneration:UUID,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?)->Bool {true}
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {projectionIdentity}
     static var nominalCameraToModel=matrix_identity_double4x4
     static func provisionalCameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
@@ -433,6 +434,7 @@ final class ROBArmRoutineVision {
     struct Correspondence {let status="matched"}
     struct Intrinsics {
         let runtimeCalibration:RuntimeCalibration?
+        var cameraServiceSourceSHA256:String? = nil
         var fx=24.0,fy=24.0,cx=12.0,cy=12.0
         let rgbOutputUndistorted:Bool?=true,depthRGBGeometryCorrespondence:Correspondence?=Correspondence()
         func isValid(forWidth:Int,height:Int)->Bool {forWidth==24 && height==24 && fx>0 && fy>0}

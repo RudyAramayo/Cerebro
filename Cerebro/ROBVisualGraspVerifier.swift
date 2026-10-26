@@ -397,9 +397,25 @@ extension ROBVisualGraspVerifier {
         let jawConfidence:Double,jawEvidenceKind:String
         let canBox:Box
     }
+    /// Minted only by the actual observed-jaw verifier reaching support.
+    /// This object cannot be decoded, copied from an archive or claimed twice.
+    final class ObservedSupport {
+        let evidence:Evidence
+        let sourceIdentity:String
+        private let lock=NSLock()
+        private var claimed=false
+        fileprivate init(evidence:Evidence,sourceIdentity:String) {
+            self.evidence=evidence;self.sourceIdentity=sourceIdentity
+        }
+        func claimForNativeAttachment()->Bool {
+            lock.lock();defer{lock.unlock()}
+            guard !claimed else{return false};claimed=true;return true
+        }
+    }
     struct ObservedJawVerifier {
         private var verifier:ROBVisualGraspVerifier
         private let sourceIdentity:String
+        private var nativeSupport:ObservedSupport? = nil
         init(baseline:ObservedJawInput,appearance:AppearanceSeed,nowMilliseconds:Double)throws {
             sourceIdentity=baseline.sourceIdentity
             guard appearance.sourceIdentity==baseline.sourceIdentity else{throw Unavailable.evidence("Pre-approach can appearance belongs to another RGB-D source.")}
@@ -409,9 +425,14 @@ extension ROBVisualGraspVerifier {
             verifier=try ROBVisualGraspVerifier(baseline:Self.sample(baseline,now:baseline.capturedAtMilliseconds),targetBox:baseline.canBox,nowMilliseconds:baseline.capturedAtMilliseconds,independentAppearance:appearance)
         }
         var evidence:Evidence {verifier.evidence}
+        var nativeSupportedObservation:ObservedSupport? {nativeSupport}
         mutating func observe(_ value:ObservedJawInput,nowMilliseconds:Double)throws->Evidence {
             guard value.sourceIdentity==sourceIdentity else {throw Unavailable.evidence("The synchronized RGB-D source changed.")}
-            return verifier.observe(try Self.sample(value,now:nowMilliseconds),nowMilliseconds:nowMilliseconds)
+            let result=verifier.observe(try Self.sample(value,now:nowMilliseconds),nowMilliseconds:nowMilliseconds)
+            if result.verdict == .supported,nativeSupport==nil {
+                nativeSupport=ObservedSupport(evidence:result,sourceIdentity:sourceIdentity)
+            }
+            return result
         }
         mutating func finish()->Evidence {verifier.finish()}
         private static func sample(_ v:ObservedJawInput,now:Double)throws->Sample {
