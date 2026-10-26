@@ -104,6 +104,8 @@ enum ROBNeckRGBPoseDisplay {
         let usePhotoHardwareOpticalOrigin:Bool?
         let operatorPanCalibration:OperatorPanCalibration?
         let estimatedGravityPitchRefinement:GravityPitchReference?
+        /// DEBUG DEMO parameter reuse only; original capture provenance stays immutable.
+        let demoPortableGravityPitchPrior:Bool?
     }
     private struct GravityPitchReference:Decodable {
         let evidencePath:String,evidenceSHA256:String
@@ -203,6 +205,7 @@ enum ROBNeckRGBPoseDisplay {
         let estimatedCameraProjectionIdentity:String?
         let operatorPanCalibration:OperatorPanCalibration?
         let gravityPitch:GravityPitch?
+        let demoPortableGravityPitchPrior:Bool
     }
     private static let lock=NSLock()
     private static var cachedKey=""
@@ -235,7 +238,8 @@ enum ROBNeckRGBPoseDisplay {
         return bytes
     }
     private static func gravityPitchEvidence(_ reference:GravityPitchReference,model:ROBGhostRobotModel,
-        parameters:[String:Double],operatorPan:OperatorPanCalibration?,oldProjectionIdentity:String)throws->GravityPitch {
+        parameters:[String:Double],operatorPan:OperatorPanCalibration?,oldProjectionIdentity:String,
+        demoPortableGravityPitchPrior:Bool=false)throws->GravityPitch {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
         guard bytes.count<100_000 else{throw Failure.invalid}
         let e=try JSONDecoder().decode(GravityPitchEvidence.self,from:bytes)
@@ -253,7 +257,7 @@ enum ROBNeckRGBPoseDisplay {
         guard e.schemaVersion==1,e.kind=="estimated_stationary_imu_optical_x_pitch_refinement",
               e.modelID==model.modelID,e.referenceID==model.referenceID,e.geometryID==model.geometryID,
               e.oldEstimatedCameraProjectionIdentity==oldProjectionIdentity,
-              e.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,UUID(uuidString:e.bodyMotionIdentity) != nil,
+              (demoPortableGravityPitchPrior || e.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity),UUID(uuidString:e.bodyMotionIdentity) != nil,
               let activeGeneration=UUID(uuidString:e.activeCameraGeneration),e.cameraRole=="face",
               !e.actualDeviceMXID.isEmpty,e.actualDeviceMXID.count<=128,
               hash(e.runtimeCalibrationIdentity),hash(e.cameraServiceSourceSHA256),
@@ -452,7 +456,7 @@ enum ROBNeckRGBPoseDisplay {
                 cachedKey="";cachedProfile=nil;return nil
             }
             if let pitch=cachedProfile?.gravityPitch,
-               (pitch.bodyMotionIdentity != ROBFixedHeadBodyMotionIdentity.currentIdentity ||
+               ((cachedProfile?.demoPortableGravityPitchPrior != true && pitch.bodyMotionIdentity != ROBFixedHeadBodyMotionIdentity.currentIdentity) ||
                 (try?read(pitch.reference.evidencePath,sha:pitch.reference.evidenceSHA256)) == nil ||
                 !pitch.sources.allSatisfy(\.unchanged)) {
                 cachedKey="";cachedProfile=nil;return nil
@@ -462,6 +466,11 @@ enum ROBNeckRGBPoseDisplay {
         cachedKey=key;cachedProfile=nil
         do {
             let a=try JSONDecoder().decode(Activation.self,from:bytes)
+            let portable=a.demoPortableGravityPitchPrior==true
+            #if !DEBUG
+            guard !portable else{throw Failure.invalid}
+            #endif
+            guard !portable || (a.usePhotoHardwareOpticalOrigin==true && a.estimatedGravityPitchRefinement != nil) else{throw Failure.invalid}
             guard a.schemaVersion==1,a.kind=="provisional_rgb_neck_display",a.modelID==model.modelID,
                   a.referenceID==model.referenceID,a.geometryID==model.geometryID else {throw Failure.invalid}
             guard a.headMount?.valid ?? true else {throw Failure.invalid}
@@ -541,7 +550,8 @@ enum ROBNeckRGBPoseDisplay {
             let finalEstimatedIdentity:String?
             if let reference=a.estimatedGravityPitchRefinement {
                 guard a.usePhotoHardwareOpticalOrigin==true,let old=estimatedIdentity else{throw Failure.invalid}
-                gravityPitch=try gravityPitchEvidence(reference,model:model,parameters:p,operatorPan:a.operatorPanCalibration,oldProjectionIdentity:old)
+                gravityPitch=try gravityPitchEvidence(reference,model:model,parameters:p,operatorPan:a.operatorPanCalibration,oldProjectionIdentity:old,
+                    demoPortableGravityPitchPrior:portable)
                 var identity:[String:Any]=["kind":"estimated_post_optical_x_pitch_v1",
                     "oldEstimatedCameraProjectionIdentity":old,"evidenceSHA256":reference.evidenceSHA256,
                     "deltaRadians":gravityPitch!.deltaRadians,"bodyMotionIdentity":gravityPitch!.bodyMotionIdentity,
@@ -552,6 +562,7 @@ enum ROBNeckRGBPoseDisplay {
                     identity["kind"]="estimated_affine_upper_post_optical_x_pitch_v1"
                     identity["referenceUpperTarget"]=upper;identity["slopeRadiansPerRawUnit"]=gravityPitch!.slopeRadiansPerRawUnit
                 }
+                if portable {identity["demoPortableGravityPitchPrior"]="immutable_pitch_parameter_prior_current_frame_validation_v1"}
                 finalEstimatedIdentity=sha(try JSONSerialization.data(withJSONObject:identity,options:[.sortedKeys]))
             }else{gravityPitch=nil;finalEstimatedIdentity=estimatedIdentity}
             cachedProfile=Profile(id:sha(bytes+fitData+referenceData+(bellyEvidence?.0 ?? Data())+(panEvidence ?? Data())),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
@@ -559,7 +570,7 @@ enum ROBNeckRGBPoseDisplay {
                 hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees,
                 bellyFloorNormalOptical:bellyEvidence?.1,bellyFloorDisplayReferenceID:a.bellyFloorDisplayReference?.evidenceSHA256,
                 usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:finalEstimatedIdentity,
-                operatorPanCalibration:a.operatorPanCalibration,gravityPitch:gravityPitch)
+                operatorPanCalibration:a.operatorPanCalibration,gravityPitch:gravityPitch,demoPortableGravityPitchPrior:portable)
         } catch {cachedProfile=nil}
         return cachedProfile
     }
@@ -600,8 +611,8 @@ enum ROBNeckRGBPoseDisplay {
         let scope=actualFrame.scope
         guard (try? scope.validate()) != nil,scope.cameraGeneration==actualFrame.cameraGeneration,
               scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==model.selectedMappingID,
-              pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,
-              scope.displayCorrectionIdentity.hasSuffix(":body:"+pitch.bodyMotionIdentity),
+              (value.demoPortableGravityPitchPrior || pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity),
+              scope.displayCorrectionIdentity.hasSuffix(":body:"+ROBFixedHeadBodyMotionIdentity.currentIdentity),
               actualFrame.actualDeviceMXID==pitch.actualDeviceMXID,
               actualFrame.runtimeCalibrationIdentity==pitch.runtimeCalibrationIdentity,
               actualFrame.cameraServiceSourceSHA256==pitch.cameraServiceSourceSHA256,
@@ -630,11 +641,28 @@ enum ROBNeckRGBPoseDisplay {
         // Same accelerometer sign and full 3D residual used by the evidence loader.
         return acos(min(1,max(-1,projected.z)))<=Double.pi/180
     }
+    /// Read-only audit of a validated current use. Original body/generation and
+    /// evidence hashes are never rebound. This pitch-only model prior cannot
+    /// validate yaw, optical origin, metric depth or camera-to-arm registration.
+    struct GravityPitchUseSessionAudit:Codable {
+        let kind:String,sourceEvidenceSHA256:String,sourceOriginalBodyIdentity:String
+        let sourceOriginalCameraGeneration:UUID,currentBodyIdentity:String,currentCameraGeneration:UUID
+        let demoPortableGravityPitchPrior:Bool
+        let registrationVerified:Bool,armMotionAuthority:Bool,originalEvidenceRebound:Bool
+    }
+    static func gravityPitchUseSessionAudit(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->GravityPitchUseSessionAudit? {
+        guard estimatedProjectionAcceptsSource(model:model,actualFrame:actualFrame),
+              let value=profile(model:model),let pitch=value.gravityPitch else{return nil}
+        return .init(kind:"estimated_pitch_model_prior_current_frame_use_v1",sourceEvidenceSHA256:pitch.reference.evidenceSHA256,
+            sourceOriginalBodyIdentity:pitch.bodyMotionIdentity,sourceOriginalCameraGeneration:pitch.cameraGeneration,
+            currentBodyIdentity:ROBFixedHeadBodyMotionIdentity.currentIdentity,currentCameraGeneration:actualFrame.cameraGeneration,
+            demoPortableGravityPitchPrior:value.demoPortableGravityPitchPrior,registrationVerified:false,armMotionAuthority:false,originalEvidenceRebound:false)
+    }
     private static var gravityPitchRefinementRequested:Bool {
         guard FileManager.default.fileExists(atPath:activationURL.path) else{return false}
         guard let data=try?Data(contentsOf:activationURL),data.count<100_000,
               let value=try?JSONSerialization.jsonObject(with:data)as?[String:Any] else{return true}
-        return value["estimatedGravityPitchRefinement"] != nil
+        return value["estimatedGravityPitchRefinement"] != nil || value["demoPortableGravityPitchPrior"]as?Bool==true
     }
     static func robotModelDisplayLiftMeters(model:ROBGhostRobotModel)->Double {profile(model:model)?.robotModelDisplayLiftMeters ?? 0}
     /// Child-group presentation only. Conjugate display-up through the common

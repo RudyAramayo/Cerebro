@@ -265,7 +265,56 @@ extension ROBNeckRGBPoseDisplayFixture {
         try install(evidence)
         precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==refinedID,"Legacy constant method changed after affine refinement")
         print("PASS synthetic affine upper pitch: training-only centered rank2 fit,500-unit span, independently held-out full3Dgravity, coefficient and globalangle bounds, exact optical origin/image-right, shared both-arm head, constant method retained; no registration or motion authority")
-        _=ROBFixedHeadBodyMotionIdentity.invalidate();rejects("Body change silently rebound old capture evidence")
+        let originalProofBytes=try Data(contentsOf:proof)
+        let originalCaptureBytes=try paths.map{try Data(contentsOf:$0)}
+        let currentBody=ROBFixedHeadBodyMotionIdentity.invalidate()
+        rejects("Body change silently rebound old capture evidence")
+        a["demoPortableGravityPitchPrior"]=false;try write(a,to:activation)
+        rejects("Explicit OFF portable policy accepted an old body")
+        a["demoPortableGravityPitchPrior"]=true;try write(a,to:activation)
+        #if DEBUG
+        let portableID=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!
+        precondition(portableID != refinedID,"Portable policy was omitted from projection identity")
+        precondition(try! acceptsLive(bodyValue:currentBody),"Fresh actual source/gravity did not validate immutable prior across app body identity")
+        precondition(try! !acceptsLive(),"Portable prior accepted the original body's scope as current")
+        precondition(try! !acceptsLive(deviceID:"different-device",bodyValue:currentBody))
+        precondition(try! !acceptsLive(runtimeValue:String(repeating:"f",count:64),bodyValue:currentBody))
+        precondition(try! !acceptsLive(serviceValue:String(repeating:"f",count:64),bodyValue:currentBody))
+        precondition(try! !acceptsLive(bodyValue:currentBody,intrinsicsValue:"different-K"))
+        precondition(try! !acceptsLive(bodyValue:currentBody,scopeGeneration:UUID()))
+        precondition(try! !acceptsLive(bodyValue:currentBody,imuValue:tiltedIMU),"Portable prior accepted >1 degree actual gravity error")
+        precondition(try! !acceptsLive(bodyValue:currentBody,imuValue:originalMovingIMU))
+        for milliseconds in [300.0,479.0,495.0,1000.0] {
+            var held=actualIMU;held["window_milliseconds"]=milliseconds
+            precondition(try! acceptsLive(bodyValue:currentBody,imuValue:held),"Portable policy tightened existing stationary window")
+        }
+        precondition(!ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:generations.last!,
+            runtimeCalibrationIdentity:runtimeID,cameraServiceSourceSHA256:service),"Frame-free API accepted an old body under portable policy")
+        let auditScope=ROBFixedHeadRegistrationScope(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+            cameraGeneration:liveGeneration,gatewaySessionGeneration:1,displayCorrectionIdentity:"fixture:body:"+currentBody,
+            panTarget:6167,lowerTarget:6411,upperTarget:5800,intrinsicsIdentity:String(repeating:"e",count:64))
+        let auditedFrame=ROBNeckRGBPoseDisplay.ActualFrameSource(cameraGeneration:liveGeneration,actualDeviceMXID:device,
+            runtimeCalibrationIdentity:runtimeID,cameraServiceSourceSHA256:service,scope:auditScope,
+            inertialJSON:try JSONSerialization.data(withJSONObject:actualIMU))
+        let audit=ROBNeckRGBPoseDisplay.gravityPitchUseSessionAudit(model:model,actualFrame:auditedFrame)!
+        precondition(audit.sourceOriginalBodyIdentity==body && audit.currentBodyIdentity==currentBody &&
+            audit.sourceOriginalCameraGeneration==generations.last! && audit.currentCameraGeneration==liveGeneration &&
+            audit.sourceEvidenceSHA256==hash(originalProofBytes) && audit.demoPortableGravityPitchPrior &&
+            !audit.registrationVerified && !audit.armMotionAuthority && !audit.originalEvidenceRebound)
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==portableID,"Actual use rebound original evidence identity")
+        var reboundEvidence=evidence;reboundEvidence["bodyMotionIdentity"]=currentBody
+        try install(reboundEvidence);rejects("Portable policy accepted relabelled source body instead of original capture lineage")
+        try install(evidence);precondition(try! acceptsLive(bodyValue:currentBody))
+        try Data(repeating:42,count:validDepth.count).write(to:depth,options:.atomic)
+        rejects("Portable cache accepted changed original raw depth")
+        try validDepth.write(to:depth);precondition(try! acceptsLive(bodyValue:currentBody))
+        #else
+        rejects("Release build accepted DEBUG portable policy")
+        #endif
+        let retainedProofBytes=try Data(contentsOf:proof),retainedCaptureBytes=try paths.map{try Data(contentsOf:$0)}
+        precondition(retainedProofBytes==originalProofBytes,"Portable policy rewrote original evidence")
+        precondition(retainedCaptureBytes==originalCaptureBytes,"Portable policy rewrote original captures")
+        a.removeValue(forKey:"demoPortableGravityPitchPrior")
         a.removeValue(forKey:"estimatedGravityPitchRefinement");try write(a,to:activation)
         precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==oldPID)
         precondition(current()!.provisionalCameraToModel==baseline.last!.provisionalCameraToModel,"Absent optional refinement changed legacy matrix")

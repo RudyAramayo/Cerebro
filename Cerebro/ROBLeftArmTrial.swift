@@ -2868,7 +2868,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     /// neither the diagnostic nor a selected view grants arm travel.
     @MainActor private func reviewInitialRetreatWithCoverage(map initialMap:ROBWorkspaceCollisionSnapshot,
         model:ROBGhostRobotModel,initialBaseline:[Double],offset:[Double],emptySource:String)
-        async throws ->(map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,proof:ROBWorkspaceInitialEmptyRetreat,reference:ROBArmRoutineVision.Frame) {
+        async throws ->(map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,proof:ROBWorkspaceInitialEmptyRetreat,reference:InitialEmptyViewReference) {
         var map=initialMap,attempted:[ROBWorkspaceView]=[],evidence:[[String:Any]]=[]
         let began=ProcessInfo.processInfo.systemUptime,recoveryDeadline=began+30
         var outcome="not_attempted"
@@ -2899,7 +2899,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             guard let trial=try visualTrial(map:map,model:model,baseline:baseline) else {
                 throw ROBArmRoutineError.blocked("Automatic coverage lost the exact local visual-trial scope.")
             }
-            guard let reference=vision.snapshot()["face"] else {throw ROBArmRoutineError.blocked("The initial preflight source frame is unavailable.")}
+            guard let sourceFrame=vision.snapshot()["face"] else {throw ROBArmRoutineError.blocked("The initial preflight source frame is unavailable.")}
+            let reference=try initialEmptyViewReference(sourceFrame)
             let now=Date().timeIntervalSince1970*1000
             do {
                 let proof=try await reviewInitialLocalRetreat(map:map,model:model,baseline:baseline,
@@ -2954,53 +2955,97 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
+    private struct InitialEmptyViewReference {
+        let frame:ROBArmRoutineVision.Frame
+        let pan:Int,lower:Int,upper:Int,readyAtUptime:Double,intrinsicsIdentity:String
+        let bodyIdentity:String,session:UInt64,neckIdentity:String
+    }
+    /// The old frame supplies source/K only, NEVER a pose at the new head hold.
+    /// Pin actual held targets/readiness independently before geometry work.
+    @MainActor private func initialEmptyViewReference(_ frame:ROBArmRoutineVision.Frame) throws ->InitialEmptyViewReference {
+        let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+        guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,
+              let pan=neck["pan"]as?Int,let lower=neck["lower"]as?Int,let upper=neck["upper"]as?Int,
+              let ready=neck["ready_at"]as?Double,ready.isFinite,ready<=ProcessInfo.processInfo.systemUptime,
+              let identity=localNeckIdentity(),generation>0,frame.cameraGeneration==vision.cameraGeneration else {
+            throw ROBArmRoutineError.blocked("Initial empty view reference needs known stationary raw neck targets, readiness, current camera and gateway session.")
+        }
+        return .init(frame:frame,pan:pan,lower:lower,upper:upper,readyAtUptime:ready,
+            intrinsicsIdentity:try ROBFixedHeadCalibrationWindowController.intrinsicsIdentity(frame),
+            bodyIdentity:ROBFixedHeadBodyMotionIdentity.currentIdentity,session:generation,neckIdentity:identity)
+    }
+
     /// Nonactuating initial-retreat preflight only. A slow geometry proof may
     /// outlive a frame; reacquire actual source data rather than restamp it.
     @MainActor private func refreshInitialEmptyDispatchView(map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
-        trial:ROBWorkspaceVisualCalibrationTrial,baseline:[Double],reference:ROBArmRoutineVision.Frame) async throws {
+        trial:ROBWorkspaceVisualCalibrationTrial,baseline:[Double],reference:InitialEmptyViewReference) async throws {
         guard localReceiptCommand != nil,!cameraReady,!leased,!armTravelDispatched,!jawCommandDispatched,
               !jawSetupDispatchUncertain,!recyclingGripDispatched,!servoPossiblePayloadUncertain else {
             throw ROBArmRoutineError.blocked("Fresh-view recovery is limited to stationary EMPTY preflight before any travel or jaw command.")
         }
         let controller=ROBFixedHeadCalibrationWindowController.shared
-        let expectedScope=try controller.scope(model:model,frame:reference)
-        guard let expected=reference.intrinsics,let runtime=expected.runtimeCalibration?.identity,
-              let source=expected.cameraServiceSourceSHA256,reference.cameraGeneration==trial.cameraGeneration else {
-            throw ROBArmRoutineError.blocked("The initial proof lost its original RGB-D source contract.")
+        let oldFrame=reference.frame
+        func reject(_ reason:String,_ detail:String)->ROBArmRoutineError {
+            var status=collisionReviewStatus as? [String:Any] ?? [:]
+            status["initial_empty_view_refresh"]=["reason":reason,"detail":detail,
+                "reference_used_for_source_only":true,"reference_sequence":NSNumber(value:oldFrame.sequence),
+                "reference_captured_at_ms":oldFrame.capturedAt,"expected_ready_at_uptime":reference.readyAtUptime,
+                "expected_raw_neck":[reference.pan,reference.lower,reference.upper],
+                "expected_gateway_generation":NSNumber(value:reference.session),"motion_authority":false]
+            collisionReviewStatus=status as NSDictionary
+            return .blocked("Initial empty view ["+reason+"]: "+detail)
+        }
+        guard let expected=oldFrame.intrinsics,let runtime=expected.runtimeCalibration?.identity,
+              let source=expected.cameraServiceSourceSHA256,oldFrame.cameraGeneration==trial.cameraGeneration,reference.bodyIdentity==trial.bodyMotionIdentity,reference.session==generation else {
+            throw reject("reference_source_contract_changed","The initial proof lost its original RGB-D source contract.")
         }
         let began=Date().timeIntervalSince1970*1000,end=min(deadline,ProcessInfo.processInfo.systemUptime+2)
         while ProcessInfo.processInfo.systemUptime<end {
             try check();try Task.checkCancellation()
             guard !armTravelDispatched,!jawCommandDispatched,!leased,!recyclingGripDispatched,
-                  localReceiptHeldNeckIdentity != nil,localReceiptHeldNeckIdentity==localNeckIdentity(),
+                  localReceiptHeldNeckIdentity==reference.neckIdentity,reference.neckIdentity==localNeckIdentity(),
                   ROBFixedHeadBodyMotionIdentity.currentIdentity==trial.bodyMotionIdentity,
                   ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==trial.estimatedCameraProjectionIdentity,
                   vision.cameraGeneration==trial.cameraGeneration else {
-                throw ROBArmRoutineError.blocked("The stationary empty preflight lost its held head/body/source or person clearance.")
+                throw reject("held_body_head_or_generation_changed","The stationary empty preflight lost its held head/body/source identity.")
+            }
+            let neck=controller.readNeck?() ?? [:]
+            guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,
+                  neck["pan"]as?Int==reference.pan,neck["lower"]as?Int==reference.lower,neck["upper"]as?Int==reference.upper,
+                  neck["ready_at"]as?Double==reference.readyAtUptime else {
+                throw reject("held_neck_changed","The pinned raw neck targets or readiness changed during empty preflight.")
             }
             let actual=try measured().positionsRadians.map(\.doubleValue)
             guard actual.count==7,baseline.count==7,1.5*zip(actual,baseline).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.002 else {
-                throw ROBArmRoutineError.blocked("The measured initial-retreat start changed during fresh-view recovery.")
+                throw reject("baseline_changed","The measured initial-retreat start changed during fresh-view recovery.")
             }
             if let frame=vision.snapshot()["face"] {
                 guard frame.handsClear else {
-                    throw ROBArmRoutineError.blocked("A hand or person is visible; holding the empty preflight.")
+                    throw reject("person_or_hand_visible","A hand or person is visible; holding the empty preflight.")
                 }
-                guard frame.cameraGeneration==reference.cameraGeneration,
+                guard frame.cameraGeneration==oldFrame.cameraGeneration,
                       frame.intrinsics?.runtimeCalibration?.identity==runtime,frame.intrinsics?.cameraServiceSourceSHA256==source else {
-                    throw ROBArmRoutineError.blocked("The RGB-D source changed while awaiting an actual fresh preflight frame.")
+                    throw reject("source_contract_changed","The RGB-D source changed while awaiting an actual fresh preflight frame.")
                 }
-                if frame.sequence>reference.sequence,frame.capturedAt>=began,vision.fresh,vision.handsClear,
+                if frame.sequence>oldFrame.sequence,frame.capturedAt>=began,vision.fresh,vision.handsClear,
                    (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
                    frame.handsClear,frame.depthCoverage>=0.25,let depth=frame.depth,let k=frame.intrinsics,
                    k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,
                    k.depthRGBGeometryCorrespondence?.status=="matched" {
-                    let scope=try controller.scope(model:model,frame:frame)
-                    guard scope==expectedScope,
+                    let capturedUptime=ProcessInfo.processInfo.systemUptime-(Date().timeIntervalSince1970*1000-frame.capturedAt)/1000
+                    guard capturedUptime>=reference.readyAtUptime else {
+                        throw reject("new_frame_before_ready","The new frame exposure preceded the pinned stationary neck readiness.")
+                    }
+                    let scope:ROBFixedHeadRegistrationScope
+                    do {scope=try controller.scope(model:model,frame:frame)}
+                    catch {throw reject("new_frame_scope_rejected",error.localizedDescription)}
+                    guard scope.panTarget==reference.pan,scope.lowerTarget==reference.lower,scope.upperTarget==reference.upper,
+                          scope.cameraGeneration==oldFrame.cameraGeneration,scope.gatewaySessionGeneration==reference.session,
+                          scope.intrinsicsIdentity==reference.intrinsicsIdentity,
                           ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,actualFrame:.init(cameraGeneration:frame.cameraGeneration,
                             actualDeviceMXID:k.runtimeCalibration?.actualDeviceMXID,runtimeCalibrationIdentity:k.runtimeCalibration?.identity,
                             cameraServiceSourceSHA256:k.cameraServiceSourceSHA256,scope:scope,inertialJSON:k.inertial.flatMap{try?JSONEncoder().encode($0)})) else {
-                        throw ROBArmRoutineError.blocked("The new preflight frame changed its normalized K/raw head pose or refined source geometry.")
+                        throw reject("new_frame_contract_or_geometry_changed","The new preflight frame changed its normalized K/raw head pose or refined source geometry.")
                     }
                     try requireLiveVisualTrial(trial,map:map,model:model)
                     return
@@ -3008,7 +3053,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             }
             try await Task.sleep(nanoseconds:20_000_000)
         }
-        throw ROBArmRoutineError.blocked("No NEW actual fresh RGB-D frame reached the unchanged empty preflight within two seconds; no travel sent.")
+        throw reject("fresh_post_ready_frame_timeout","No NEW actual fresh RGB-D frame reached the unchanged empty preflight within two seconds; no travel sent.")
     }
 
     @MainActor private func performInitialLocalRetreatIfNeeded(map initialMap:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) async throws ->Bool {
@@ -3056,7 +3101,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             throw ROBArmRoutineError.blocked("The explicit initial-retreat trial scope disappeared during stationary preparation.")
         }
         let dispatchGoal=zip(q,offset).map(+)
-        guard let reference=vision.snapshot()["face"] else {throw ROBArmRoutineError.blocked("The stationary preflight source frame disappeared.")}
+        guard let sourceFrame=vision.snapshot()["face"] else {throw ROBArmRoutineError.blocked("The stationary preflight source frame disappeared.")}
+        let reference=try initialEmptyViewReference(sourceFrame)
         cameraReady=false // No travel has been dispatched; restore the strict gate only after actual reacquisition.
         let proof=try await reviewInitialLocalRetreat(map:map,model:model,baseline:q,goal:dispatchGoal,trial:dispatchTrial,
             generation:session,camera:camera,now:reviewTime,measuredAt:reviewTime-reviewed.effectiveSampleAgeMilliseconds,
@@ -3083,6 +3129,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               proof.maximumHullTravelMeters+admissionDrift<=0.060 else {
             throw ROBArmRoutineError.blocked("The actual retreat start drifted after review; no step sent.")
         }
+        ROBWorkspaceSearch.shared.announce?("Moving my \(physicalSide) arm.")
         proposalStep=0;phase="initial declared-empty retreat";sentPath=[q,dispatchGoal]
         reviewedDispatchStart=dispatch;armTravelDispatched=true
         try await accepted {gateway.sendApprovedLeftGestureStep(proposalID:path.id,index:0,duration:4,expectedSessionGeneration:session)}
@@ -4344,6 +4391,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         var output = result as! [String: Any]
         output["physical_arm"]=physicalSide
+        if let refresh=collisionReviewStatus["initial_empty_view_refresh"] {output["initial_empty_view_refresh"]=refresh}
         if activeApproachUnknownAdvisory {
             output["approach_unknown_advisory"]=true;output["unknown_space_policy"]="operator_cleared_advisory_only"
             output["unknown_cells_observed"]=false;output["unknown_cells_relabeled_free"]=false

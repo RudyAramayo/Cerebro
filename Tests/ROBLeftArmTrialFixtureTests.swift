@@ -309,6 +309,7 @@ enum ROBNeckRGBPoseDisplay {
 
 final class ROBFixedHeadCalibrationWindowController {
     static let shared=ROBFixedHeadCalibrationWindowController()
+    static func intrinsicsIdentity(_ frame:ROBArmRoutineVision.Frame)throws->String {String(repeating:"a",count:64)}
     var readNeck:(()->NSDictionary)? = { ["known":true,"stationary":true,"pan":6015,"pan_degrees":0.0,"lower":6011,"upper":6160,"ready_at":0.0] }
     func scope(model:ROBGhostRobotModel,frame:ROBArmRoutineVision.Frame)throws->ROBFixedHeadRegistrationScope {
         let n=readNeck?() ?? [:]
