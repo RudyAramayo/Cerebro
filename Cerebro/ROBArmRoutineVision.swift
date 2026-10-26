@@ -1165,12 +1165,43 @@ struct ROBWorkspaceCanSelection {
         return .init(object:nil,preview:nil,diagnostics:diagnostics)
     }
 
+    @nonobjc private static let blockerDepthQueue = DispatchQueue(label: "com.orbitusrobotics.workspace-blocker-depth", qos: .userInitiated)
+
+    /// These value-only workers deliberately use checked continuations rather
+    /// than a nested Task.detached.value inside the large capture coroutine.
+    /// They can add pixels to a map, never send an actuator command or grant.
+    @nonobjc private static func appendBlockerDepth(map:ROBWorkspaceDepthMap,pixels:CameraDepthFrame,
+        intrinsics:CameraIntrinsics,matrix:simd_double4x4,capturedAtMilliseconds:Double,sequence:UInt64,
+        cameraGeneration:UUID,view:ROBWorkspaceView,projection:String) async throws ->ROBWorkspaceDepthMap {
+        let width=pixels.width,height=pixels.height,fx=intrinsics.fx,fy=intrinsics.fy,cx=intrinsics.cx,cy=intrinsics.cy
+        let pan=view.panDegrees,upper=view.upperTarget
+        return try await withCheckedThrowingContinuation { continuation in
+            blockerDepthQueue.async {
+                do {
+                    var next=map
+                    try next.append(width:width,height:height,fx:fx,fy:fy,cx:cx,cy:cy,
+                        depth:{pixels.distanceMillimeters(x:$0,y:$1)},cameraToRobot:matrix,
+                        capturedAtMilliseconds:capturedAtMilliseconds,sequence:sequence,cameraGeneration:cameraGeneration,
+                        measuredSelfBounds:[],cameraRegistrationVerified:false,recordedPanDegrees:pan,
+                        recordedUpperTarget:upper,recordedLowerTarget:6011,
+                        estimatedCameraProjectionIdentity:projection)
+                    continuation.resume(returning:next)
+                } catch {continuation.resume(throwing:error)}
+            }
+        }
+    }
+
+    @nonobjc private static func freezeBlockerDepth(map:ROBWorkspaceDepthMap) async ->ROBWorkspaceCollisionSnapshot? {
+        await withCheckedContinuation { continuation in
+            blockerDepthQueue.async {continuation.resume(returning:map.snapshot())}
+        }
+    }
+
     /// Nonactuating mitigation for a specific unknown cell. A new view adds
     /// actual rays to the SAME scene; it never masks robot geometry, erases an
     /// old return or promotes a projected cell into observed free space.
-    // Keep the async orchestration unoptimized: Swift task-stack teardown
-    // aborted in the optimized wrapper after its first detached depth append.
-    // The detached mapper and geometric calculations retain their build mode.
+    // Keep the orchestration unoptimized while isolating the observed Swift
+    // task-stack failure. Map math runs in the separate optimized workers.
     @_optimize(none)
     @MainActor @nonobjc func captureBlockerCoverage(blocker:ROBWorkspaceUnknownCellBlocker,
         continuing snapshot:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,generation:UInt64,
@@ -1358,16 +1389,9 @@ struct ROBWorkspaceCanSelection {
                 let input=map
                 do {
                     recordStage("append_started")
-                    map=try await Task.detached(priority:.userInitiated){
-                        var next=input
-                        try next.append(width:width,height:height,fx:intrinsics.fx,fy:intrinsics.fy,cx:intrinsics.cx,cy:intrinsics.cy,
-                            depth:{pixels.distanceMillimeters(x:$0,y:$1)},cameraToRobot:projectionContext.matrix,
-                            capturedAtMilliseconds:frame.capturedAt,sequence:frame.sequence,cameraGeneration:frame.cameraGeneration,
-                            measuredSelfBounds:[],cameraRegistrationVerified:false,recordedPanDegrees:view.panDegrees,
-                            recordedUpperTarget:view.upperTarget,recordedLowerTarget:6011,
-                            estimatedCameraProjectionIdentity:projection)
-                        return next
-                    }.value
+                    map=try await Self.appendBlockerDepth(map:input,pixels:pixels,intrinsics:intrinsics,
+                        matrix:projectionContext.matrix,capturedAtMilliseconds:frame.capturedAt,sequence:frame.sequence,
+                        cameraGeneration:frame.cameraGeneration,view:view,projection:projection)
                     recordStage("append_complete")
                 } catch {
                     try requireHeldView()
@@ -1386,7 +1410,7 @@ struct ROBWorkspaceCanSelection {
             }
             let input=map
             recordStage("freeze_started")
-            let frozen=await Task.detached(priority:.userInitiated,operation:{input.snapshot()}).value
+            let frozen=await Self.freezeBlockerDepth(map:input)
             recordStage("freeze_complete")
             guard let result=frozen else {
                 throw ROBWorkspaceDepthMapError.invalidFrame

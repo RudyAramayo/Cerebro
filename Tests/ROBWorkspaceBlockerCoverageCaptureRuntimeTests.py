@@ -121,6 +121,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
  func requireEstimatedProjectionIdentity(_ value:String?,model:ROBGhostRobotModel)throws {precondition(value=="projection")}
  func registeredCameraContext(frame:ROBArmRoutineVision.Frame,model:ROBGhostRobotModel)->Int? {Modes.mode=="registered" ? 1:nil}
  func unregisteredCameraProjection(frame:ROBArmRoutineVision.Frame,view:ROBWorkspaceView,model:ROBGhostRobotModel)throws->(matrix:simd_double4x4,identity:String?,lowerTarget:Int?) {(matrix_identity_double4x4,"projection",6011)}
+ __ACTUAL_WORKERS__
  __ACTUAL_METHOD__
 }
 @main struct Fixtures {
@@ -175,13 +176,17 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
 def main():
     source = (ROOT/'Cerebro/ROBArmRoutineVision.swift').read_text()
     actual = method(source, '    @_optimize(none)\n    @MainActor @nonobjc func captureBlockerCoverage(')
+    queue = next(line for line in source.splitlines() if line.startswith('    @nonobjc private static let blockerDepthQueue'))
+    workers = queue+'\n'+method(source, '    @nonobjc private static func appendBlockerDepth(')+'\n'+method(source, '    @nonobjc private static func freezeBlockerDepth(')
     forbidden = ['observeWorkspace', 'sendApproved', 'setGripper', 'measuredSelfBounds(model:', 'finishView?()']
     assert not any(token in actual for token in forbidden)
     assert 'capturedAtMilliseconds:frame.capturedAt,sequence:frame.sequence' in actual
-    assert 'measuredSelfBounds:[],cameraRegistrationVerified:false' in actual
+    assert 'measuredSelfBounds:[],cameraRegistrationVerified:false' in workers
+    assert 'Task.detached' not in actual and '.value' not in actual
+    assert 'withCheckedThrowingContinuation' in workers and 'withCheckedContinuation' in workers
     with tempfile.TemporaryDirectory(prefix='rob-blocker-capture-') as folder:
         p=Path(folder);swift=p/'Fixture.swift';binary=p/'fixture'
-        swift.write_text(FIXTURE.replace('__ACTUAL_METHOD__',actual))
+        swift.write_text(FIXTURE.replace('__ACTUAL_WORKERS__',workers).replace('__ACTUAL_METHOD__',actual))
         subprocess.run(['xcrun','swiftc','-O','-swift-version','5','-parse-as-library','-module-cache-path','/private/tmp/cerebro-swift-module-cache',str(swift),'-o',str(binary)],check=True,timeout=60)
         subprocess.run([str(binary)],check=True,timeout=20)
 if __name__=='__main__': main()
