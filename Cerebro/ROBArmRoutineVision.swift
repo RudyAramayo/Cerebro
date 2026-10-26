@@ -1446,6 +1446,8 @@ struct ROBWorkspaceCanSelection {
         collisionSnapshotValue = nil
         collisionSnapshotModel = model
         let vision = ROBArmRoutineVision.shared
+        let rawCapture=RawScanCapture(model:model,generation:generation)
+        defer {rawCapture.closeIfIncomplete()}
         var map: ROBWorkspaceDepthMap?, context: (registration: ROBFixedHeadRegistration, scope: ROBFixedHeadRegistrationScope)?
         var previous: UInt64 = 0, frames = 0
         let deadline = ProcessInfo.processInfo.systemUptime + 15
@@ -1481,6 +1483,8 @@ struct ROBWorkspaceCanSelection {
                 return next
             }.value
             try check()
+            await rawCapture.append(frame,sceneID:inputMap.sceneID,scope:measured.scope,transform:measured.registration.cameraToRobot,
+                selfBounds:selfBounds,registration:measured.registration,projectionIdentity:nil)
             previous = frame.sequence; frames += 1
             progress("Passive fixed-head scene: \(frames)/3 frames; arms and head unchanged.")
         }
@@ -1491,9 +1495,12 @@ struct ROBWorkspaceCanSelection {
             throw ROBWorkspaceDepthMapError.invalidFrame
         }
         collisionSnapshotValue = snapshot
+        await rawCapture.finish(snapshot)
         lastReport = ["status":"passive_fixed_head_scene_captured","registration_verified":true,
             "scene_id":snapshot.sceneID.uuidString,"depth_frames":snapshot.observedFrameCount,
             "detail":"Measured current head view; no neck or arm command was sent."]
+        var archiveReport=lastReport as? [String:Any] ?? [:];archiveReport["raw_archive"]=rawCapture.report
+        lastReport=archiveReport as NSDictionary
         return snapshot
     }
 
@@ -1748,6 +1755,8 @@ struct ROBWorkspaceCanSelection {
         let estimatedProjectionIdentity=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
         try requireEstimatedProjectionIdentity(estimatedProjectionIdentity,model:model)
         let vision = ROBArmRoutineVision.shared
+        let rawCapture=RawScanCapture(model:model,generation:generation)
+        defer {rawCapture.closeIfIncomplete()}
         let scanBodyIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity
         var captureAnchor = ROBWorkspaceCaptureAnchor()
         var map:ROBWorkspaceDepthMap?
@@ -1772,7 +1781,7 @@ struct ROBWorkspaceCanSelection {
                     "prepare_accepted":lastPrepareAccepted,"view_ready":lastViewReady,
                     "expected_camera_generation":captureAnchor.cameraGeneration?.uuidString ?? "waiting_for_first_settled_frame","actual_camera_generation":vision.cameraGeneration.uuidString,
                     "expected_gateway_generation":NSNumber(value:generation),"gateway":ROBAmberGatewayClient.shared.connectionSnapshot(),
-                    "camera_health":vision.healthSnapshot(),"markerless_registration_probe":vision.collisionRegistrationDiagnostics()]
+                    "camera_health":vision.healthSnapshot(),"markerless_registration_probe":vision.collisionRegistrationDiagnostics(),"raw_archive":rawCapture.report]
                 lastReport = failureReport as NSDictionary
             }
             vision.endCollisionRegistrationProbe(); finishView?()
@@ -1918,6 +1927,8 @@ struct ROBWorkspaceCanSelection {
                 }
                 try validateHeldView()
                 guard ProcessInfo.processInfo.systemUptime<projectionBudget.deadlineUptime else {throw projectionDeadlineFailure()}
+                await rawCapture.append(frame,sceneID:currentMap.sceneID,scope:sourceScope,transform:transform,
+                    selfBounds:selfBounds,registration:measured?.registration,projectionIdentity:estimated?.identity)
                 projectedInView+=1
                 framesProjected += 1
                 try validateHeldView()
@@ -1933,12 +1944,143 @@ struct ROBWorkspaceCanSelection {
         guard captureAnchor.permitsCurrent(vision.cameraGeneration) else { throw acquisitionFailure("capture generation changed before the completed scene snapshot") }
         guard let snapshot = frozen else { throw acquisitionFailure("only \(framesProjected) fresh depth frames were projected; at least two are required") }
         collisionSnapshotValue = snapshot
+        await rawCapture.finish(snapshot)
         lastReport = ["status":"collision_scene_captured", "detail":snapshot.registrationDetail,
             "scene_id":snapshot.sceneID.uuidString,"depth_frames":snapshot.observedFrameCount,
             "occupied_voxels":snapshot.occupiedVoxelCount,"free_voxels":snapshot.freeVoxelCount,
             "registration_verified":snapshot.registrationID != nil,"markerless_registration_probe":vision.collisionRegistrationDiagnostics()]
         completed = true
+        var archiveReport=lastReport as? [String:Any] ?? [:];archiveReport["raw_archive"]=rawCapture.report
+        lastReport=archiveReport as NSDictionary
         return snapshot
+    }
+
+    /// Diagnostics only. Raw pixels do not classify robot returns or admit
+    /// motion. History is observed telemetry, never a planned/FK substitute.
+    /// Replay occupied contributors from each saved original sparse (x,y):
+    /// z=u16le/1000, optical=((x-cx)*z/fx,(y-cy)*z/fy,z), then saved column-major
+    /// cameraToRobot. Apply saved workspace/registered-volume/self-mask rules;
+    /// floor(world/0.025) is the source-group ID before27-cell dilation.
+    /// Occupancy precedes neighbor consistency: that test affects FREE rays
+    /// only. Missing/archive-failed pixels never supply classification or FREE.
+    @MainActor private final class RawScanCapture {
+        let model:ROBGhostRobotModel,generation:UInt64
+        let parentDirectory:URL
+        var finished=false
+        var writer:ROBWorkspaceRawScanArchive?,failure:String?,records:[ROBWorkspaceRawScanArchive.Record]=[]
+        var telemetry:[String:[ROBAmberGatewayTelemetry]]=[:]
+        var observer:NSObjectProtocol?
+        init(model:ROBGhostRobotModel,generation:UInt64,parentDirectory:URL=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/WorkspaceRawScans",isDirectory:true)) {
+            self.model=model;self.generation=generation;self.parentDirectory=parentDirectory
+            observer=NotificationCenter.default.addObserver(forName:.ROBAmberGatewayTelemetryDidUpdate,
+                object:ROBAmberGatewayClient.shared,queue:.main){[weak self] note in
+                guard let sample=note.userInfo?["telemetry"]as?ROBAmberGatewayTelemetry else{return}
+                MainActor.assumeIsolated {self?.record(sample)}
+            }
+            for arm in ["left","right"] {if let sample=ROBAmberGatewayClient.shared.telemetry(forArm:arm){record(sample)}}
+        }
+        deinit {if let observer {NotificationCenter.default.removeObserver(observer)}}
+        func record(_ sample:ROBAmberGatewayTelemetry) {
+            guard (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==generation,
+                  sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds.isFinite else{return}
+            var values=telemetry[sample.arm] ?? []
+            if values.last?.sequence != sample.sequence {values.append(sample);if values.count>240 {values.removeFirst(values.count-240)}}
+            telemetry[sample.arm]=values
+        }
+        func feedback(_ physical:String,frameTime:Double)->ROBWorkspaceRawScanArchive.Availability<ROBWorkspaceRawScanArchive.ArmFeedback> {
+            let arm=physical=="left" ? "right":"left",gateway=ROBAmberGatewayClient.shared
+            guard let sample=telemetry[arm]?.min(by:{a,b in
+                abs(a.receivedAt.timeIntervalSince1970*1000-a.sampleAgeAtReceiptMilliseconds-frameTime)<abs(b.receivedAt.timeIntervalSince1970*1000-b.sampleAgeAtReceiptMilliseconds-frameTime)
+            }),sample.positionsRadians.count==7,sample.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),sample.statuses.count==7,
+                  sample.effectiveSampleAgeMilliseconds.isFinite,sample.effectiveSampleAgeMilliseconds>=0,
+                  sample.effectiveGripperFeedbackAgeMilliseconds.isFinite,sample.effectiveGripperFeedbackAgeMilliseconds>=0,
+                  abs(sample.receivedAt.timeIntervalSince1970*1000-sample.sampleAgeAtReceiptMilliseconds-frameTime)<=150,
+                  let sourceModel=try?ROBGhostRobotModel(directory:model.directory,physicalSide:physical),gateway.modes(forArm:arm).count==7 else {
+                return .unavailable("No actual exposure-nearest physical \(physical) telemetry within150ms in this passive scan history")
+            }
+            return .available(.init(physicalSide:physical,gatewayArm:arm,telemetrySequence:sample.sequence,
+                receivedAtHostMilliseconds:sample.receivedAt.timeIntervalSince1970*1000,effectiveSampleAgeMilliseconds:sample.effectiveSampleAgeMilliseconds,
+                effectiveGripperAgeMilliseconds:sample.effectiveGripperFeedbackAgeMilliseconds,positionsRadians:sample.positionsRadians.map(\.doubleValue),
+                reportedModes:sample.statuses.map(\.intValue),gatewayModes:gateway.modes(forArm:arm).map(\.intValue),
+                exposureOffsetMilliseconds:.available(frameTime-(sample.receivedAt.timeIntervalSince1970*1000-sample.sampleAgeAtReceiptMilliseconds)),
+                referenceIdentity:.unavailable("Raw vendor encoder coordinates; native session reference token is not serialized"),
+                modelID:sourceModel.modelID,geometryID:sourceModel.geometryID,mappingID:sourceModel.selectedMappingID))
+        }
+        func append(_ frame:ROBArmRoutineVision.Frame,sceneID:UUID,scope:ROBFixedHeadRegistrationScope,
+            transform:simd_double4x4,selfBounds:[(low:SIMD3<Double>,high:SIMD3<Double>)],registration:ROBFixedHeadRegistration?,projectionIdentity:String?) async {
+            guard failure==nil else{return}
+            do {
+                guard let depth=frame.depth,let k=frame.intrinsics,let runtime=k.runtimeCalibration,
+                      let image=CIContext(options:[.useSoftwareRenderer:true]).createCGImage(frame.image,from:frame.image.extent),
+                      image.width==depth.width,image.height==depth.height else {throw ROBWorkspaceRawScanArchive.ArchiveError.rejected("Passive source RGB/depth raster/runtime is unavailable")}
+                if writer==nil {
+                    writer=try await .create(parentDirectory:parentDirectory,scene:.init(archiveID:UUID(),workspaceSceneID:sceneID,
+                        bodyMotionIdentity:ROBFixedHeadBodyMotionIdentity.currentIdentity,gatewayGeneration:generation,
+                        modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID))
+                }
+                var rgba=[UInt8](repeating:0,count:depth.width*depth.height*4)
+                let rendered=rgba.withUnsafeMutableBytes{bytes->Bool in
+                    guard let drawing=CGContext(data:bytes.baseAddress,width:depth.width,height:depth.height,bitsPerComponent:8,
+                        bytesPerRow:depth.width*4,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue|CGBitmapInfo.byteOrder32Big.rawValue) else{return false}
+                    drawing.draw(image,in:CGRect(x:0,y:0,width:depth.width,height:depth.height));return true
+                }
+                guard rendered else {throw ROBWorkspaceRawScanArchive.ArchiveError.rejected("Passive normalized RGB888 copy failed")}
+                var rgb=Data(count:depth.width*depth.height*3)
+                rgb.withUnsafeMutableBytes{buffer in let out=buffer.bindMemory(to:UInt8.self)
+                    for i in 0..<(depth.width*depth.height) {out[i*3]=rgba[i*4];out[i*3+1]=rgba[i*4+1];out[i*3+2]=rgba[i*4+2]}}
+                let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+                func json(_ object:[String:Any])throws->Data {try JSONSerialization.data(withJSONObject:object,options:.sortedKeys)}
+                let contracts:[String:Any]=["pixelSource":"retained normalized source raster rendered RGB888 without resizing",
+                    "rgbOutputUndistorted":k.rgbOutputUndistorted as Any? ?? NSNull(),"depthRGBGeometryCorrespondence":k.depthRGBGeometryCorrespondence?.status as Any? ?? NSNull(),
+                    "cameraServiceSourceSHA256":k.cameraServiceSourceSHA256 as Any? ?? NSNull(),"runtimeCalibrationIdentity":runtime.identity,
+                    "sourceSize":k.sourceSize as Any? ?? NSNull(),"sourceIntrinsics":k.sourceIntrinsics as Any? ?? NSNull(),"imageTransform":k.imageTransform as Any? ?? NSNull(),
+                    "depthSourceSize":k.depthSourceSize as Any? ?? NSNull(),"depthSourceIntrinsics":k.depthSourceIntrinsics as Any? ?? NSNull(),"depthImageTransform":k.depthImageTransform as Any? ?? NSNull(),
+                    "rgbSourceDistortionCoefficients":k.rgbSourceDistortionCoefficients as Any? ?? NSNull(),"depthSourceDistortionCoefficients":k.depthSourceDistortionCoefficients as Any? ?? NSNull(),
+                    "gatewayModesObservation":"current native modes at copy time; reportedModes/q are historical telemetry; host association is not exact sensor exposure sync"]
+                let sampling:[String:Any]=["mapper":"ROBWorkspaceDepthMap.append_original_normalized_depth_v1","firstPixel":[1,1],
+                    "exclusivePixelUpperBound":[depth.width-1,depth.height-1],"stride":max(2,Int(ceil(sqrt(Double(depth.width*depth.height)/12000)))),
+                    "acceptedDepthMillimeters":[100,3000],"depthUnits":"u16le_mm","sourceVoxelSizeMeters":0.025,
+                    "sourceGroupID":"floor(projectedX/0.025),floor(projectedY/0.025),floor(projectedZ/0.025)","occupiedDilationOffsets":[-1,0,1],
+                    "workspaceLowMeters":[-2,-2,-0.3],"workspaceHighMeters":[2,2,2.4],"pixelConvention":"original normalized top-left RGB-D",
+                    "registeredValidRobotVolume":try registration.map{try JSONSerialization.jsonObject(with:encoder.encode($0.validRobotVolume))} ?? NSNull(),
+                    "measuredSelfMaskApplied":registration != nil && !selfBounds.isEmpty,"measuredSelfMaskMarginMeters":0.01,
+                    "measuredSelfBounds":registration == nil ? []:selfBounds.map{["low":[$0.low.x,$0.low.y,$0.low.z],"high":[$0.high.x,$0.high.y,$0.high.z]]},
+                    "finalMapLink":"manifest.json sourceMapBinding; all source frames must match before complete","observedSelf":false]
+                let input=ROBWorkspaceRawScanArchive.Frame(frameID:UUID(),sequence:frame.sequence,capturedAtHostMilliseconds:frame.capturedAt,
+                    rgbCapturedAtHostMilliseconds:.unavailable("Independent RGB exposure host timestamp not exported by retained frame"),
+                    depthCapturedAtHostMilliseconds:.unavailable("Independent depth exposure host timestamp not exported by retained frame"),
+                    sourceTimestampJSON:.unavailable("Independent device clock timestamps not exported by retained frame"),cameraGeneration:frame.cameraGeneration,
+                    width:depth.width,height:depth.height,rgb888:rgb,depthU16LittleEndian:Data(depth.millimetersLittleEndian),
+                    infrared:.unavailable("IR not exported by retained frame"),infraredContractJSON:.unavailable("IR not exported by retained frame"),intrinsics:[k.fx,k.fy,k.cx,k.cy],
+                    sourceContractsJSON:try json(contracts),runtimeCalibrationJSON:try encoder.encode(runtime),
+                    imuJSON:try k.inertial.map{.available(try encoder.encode($0))} ?? .unavailable("No actual IMU packet in retained frame"),
+                    actualAppliedNeck:.available(.init(appliedPanTarget:scope.panTarget,appliedLowerTarget:scope.lowerTarget,appliedUpperTarget:scope.upperTarget,
+                        observedAtHostMilliseconds:Date().timeIntervalSince1970*1000,stationary:true,source:"native validated source scope; copied while held view remains checked")),
+                    physicalLeftFeedback:feedback("left",frameTime:frame.capturedAt),physicalRightFeedback:feedback("right",frameTime:frame.capturedAt),
+                    cameraToRobotColumnMajor:(0..<4).flatMap{c in (0..<4).map{r in transform[c][r]}},
+                    projectionMethod:registration == nil ? "native_unregisteredCameraProjection_estimate_not_registration":"native_registeredCameraContext",
+                    projectionScopeJSON:try json(["fixedHeadScope":try JSONSerialization.jsonObject(with:encoder.encode(scope)),
+                        "registrationID":registration?.id as Any? ?? NSNull(),"estimatedCameraProjectionIdentity":projectionIdentity as Any? ?? NSNull()]),returnSamplingContractJSON:try json(sampling))
+                records.append(try await writer!.append(input))
+            }catch {failure=error.localizedDescription;await writer?.closeIncomplete(reason:error.localizedDescription)}
+        }
+        func finish(_ snapshot:ROBWorkspaceCollisionSnapshot) async {
+            guard failure==nil,let writer else {return}
+            do {
+                let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+                _ = try await writer.finish(sourceMap:.init(workspaceSceneID:snapshot.sceneID,mapFingerprint:snapshot.fingerprint,
+                    serializedJSON:try encoder.encode(snapshot),observations:snapshot.observations.map{.init(sequence:$0.sequence,
+                        capturedAtHostMilliseconds:$0.capturedAtMilliseconds,cameraGeneration:snapshot.cameraGeneration)}))
+                finished=true
+            }catch {failure=error.localizedDescription;await writer.closeIncomplete(reason:error.localizedDescription)}
+        }
+        var report:[String:Any] {[
+            "status":finished ? "complete":"incomplete","detail":failure as Any? ?? (finished ? NSNull():"Raw source-map binding is incomplete"),
+            "directory":writer?.directory.path as Any? ?? NSNull(),"archived_frames":records.count,"exact_sensor_exposure_timestamps":false,
+            "self_classification":false,"motion_authority":false]}
+        func closeIfIncomplete() {
+            if let writer {Task {await writer.closeIncomplete(reason:"Passive scan ended before final source-map binding; retained map has no complete raw archive")}}
+        }
     }
 
     @MainActor @nonobjc private func measuredSelfBounds(model: ROBGhostRobotModel) -> [(low:SIMD3<Double>,high:SIMD3<Double>)] {

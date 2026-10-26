@@ -79,6 +79,19 @@ final class ROBWorkspaceRawScanArchive: @unchecked Sendable {
         let metadataSHA256:String
         let byteCount:Int
     }
+    struct SourceObservation:Codable,Equatable,Sendable {
+        let sequence:UInt64,capturedAtHostMilliseconds:Double
+        let cameraGeneration:UUID
+    }
+    struct SourceMap:Sendable {
+        let workspaceSceneID:UUID,mapFingerprint:String,serializedJSON:Data
+        let observations:[SourceObservation]
+    }
+    struct SourceMapBinding:Codable {
+        let workspaceSceneID:UUID,mapFingerprint:String
+        let relativePath:String,serializedSHA256:String
+        let observations:[SourceObservation]
+    }
     struct Manifest:Codable {
         let schemaVersion:Int
         let kind:String
@@ -87,6 +100,7 @@ final class ROBWorkspaceRawScanArchive: @unchecked Sendable {
         let status:String
         let frames:[Record]
         let failure:String?
+        let sourceMapBinding:SourceMapBinding?
         let classificationAuthority:Bool
         let motionAuthority:Bool
     }
@@ -119,6 +133,7 @@ final class ROBWorkspaceRawScanArchive: @unchecked Sendable {
     private var frames:[Record]=[]
     private var byteCount=0
     private var closed=false
+    private var sourceMapBinding:SourceMapBinding?
     private init(directory:URL,scene:Scene,maximumFrames:Int,maximumBytes:Int) {
         self.directory=directory;self.scene=scene;self.maximumFrames=maximumFrames;self.maximumBytes=maximumBytes
     }
@@ -168,12 +183,32 @@ final class ROBWorkspaceRawScanArchive: @unchecked Sendable {
             }
         }
     }
-    func finish() async throws->Manifest {
+    func finish(sourceMap:SourceMap?=nil) async throws->Manifest {
         try await withCheckedThrowingContinuation {continuation in
             queue.async {
                 guard !self.closed else {continuation.resume(throwing:ArchiveError.rejected("Raw archive is closed."));return}
                 do {
                     guard !self.frames.isEmpty else {throw ArchiveError.rejected("Raw archive cannot finish empty.")}
+                    if let sourceMap {
+                        guard sourceMap.workspaceSceneID==self.scene.workspaceSceneID,
+                              sourceMap.observations==self.frames.map({SourceObservation(sequence:$0.sequence,capturedAtHostMilliseconds:$0.capturedAtHostMilliseconds,cameraGeneration:$0.cameraGeneration)}),
+                              sourceMap.serializedJSON.count<=self.maximumBytes-self.byteCount,
+                              let object=try JSONSerialization.jsonObject(with:sourceMap.serializedJSON)as?[String:Any],
+                              object["fingerprint"]as?String==sourceMap.mapFingerprint,
+                              (object["sceneID"]as?String).flatMap(UUID.init(uuidString:))==self.scene.workspaceSceneID else {
+                            throw ArchiveError.rejected("Raw source map must match every archived original frame, scene and byte budget.")
+                        }
+                        guard sourceMap.mapFingerprint.count==64,sourceMap.mapFingerprint.allSatisfy({$0.isHexDigit}),
+                              let camera=(object["cameraGeneration"]as?String).flatMap(UUID.init(uuidString:)),
+                              let observations=object["observations"]as?[[String:Any]],observations.count==sourceMap.observations.count,
+                              zip(observations,sourceMap.observations).allSatisfy({row,expected in
+                                  (row["sequence"]as?NSNumber)?.uint64Value==expected.sequence &&
+                                  (row["capturedAtMilliseconds"]as?NSNumber)?.doubleValue==expected.capturedAtHostMilliseconds && camera==expected.cameraGeneration
+                              }) else {throw ArchiveError.rejected("Serialized raw map observations differ from original archived pixel sources.")}
+                        try Self.writeNew(sourceMap.serializedJSON,to:self.directory.appendingPathComponent("source-map.json"))
+                        self.sourceMapBinding = .init(workspaceSceneID:sourceMap.workspaceSceneID,mapFingerprint:sourceMap.mapFingerprint,
+                            relativePath:"source-map.json",serializedSHA256:Self.hash(sourceMap.serializedJSON),observations:sourceMap.observations)
+                    }
                     let manifest=try self.writeManifest(status:"complete",failure:nil)
                     self.closed=true;continuation.resume(returning:manifest)
                 }catch {self.closed=true;_ = try?self.writeManifest(status:"failed",failure:error.localizedDescription);continuation.resume(throwing:error)}
@@ -235,7 +270,7 @@ final class ROBWorkspaceRawScanArchive: @unchecked Sendable {
     }
     @discardableResult private func writeManifest(status:String,failure:String?)throws->Manifest {
         let manifest=Manifest(schemaVersion:1,kind:"raw_workspace_pixel_provenance_only",scene:scene,maximumFrames:maximumFrames,maximumBytes:maximumBytes,
-            status:status,frames:frames,failure:failure,classificationAuthority:false,motionAuthority:false)
+            status:status,frames:frames,failure:failure,sourceMapBinding:sourceMapBinding,classificationAuthority:false,motionAuthority:false)
         let data=try Self.encode(manifest),temporary=directory.appendingPathComponent("manifest-\(UUID().uuidString).tmp")
         try Self.writeNew(data,to:temporary)
         guard rename(temporary.path,directory.appendingPathComponent("manifest.json").path)==0 else {try?FileManager.default.removeItem(at:temporary);throw ArchiveError.rejected("Atomic raw manifest publication failed.")}
