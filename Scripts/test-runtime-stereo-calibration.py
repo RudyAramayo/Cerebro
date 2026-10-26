@@ -78,7 +78,11 @@ class FakePipeline:
         self.device = device
         self.partial_apply_failure = partial_apply_failure
         self.policies = {"useHomographyRectification": False, "disparityToDepthUseSpecTranslation": False,
-                         "rectificationUseSpecTranslation": False, "depthAlignmentUseSpecTranslation": False}
+                         "rectificationUseSpecTranslation": False, "depthAlignmentUseSpecTranslation": False,
+                         "initialConfig": {"algorithmControl": {"enableLeftRightCheck": True}, "postProcessing": {
+                             "median": 0, "spatialFilter": {"enable": False, "holeFillingRadius": 0},
+                             "temporalFilter": {"enable": False}, "holeFilling": {"enable": False},
+                             "adaptiveMedianFilter": {"enable": False}, "decimationFilter": {"decimationFactor": 1}}}}
     def __enter__(self): return self
     def __exit__(self, *_): self.device.calls.append("close"); self.device.closed = True
     def setCalibrationData(self, value):
@@ -98,6 +102,7 @@ class RuntimeStereoTests(unittest.TestCase):
         worker.RUNTIME_STEREO_PROFILE_CACHE.clear()
         self.mode = dai.StereoDepthConfig(); self.mode.setSubpixel(True)
         self.stereo = SimpleNamespace(initialConfig=self.mode)
+        worker.configure_strict_planning_depth(self.stereo, dai)
         self.logs = io.StringIO()
         self.redirect = contextlib.redirect_stdout(self.logs); self.redirect.__enter__()
         self.loaded = self.make_profile()
