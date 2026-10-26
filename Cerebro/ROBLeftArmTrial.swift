@@ -2226,7 +2226,97 @@ enum ROBArmCurrentSpikeRecording {
         return true
     }
 
-    @MainActor private func performInitialLocalRetreatIfNeeded(map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) async throws ->Bool {
+    /// Only neck observations may mitigate an unknown-cell preflight failure.
+    /// Every attempt rebuilds the complete proof from original retained rays;
+    /// neither the diagnostic nor a selected view grants arm travel.
+    @MainActor private func reviewInitialRetreatWithCoverage(map initialMap:ROBWorkspaceCollisionSnapshot,
+        model:ROBGhostRobotModel,initialBaseline:[Double],offset:[Double],emptySource:String)
+        async throws ->(map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,proof:ROBWorkspaceInitialEmptyRetreat) {
+        var map=initialMap,attempted:[ROBWorkspaceView]=[],evidence:[[String:Any]]=[]
+        let began=ProcessInfo.processInfo.systemUptime,recoveryDeadline=began+30
+        var outcome="not_attempted"
+        defer {
+            if !evidence.isEmpty,!lastRecordingPath.isEmpty {
+                do {
+                    let report:[String:Any]=["kind":"initial_unknown_cell_coverage_recovery","schemaVersion":1,
+                        "motionAuthority":false,"freeSpaceInferred":false,"maximumViews":2,"budgetSeconds":30,
+                        "elapsedSeconds":ProcessInfo.processInfo.systemUptime-began,"outcome":outcome,
+                        "originalMapFingerprint":initialMap.fingerprint,"finalMapFingerprint":map.fingerprint,
+                        "sceneID":map.sceneID.uuidString,"attempts":evidence]
+                    let path=URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension("coverage-recovery.json")
+                    try JSONSerialization.data(withJSONObject:report,options:[.sortedKeys,.prettyPrinted]).write(to:path,options:.atomic)
+                    try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:path.path)
+                } catch {
+                    var status=collisionReviewStatus as? [String:Any] ?? [:]
+                    status["coverage_evidence_write_error"]=error.localizedDescription;collisionReviewStatus=status as NSDictionary
+                }
+            }
+        }
+        while true {
+            try check()
+            let sample=try measured(),baseline=sample.positionsRadians.map(\.doubleValue)
+            guard baseline.count==7,initialBaseline.count==7,offset.count==7,
+                  1.5*zip(baseline,initialBaseline).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+                throw ROBArmRoutineError.blocked("The arm changed during automatic coverage; no travel was sent.")
+            }
+            guard let trial=try visualTrial(map:map,model:model,baseline:baseline) else {
+                throw ROBArmRoutineError.blocked("Automatic coverage lost the exact local visual-trial scope.")
+            }
+            let now=Date().timeIntervalSince1970*1000
+            do {
+                let proof=try await reviewInitialLocalRetreat(map:map,model:model,baseline:baseline,
+                    goal:zip(baseline,offset).map(+),trial:trial,generation:generation,camera:vision.cameraGeneration,
+                    now:now,measuredAt:now-sample.effectiveSampleAgeMilliseconds,sequence:sample.sequence,
+                    emptySource:emptySource,stage:"before_stationary_mode_preparation")
+                outcome=attempted.isEmpty ? "initial_review_passed":"fresh_complete_review_passed"
+                return (map,trial,proof)
+            } catch {
+                let original=error
+                guard localReceiptCommand != nil,inactiveWorkspaceSearch,!leased,!positionReady,
+                      leaseRenewals.isEmpty,!armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,
+                      !recyclingGripDispatched,!servoPossiblePayloadUncertain,
+                      attempted.count<2,ProcessInfo.processInfo.systemUptime<recoveryDeadline,
+                      let blocker=ROBWorkspaceUnknownCellBlocker(detail:error.localizedDescription,voxelSizeMeters:map.voxelSizeMeters) else {
+                    outcome="review_still_blocked";throw original
+                }
+                try check()
+                cameraReady=false;localReceiptHeldNeckIdentity=nil
+                phase="automatic unknown-cell coverage"
+                update("Checking a new view of the blocked \(blocker.link) region, attempt \(attempted.count+1) of 2")
+                let before=map
+                guard let capture=try await ROBWorkspaceSearch.shared.captureBlockerCoverage(blocker:blocker,continuing:map,
+                    model:model,generation:generation,attempted:attempted,deadlineUptime:recoveryDeadline,
+                    check:{try self.check()},progress:{self.update($0)}) else {
+                    outcome="no_distinct_observable_view"
+                    evidence.append(["status":outcome,"blocked_link":blocker.link,
+                        "blocked_voxel":[blocker.voxel.x,blocker.voxel.y,blocker.voxel.z],"detail":original.localizedDescription])
+                    throw original
+                }
+                try check()
+                guard capture.snapshot.sceneID==before.sceneID,capture.snapshot.cameraGeneration==before.cameraGeneration,
+                      capture.snapshot.sessionGeneration==before.sessionGeneration,
+                      capture.snapshot.bodyMotionIdentity==before.bodyMotionIdentity,
+                      capture.snapshot.estimatedCameraProjectionIdentity==before.estimatedCameraProjectionIdentity,
+                      capture.snapshot.observedFrameCount>before.observedFrameCount,
+                      capture.snapshot.lastCapturedAtMilliseconds>before.lastCapturedAtMilliseconds else {
+                    throw ROBArmRoutineError.blocked("Automatic coverage changed its scene or failed to add original observations.")
+                }
+                attempted.append(capture.view);map=capture.snapshot
+                collisionMap=map;collisionModel=model;collisionReviewProposal=nil
+                evidence.append(["status":"captured_rechecking_complete_path","attempt":attempted.count,
+                    "blocked_link":blocker.link,"blocked_voxel":[blocker.voxel.x,blocker.voxel.y,blocker.voxel.z],
+                    "pan":capture.view.panDegrees,"upper":capture.view.upperTarget,
+                    "before_state":Int(before.state(at:blocker.center).rawValue),"after_state":Int(map.state(at:blocker.center).rawValue),
+                    "before_map":before.fingerprint,"after_map":map.fingerprint,
+                    "before_frames":before.observedFrameCount,"after_frames":map.observedFrameCount,
+                    "occupied_returns_preserved":true,"free_space_inferred":false])
+                publishCollisionReview(map:map,detail:"New blocker view captured; rechecking the entire initial arm route")
+            }
+        }
+    }
+
+    @MainActor private func performInitialLocalRetreatIfNeeded(map initialMap:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) async throws ->Bool {
+        var map=initialMap
         guard localReceiptCommand != nil,map.registrationID == nil else {return false}
         let initial=try measured().positionsRadians.map(\.doubleValue)
         let needsRetreat=try await Task.detached(priority:.userInitiated){
@@ -2241,20 +2331,19 @@ enum ROBArmCurrentSpikeRecording {
         }
         guard physicalSide=="right",!armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,
               !recyclingGripDispatched,ROBArmRoutinePlan.near(start,Array(repeating:0,count:7)),
-              let trial=try visualTrial(map:map,model:model,baseline:start) else {
+              try visualTrial(map:map,model:model,baseline:start) != nil else {
             throw ROBArmRoutineError.blocked("Initial self-proxy clearance needs a distinct declared-empty first-attempt retreat; no general overlap exemption is available.")
         }
         let emptySource="local_first_attempt_no_arm_travel_or_task_grip"
         let offset=[0,-0.075,0,0,0,0,0]
-        let goal=zip(start,offset).map(+),session=generation,camera=vision.cameraGeneration
-        let now=Date().timeIntervalSince1970*1000,measuredAt=now-sample.effectiveSampleAgeMilliseconds
-        let initialProof=try await reviewInitialLocalRetreat(map:map,model:model,baseline:start,goal:goal,trial:trial,
-            generation:session,camera:camera,now:now,measuredAt:measuredAt,sequence:sample.sequence,
-            emptySource:emptySource,stage:"before_stationary_mode_preparation")
+        let session=generation
+        let coverageReview=try await reviewInitialRetreatWithCoverage(map:map,model:model,initialBaseline:start,offset:offset,emptySource:emptySource)
+        map=coverageReview.map
+        let trial=coverageReview.trial,initialProof=coverageReview.proof,camera=vision.cameraGeneration
         try requireLiveVisualTrial(trial,map:map,model:model)
         let initialPath=ROBLeftGestureProposal(id:UUID(),name:"Initial declared-empty visual calibration retreat",kind:"initial_empty_visual_retreat",
             modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
-            sessionGeneration:session,baseline:start,poses:[],steps:[initialProof.step])
+            sessionGeneration:session,baseline:initialProof.baseline,poses:[],steps:[initialProof.step])
         activeLocalRetreat=initialProof;proposal=initialPath;collisionReviewProposal=initialPath
         defer {activeLocalRetreat=nil;proposal=nil;proposalStep = -1;reviewedDispatchStart=nil}
         inactiveWorkspaceSearch=false

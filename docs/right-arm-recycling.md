@@ -34,6 +34,32 @@ historical `can-reach.json` file.
 
 ## Visual checks and changed targets
 
+For the standing local can trial, an unknown-cell rejection during the initial
+empty retreat now starts a bounded neck-only recovery before any arm mode,
+trajectory or jaw command. The diagnostic identifies the actual link and voxel.
+The planner projects the complete cell into candidate camera views, selects a
+distinct view with additional parallax, waits for the normal neck settling
+checks, and appends two advancing synchronized depth exposures. It retains the
+same scene and every original obstacle return, then repeats the complete arm
+review from fresh measured feedback. At most two additional views share a
+30-second deadline and the original scan's 60-second acquisition bound.
+
+This fallback does not run after arm travel, jaw setup, possible possession,
+mode changes, Stop, feedback loss or a source/body/context change. Occupied
+obstacles do not trigger it. Missing depth remains unknown; projecting a cell
+inside the image does not prove visibility through ROB's own hardware. A depth
+hole can therefore remain unresolved after both attempts. The private trial
+recording gets a `coverage-recovery.json` audit with the attempted views,
+before/after cell states and map fingerprints. Capture diagnostics also retain
+bounded same-frame depth statistics for the projected cell region. None of
+these records grants motion or claims camera-to-arm registration.
+
+Hardware-free validation uses `Tests/ROBLeftArmCoverageRecoveryRuntimeTests.py`,
+`Tests/ROBWorkspaceBlockerCoverageCaptureRuntimeTests.py` and
+`Scripts/test-workspace-depth-map.sh`. These exercise the actual recovery,
+capture and mapper paths with inert camera/robot seams; they do not establish a
+successful physical grasp.
+
 Before closing, a fresh detector observation and aligned depth must still agree
 with the frozen can. A significant displacement stops closing. The task may
 hold, reacquire and completely replan once under its existing approval; it does

@@ -5761,6 +5761,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         ROBSerialBox *serial = weakSelf.serialBox;
         return serial == nil ? 0 : MAX(serial.currentNeckPanMinimumDegrees, MIN(serial.currentNeckPanMaximumDegrees, pan));
     };
+    workspace.panTargetForView = ^NSNumber *(double pan) {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        if (serial == nil || !serial.neckCommandStateKnown || !isfinite(pan) ||
+            pan < serial.currentNeckPanMinimumDegrees || pan > serial.currentNeckPanMaximumDegrees) { return nil; }
+        ROBNeckSafetyConfig config = [serial neckSafetyConfiguration];
+        int32_t target = 0;
+        return ROBNeckSafetyPanDegreesToTarget(&config, pan, &target) ? @(target) : nil;
+    };
     ROBNeckQRCalibration *qrCalibration = [ROBNeckQRCalibration shared];
     qrCalibration.cameraDemand = routine.cameraDemand;
     qrCalibration.prepareView = workspace.prepareView;

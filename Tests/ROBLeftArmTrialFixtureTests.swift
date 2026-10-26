@@ -328,6 +328,14 @@ final class ROBWorkspaceSearch {
     var nearestSelectionCalls=0
     var prepareView:((Double,Int)->Bool)? = {_,_ in true}
     var viewReady:((Double,Int)->Bool)? = {_,_ in true}
+    @MainActor func captureBlockerCoverage(blocker:ROBWorkspaceUnknownCellBlocker,continuing snapshot:ROBWorkspaceCollisionSnapshot,
+        model:ROBGhostRobotModel,generation:UInt64,attempted:[ROBWorkspaceView],deadlineUptime:Double,
+        check:()throws->Void,progress:(String)->Void) async throws ->(snapshot:ROBWorkspaceCollisionSnapshot,view:ROBWorkspaceView)? {
+        try check()
+        // No actual new source pixels exist at this seam. Never manufacture
+        // another coverage frame or turn the synthetic map into travel proof.
+        return nil
+    }
     @MainActor func nearestReachableCan(model:ROBGhostRobotModel,baseline:[String:Double],map:ROBWorkspaceCollisionSnapshot,
         calibrationFile:URL?=nil,nowMilliseconds:Double=Date().timeIntervalSince1970*1000) async ->ROBWorkspaceCanSelection {
         nearestSelectionCalls += 1
@@ -1222,8 +1230,17 @@ final class ROBArmRoutineCoordinator {
             let front = plan.target(index: plan.frontIndex)!, zero = Array(repeating: 0.0, count: 7)
             let model = try ROBGhostRobotModel(directory: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
             let legacyURL = URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/first-confirmed-recycle.proposal.json")
-            let legacyCarry = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:legacyURL))
-            precondition(legacyCarry.validForReplay(model:model),"Historical route must remain viewable without replaying a taught entry")
+            let archivedCarry = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:legacyURL))
+            precondition(archivedCarry.geometryID != model.geometryID && !archivedCarry.validForReplay(model:model),
+                "Historical proposal from before the tread-hull repair acquired current-geometry replay validity")
+            // The immutable archive keeps its original geometry identity.
+            // This distinct inert proposal tests the missing-payload gate with
+            // today's identities; it is never a rebinding of physical evidence.
+            let legacyCarry = ROBLeftGestureProposal(id:UUID(),name:"Synthetic current-model no-payload carrying fixture",kind:archivedCarry.kind,
+                modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+                sessionGeneration:g.generation,baseline:archivedCarry.baseline,poses:archivedCarry.poses,steps:archivedCarry.steps,
+                recyclingActions:archivedCarry.recyclingActions,recyclingParameters:archivedCarry.recyclingParameters)
+            precondition(legacyCarry.validForReplay(model:model),"Synthetic no-payload fixture lost structural validity")
             precondition(legacyCarry.workspaceCollisionPlan?.payload == nil && legacyCarry.steps.contains(where:{ $0.jawAction == .grip }))
             g.commands = []; let beforeLegacyApproval = approvals, beforeLegacyScan = search.collisionScanCalls
             let missingPayload = await run(legacyCarry,model:model)
@@ -1231,7 +1248,7 @@ final class ROBArmRoutineCoordinator {
             precondition((missingPayload["detail"] as? String)?.contains("Measure the carried object") == true,missingPayload.description)
             precondition(approvals == beforeLegacyApproval && search.collisionScanCalls == beforeLegacyScan && g.commands.isEmpty,
                 "A legacy carry without measured payload requested authority or attempted capture/actuation")
-            print("Imported carrying proposal: archive remains structurally replayable for preview, but missing measured payload rejects before approval, scene capture or actuator commands")
+            print("Imported carrying proposal: original stale-geometry archive stays rejected; distinct inert current-model proposal with missing measured payload rejects before approval, scene capture or actuator commands")
             let hand = model.toolPosition(model.positions(vendorLeft: front))!
             let now = Date().timeIntervalSince1970 * 1000, view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306)
             search.objects = [

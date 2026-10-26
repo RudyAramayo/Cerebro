@@ -9,6 +9,115 @@ import Darwin
     static func rejected(_ detail: String, _ block: () throws -> Void) {
         do { try block(); fatalError(detail) } catch {}
     }
+    static func continuationAndCoverageFixtures()throws {
+        let camera=UUID(),now=40_000.0,projection=String(repeating:"d",count:64)
+        var original=ROBWorkspaceDepthMap(modelID:"continue-model",geometryID:"continue-geometry",mappingID:"continue-mapping",
+            sessionGeneration:19,cameraGeneration:camera,nowMilliseconds:now,estimatedCameraProjectionIdentity:projection)
+        func append(_ map:inout ROBWorkspaceDepthMap,_ sequence:UInt64,_ captured:Double,
+                    transform:simd_double4x4 = matrix_identity_double4x4,depth:UInt16 = 1000)throws {
+            try map.append(width:16,height:16,fx:1000,fy:1000,cx:8,cy:8,depth:{_,_ in depth},
+                cameraToRobot:transform,capturedAtMilliseconds:captured,sequence:sequence,cameraGeneration:camera,
+                nowMilliseconds:captured+1,recordedPanDegrees:0,recordedUpperTarget:5300,recordedLowerTarget:6011,
+                estimatedCameraProjectionIdentity:projection)
+        }
+        try append(&original,1,now+100);try append(&original,2,now+200)
+        let seed=original.snapshot(nowMilliseconds:now+210)!
+        func continued(_ snapshot:ROBWorkspaceCollisionSnapshot = seed,at time:Double = now+220,
+            model:String="continue-model",geometry:String="continue-geometry",mapping:String="continue-mapping",
+            session:UInt64=19,cameraID:UUID=camera,pid:String=projection)throws->ROBWorkspaceDepthMap {
+            try .init(continuing:snapshot,modelID:model,geometryID:geometry,mappingID:mapping,sessionGeneration:session,
+                cameraGeneration:cameraID,estimatedCameraProjectionIdentity:pid,nowMilliseconds:time)
+        }
+        var next=try continued()
+        let roundTrip=next.snapshot(nowMilliseconds:seed.createdAtMilliseconds)!
+        expect(roundTrip.fingerprint==seed.fingerprint && roundTrip.sceneID==seed.sceneID &&
+            next.createdAtMilliseconds==seed.createdAtMilliseconds,"Continuation changed original frozen scene identity or time")
+        expect(roundTrip.observations.map(\.sequence)==[1,2] &&
+            roundTrip.observations.map(\.capturedAtMilliseconds)==[now+100,now+200],"Continuation restamped raw observations")
+        let unknown=SIMD3(0.1375,0.0125,0.5125)
+        expect(seed.state(at:unknown) == .unknown && roundTrip.state(at:unknown) == .unknown,
+            "Continuing a map manufactured free space")
+        rejected("Continuation accepted replayed sequence") {try append(&next,2,now+300)}
+        var translated=matrix_identity_double4x4;translated.columns.3.x=0.13
+        try append(&next,3,now+300,transform:translated,depth:1500)
+        let updated=next.snapshot(nowMilliseconds:now+310)!
+        expect(updated.sceneID==seed.sceneID && updated.fingerprint != seed.fingerprint && updated.observedFrameCount==3,
+            "A real new observation did not extend the same scene")
+        expect(updated.state(at:unknown) == .free,"Actual consistent fresh depth rays did not resolve the previously unknown cell")
+        expect(updated.observations[0].capturedAtMilliseconds==now+100 && updated.observations[2].sequence==3,
+            "New observation erased or restamped source history")
+        for cell in seed.occupiedVoxels {
+            let point=cell.center(voxelSizeMeters:seed.voxelSizeMeters)
+            let before=seed.occupiedSampleBounds(at:point)!,after=updated.occupiedSampleBounds(at:point)!
+            expect(updated.state(at:point) == .occupied && (0..<3).allSatisfy({after.low[$0]<=before.low[$0] && after.high[$0]>=before.high[$0]}),
+                "Targeted coverage removed an original occupied return or narrowed its union")
+        }
+        expect(updated.registrationID==nil && updated.registrationUncertaintyMeters==nil,
+            "Targeted observation promoted camera registration")
+        for changed in 0..<6 {
+            rejected("Changed continuation context was accepted") {
+                _ = try continued(model:changed==0 ? "other":"continue-model",geometry:changed==1 ? "other":"continue-geometry",
+                    mapping:changed==2 ? "other":"continue-mapping",session:changed==3 ? 20:19,
+                    cameraID:changed==4 ? UUID():camera,pid:changed==5 ? String(repeating:"e",count:64):projection)
+            }
+        }
+        rejected("Expired continuation reset acquisition clock") {_=try continued(at:now+60_101)}
+        rejected("Future continuation snapshot was accepted") {_=try continued(at:now+209)}
+        var second=try continued(updated,at:now+320)
+        rejected("A second seed extended the original60s acquisition limit") {
+            try append(&second,4,now+60_101)
+        }
+        func changedSnapshot(_ change:(inout [String:Any])->Void)throws->ROBWorkspaceCollisionSnapshot {
+            var object=try JSONSerialization.jsonObject(with:JSONEncoder().encode(seed)) as! [String:Any]
+            change(&object)
+            return try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:JSONSerialization.data(withJSONObject:object))
+        }
+        rejected("Truncated continuation was accepted") {_=try continued(try changedSnapshot{$0["isTruncated"]=true})}
+        rejected("Measured registration entered the provisional continuation lane") {
+            _=try continued(try changedSnapshot{$0["capturedRegistrationID"]="measured"})
+        }
+        rejected("Body-motion identity mismatch entered continuation") {
+            _=try continued(try changedSnapshot{$0["bodyMotionIdentity"]="other-body"})
+        }
+        rejected("Tampered immutable fingerprint entered continuation") {
+            _=try continued(try changedSnapshot{$0["fingerprint"]=String(repeating:"0",count:64)})
+        }
+
+        let detail="right_five_Link enters unobserved space. Scan the whole arm route before moving. Convex distance upper bound 57.019 mm; retained envelope margin 60.000 mm; voxel [0,0,20]; representation whole_voxel."
+        let blocker=ROBWorkspaceUnknownCellBlocker(detail:detail,voxelSizeMeters:0.025)!
+        expect(blocker.link=="right_five_Link" && blocker.voxel==ROBWorkspaceVoxel(x:0,y:0,z:20) &&
+            abs(blocker.distanceMeters-0.057019)<1e-10 && simd_distance(blocker.center,SIMD3(0.0125,0.0125,0.5125))<1e-10,"Unknown blocker diagnostic lost its exact geometry")
+        for bad in [detail.replacingOccurrences(of:"enters unobserved space. Scan the whole arm route before moving.",with:"would intersect an observed workspace obstacle."),
+            detail+" unrelated text",detail.replacingOccurrences(of:"57.019",with:"NaN"),
+            detail.replacingOccurrences(of:"60.000",with:"0.000"),detail.replacingOccurrences(of:"whole_voxel",with:"all_original_return_bounds"),
+            detail.replacingOccurrences(of:"[0,0,20]",with:"[99999999999999999999999999,0,20]")] {
+            expect(ROBWorkspaceUnknownCellBlocker(detail:bad,voxelSizeMeters:0.025)==nil,"Non-unknown/unbounded text selected a coverage view")
+        }
+        expect(ROBWorkspaceUnknownCellBlocker(detail:detail,voxelSizeMeters:.nan)==nil,"Nonfinite blocker size was accepted")
+        func values(_ transform:simd_double4x4)->[Double] {(0..<4).flatMap{column in (0..<4).map{transform[column][$0]}}}
+        func candidate(_ pan:Double,_ x:Double=0,_ z:Double=0)->ROBWorkspaceBlockerCoverageCandidate {
+            var matrix=matrix_identity_double4x4;matrix.columns.3.x=x;matrix.columns.3.z=z
+            return .init(view:.init(panDegrees:pan,upperTarget:5300),cameraToRobotColumnMajor:values(matrix))
+        }
+        let prior=[seed.observations[0]]
+        func select(_ candidates:[ROBWorkspaceBlockerCoverageCandidate],attempted:[ROBWorkspaceView]=[],
+            observations:[ROBWorkspaceDepthObservation]?=nil,fx:Double=500)->ROBWorkspaceView? {
+            ROBWorkspaceBlockerCoveragePlan.nextView(blocker:blocker,candidates:candidates,observations:observations ?? prior,
+                attempted:attempted,width:640,height:480,fx:fx,fy:500,cx:320,cy:240)
+        }
+        let weak=candidate(10),parallax=candidate(20,0.15)
+        expect(select([candidate(0),weak,parallax])==parallax.view,"Selector repeated old view or preferred zero parallax")
+        expect(select([weak,parallax],attempted:[parallax.view])==weak.view,"Selector retried an attempted view")
+        expect(select([weak,parallax],attempted:[weak.view,parallax.view])==nil,"Selector exceeded distinct-view set")
+        expect(select([candidate(2.9),candidate(30,1),candidate(40,0,1)])==nil,
+            "Repeated, out-of-image or behind-camera whole cell was selected")
+        expect(select([candidate(10,0,0.45)])==nil,"Partial near-plane whole cell was selected")
+        var malformed=values(matrix_identity_double4x4);malformed[0]=2
+        expect(select([.init(view:weak.view,cameraToRobotColumnMajor:malformed)])==nil,"Nonrigid candidate transform was selected")
+        expect(select([weak],observations:[])==nil && select([weak],fx:.nan)==nil,"Missing provenance/nonfinite intrinsics selected a view")
+        expect(select(Array(repeating:candidate(0),count:128)+[parallax])==nil,"Selector escaped128-candidate work bound")
+        print("Targeted depth continuation/selection passed: exact frozen scene roundtrip, unchanged raw obstacle unions and stamps, only actual fresh rays resolve unknown; context/replay/truncation/expiry reject; whole-cell image coverage, distinct parallax views and bounded diagnostics only")
+    }
     static func projectionExpirationFixtures()throws {
         let camera=UUID(),now=50_000.0
         var map=ROBWorkspaceDepthMap(modelID:"expiry-model",geometryID:"expiry-geometry",mappingID:"expiry-mapping",
@@ -204,6 +313,7 @@ import Darwin
         }
     }
     static func main() throws {
+        try continuationAndCoverageFixtures()
         try projectionExpirationFixtures()
         try storageBudgetFixtures()
         try projectionIdentityFixtures()
