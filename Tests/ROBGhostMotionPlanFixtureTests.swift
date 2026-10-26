@@ -37,10 +37,15 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
-        if CommandLine.arguments.last=="grasp-hold" {
+        if CommandLine.arguments.last=="grasp-hold" || CommandLine.arguments.last=="carry-release" {
+            let carryingFixture=CommandLine.arguments.last=="carry-release"
             let arm=try ROBGhostRobotModel(directory:model.directory,physicalSide:"right"),now=Date().timeIntervalSince1970*1000
-            let can=ROBWorkspaceLocatedObject(target:.can,position:[0.45334,-0.17957,0.81673],confidence:0.9,capturedAt:now,sequence:100,
+            var can=ROBWorkspaceLocatedObject(target:.can,position:[0.45334,-0.17957,0.81673],confidence:0.9,capturedAt:now,sequence:100,
                 view:.init(panDegrees:0,upperTarget:6306))
+            if carryingFixture {
+                can.sections = .init(top:[can.point.x,can.point.y,can.point.z+0.060],middle:can.position,
+                    bottom:[can.point.x,can.point.y,can.point.z-0.060],heightMeters:0.120,diameterMeters:0.066)
+            }
             let preview=try ROBCanGrabPreview.make(can:can,model:arm,baseline:arm.positions(vendorLeft:Array(repeating:0,count:7)),side:"right",now:now)
             precondition(preview.reachesCan && preview.graspError<0.001)
             let body=Array(preview.recyclingBodySteps),baseline=arm.vendorLeft(body.first!.pose)
@@ -71,7 +76,8 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
             expectBlocked{_=try compile(trial,body.map(\.pose),release)}
             expectBlocked{_=try compile(trial,Array(body.dropLast()).map(\.pose),actions)}
             let grip=raw.steps.firstIndex{$0.jawAction == .grip}!,prepared=raw.steps.firstIndex{$0.jawAction == .prepare}!
-            let payload=ROBWorkspaceCarriedObject(measurementID:"synthetic-shape-prior",centerInToolMeters:[0,0,0],halfExtentsMeters:[0.033,0.033,0.060])
+            let payload=ROBWorkspaceCarriedObject(measurementID:"synthetic-shape-prior",centerInToolMeters:[0,0,0],
+                halfExtentsMeters:carryingFixture ? [0.063,0.036,0.036]:[0.033,0.033,0.060])
             let contact=ROBWorkspaceIntentionalContact(measurementID:payload.measurementID,observationSequence:100,capturedAtMilliseconds:now,
                 sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,mapFingerprint:map.fingerprint,modelID:arm.modelID,
                 geometryID:arm.geometryID,mappingID:arm.selectedMappingID,toolLink:arm.toolLink,
@@ -88,6 +94,91 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
                 collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:trial,nowMilliseconds:now)
             precondition(proof.checkedPoseCount>0 && map.queries>0 && contact.releaseStepIndex==nil)
             print("Terminal grasp hold: actual RIGHT horizontal can reach, explicit trial+checked entry, one grip/6cm lift/no release, payload+full-hull review, decoded default authority/release/missing-lift negatives; synthetic free map only, no hardware")
+            if carryingFixture {
+                let heldQ=raw.steps.last!.positions,held=arm.positions(vendorLeft:heldQ),tool=arm.toolPosition(held)!
+                var carry:ROBCanCarryPreview?
+                for offset in [0.04,0.0,-0.04] where carry==nil {
+                    let bucket=ROBWorkspaceLocatedObject(target:.orangeBucket,position:[tool.x,tool.y-offset,tool.z-0.2],
+                        confidence:0.95,capturedAt:now,sequence:101,view:can.view,openingRadius:0.14)
+                    carry=try?ROBCanCarryPreview.make(from:held,can:can,attachedPayload:payload,destination:bucket,
+                        model:arm,side:"right",now:now,dropUncertaintyMeters:0.035)
+                }
+                guard let carry else {preconditionFailure("Synthetic verified held-can carry must be reachable")}
+                var previous=heldQ
+                let carrySteps=try carry.steps.map { step -> ROBLeftGestureProposal.Step in
+                    let q=arm.vendorLeft(step.pose)
+                    let seconds=max(step.seconds,ROBLeftArmInteractionPlan.duration(from:previous,to:q,padding:ROBArmRoutinePlan.tolerance)!)
+                    guard seconds<=5 else {throw ROBGhostMotionError.blocked("Synthetic carry segment too long")}
+                    previous=q
+                    return .init(positions:q,seconds:seconds,jawAction:step.jawAction,stage:step.stage)
+                }
+                let attachment=ROBWorkspaceVerifiedAttachedCan(nativePhaseID:UUID(),nativeVisualEvidenceSHA256:hash,
+                    sourceContactFingerprint:contact.fingerprint,sourceCylinderFingerprint:contact.sourceCylinderFingerprint,
+                    sourceMapFingerprint:map.fingerprint,payloadFingerprint:payload.fingerprint,
+                    bodyMotionIdentity:"fixture-body",sessionGeneration:42,verificationFirstSequence:100,verificationLastSequence:103,
+                    verificationCapturedAtMilliseconds:now,fixedViewIdentity:hash,targetIdentity:"isolated can100",
+                    baseline:heldQ,baselineTelemetrySequence:999,baselineCapturedAtMilliseconds:now)
+                let carryContact=ROBWorkspaceIntentionalContact(measurementID:payload.measurementID,observationSequence:100,
+                    capturedAtMilliseconds:now,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,mapFingerprint:map.fingerprint,
+                    modelID:arm.modelID,geometryID:arm.geometryID,mappingID:arm.selectedMappingID,toolLink:arm.toolLink,
+                    topCenterMeters:contact.topCenterMeters,bottomCenterMeters:contact.bottomCenterMeters,diameterMeters:0.066,
+                    firstContactStepIndex:0,gripStepIndex:nil,releaseStepIndex:carry.releaseIndex,stepCount:carrySteps.count,
+                    verifiedAttachment:attachment)
+                precondition(carryContact.matchesSourceContact(contact))
+                let carriedTrial=ROBWorkspaceVisualCalibrationTrial(receiptID:trial.receiptID,receiptSHA256:trial.receiptSHA256,
+                    appSessionID:trial.appSessionID,command:trial.command,canCount:trial.canCount,summarySHA256:trial.summarySHA256,
+                    authorizationContextIdentity:trial.authorizationContextIdentity,sessionGeneration:42,sceneID:map.sceneID,
+                    cameraGeneration:map.cameraGeneration,modelID:arm.modelID,geometryID:arm.geometryID,mappingID:arm.selectedMappingID,
+                    mapFingerprint:map.fingerprint,bodyMotionIdentity:"fixture-body",estimatedCameraProjectionIdentity:hash,
+                    observationPoseIdentity:hash,currentPoseIdentity:hash,baseline:heldQ,issuedAtMilliseconds:now-1,
+                    expiresAtMilliseconds:now+30_000,assumedSpatialErrorMeters:0.035)
+                let carryProof=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:heldQ,steps:carrySteps,map:map,
+                    model:arm,generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now,
+                    trial:carriedTrial,payload:payload,intentionalContact:carryContact,carryingAtStart:true)
+                func compileCarry(_ native:ROBWorkspaceVerifiedAttachedCan?=attachment,_ path:ROBWorkspaceCollisionPlan=carryProof,
+                    kind:String="recycling_carry_release",poses:[[String:Double]]=[] )throws->ROBLeftGestureProposal {
+                    try ROBLeftGestureCompiler.compile(kind:kind,name:"Synthetic verified attached carry and gravity release",poses:poses,
+                        model:arm,baseline:heldQ,generation:42,workspaceCollisionPlan:path,collisionMap:map,
+                        collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,
+                        visualCalibrationTrial:carriedTrial,verifiedAttachment:native,nowMilliseconds:now)
+                }
+                expectBlocked{_=try compileCarry(nil)}
+                let carried=try compileCarry(),archivedCarry=try JSONDecoder().decode(ROBLeftGestureProposal.self,from:carried.encoded())
+                precondition(carried.steps==carrySteps && carried.workspaceCollisionPlan?.carryingAtStart==true &&
+                    carried.steps.filter{$0.jawAction == .release}.count==1 &&
+                    !carried.steps.contains{$0.jawAction == .prepare || $0.jawAction == .grip})
+                expectBlocked{try ROBLeftGestureCompiler.validate(archivedCarry,model:arm,collisionMap:map,collisionSceneID:map.sceneID,
+                    collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:carriedTrial,nowMilliseconds:now)}
+                try ROBLeftGestureCompiler.validate(archivedCarry,model:arm,collisionMap:map,collisionSceneID:map.sceneID,
+                    collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:carriedTrial,verifiedAttachment:attachment,nowMilliseconds:now)
+                var wrongPhaseObject=try JSONSerialization.jsonObject(with:JSONEncoder().encode(attachment)) as! [String:Any]
+                wrongPhaseObject["nativePhaseID"]=UUID().uuidString
+                let wrongPhase=try JSONDecoder().decode(ROBWorkspaceVerifiedAttachedCan.self,from:JSONSerialization.data(withJSONObject:wrongPhaseObject))
+                expectBlocked{_=try compileCarry(wrongPhase)}
+                var emptyStart=carryProof;emptyStart.carryingAtStart=false
+                expectBlocked{_=try compileCarry(attachment,emptyStart)}
+                expectBlocked{_=try compileCarry(attachment,carryProof,kind:"workspace_collision")}
+                var otherArm=carried.poses;otherArm[0]["left_joint1",default:0]+=0.01
+                expectBlocked{_=try compileCarry(attachment,carryProof,poses:otherArm)}
+                func alteredCarryProof(_ edit:(inout [String:Any])->Void)throws->ROBWorkspaceCollisionPlan {
+                    var object=try JSONSerialization.jsonObject(with:JSONEncoder().encode(carryProof)) as! [String:Any]
+                    edit(&object)
+                    return try JSONDecoder().decode(ROBWorkspaceCollisionPlan.self,from:JSONSerialization.data(withJSONObject:object))
+                }
+                let fakeGrip=try alteredCarryProof { object in
+                    var steps=object["steps"] as! [[String:Any]];steps[0]["jawAction"]="grip";object["steps"]=steps
+                }
+                expectBlocked{_=try compileCarry(attachment,fakeGrip)}
+                let missingPayload=try alteredCarryProof{$0["payload"]=NSNull()}
+                expectBlocked{_=try compileCarry(attachment,missingPayload)}
+                let changedCylinder=try alteredCarryProof { object in
+                    var target=object["intentionalContact"] as! [String:Any]
+                    target["diameterMeters"]=0.080;object["intentionalContact"]=target
+                }
+                expectBlocked{_=try compileCarry(attachment,changedCylinder)}
+                precondition(carryProof.checkedPoseCount>0 && carrySteps.count<=80 && carryProof.intentionalContact?.gripStepIndex==nil)
+                print("Verified attached carry compiler: real RIGHT held-can geometry/full proof, one release/empty upward retreat, no open/grip; decoded-only, wrong native phase, empty start, alternate kind and opposite-arm pose rejected; no hardware or runtime authority")
+            }
             return
         }
         if CommandLine.arguments.last == "corkscrew-entry" {

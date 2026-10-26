@@ -4,6 +4,64 @@ import Darwin
 
 enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedbackLost, cameraSourceChanged }
 
+/// Native relay metadata. Joint positions belong to each fresh phase proof,
+/// never the immutable user authorization that spans those planned motions.
+struct ROBTableRelayContext:Codable,Equatable {
+    let rightModelID:String,rightReferenceID:String,rightMappingID:String
+    let leftModelID:String,leftReferenceID:String,leftMappingID:String
+    let geometryID:String,cameraGeneration:UUID,bodyMotionIdentity:String
+    let gatewayGeneration:UInt64
+    let runtimeCalibrationIdentity:String,stereoPolicySHA256:String,physicalProjectionIdentity:String
+    let assumedSpatialErrorMeters:Double
+    var valid:Bool {
+        [rightModelID,rightReferenceID,rightMappingID,leftModelID,leftReferenceID,leftMappingID,geometryID,
+         runtimeCalibrationIdentity,stereoPolicySHA256,physicalProjectionIdentity].allSatisfy(relayHashIsValid) &&
+        rightMappingID != leftMappingID && !bodyMotionIdentity.isEmpty && bodyMotionIdentity.utf8.count<=256 &&
+        gatewayGeneration>0 && assumedSpatialErrorMeters==0.035
+    }
+    var identity:String {
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        return SHA256.hash(data:(try?encoder.encode(self)) ?? Data()).map{String(format:"%02x",$0)}.joined()
+    }
+    var object:[String:Any] { (try?JSONSerialization.jsonObject(with:JSONEncoder().encode(self)))as?[String:Any] ?? [:] }
+}
+private func relayHashIsValid(_ value:String)->Bool {value.count==64 && value.allSatisfy{$0.isHexDigit && !$0.isUppercase}}
+
+/// Actual native telemetry only. The executor still owns full path admission,
+/// joint limits, ownership and exposure matching; this supplies both-arm liveness.
+struct ROBTableRelayPhaseFeedback {
+    let gatewayGeneration:UInt64
+    let rightPositions:[Double],leftPositions:[Double]
+    let rightModes:[Int],leftModes:[Int]
+    let rightTelemetrySequence:UInt64,leftTelemetrySequence:UInt64
+    let rightStationary:Bool,leftStationary:Bool
+    let rightMotorAgeMilliseconds:Double,leftMotorAgeMilliseconds:Double
+    let rightGripperAgeMilliseconds:Double,leftGripperAgeMilliseconds:Double
+    func valid(movingArm:String?,generation:UInt64)->Bool {
+        guard gatewayGeneration==generation,rightTelemetrySequence>0,leftTelemetrySequence>0,
+              rightPositions.count==7,leftPositions.count==7,(rightPositions+leftPositions).allSatisfy(\.isFinite),
+              [rightMotorAgeMilliseconds,leftMotorAgeMilliseconds,rightGripperAgeMilliseconds,leftGripperAgeMilliseconds]
+                .allSatisfy({$0.isFinite && (0...250).contains($0)}),rightModes.count==7,leftModes.count==7 else{return false}
+        func modes(_ values:[Int],moving:Bool)->Bool {
+            guard let mode=values.first,values.allSatisfy({$0==mode}) else{return false}
+            return moving ? mode==2:[0,2].contains(mode)
+        }
+        return modes(rightModes,moving:movingArm=="right") && modes(leftModes,moving:movingArm=="left") &&
+            (movingArm=="right" || rightStationary) && (movingArm=="left" || leftStationary)
+    }
+}
+
+/// An actual user declaration plus audited task history can establish ASSUMED
+/// empty state; this never claims camera-measured possession or fabricates ASR.
+struct ROBTableRelayInitialEmptyEvidence {
+    let source:String
+    let declarationMessageSHA256:String,declarationAuditSHA256:String,taskHistorySHA256:String
+    let declaredAtMilliseconds:Double,appSessionID:String
+    let rightDeclaredEmpty:Bool,leftDeclaredEmpty:Bool
+    let rightAcquisitionCommandsSinceDeclaration:Int,leftAcquisitionCommandsSinceDeclaration:Int
+    let anyUncertainAcquisitionAcknowledgement:Bool,globalMayHoldPayload:Bool
+}
+
 /// The operator decides on the controller; Cerebro owns execution and its
 /// measured result. No desktop alert, persisted grant, or per-waypoint prompt.
 @objcMembers final class ROBControllerArmApproval: NSObject {
@@ -724,6 +782,44 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         try handle.write(contentsOf: data); try handle.synchronize()
     }
 
+    private struct TableRelayScope:Equatable {
+        let canCount:Int,summary:String,context:ROBTableRelayContext
+        var contextIdentity:String {context.identity}
+        var object:[String:Any] {
+            ["scopeVersion":1,"command":"right_table_left_recycle_cans_v1","canCount":canCount,
+             "summary":summary,"summarySHA256":Self.hash(summary),"context":context.object,
+             "contextIdentity":contextIdentity,"targetObject":"empty_coke_can","destination":"orange_bucket",
+             "route":["right_pickup","shared_table","left_pickup","orange_bucket"],"arms":["right","left"],
+             "rightGatewayArm":"left","leftGatewayArm":"right","oneMovingArmAtATime":true,
+             "bothArmsStationaryHolds":true,"treads":false,"torso":false,"manualGestures":false,
+             "permitsUnmeasuredVisualCalibrationTrial":true]
+        }
+        private static func hash(_ value:String)->String {ROBControllerArmApproval.localHash(Data(value.utf8))}
+    }
+    private struct TableRelayBinding {
+        let phase:String,physicalArm:String,proposalID:UUID,proposalSHA256:String
+        let idlePositions:[Double]
+        let rightSequenceAtBind:UInt64,leftSequenceAtBind:UInt64
+        let feedback:()->ROBTableRelayPhaseFeedback?
+    }
+    private struct TableRelayApproval {
+        let receiptID:UUID,receiptSHA256:String,pendingID:String,scope:TableRelayScope
+        let currentContext:()->String?
+        let previousUncertaintyAtMilliseconds:Double?
+        var phaseIndex=0,completedTransfers=0,verifiedBucketLandings=0
+        var rightMayHold=true,leftMayHold=true
+        var supportStage="initial_empty_unverified"
+        var binding:TableRelayBinding?
+        var usedProposals=Set<UUID>()
+        var usedProposalHashes=Set<String>()
+        var pendingBucketLandingVerified=false
+        var lastConsumedPhase:String?
+    }
+    private var tableRelayApproval:TableRelayApproval?
+    private var lastTableRelayLedger:NSDictionary?
+    private var tableRelayAuditFailure:String?
+    private static let tableRelayPhases=["right_pickup","right_place_shared_table","right_retreat","left_pickup","left_place_bucket","left_retreat"]
+
     private struct Peer {
         let device: UUID
         let session: UUID
@@ -748,6 +844,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         var armSessionID: String? = nil
         var attentionReminders = 0
         var localRecyclingScope: LocalRecyclingScope?
+        var tableRelayScope:TableRelayScope?
         var localContextIdentity: (() -> String?)?
         var awaitingLocalReceipt = false
         var localSessionApprovalID: UUID?
@@ -831,6 +928,12 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
 
     private func authorizationIsLive(_ p: Pending) -> Bool {
         guard let started = p.started, (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
+        if let scope=p.tableRelayScope {
+            guard tableRelayAuditFailure==nil,let approval=tableRelayApproval,approval.pendingID==p.id,
+                  approval.scope==scope,approval.currentContext()==scope.contextIdentity else{return false}
+            if let binding=approval.binding {return tableRelayFeedbackIsLive(binding,scope:scope)}
+            return true
+        }
         if let id = p.localSessionApprovalID {
             guard let approval = localRecyclingApproval, approval.receiptID == id,
                   approval.activePendingID == p.id, approval.scope == p.localRecyclingScope,
@@ -962,6 +1065,12 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
 
     private func beginAcceptedOperation() {
         guard let p = pending, p.started == nil else { return }
+        if let scope=p.tableRelayScope {
+            guard tableRelayAuditFailure==nil,let approval=tableRelayApproval,approval.pendingID==p.id,
+                  approval.scope==scope,approval.currentContext()==scope.contextIdentity else {
+                cancel(reason:"The table-relay authorization lost its exact both-arm context.");return
+            }
+        }
         if p.localSessionApprovalID != nil {
             guard let approval = localRecyclingApproval, approval.activePendingID == p.id,
                   approval.beginBefore > now(), approval.scope == p.localRecyclingScope,
@@ -978,6 +1087,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         p.execute { [weak self] result in
             guard let self, self.pending?.id == p.id else { return }
             precondition(Thread.isMainThread)
+            if p.tableRelayScope != nil {self.finishTableRelayOperation(result);return}
             let outcome = result["status"] as? String ?? "failed"
             let succeeded = ["completed", "accepted_unverified", "ready_for_object", "grip_attempted"].contains(outcome)
             let noReach = result["reach_sent"] as? Bool == false
@@ -1052,14 +1162,14 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     /// Exact one-shot scope for the operator-supervised physical-left trial.
     func authorizesLeftArmTrial(_ summary: String) -> Bool {
         guard let p = pending,
-              p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
+              p.tableRelayScope==nil,p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
               p.arguments["arm"] as? String == "left", p.summary == summary,
               authorizationIsLive(p) else { return false }
         return true
     }
 
     func authorizesRightArmTrial(_ summary: String) -> Bool {
-        guard let p = pending, p.action == "arm_operation",
+        guard let p = pending,p.tableRelayScope==nil,p.action == "arm_operation",
               p.arguments["operation"] as? String == "manual",
               ["right","both"].contains(p.arguments["arm"] as? String ?? ""), p.summary == summary,
               authorizationIsLive(p) else { return false }
@@ -1070,7 +1180,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     /// operator-supervised travel may replace the semantic route inspection.
     /// Never persist or infer this scope from a model's request or a preference.
     func authorizesSupervisedArmRoute() -> Bool {
-        guard let p = pending, authorizationIsLive(p) else { return false }
+        guard let p = pending,p.tableRelayScope==nil,authorizationIsLive(p) else { return false }
         return (p.action == "arm_operation" && p.summary.hasSuffix(Self.supervisedRouteNotice))
             || (p.action == "play_gesture" && p.summary == Self.supervisedGreetingName)
     }
@@ -1078,7 +1188,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     private func request(action: String, arguments: NSDictionary, summary: String, executionLimit: TimeInterval = 120,
                          allowArmSession: Bool = false,
                          localRecyclingScope: LocalRecyclingScope? = nil,
-                         localContextIdentity: (() -> String?)? = nil, receiptOnly: Bool = false,
+                         localContextIdentity: (() -> String?)? = nil, receiptOnly: Bool = false, tableRelayScope:TableRelayScope? = nil,
                          execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
                          cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
@@ -1097,6 +1207,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
             created: now(), execute: execute, cancel: cancel, completion: completion, executionLimit: executionLimit)
         pending?.localRecyclingScope = localRecyclingScope
+        pending?.tableRelayScope = tableRelayScope
         pending?.localContextIdentity = localContextIdentity
         pending?.awaitingLocalReceipt = receiptOnly
         if receiptOnly, let scope = localRecyclingScope, let context = localContextIdentity {
@@ -1243,6 +1354,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     }
     private func cancelCurrentOperation(reason: String, standingPause: Bool) {
         pendingEmptyObservation=nil
+        revokeTableRelay(reason:reason)
         armSession = nil
         revokeLocalApproval(reason: reason)
         guard let p = pending else {
@@ -1276,7 +1388,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         guard let p = pending else { return }
         if p.awaitingLocalReceipt, p.started == nil {
             if now().timeIntervalSince(p.created) >= Self.localApprovalBeginLimit ||
-                p.localContextIdentity?() != p.localRecyclingScope?.contextIdentity {
+                p.localContextIdentity?() != (p.tableRelayScope?.contextIdentity ?? p.localRecyclingScope?.contextIdentity) {
                 cancel(reason: "The prepared local recycling request expired or lost its context.")
             }
             return
@@ -1289,7 +1401,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             // is missed. Repeat the SAME scope without extending its deadline.
             announceApproval?("Hey! Can I move my arms?")
         }
-        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil {
+        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil || p.tableRelayScope != nil {
             if !authorizationIsLive(p) { pauseOrCancelLostOperation("Authorized arm operation expired; hold requested.") }
             return
         }
@@ -1398,5 +1510,258 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         if cancelExecution { p.cancel() }
         update(result["detail"] as? String ?? "Arm operation ended")
         p.completion(result)
+    }
+}
+
+extension ROBControllerArmApproval {
+    private var tableRelayObjectStateURL:URL {localRecyclingApprovalAuditDirectory.appendingPathComponent("table-relay-object-state.json")}
+
+    /// Persisted object uncertainty is evidence only, never a restored grant.
+    var tableRelayMayHoldPayload:Bool {
+        if tableRelayAuditFailure != nil {return true}
+        guard FileManager.default.fileExists(atPath:tableRelayObjectStateURL.path) else{return false}
+        guard let bytes=try?readPrivateLocalReceipt(tableRelayObjectStateURL),
+              let value=(try?JSONSerialization.jsonObject(with:bytes))as?[String:Any],
+              value["schemaVersion"]as?Int==1,let right=value["rightPossiblePayloadHeld"]as?Bool,
+              let left=value["leftPossiblePayloadHeld"]as?Bool else{return true}
+        return right || left
+    }
+    var activeTableRelayLedger:NSDictionary? {
+        if let a=tableRelayApproval {return tableRelayLedger(a,event:"current",state:"active")as NSDictionary}
+        return lastTableRelayLedger
+    }
+    var pendingTableRelayApprovalScope:NSDictionary? {pending?.tableRelayScope.map{$0.object as NSDictionary}}
+    var pendingTableRelayReceiptTemplate:NSDictionary? {
+        guard let p=pending,p.started==nil,let scope=p.tableRelayScope else{return nil}
+        let issued=now().timeIntervalSince1970*1000
+        return ["schemaVersion":3,"kind":"local_user_table_relay_approval_v1","receiptID":UUID().uuidString,
+            "appSessionID":localSessionID.uuidString,"pendingID":p.id,"issuedAtMilliseconds":issued,
+            "expiresAtMilliseconds":issued+Self.localApprovalBeginLimit*1000,"source":"explicit_user_session_instruction",
+            "sourceMessage":"","sourceMessageSHA256":"","additionalUserInstruction":"","additionalUserInstructionSHA256":"",
+            "scope":scope.object]as NSDictionary
+    }
+    @nonobjc func requestTableRelayWorkspaceTask(canCount:Int,summary:String,
+        currentContext:@escaping()->ROBTableRelayContext?,execute:@escaping(@escaping(NSDictionary)->Void)->Void,
+        cancel:@escaping()->Void,completion:@escaping(NSDictionary)->Void) {
+        precondition(Thread.isMainThread)
+        guard pending==nil,tableRelayApproval==nil,localRecyclingApproval==nil,!standingLocalCanCampaignActive,
+              (1...8).contains(canCount),!summary.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+              summary.utf8.count<=2048,let context=currentContext(),context.valid else {
+            completion(["status":"rejected","detail":"Prepare a separate exact1...8-can table relay with both model/source identities; existing single-arm jobs cannot supply its authority."]);return
+        }
+        let scope=TableRelayScope(canCount:canCount,summary:summary,context:context)
+        let live:()->String? = {guard let value=currentContext(),value.valid else{return nil};return value.identity}
+        request(action:"arm_operation",arguments:["operation":"manual","arm":"both","summary":summary],summary:summary,
+            executionLimit:600,localContextIdentity:live,receiptOnly:true,tableRelayScope:scope,
+            execute:execute,cancel:cancel,completion:completion)
+    }
+    @nonobjc func importLocalTableRelayApproval(fromReceiptURL url:URL)throws {
+        precondition(Thread.isMainThread)
+        guard let p=pending,p.started==nil,p.awaitingLocalReceipt,let scope=p.tableRelayScope,
+              let context=p.localContextIdentity,context()==scope.contextIdentity,tableRelayApproval==nil else {
+            throw localApprovalError("Prepare the exact current both-arm table relay before importing its private receipt.")
+        }
+        let data=try readPrivateLocalReceipt(url)
+        guard let top=try JSONSerialization.jsonObject(with:data)as?[String:Any] else {throw localApprovalError("Invalid relay receipt.")}
+        let keys:Set<String>=["schemaVersion","kind","receiptID","appSessionID","pendingID","issuedAtMilliseconds","expiresAtMilliseconds",
+            "source","sourceMessage","sourceMessageSHA256","additionalUserInstruction","additionalUserInstructionSHA256","scope"]
+        let receipt=try JSONDecoder().decode(LocalReceipt.self,from:data)
+        let current=now().timeIntervalSince1970*1000
+        guard Set(top.keys)==keys,receipt.schemaVersion==3,receipt.kind=="local_user_table_relay_approval_v1",
+              receipt.appSessionID==localSessionID,top["pendingID"]as?String==p.id,
+              receipt.source=="explicit_user_session_instruction",let supplied=top["scope"]as?[String:Any],
+              try localCanonical(supplied)==localCanonical(scope.object),
+              !receipt.sourceMessage.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,receipt.sourceMessage.utf8.count<=8192,
+              receipt.sourceMessageSHA256==Self.localHash(Data(receipt.sourceMessage.utf8)),
+              let additional=receipt.additionalUserInstruction,!additional.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+              additional.utf8.count<=8192,receipt.additionalUserInstructionSHA256==Self.localHash(Data(additional.utf8)),
+              receipt.issuedAtMilliseconds.isFinite,receipt.expiresAtMilliseconds.isFinite,
+              receipt.issuedAtMilliseconds>0,receipt.issuedAtMilliseconds<=current,receipt.expiresAtMilliseconds>current,
+              receipt.expiresAtMilliseconds>receipt.issuedAtMilliseconds,
+              receipt.expiresAtMilliseconds-receipt.issuedAtMilliseconds<=Self.localApprovalBeginLimit*1000,
+              current-receipt.issuedAtMilliseconds<=Self.localApprovalBeginLimit*1000 else {
+            throw localApprovalError("Relay receipt source, version, exact both-arm scope, pending job or expiry does not match.")
+        }
+        var priorUncertainty:Double?
+        if tableRelayMayHoldPayload {
+            if let bytes=try?readPrivateLocalReceipt(tableRelayObjectStateURL),
+               let value=(try?JSONSerialization.jsonObject(with:bytes))as?[String:Any],
+               let time=value["updatedAtMilliseconds"]as?Double,time.isFinite {priorUncertainty=time}
+            else {priorUncertainty=current}
+        }
+        var audit=top;audit["receiptSHA256"]=Self.localHash(data);audit["sourceReceiptPath"]=url.path
+        audit["importedAtMilliseconds"]=current;audit["event"]="table_relay_import_once_no_persisted_grant"
+        try writeLocalApprovalAudit(audit,name:"table-relay-receipt-"+receipt.receiptID.uuidString+".json")
+        let approval=TableRelayApproval(receiptID:receipt.receiptID,receiptSHA256:Self.localHash(data),pendingID:p.id,
+            scope:scope,currentContext:context,previousUncertaintyAtMilliseconds:priorUncertainty)
+        try persistTableRelayLedger(approval,event:"imported_initial_object_state_unknown",state:"active")
+        tableRelayApproval=approval
+        startTimer();beginAcceptedOperation()
+    }
+    @nonobjc func recordTableRelayInitialEmptyEvidence(_ evidence:ROBTableRelayInitialEmptyEvidence,
+        feedback:ROBTableRelayPhaseFeedback)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        let nowMS=now().timeIntervalSince1970*1000
+        let history=evidence.source=="audited_user_declared_empty_plus_no_acquisition_history"
+        let fresh=evidence.source=="fresh_audited_user_declared_empty"
+        guard a.phaseIndex==0,a.completedTransfers==0,a.binding==nil,a.usedProposals.isEmpty,
+              a.supportStage=="initial_empty_unverified",history || fresh,
+              evidence.appSessionID==localSessionID.uuidString,evidence.rightDeclaredEmpty,evidence.leftDeclaredEmpty,
+              evidence.declaredAtMilliseconds.isFinite,evidence.declaredAtMilliseconds>0,evidence.declaredAtMilliseconds<=nowMS,
+              [evidence.declarationMessageSHA256,evidence.declarationAuditSHA256,evidence.taskHistorySHA256].allSatisfy(relayHashIsValid),
+              evidence.rightAcquisitionCommandsSinceDeclaration==0,evidence.leftAcquisitionCommandsSinceDeclaration==0,
+              !evidence.anyUncertainAcquisitionAcknowledgement,!evidence.globalMayHoldPayload,!standingCanCampaignMayHoldPayload,
+              feedback.valid(movingArm:nil,generation:a.scope.context.gatewayGeneration),
+              a.previousUncertaintyAtMilliseconds.map({fresh && evidence.declaredAtMilliseconds>$0}) ?? true else {
+            throw localApprovalError("Initial relay EMPTY needs the actual audited declaration plus no-acquisition history and fresh both-arm feedback. Prior uncertain acquisition needs a newer actual user fact.")
+        }
+        a.rightMayHold=false;a.leftMayHold=false
+        a.supportStage=history ? "initial_empty_ASSUMED_declared_task_history":"initial_empty_ASSUMED_fresh_user_fact"
+        try persistTableRelayLedger(a,event:"initial_empty_assumption",state:"active",evidence:[
+            "source":evidence.source,"declarationMessageSHA256":evidence.declarationMessageSHA256,
+            "declarationAuditSHA256":evidence.declarationAuditSHA256,"taskHistorySHA256":evidence.taskHistorySHA256,
+            "declaredAtMilliseconds":evidence.declaredAtMilliseconds,"possessionMeasured":false])
+        tableRelayApproval=a
+    }
+    @nonobjc func bindTableRelayPhaseProposal(phase:String,physicalArm:String,proposalID:UUID,proposalSHA256:String,
+        feedback:@escaping()->ROBTableRelayPhaseFeedback?)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        guard a.completedTransfers<a.scope.canCount,phase==Self.tableRelayPhases[a.phaseIndex],
+              physicalArm==tableRelaySide(phase),relayHashIsValid(proposalSHA256),a.binding==nil,
+              !a.usedProposals.contains(proposalID),!a.usedProposalHashes.contains(proposalSHA256),a.usedProposals.count<2048,
+              let frame=feedback(),frame.valid(movingArm:physicalArm,generation:a.scope.context.gatewayGeneration),
+              a.supportStage != "initial_empty_unverified" else {
+            throw localApprovalError("Bind exactly one new immutable relay proposal to the current phase, selected physical arm and fresh both-arm feedback.")
+        }
+        if phase=="right_pickup" {guard !a.leftMayHold,(!a.rightMayHold || a.supportStage=="right_acquisition_possible") else {throw localApprovalError("A new relay pickup cannot start with a possible payload.")}}
+        if phase=="left_pickup" {guard !a.rightMayHold,(!a.leftMayHold && a.supportStage=="shared_table_verified_right_clear" || a.leftMayHold && a.supportStage=="left_acquisition_possible") else {throw localApprovalError("LEFT pickup needs the verified table placement and RIGHT clear hold.")}}
+        a.binding=TableRelayBinding(phase:phase,physicalArm:physicalArm,proposalID:proposalID,proposalSHA256:proposalSHA256,
+            idlePositions:physicalArm=="right" ? frame.leftPositions:frame.rightPositions,
+            rightSequenceAtBind:frame.rightTelemetrySequence,leftSequenceAtBind:frame.leftTelemetrySequence,feedback:feedback)
+        a.usedProposals.insert(proposalID);a.usedProposalHashes.insert(proposalSHA256)
+        try persistTableRelayLedger(a,event:"phase_proposal_bound",state:"active")
+        tableRelayApproval=a
+    }
+    @nonobjc func authorizesTableRelayPhaseProposal(phase:String,physicalArm:String,proposalID:UUID,proposalSHA256:String)->Bool {
+        guard Thread.isMainThread,let p=pending,p.tableRelayScope != nil,authorizationIsLive(p),
+              let a=tableRelayApproval,let b=a.binding,phase==Self.tableRelayPhases[a.phaseIndex],
+              b.phase==phase,b.physicalArm==physicalArm,b.proposalID==proposalID,b.proposalSHA256==proposalSHA256 else{return false}
+        return tableRelayFeedbackIsLive(b,scope:a.scope)
+    }
+    @nonobjc func endTableRelayPhaseProposal(proposalID:UUID,proposalSHA256:String)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        guard let b=a.binding,b.proposalID==proposalID,b.proposalSHA256==proposalSHA256,
+              tableRelayFeedbackIsLive(b,scope:a.scope),
+              b.feedback()?.valid(movingArm:nil,generation:a.scope.context.gatewayGeneration)==true else {
+            throw localApprovalError("Only the current fresh relay proposal can end at its measured both-arm hold.")
+        }
+        a.binding=nil;a.lastConsumedPhase=b.phase
+        try persistTableRelayLedger(a,event:"phase_proposal_consumed_at_hold",state:"active")
+        tableRelayApproval=a
+    }
+    /// Call immediately BEFORE a grip dispatch, including one whose ack may
+    /// become uncertain. No subsequent receipt may silently clear this flag.
+    @nonobjc func markTableRelayPossiblePayloadHeld(physicalArm:String)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        guard let b=a.binding,b.physicalArm==physicalArm,["right_pickup","left_pickup"].contains(b.phase),
+              tableRelayFeedbackIsLive(b,scope:a.scope) else {throw localApprovalError("Acquisition uncertainty needs its exact active pickup phase.")}
+        guard physicalArm=="right" ? !a.rightMayHold:!a.leftMayHold else {throw localApprovalError("This pickup already recorded acquisition; no repeated grip is admitted.")}
+        if physicalArm=="right" {a.rightMayHold=true}else{a.leftMayHold=true}
+        a.supportStage=physicalArm+"_acquisition_possible"
+        try persistTableRelayLedger(a,event:"acquisition_possible_before_grip",state:"active")
+        tableRelayApproval=a
+    }
+    @nonobjc func recordTableRelayPhaseCompletion(phase:String,evidenceSHA256:String,
+        feedback:ROBTableRelayPhaseFeedback,bucketLandingVerified:Bool=false)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        guard a.completedTransfers<a.scope.canCount,a.binding==nil,phase==Self.tableRelayPhases[a.phaseIndex],
+              a.lastConsumedPhase==phase,relayHashIsValid(evidenceSHA256),
+              feedback.valid(movingArm:tableRelaySide(phase),generation:a.scope.context.gatewayGeneration),
+              feedback.valid(movingArm:nil,generation:a.scope.context.gatewayGeneration),
+              !bucketLandingVerified || phase=="left_place_bucket" else {throw localApprovalError("Complete only the current measured relay phase with fresh both-arm feedback and native evidence.")}
+        switch phase {
+        case "right_pickup":
+            guard a.rightMayHold,!a.leftMayHold,a.supportStage=="right_acquisition_possible" else {throw localApprovalError("RIGHT pickup lacks recorded acquisition and positive visual grasp evidence.")}
+            a.supportStage="right_grasp_visually_supported"
+        case "right_place_shared_table":
+            guard a.rightMayHold,!a.leftMayHold else {throw localApprovalError("RIGHT table placement has no possible RIGHT payload.")}
+            a.rightMayHold=false;a.supportStage="shared_table_visually_verified"
+        case "right_retreat":
+            guard !a.rightMayHold,!a.leftMayHold,a.supportStage=="shared_table_visually_verified" else {throw localApprovalError("RIGHT retreat needs the supported shared-table release.")}
+            a.supportStage="shared_table_verified_right_clear"
+        case "left_pickup":
+            guard a.leftMayHold,!a.rightMayHold,a.supportStage=="left_acquisition_possible" else {throw localApprovalError("LEFT pickup lacks recorded acquisition and positive visual grasp evidence.")}
+            a.supportStage="left_grasp_visually_supported"
+        case "left_place_bucket":
+            guard a.leftMayHold,!a.rightMayHold else {throw localApprovalError("Bucket release has no possible LEFT payload.")}
+            a.leftMayHold=false;a.supportStage="bucket_release_visually_verified";a.pendingBucketLandingVerified=bucketLandingVerified
+        case "left_retreat":
+            guard !a.leftMayHold,!a.rightMayHold,a.supportStage=="bucket_release_visually_verified" else {throw localApprovalError("Final retreat needs the verified bucket release.")}
+            a.completedTransfers+=1;if a.pendingBucketLandingVerified {a.verifiedBucketLandings+=1}
+            a.pendingBucketLandingVerified=false;a.supportStage="both_empty_after_bucket_release"
+        default:throw localApprovalError("Unknown relay phase.")
+        }
+        a.phaseIndex=(a.phaseIndex+1)%Self.tableRelayPhases.count;a.lastConsumedPhase=nil
+        try persistTableRelayLedger(a,event:"phase_completed",state:"active",evidence:["completedPhase":phase,"evidenceSHA256":evidenceSHA256])
+        tableRelayApproval=a
+    }
+    private func tableRelaySide(_ phase:String)->String {phase.hasPrefix("right_") ? "right":"left"}
+    private func liveTableRelay()throws->TableRelayApproval {
+        guard let p=pending,p.tableRelayScope != nil,authorizationIsLive(p),let a=tableRelayApproval else {
+            throw localApprovalError("No live exact table-relay authority remains; hold both arms.")
+        }
+        return a
+    }
+    private func tableRelayFeedbackIsLive(_ binding:TableRelayBinding,scope:TableRelayScope)->Bool {
+        guard let frame=binding.feedback(),frame.valid(movingArm:binding.physicalArm,generation:scope.context.gatewayGeneration),
+              frame.rightTelemetrySequence>=binding.rightSequenceAtBind,frame.leftTelemetrySequence>=binding.leftSequenceAtBind else{return false}
+        let idle=binding.physicalArm=="right" ? frame.leftPositions:frame.rightPositions
+        return 1.5*zip(idle,binding.idlePositions).reduce(0.0){$0+abs($1.0-$1.1)}<=0.005
+    }
+    private func tableRelayLedger(_ a:TableRelayApproval,event:String,state:String)->[String:Any] {
+        var value:[String:Any]=["schemaVersion":1,"kind":"native_table_relay_phase_ledger_v1","receiptID":a.receiptID.uuidString,
+            "receiptSHA256":a.receiptSHA256,"appSessionID":localSessionID.uuidString,"pendingID":a.pendingID,
+            "command":"right_table_left_recycle_cans_v1","contextIdentity":a.scope.contextIdentity,
+            "canCount":a.scope.canCount,"completedTransfers":a.completedTransfers,"verifiedBucketLandings":a.verifiedBucketLandings,
+            "phase":Self.tableRelayPhases[a.phaseIndex],"state":state,"event":event,"supportStage":a.supportStage,
+            "rightPossiblePayloadHeld":a.rightMayHold,"leftPossiblePayloadHeld":a.leftMayHold,
+            "oneMovingArmAtATime":true,"updatedAtMilliseconds":now().timeIntervalSince1970*1000,
+            "consumedProposalCount":a.usedProposals.count,"persistedMotionGrant":false,"possessionMeasured":false]
+        if let b=a.binding {value["binding"]=["phase":b.phase,"physicalArm":b.physicalArm,"proposalID":b.proposalID.uuidString,"proposalSHA256":b.proposalSHA256]}
+        return value
+    }
+    private func persistTableRelayLedger(_ a:TableRelayApproval,event:String,state:String,evidence:[String:Any]=[:])throws {
+        var value=tableRelayLedger(a,event:event,state:state);if !evidence.isEmpty {value["evidence"]=evidence}
+        do {
+            try writeLocalApprovalAudit(value,name:"table-relay-event-"+UUID().uuidString+".json")
+            if FileManager.default.fileExists(atPath:tableRelayObjectStateURL.path) {_=try readPrivateLocalReceipt(tableRelayObjectStateURL)}
+            try localCanonical(value).write(to:tableRelayObjectStateURL,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:tableRelayObjectStateURL.path)
+            lastTableRelayLedger=value as NSDictionary
+        } catch {tableRelayAuditFailure=error.localizedDescription;throw error}
+    }
+    private func revokeTableRelay(reason:String) {
+        guard let a=tableRelayApproval else{return}
+        do {try persistTableRelayLedger(a,event:"revoked",state:"revoked",evidence:["reason":reason])}
+        catch {var value=tableRelayLedger(a,event:"revoked_audit_failure",state:"blocked");value["auditError"]=error.localizedDescription;lastTableRelayLedger=value as NSDictionary}
+        tableRelayApproval=nil
+    }
+    private func finishTableRelayOperation(_ result:NSDictionary) {
+        guard let a=tableRelayApproval else {finish(["status":"blocked","detail":"Relay authority was lost; hold both arms."],state:.failed);return}
+        let complete=a.completedTransfers==a.scope.canCount && !a.rightMayHold && !a.leftMayHold && a.binding==nil
+        var output=result as? [String:Any] ?? [:]
+        output["status"]=complete ? "completed":"partial_held"
+        output["transfer_completed"]=complete;output["batch_completed"]=a.completedTransfers
+        output["verified_bucket_landings"]=a.verifiedBucketLandings
+        output["possible_payload_held"]=a.rightMayHold || a.leftMayHold
+        do {try persistTableRelayLedger(a,event:complete ? "consumed":"ended_incomplete",state:complete ? "consumed":"revoked")}
+        catch {output["status"]="blocked";output["detail"]="Relay ledger could not be saved: "+error.localizedDescription}
+        tableRelayApproval=nil
+        finish(output as NSDictionary,state:complete && tableRelayAuditFailure==nil ? .completed:.failed)
     }
 }

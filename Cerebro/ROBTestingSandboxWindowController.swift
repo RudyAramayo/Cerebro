@@ -66,6 +66,7 @@ import UniformTypeIdentifiers
     private let standingCampaignInfo = NSTextField(wrappingLabelWithString: "")
     private let nominalEmptyCommissioningStep = NSButton(checkboxWithTitle: "One slow empty-arm commissioning step", target: nil, action: nil)
     private let oneDegreeEmptyCalibrationStep = NSButton(checkboxWithTitle: "One-degree empty-arm calibration step", target: nil, action: nil)
+    private let holdAfterInitialEmptyLift = NSButton(checkboxWithTitle: "Hold after initial empty lift", target: nil, action: nil)
     private var collisionRefreshTimer: Timer?
     private let continueCycle = NSButton(title: "Continue", target: nil, action: nil)
     private let save = NSButton(title: "Save test parameters", target: nil, action: nil)
@@ -255,6 +256,15 @@ import UniformTypeIdentifiers
             oneDegreeEmptyCalibrationStep.state = ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
             detailStack.addArrangedSubview(oneDegreeEmptyCalibrationStep)
             addHelp("Actuator/model calibration only: RIGHT J2 −0.02 rad over 4 seconds, at most 2 cm modeled travel, then hold. Collision clearance is unverified; contact predictions are diagnostic only. Contact could push the table or lift ROB. No payload, jaw command, grasp, carry, release, return or chained motion. Zero transfers. Stop and fresh feedback remain required.")
+            #if DEBUG
+            if trial.id == "right-recycling" {
+                holdAfterInitialEmptyLift.identifier = NSUserInterfaceItemIdentifier("sandbox-hold-after-initial-empty-lift")
+                holdAfterInitialEmptyLift.target = self; holdAfterInitialEmptyLift.action = #selector(changeHoldAfterInitialEmptyLift)
+                holdAfterInitialEmptyLift.state = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled ? .on : .off
+                detailStack.addArrangedSubview(holdAfterInitialEmptyLift)
+                addHelp("DEBUG: use the ordinary complete occupied/unknown/self-clearance checks for one initial EMPTY lift, then hold at the measured endpoint. No jaw, grasp, carry, release, return, rescan after lifting or chained step. ZERO can transfers. If no initial lift is needed, remain unchanged.")
+            }
+            #endif
             localApprovalInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-local-recycling-approval-scope")
             localApprovalInfo.isSelectable = true
             detailStack.addArrangedSubview(localApprovalInfo)
@@ -591,6 +601,11 @@ import UniformTypeIdentifiers
             parameterMessage = "Choose only one empty-arm calibration experiment before preparing its exact receipt."
             refresh(); return
         }
+        let liftHold = selectedTrial.id == "right-recycling" && holdAfterInitialEmptyLift.state == .on
+        guard !liftHold || (nominalEmptyCommissioningStep.state != .on && oneDegreeEmptyCalibrationStep.state != .on) else {
+            parameterMessage = "Choose only one empty-arm test; the fully checked lift-and-hold option excludes both calibration experiments."; refresh(); return
+        }
+        ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = liftHold
         ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters = spatial
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
@@ -615,6 +630,7 @@ import UniformTypeIdentifiers
         }
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
         if nominalEmptyCommissioningStep.state == .on {
+            holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = false
             oneDegreeEmptyCalibrationStep.state = .off
             ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
         }
@@ -631,6 +647,7 @@ import UniformTypeIdentifiers
         }
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
         if oneDegreeEmptyCalibrationStep.state == .on {
+            holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = false
             nominalEmptyCommissioningStep.state = .off
             ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
         }
@@ -638,6 +655,21 @@ import UniformTypeIdentifiers
             ? "Next local receipt: one four-second RIGHT J2 −0.02 rad calibration step, then hold; contact clearance is unverified; zero transfers."
             : "One-degree calibration is off; ordinary recycling admission applies."
         approval.tick(); refresh()
+    }
+    @objc private func changeHoldAfterInitialEmptyLift() {
+        guard canEdit else { return }
+        ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = selectedTrial.id == "right-recycling" && holdAfterInitialEmptyLift.state == .on
+        if ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled {
+            nominalEmptyCommissioningStep.state = .off;oneDegreeEmptyCalibrationStep.state = .off
+            ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
+            ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
+        }
+        parameterMessage = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled
+            ? "Next exact DEBUG job: one fully checked empty lift, then hold; no jaws or can operations, ZERO transfers."
+            : "Initial-lift hold is off; ordinary recycling continues after its checked initial lift."
+        // Changing the exact context invalidates only its old job. A standing
+        // campaign may pause for a fresh plan without revoking its approval.
+        ROBControllerArmApproval.shared.tick();refresh()
     }
     public func controlTextDidChange(_ notification: Notification) {
         guard canEdit, let field = fields["localVisualAllowanceMillimeters"],
@@ -778,6 +810,8 @@ import UniformTypeIdentifiers
         nominalEmptyCommissioningStep.state = left.nominalEmptyCommissioningStepEnabled ? .on : .off
         oneDegreeEmptyCalibrationStep.isEnabled = canEdit
         oneDegreeEmptyCalibrationStep.state = left.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
+        holdAfterInitialEmptyLift.isEnabled = canEdit && selectedTrial.id == "right-recycling"
+        holdAfterInitialEmptyLift.state = left.holdAfterInitialEmptyLiftEnabled ? .on : .off
         save.isEnabled = canEdit
         for button in actionButtons {
             let command = selectedTrial.actions.indices.contains(button.tag) ? selectedTrial.actions[button.tag].command : ""

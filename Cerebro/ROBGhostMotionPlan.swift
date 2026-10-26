@@ -344,6 +344,7 @@ enum ROBLeftGestureCompiler {
                         collisionMap: (any ROBWorkspaceCollisionMap)? = nil,
                         collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
                         visualCalibrationTrial: ROBWorkspaceVisualCalibrationTrial? = nil,
+                        verifiedAttachment: ROBWorkspaceVerifiedAttachedCan? = nil,
                         nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws -> ROBLeftGestureProposal {
         func validatePath(_ path:ROBWorkspaceCollisionPlan,map:any ROBWorkspaceCollisionMap,sceneID:UUID,camera:UUID) throws {
             if let trial = visualCalibrationTrial {
@@ -367,6 +368,60 @@ enum ROBLeftGestureCompiler {
             }
             try validatePath(path,map:map,sceneID:sceneID,camera:camera)
             var result = proposal; result.workspaceCollisionPlan = path; return result
+        }
+        let attachedCarry=kind=="recycling_carry_release"
+        guard attachedCarry || (verifiedAttachment==nil && workspaceCollisionPlan?.intentionalContact?.verifiedAttachment==nil) else {
+            throw ROBGhostMotionError.blocked("An attached-can phase cannot be substituted for another gesture type.")
+        }
+        if attachedCarry {
+            guard let attachment=verifiedAttachment,attachment.valid,
+                  let path=workspaceCollisionPlan,path.intentionalContact?.verifiedAttachment==attachment,
+                  path.carryingAtStart==true,path.contactStepIndex==nil,
+                  let payload=path.payload,payload.valid,payload.fingerprint==attachment.payloadFingerprint,
+                  let contact=path.intentionalContact,contact.gripStepIndex==nil,let release=contact.releaseStepIndex,
+                  path.baseline==baseline,baseline==attachment.baseline,
+                  workspaceApproachPlan==nil,recyclingActions==nil,recyclingParameters==nil,
+                  !name.isEmpty,name.count<=100,generation>0,
+                  path.steps.count==contact.stepCount,path.steps.count<=80,path.steps.count>=3,
+                  path.steps.allSatisfy({$0.positions.count==7 && $0.positions.allSatisfy{$0.isFinite && abs($0)<=3.1}}),
+                  path.steps.reduce(0,{$0+$1.seconds})<=maximumScheduledSeconds,
+                  !path.steps.contains(where:{$0.jawAction == .prepare || $0.jawAction == .grip}),
+                  path.steps.filter({$0.jawAction == .release}).count==1,
+                  path.steps.indices.contains(release),path.steps[release].jawAction == .release else {
+                throw ROBGhostMotionError.blocked("A carry/release proposal needs the caller's matching verified native attachment and a complete carrying-at-start path; decoded evidence alone is insufficient.")
+            }
+            let rendered=path.steps.map{model.positions(vendorLeft:$0.positions)}
+            guard poses.isEmpty || poses==rendered,
+                  let held=model.toolPosition(model.positions(vendorLeft:baseline)),
+                  let drop=model.toolPosition(rendered[release]),let retreat=model.toolPosition(rendered.last!),
+                  simd_distance(drop,held)>=0.04,retreat.z-drop.z>=0.04 else {
+                throw ROBGhostMotionError.blocked("A carry/release path needs its exact selected-arm poses, a distinct drop and an upward empty retreat.")
+            }
+            // Do not reopen or regrip an already held can. Preserve the
+            // horizontal-jaw bound over every interpolated carrying segment.
+            var previous=baseline,checks=0
+            for step in path.steps.prefix(release+1) {
+                let travel=1.5*zip(previous,step.positions).reduce(0.0,{$0+abs($1.0-$1.1)})
+                guard previous.count==7,step.positions.count==7,travel.isFinite else {
+                    throw ROBGhostMotionError.blocked("The attached carrying segment is malformed.")
+                }
+                let samples=max(1,Int(ceil(travel/0.01)))
+                checks+=samples+1
+                guard checks<=ROBWorkspaceCollisionPlan.maximumPoseChecks else {
+                    throw ROBGhostMotionError.blocked("The attached carrying orientation review exceeded its bounded sample count.")
+                }
+                for index in 0...samples {
+                    let t=Double(index)/Double(samples),q=zip(previous,step.positions).map{$0+($1-$0)*t}
+                    guard let frame=model.frames(model.positions(vendorLeft:q))[model.toolLink],
+                          max(abs(frame.columns.1.z),abs(frame.columns.2.z))<=sin(8 * .pi/180) else {
+                        throw ROBGhostMotionError.blocked("The attached carrying path would turn the held can's jaws vertically.")
+                    }
+                }
+                previous=step.positions
+            }
+            return try checked(.init(id:id,name:name,kind:kind,modelID:model.modelID,referenceID:model.referenceID,
+                geometryID:model.geometryID,mappingID:model.selectedMappingID,sessionGeneration:generation,
+                baseline:baseline,poses:rendered,steps:path.steps))
         }
         let terminalGraspHold=kind=="recycling_grasp_hold"
         if terminalGraspHold {
@@ -498,6 +553,7 @@ enum ROBLeftGestureCompiler {
                          collisionMap: (any ROBWorkspaceCollisionMap)? = nil,
                          collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
                          visualCalibrationTrial: ROBWorkspaceVisualCalibrationTrial? = nil,
+                         verifiedAttachment: ROBWorkspaceVerifiedAttachedCan? = nil,
                          nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws {
         guard proposal.modelID == model.modelID, proposal.referenceID == model.referenceID,
               proposal.geometryID == model.geometryID, proposal.mappingID == model.selectedMappingID else {
@@ -508,7 +564,7 @@ enum ROBLeftGestureCompiler {
             recyclingActions: proposal.recyclingActions, recyclingParameters: proposal.recyclingParameters,
             workspaceCollisionPlan:proposal.workspaceCollisionPlan,workspaceApproachPlan:proposal.workspaceApproachPlan,collisionMap:collisionMap,
             collisionSceneID:collisionSceneID,collisionCameraGeneration:collisionCameraGeneration,
-            visualCalibrationTrial:visualCalibrationTrial,nowMilliseconds:nowMilliseconds)
+            visualCalibrationTrial:visualCalibrationTrial,verifiedAttachment:verifiedAttachment,nowMilliseconds:nowMilliseconds)
         guard proposal == expected else { throw ROBGhostMotionError.blocked("The reviewed path or timing changed; review a new proposal.") }
     }
 

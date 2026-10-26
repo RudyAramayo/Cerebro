@@ -1300,6 +1300,167 @@ final class ROBAmberGatewayClient: NSObject {
             check(b.receive(controllerStop(), device: device, session: session) && notifications == 2,
                 "A distinct fresh operator Stop remains available after the previous job ended")
         }
+        // New table relay is a distinct native written-user lane. No receipt,
+        // source or arm scope from the older can campaign can authorize it.
+        let relayCamera=UUID()
+        func relayContextValue(camera:UUID?=nil,error:Double=0.035)->ROBTableRelayContext {
+            .init(rightModelID:String(repeating:"c",count:64),rightReferenceID:String(repeating:"d",count:64),rightMappingID:String(repeating:"a",count:64),
+                leftModelID:String(repeating:"c",count:64),leftReferenceID:String(repeating:"d",count:64),leftMappingID:String(repeating:"b",count:64),
+                geometryID:String(repeating:"e",count:64),cameraGeneration:camera ?? relayCamera,bodyMotionIdentity:"synthetic stationary body",
+                gatewayGeneration:7,runtimeCalibrationIdentity:String(repeating:"f",count:64),stereoPolicySHA256:String(repeating:"1",count:64),
+                physicalProjectionIdentity:String(repeating:"2",count:64),assumedSpatialErrorMeters:error)
+        }
+        var relayContext:ROBTableRelayContext?=relayContextValue()
+        func relayFeedback(right:Double=0,left:Double=0,age:Double=1,rightMode:Int=2,leftMode:Int=2,
+            generation:UInt64=7,sequence:UInt64=100,rightStationary:Bool=true,leftStationary:Bool=true,leftAge:Double?=nil)->ROBTableRelayPhaseFeedback {
+            .init(gatewayGeneration:generation,rightPositions:[right,0,0,0,0,0,0],leftPositions:[left,0,0,0,0,0,0],
+                rightModes:Array(repeating:rightMode,count:7),leftModes:Array(repeating:leftMode,count:7),
+                rightTelemetrySequence:sequence,leftTelemetrySequence:sequence,rightStationary:rightStationary,leftStationary:leftStationary,
+                rightMotorAgeMilliseconds:age,leftMotorAgeMilliseconds:leftAge ?? age,rightGripperAgeMilliseconds:age,leftGripperAgeMilliseconds:leftAge ?? age)
+        }
+        func relayEmpty(_ b:ROBControllerArmApproval,source:String="audited_user_declared_empty_plus_no_acquisition_history",
+            acquisition:Int=0,declaredAt:Double?=nil)->ROBTableRelayInitialEmptyEvidence {
+            .init(source:source,declarationMessageSHA256:hash("Synthetic actual user fact: both grippers are empty"),
+                declarationAuditSHA256:hash("Synthetic private declaration audit"),taskHistorySHA256:hash("Synthetic empty startup and bounded empty motion only"),
+                declaredAtMilliseconds:declaredAt ?? b.now().timeIntervalSince1970*1000-1000,appSessionID:b.localRecyclingApprovalSessionID,
+                rightDeclaredEmpty:true,leftDeclaredEmpty:true,rightAcquisitionCommandsSinceDeclaration:acquisition,
+                leftAcquisitionCommandsSinceDeclaration:0,anyUncertainAcquisitionAcknowledgement:false,globalMayHoldPayload:false)
+        }
+        func relayReceipt(_ b:ROBControllerArmApproval,mutate:(inout[String:Any])->Void={_ in})throws->URL {
+            var value=b.pendingTableRelayReceiptTemplate as! [String:Any]
+            let source="Synthetic actual written user instruction: RIGHT picks up cans, places on a shared table; LEFT puts them in the orange bucket."
+            let additional="Synthetic explicit instruction: both arms permitted one at a time, stationary torso and treads, protected visual trial."
+            value["sourceMessage"]=source;value["sourceMessageSHA256"]=hash(source)
+            value["additionalUserInstruction"]=additional;value["additionalUserInstructionSHA256"]=hash(additional)
+            mutate(&value)
+            let url=localDirectory.appendingPathComponent(UUID().uuidString+"-table-relay.json")
+            try JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]).write(to:url)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+            return url
+        }
+        func relayRequest(_ b:ROBControllerArmApproval,count:Int=1,execute:@escaping(@escaping(NSDictionary)->Void)->Void={_ in}) {
+            b.requestTableRelayWorkspaceTask(canCount:count,summary:"Synthetic exact RIGHT-table-LEFT-bucket relay",
+                currentContext:{relayContext},execute:execute,cancel:{},completion:{_ in})
+        }
+        func relayReject(_ label:String,_ operation:()throws->Void) {
+            do {try operation();check(false,label)}catch {check(true,label)}
+        }
+        do {
+            let b=localBroker();var executed=0
+            relayRequest(b,execute:{_ in executed+=1})
+            check(b.isPending && b.pendingTableRelayReceiptTemplate != nil && executed==0,"Relay starts only from its native file receipt")
+            check(!b.receiveSpokenAuthorization("yes proceed"),"Spoken single-arm acknowledgement cannot import a relay receipt")
+            let invalids:[(String,(inout[String:Any])->Void)]=[
+                ("legacy version",{$0["schemaVersion"]=2}),
+                ("fake microphone",{$0["source"]="final_clean_local_microphone"}),
+                ("wrong pending job",{$0["pendingID"]=UUID().uuidString}),
+                ("wrong count",{v in var s=v["scope"]as![String:Any];s["canCount"]=2;v["scope"]=s}),
+                ("wrong route",{v in var s=v["scope"]as![String:Any];s["route"]=["right_pickup","orange_bucket"];v["scope"]=s}),
+                ("simultaneous arms",{v in var s=v["scope"]as![String:Any];s["oneMovingArmAtATime"]=false;v["scope"]=s}),
+                ("source hash",{$0["sourceMessageSHA256"]=hash("different")})]
+            for (label,mutate) in invalids {relayReject(label){try b.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(b,mutate:mutate))}}
+            let receipt=try relayReceipt(b)
+            relayReject("Legacy importer cannot accept relay"){try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt)}
+            try b.importLocalTableRelayApproval(fromReceiptURL:receipt)
+            check(executed==1 && b.tableRelayMayHoldPayload,"Relay import persists initial object uncertainty before execution")
+            check(!b.authorizesRightArmTrial("Synthetic exact RIGHT-table-LEFT-bucket relay") &&
+                !b.authorizesLeftArmTrial("Synthetic exact RIGHT-table-LEFT-bucket relay"),"Relay must not widen legacy arm grants")
+            relayReject("Bare empty evidence not accepted"){try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b,source:"arbitrary_hash"),feedback:relayFeedback())}
+            relayReject("Acquisition history not empty"){try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b,acquisition:1),feedback:relayFeedback())}
+            relayReject("Initial stale opposite arm"){try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b),feedback:relayFeedback(age:251))}
+            try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b),feedback:relayFeedback(rightMode:0,leftMode:0))
+            check(!b.tableRelayMayHoldPayload && b.activeTableRelayLedger?["supportStage"]as?String=="initial_empty_ASSUMED_declared_task_history",
+                "Audited declared-empty/no-acquisition chain works without a new prompt or measured-possession claim")
+            var feedback:ROBTableRelayPhaseFeedback?=relayFeedback()
+            let id=UUID(),proposal=hash("Synthetic immutable RIGHT pickup proposal")
+            relayReject("Wrong first phase"){try b.bindTableRelayPhaseProposal(phase:"left_pickup",physicalArm:"left",proposalID:id,proposalSHA256:proposal,feedback:{feedback})}
+            relayReject("Wrong physical side"){try b.bindTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"left",proposalID:id,proposalSHA256:proposal,feedback:{feedback})}
+            try b.bindTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal,feedback:{feedback})
+            check(b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Exact relay phase/proposal is live")
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:hash("changed")),"Changed proposal hash rejected")
+            relayReject("Second simultaneous binding"){try b.bindTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:UUID(),proposalSHA256:hash("second"),feedback:{feedback})}
+            feedback=relayFeedback(right:0.1)
+            check(b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Moving-arm q may advance within independently checked proposal")
+            feedback=relayFeedback(left:0.01)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Idle physical LEFT movement invalidates RIGHT proposal")
+            feedback=relayFeedback(leftStationary:false)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Nonselected arm must be independently stationary")
+            feedback=relayFeedback(age:251)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Both-arm motor/gripper freshness is mandatory")
+            feedback=relayFeedback(leftAge:251)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Fresh moving RIGHT cannot mask stale stationary LEFT feedback")
+            feedback=relayFeedback(rightMode:0)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Moving arm mode must remain position mode")
+            feedback=relayFeedback(generation:8)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Changed gateway invalidates proposal")
+            feedback=relayFeedback(sequence:99)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Feedback sequences cannot rewind")
+            feedback=relayFeedback()
+            try b.markTableRelayPossiblePayloadHeld(physicalArm:"right")
+            check(b.tableRelayMayHoldPayload && b.activeTableRelayLedger?["rightPossiblePayloadHeld"]as?Bool==true,"Possible RIGHT acquisition is durable before grip ack")
+            relayReject("No repeated grip in same phase"){try b.markTableRelayPossiblePayloadHeld(physicalArm:"right")}
+            try b.endTableRelayPhaseProposal(proposalID:id,proposalSHA256:proposal)
+            relayReject("No proposal replay"){try b.bindTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal,feedback:{feedback})}
+            try b.recordTableRelayPhaseCompletion(phase:"right_pickup",evidenceSHA256:hash("actual native positive visual grasp"),feedback:relayFeedback())
+            check(b.activeTableRelayLedger?["phase"]as?String=="right_place_shared_table","Positive RIGHT grasp advances only to table placement")
+            b.cancel(reason:"Synthetic Stop during possible RIGHT carry")
+            check(!b.isPending && b.tableRelayMayHoldPayload && b.activeTableRelayLedger?["state"]as?String=="revoked","Stop revokes authority but preserves per-arm payload uncertainty")
+            let restarted=localBroker();restarted.localRecyclingApprovalAuditDirectory=b.localRecyclingApprovalAuditDirectory
+            check(restarted.tableRelayMayHoldPayload && restarted.activeTableRelayLedger==nil,"Restart reloads uncertainty, never relay authority")
+            relayRequest(restarted)
+            try restarted.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(restarted))
+            relayReject("Old empty declaration cannot erase possible acquisition"){try restarted.recordTableRelayInitialEmptyEvidence(relayEmpty(restarted),feedback:relayFeedback())}
+            try restarted.recordTableRelayInitialEmptyEvidence(relayEmpty(restarted,source:"fresh_audited_user_declared_empty",
+                declaredAt:restarted.now().timeIntervalSince1970*1000),feedback:relayFeedback())
+            check(!restarted.tableRelayMayHoldPayload,"A newer actual declared-empty fact can resolve prior uncertain acquisition")
+            restarted.cancel(reason:"Synthetic fixture stop")
+        }
+        do {
+            let b=localBroker();var done:((NSDictionary)->Void)?;var completion:NSDictionary=[:]
+            b.requestTableRelayWorkspaceTask(canCount:1,summary:"Synthetic complete native relay",currentContext:{relayContext},execute:{done=$0},cancel:{},completion:{completion=$0})
+            try b.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(b))
+            try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b),feedback:relayFeedback())
+            let phases=["right_pickup","right_place_shared_table","right_retreat","left_pickup","left_place_bucket","left_retreat"]
+            for (i,phase) in phases.enumerated() {
+                let side=phase.hasPrefix("right_") ? "right":"left",id=UUID(),proposal=hash("synthetic phase \(i)")
+                relayReject("Phase cannot complete without a consumed native proposal"){try b.recordTableRelayPhaseCompletion(phase:phase,evidenceSHA256:hash("unbound"),feedback:relayFeedback())}
+                try b.bindTableRelayPhaseProposal(phase:phase,physicalArm:side,proposalID:id,proposalSHA256:proposal,feedback:{relayFeedback()})
+                if phase.hasSuffix("pickup") {try b.markTableRelayPossiblePayloadHeld(physicalArm:side)}
+                try b.endTableRelayPhaseProposal(proposalID:id,proposalSHA256:proposal)
+                try b.recordTableRelayPhaseCompletion(phase:phase,evidenceSHA256:hash("synthetic positive native result \(i)"),feedback:relayFeedback(),bucketLandingVerified:phase=="left_place_bucket")
+                if phase=="right_place_shared_table" {check(b.activeTableRelayLedger?["completedTransfers"]as?Int==0,"Table placement is not a recycled-can count")}
+            }
+            check(b.activeTableRelayLedger?["completedTransfers"]as?Int==1 && b.activeTableRelayLedger?["verifiedBucketLandings"]as?Int==1 && !b.tableRelayMayHoldPayload,
+                "Only final ordered bucket release/retreat completes the relay")
+            done?(["status":"completed"])
+            check(!b.isPending && completion["status"]as?String=="completed" && b.activeTableRelayLedger?["state"]as?String=="consumed","Complete relay consumes its grant")
+        }
+        do {
+            let b=localBroker();relayRequest(b)
+            let receipt=try relayReceipt(b);let original=try JSONSerialization.jsonObject(with:Data(contentsOf:receipt))as![String:Any]
+            try b.importLocalTableRelayApproval(fromReceiptURL:receipt);b.cancel(reason:"Synthetic cancellation")
+            relayRequest(b)
+            let replay=try relayReceipt(b){$0["receiptID"]=original["receiptID"]}
+            relayReject("Consumed/revoked receipt ID tombstone rejects fresh-pending replay"){try b.importLocalTableRelayApproval(fromReceiptURL:replay)}
+            b.cancel(reason:"Synthetic cleanup")
+        }
+        do {
+            let b=localBroker();var stopped=0
+            var clock=Date();b.now={clock}
+            b.requestTableRelayWorkspaceTask(canCount:1,summary:"Synthetic context-bound relay",currentContext:{relayContext},execute:{_ in},cancel:{stopped+=1},completion:{_ in})
+            try b.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(b))
+            relayContext=relayContextValue(camera:UUID());b.tick()
+            check(!b.isPending && stopped==1,"Camera/body/model/gateway stable context change revokes active relay")
+            relayContext=relayContextValue()
+            relayRequest(b);try b.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(b));clock.addTimeInterval(601);b.tick()
+            check(!b.isPending,"Relay retains bounded600second execution")
+        }
+        do {
+            for count in [0,9] {let b=localBroker();relayRequest(b,count:count);check(!b.isPending,"Relay count remains exact1...8")}
+            relayContext=relayContextValue(error:0.04)
+            let b=localBroker();relayRequest(b);check(!b.isPending,"Relay35mm assumption cannot silently change")
+            relayContext=relayContextValue()
+        }
         print("Controller/spoken arm approval and session reuse: \(checks) checks passed; no hardware access")
     }
 }

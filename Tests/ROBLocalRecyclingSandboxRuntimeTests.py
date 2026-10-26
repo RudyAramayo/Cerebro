@@ -13,6 +13,7 @@ helper = braced_declaration(source, 'enum ROBLocalRecyclingSandboxRouting {')
 prepare = braced_declaration(source, '    private func prepareLocalRecyclingSessionJob()')
 nominal_change = braced_declaration(source, '    @objc private func changeNominalEmptyCommissioningStep()').replace('@objc ', '')
 degree_change = braced_declaration(source, '    @objc private func changeOneDegreeEmptyCalibrationStep()').replace('@objc ', '')
+hold_change = braced_declaration(source, '    @objc private func changeHoldAfterInitialEmptyLift()').replace('@objc ', '')
 standing_run = braced_declaration(source, '    private func runStandingCanCampaign()')
 resume = braced_declaration(source, '    public func resumeAuthorizedStandingCanCampaign(targetCanCount:').replace('public ', '')
 selection = braced_declaration(source, '    public func tableViewSelectionDidChange(').replace('public ', '')
@@ -88,6 +89,7 @@ final class ROBLeftArmTrial {
     var localVisualTrialAssumedSpatialErrorMeters = 0.05
     var nominalEmptyCommissioningStepEnabled = false
     var oneDegreeEmptyCalibrationStepEnabled = false
+    var holdAfterInitialEmptyLiftEnabled = false
     var isRunning = false
     var completionResult:NSDictionary = ["status":"prepared"]
     var calls:[(String,String)] = []
@@ -121,18 +123,21 @@ final class Sandbox {
     var parameterMessage = "old"
     var nominalEmptyCommissioningStep = Toggle()
     var oneDegreeEmptyCalibrationStep = Toggle()
+    var holdAfterInitialEmptyLift = Toggle()
     init(){table.onSelect={[weak self] row in self?.selectedTrial=Self.trials[row]}}
     func buildDetail(){rebuilds+=1;fields=["recyclingCount":Field(stringValue:String(Self.recyclingCount)),"localVisualAllowanceMillimeters":Field(stringValue:"50")]}
     func refresh(){refreshes += 1}
     /* PREPARE */
     /* NOMINAL_CHANGE */
     /* DEGREE_CHANGE */
+    /* HOLD_CHANGE */
     /* STANDING_RUN */
     /* RESUME */
     /* SELECTION */
     func prepare(){prepareLocalRecyclingSessionJob()}
     func toggleNominal(){changeNominalEmptyCommissioningStep()}
     func toggleDegree(){changeOneDegreeEmptyCalibrationStep()}
+    func toggleHold(){changeHoldAfterInitialEmptyLift()}
     func runStanding(){runStandingCanCampaign()}
 }
 @main enum Test {
@@ -154,6 +159,16 @@ final class Sandbox {
             precondition(trial.calls.count==before && ui.parameterMessage.contains("whole number"))
         }
         Sandbox.recyclingCount=4
+        let holdOnly=Sandbox();holdOnly.holdAfterInitialEmptyLift.state = .on
+        let holdBroker=ROBControllerArmApproval.shared,holdCancels=holdBroker.cancellations,holdTicks=holdBroker.ticks
+        holdOnly.toggleHold()
+        precondition(trial.holdAfterInitialEmptyLiftEnabled && !trial.nominalEmptyCommissioningStepEnabled && !trial.oneDegreeEmptyCalibrationStepEnabled)
+        precondition(holdBroker.cancellations==holdCancels && holdBroker.ticks==holdTicks+1,"Lift-only context edit revoked standing authorization")
+        holdOnly.prepare();precondition(trial.holdAfterInitialEmptyLiftEnabled)
+        let leftHold=Sandbox();leftHold.selectedTrial.id="recycling";leftHold.holdAfterInitialEmptyLift.state = .on
+        leftHold.prepare();precondition(!trial.holdAfterInitialEmptyLiftEnabled,"Right-only lift flag leaked into LEFT task")
+        let mixedHold=Sandbox();mixedHold.holdAfterInitialEmptyLift.state = .on;mixedHold.oneDegreeEmptyCalibrationStep.state = .on
+        let beforeMixedHold=trial.calls.count;mixedHold.prepare();precondition(trial.calls.count==beforeMixedHold && mixedHold.parameterMessage.contains("only one"))
         let commissioning=Sandbox(); commissioning.nominalEmptyCommissioningStep.state = .on; commissioning.prepare()
         precondition(trial.nominalEmptyCommissioningStepEnabled,"Explicit local checkbox was not frozen before preparation")
         let ordinary=Sandbox(); ordinary.prepare()
@@ -316,7 +331,7 @@ final class Sandbox {
         print("PASS live sandbox status: active phase precedes broker scope, common-mode progress fallback; selected RIGHT recording cannot open latest LEFT evidence")
     }
 }
-'''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare).replace('/* NOMINAL_CHANGE */', nominal_change).replace('/* DEGREE_CHANGE */', degree_change).replace('/* STANDING_RUN */', standing_run).replace('/* RESUME */', resume).replace('/* SELECTION */', selection)
+'''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare).replace('/* NOMINAL_CHANGE */', nominal_change).replace('/* DEGREE_CHANGE */', degree_change).replace('/* HOLD_CHANGE */', hold_change).replace('/* STANDING_RUN */', standing_run).replace('/* RESUME */', resume).replace('/* SELECTION */', selection)
 
 with tempfile.TemporaryDirectory(prefix='rob-local-recycling-sandbox-', dir='/private/tmp') as folder:
     root = Path(folder); path = root / 'Fixture.swift'; path.write_text(fixture)
