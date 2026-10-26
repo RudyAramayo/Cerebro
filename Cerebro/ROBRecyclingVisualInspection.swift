@@ -188,6 +188,7 @@ import CoreImage
         var observations:[[String:Any]]=[]
         var retainedFrames:[ROBGripperVisualServo.Frame]=[]
         var provisionalCoMotion=false
+        var canAppearanceSeed:ROBVisualGraspVerifier.AppearanceSeed?
         @MainActor init(baseline:ServoBaseline,can:ROBWorkspaceLocatedObject,model:ROBGhostRobotModel,box:[Double]) {
             self.baseline=baseline;self.can=can;targetBox=box
             request=VNTrackObjectRequest(detectedObjectObservation:VNDetectedObjectObservation(boundingBox:
@@ -200,8 +201,27 @@ import CoreImage
         let frame:ROBGripperVisualServo.Frame
         let decision:ROBGripperVisualServo.Decision
         let canBox:[Double]
+        let handsClear:Bool
+        let cameraGeneration:UUID
+        let sourceIdentity:String
     }
     private static let servoImageContext=CIContext(options:[.useSoftwareRenderer:true])
+
+    private static func servoGrayscale(_ bytes:[UInt8])->[UInt8] {
+        var gray:[UInt8]=[]
+        gray.reserveCapacity(bytes.count/3)
+        var index:Int=0
+        while index+2<bytes.count {
+            let red:Int=Int(bytes[index])*299
+            let green:Int=Int(bytes[index+1])*587
+            let blue:Int=Int(bytes[index+2])*114
+            let luminance:Int=(red+green+blue)/1000
+            gray.append(UInt8(luminance))
+            index+=3
+        }
+        return gray
+    }
+
 
     static func beginIncrementalVisualServo(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
         map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
@@ -232,6 +252,25 @@ import CoreImage
         let view="observed-jaw-servo:"+trial.receiptID+":"+ROBGhostRobotModel.hash(try encoder.encode(scope))+":"+projection.frameContractIdentity
         let baseline=ServoBaseline(projection:.visualTrial(projection),scope:scope,targetIdentity:"can-\(can.sequence)-\(trial.receiptID)",viewIdentity:view)
         let result=ServoContext(baseline:baseline,can:can,model:model,box:detections[0].box)
+        guard let seedFeedback=feedbackForFrame(reference),seedFeedback.sampleAgeAtReceiptMilliseconds<=250 else {
+            throw ROBGhostMotionError.blocked("Pre-approach can appearance needs its actual exposure-matched held feedback.")
+        }
+        let seedNow=Date().timeIntervalSince1970*1000
+        let seedPixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:reference,scopeIdentity:view,
+            jointPositions:seedFeedback.positionsRadians.map(\.doubleValue),
+            jointCapturedAtMilliseconds:seedNow-seedFeedback.effectiveSampleAgeMilliseconds,
+            poseHeldDuringCapture:true,openingCommandAtMilliseconds:nil,nowMilliseconds:seedNow)
+        // The seed retains only actual RGB appearance; its exposure-matched
+        // feedback never substitutes for current observed finger evidence.
+        let seedRGB=Array(seedPixels.rgb)
+        let seedGray=servoGrayscale(seedRGB)
+        let seedBox=detections[0].box
+        result.canAppearanceSeed = .init(sequence:reference.sequence,capturedAtMilliseconds:reference.capturedAt,
+            cameraGeneration:reference.cameraGeneration,fixedViewIdentity:view,targetIdentity:baseline.targetIdentity,
+            sourceIdentity:projection.frameContractIdentity,width:seedPixels.width,height:seedPixels.height,gray:seedGray,
+            canBox:.init(left:seedBox[0],top:seedBox[1],right:seedBox[2],bottom:seedBox[3]),
+            synchronizedRGBDepth:true,handsClear:reference.handsClear)
+
         guard let image=servoImageContext.createCGImage(reference.image,from:reference.image.extent) else {throw ROBGhostMotionError.blocked("The actual can seed pixels are unavailable.")}
         try result.tracker.perform([result.request],on:image)
         if let initial=result.request.results?.first as?VNDetectedObjectObservation {result.request.inputObservation=initial}
@@ -316,7 +355,7 @@ import CoreImage
         if decision.status=="targetMoved",let initial=context.firstCanMiddlePixels,initial.count==2,decision.canMiddlePixels.count==2 {
             throw TargetMoved.imageDisplacement(hypot(decision.canMiddlePixels[0]-initial[0],decision.canMiddlePixels[1]-initial[1]))
         }
-        return ServoObservation(frame:pixels,decision:decision,canBox:box)
+        return ServoObservation(frame:pixels,decision:decision,canBox:box,handsClear:frame.handsClear,cameraGeneration:frame.cameraGeneration,sourceIdentity:try visualFrameContract(frame))
     }
 
     static func verifyIncrementalServoLift(context:ServoContext,beforeLift:ServoObservation,model:ROBGhostRobotModel,
@@ -327,62 +366,49 @@ import CoreImage
             fixedViewIdentity:context.baseline.viewIdentity,targetIdentity:context.baseline.targetIdentity,
             targetBox:.init(left:box[0],top:box[1],right:box[2],bottom:box[3]),
             baselineCapturedAtMilliseconds:base.capturedAtMilliseconds,lastCapturedAtMilliseconds:base.capturedAtMilliseconds)
-        guard let originalJaw=beforeLift.decision.observation else {result.verdict = .unknown;result.reason="No observed jaw baseline; hold the possible payload.";return result}
-        var coherent=0,stationary=0,divergent=0
+        result.toolEvidenceSource="independent_observed_fingers"
+        func input(_ value:ServoObservation)throws->ROBVisualGraspVerifier.ObservedJawInput {
+            let f=value.frame
+            guard let jaw=value.decision.observation,jaw.centerPixels.count==2,jaw.tipsPixels.count==2,
+                  jaw.tipsPixels.allSatisfy({$0.count==2}),value.canBox.count==4,
+                  f.rgb.count==f.width*f.height*3,f.depthMillimeters.count==f.width*f.height,
+                  f.poseHeldDuringCapture,abs(f.jointCapturedAtMilliseconds-f.capturedAtMilliseconds)<=150,
+                  value.cameraGeneration==context.baseline.scope.cameraGeneration,
+                  case .visualTrial(let projection)=context.baseline.projection,
+                  value.sourceIdentity==projection.frameContractIdentity else {
+                throw ROBVisualGraspVerifier.Unavailable.evidence("The actual observed-finger RGB-D capture/source is unavailable.")
+            }
+            let bytes=Array(f.rgb)
+            let gray=servoGrayscale(bytes)
+            return .init(sequence:f.sequence,capturedAtMilliseconds:f.capturedAtMilliseconds,cameraGeneration:value.cameraGeneration,
+                fixedViewIdentity:f.scopeIdentity,targetIdentity:context.baseline.targetIdentity,sourceIdentity:value.sourceIdentity,
+                width:f.width,height:f.height,gray:gray,depthMeters:f.depthMillimeters.map{Float($0)/1000},fx:f.fx,fy:f.fy,cx:f.cx,cy:f.cy,
+                synchronizedRGBDepth:true,handsClear:value.handsClear,
+                jawCenterPixels:.init(x:jaw.centerPixels[0],y:jaw.centerPixels[1]),
+                fingerTipsPixels:jaw.tipsPixels.map{.init(x:$0[0],y:$0[1])},jawSequence:jaw.sequence,
+                jawCapturedAtMilliseconds:jaw.capturedAtMilliseconds,jawScopeIdentity:jaw.scopeIdentity,
+                jawConfidence:jaw.confidence,jawEvidenceKind:jaw.evidenceKind,
+                canBox:.init(left:value.canBox[0],top:value.canBox[1],right:value.canBox[2],bottom:value.canBox[3]))
+        }
+        var verifier:ROBVisualGraspVerifier.ObservedJawVerifier
+        do {
+            guard let appearance=context.canAppearanceSeed else{throw ROBVisualGraspVerifier.Unavailable.evidence("No independent pre-approach can appearance was retained.")}
+            verifier=try .init(baseline:input(beforeLift),appearance:appearance,nowMilliseconds:Date().timeIntervalSince1970*1000)
+        }
+        catch {result.verdict = .unknown;result.reason=error.localizedDescription;return result}
         let end=ProcessInfo.processInfo.systemUptime+4
         while ProcessInfo.processInfo.systemUptime<end {
             try check();try Task.checkCancellation()
-            let sample:ServoObservation
-            do {sample=try await observe()}catch{
-                try check();result.verdict = .unknown;result.reason="Live observed-jaw/can verification was inconclusive: "+error.localizedDescription;return result
+            do {
+                let sample=try await observe()
+                guard sample.frame.capturedAtMilliseconds>=heldSinceMilliseconds else {continue}
+                result=try verifier.observe(input(sample),nowMilliseconds:Date().timeIntervalSince1970*1000)
+            } catch {
+                try check();result.verdict = .unknown;result.reason="Independent can/finger verification unavailable: "+error.localizedDescription;return result
             }
-            guard sample.frame.sequence>result.lastSequence,sample.frame.capturedAtMilliseconds>=heldSinceMilliseconds,
-                  sample.frame.scopeIdentity==base.scopeIdentity,let jaw=sample.decision.observation else {continue}
-            result.samples+=1;result.lastSequence=sample.frame.sequence;result.lastCapturedAtMilliseconds=sample.frame.capturedAtMilliseconds
-            guard servoBackgroundIsStatic(base,sample.frame,canBox:box,jaw:originalJaw) else {
-                result.verdict = .unknown;result.reason="Static RGB background did not support a fixed camera/exposure; holding without a possession claim.";return result
-            }
-            let j=zip(jaw.centerPixels,originalJaw.centerPixels).map{$0-$1},c=zip(sample.decision.canMiddlePixels,beforeLift.decision.canMiddlePixels).map{$0-$1}
-            guard j.count==2,c.count==2 else{continue}
-            let jm=hypot(j[0],j[1]),cm=hypot(c[0],c[1]),error=hypot(j[0]-c[0],j[1]-c[1])
-            result.toolMotionPixels=jm;result.targetMotionPixels=cm;result.targetToolMotionErrorPixels=error
-            guard jm>=6 else{continue}
-            if cm>=4,error<=max(3,jm*0.25) {coherent+=1;stationary=0;divergent=0}
-            else if cm<=2 {stationary+=1;coherent=0;divergent=0}
-            else {divergent+=1;coherent=0;stationary=0}
-            if coherent>=3 {context.provisionalCoMotion=true;result.verdict = .unknown;result.reason="Provisional can-box/jaw co-motion in three advancing RGB views. Independent can-appearance identity and possession are NOT verified; the tracker may include occluding jaws. Holding for direct camera/operator observation, with no carry, release or grasp count.";return result}
-            if stationary>=3 || divergent>=3 {result.verdict = .failed;result.reason=stationary>=3 ? "Observed jaws lifted but the selected can stayed on the table. Holding; no blind retry.":"The selected can did not move coherently with the observed jaws. Holding the possible payload.";return result}
+            if result.verdict != .collecting {return result}
         }
-        result.verdict = .unknown;result.reason="The bounded RGB jaw/can observation did not establish repeated lift co-motion. Holding; no carry/release or automatic grasp retry."
-        return result
-    }
-
-    private static func servoBackgroundIsStatic(_ a:ROBGripperVisualServo.Frame,_ b:ROBGripperVisualServo.Frame,
-        canBox:[Double],jaw:ROBGripperVisualServo.JawObservation)->Bool {
-        guard a.width==b.width,a.height==b.height,a.rgb.count==b.rgb.count else{return false}
-        let w=a.width,h=a.height,aa=[UInt8](a.rgb),bb=[UInt8](b.rgb)
-        func gray(_ p:[UInt8],_ x:Int,_ y:Int)->Double {let i=(y*w+x)*3;return 0.299*Double(p[i])+0.587*Double(p[i+1])+0.114*Double(p[i+2])}
-        var still:[SIMD2<Double>]=[],shifted=0
-        for fy in [0.15,0.38,0.62,0.85] {for fx in [0.15,0.38,0.62,0.85] {
-            if fx>canBox[0]-0.10 && fx<canBox[2]+0.10 && fy>canBox[1]-0.10 && fy<canBox[3]+0.10 {continue}
-            let x=Int(fx*Double(w-1)),y=Int(fy*Double(h-1))
-            if hypot(Double(x)-jaw.centerPixels[0],Double(y)-jaw.centerPixels[1])<max(25,jaw.openingPixels+12){continue}
-            guard x>=8,y>=8,x<w-8,y<h-8 else{continue}
-            var av:[Double]=[];for yy in -5...5 {for xx in -5...5 {av.append(gray(aa,x+xx,y+yy))}}
-            let am=av.reduce(0,+)/Double(av.count),an=sqrt(av.reduce(0){$0+pow($1-am,2)})
-            guard an>80 else{continue}
-            var best = -1.0,bestDx=0,bestDy=0
-            for dy in -2...2 {for dx in -2...2 {
-                var bv:[Double]=[];for yy in -5...5 {for xx in -5...5 {bv.append(gray(bb,x+dx+xx,y+dy+yy))}}
-                let bm=bv.reduce(0,+)/Double(bv.count),bn=sqrt(bv.reduce(0){$0+pow($1-bm,2)})
-                guard bn>80 else{continue}
-                let corr=zip(av,bv).reduce(0.0){$0+($1.0-am)*($1.1-bm)}/(an*bn)
-                if corr>best {best=corr;bestDx=dx;bestDy=dy}
-            }}
-            if best>=0.85 {if bestDx==0 && bestDy==0 {still.append(SIMD2(Double(x),Double(y)))}else{shifted+=1}}
-        }}
-        let spread=still.map{p in still.map{simd_distance(p,$0)}.max() ?? 0}.max() ?? 0
-        return still.count>=3 && shifted<3 && spread>=0.3*Double(min(w,h))
+        return verifier.finish()
     }
 
     static func verifyAfterLift(context:Context,model:ROBGhostRobotModel,gatewayArm:String,

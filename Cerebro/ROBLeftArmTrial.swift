@@ -61,6 +61,33 @@ enum ROBInitialRetreatFailureExport {
     }
 }
 
+/// Passive scan evidence only. Encode the immutable snapshot away from the
+/// main actor; no frames, instruction text or motion authority are added.
+enum ROBPassiveWorkspaceMapExport {
+    private static let queue = DispatchQueue(label:"com.cerebro.passive-workspace-map-export",qos:.utility)
+    static func write(map:ROBWorkspaceCollisionSnapshot,recording:URL) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    let destination=recording.deletingPathExtension().appendingPathExtension("workspace-map.json")
+                    let temporary=destination.deletingLastPathComponent().appendingPathComponent(".workspace-map-export-"+UUID().uuidString)
+                    try FileManager.default.createDirectory(at:temporary,withIntermediateDirectories:false,
+                        attributes:[.posixPermissions:0o700])
+                    defer {try? FileManager.default.removeItem(at:temporary)}
+                    let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+                    let file=temporary.appendingPathComponent("workspace-map.json")
+                    try encoder.encode(map).write(to:file,options:.atomic)
+                    try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+                    // Each recording has its own UUID; never replace another
+                    // scan's archived evidence or alter its capture timestamps.
+                    try FileManager.default.moveItem(at:file,to:destination)
+                    continuation.resume(returning:destination)
+                } catch {continuation.resume(throwing:error)}
+            }
+        }
+    }
+}
+
 /// Raw electrical observations only: no calibrated force or contact claim.
 /// A latched event cannot authorize a waypoint, reverse, restart or release.
 enum ROBArmCurrentSpikeRecording {
@@ -1804,8 +1831,16 @@ enum ROBArmCurrentSpikeRecording {
                     "modeled_max_vertex_travel_m":proof.maximumVertexDisplacementMeters,
                     "detail":"One estimated EMPTY-arm retreat away from the table over 4 seconds is ready. No motion sent. Confirm local clearance and approve separately; review expires with the fresh map."]
             }
-            return ["status":"accepted_unverified","arm_motion_sent":false,"measured":false,
+            var result:[String:Any] = ["status":"accepted_unverified","arm_motion_sent":false,"measured":false,
                     "detail":map.registrationDetail,"workspace_search":ROBWorkspaceSearch.shared.lastReport]
+            if !lastRecordingPath.isEmpty {
+                let path=try await ROBPassiveWorkspaceMapExport.write(map:map,recording:URL(fileURLWithPath:lastRecordingPath))
+                try check()
+                var status=collisionReviewStatus as? [String:Any] ?? [:]
+                status["workspace_map_path"]=path.path;collisionReviewStatus=status as NSDictionary
+                result["workspace_map_path"]=path.path
+            }
+            return result as NSDictionary
         }
         if command == "left_search_workspace" || command == "left_check_hanging" {
             let model = try workspaceModel()
@@ -3038,9 +3073,11 @@ enum ROBArmCurrentSpikeRecording {
         let evidence=try await ROBRecyclingVisualInspection.verifyIncrementalServoLift(context:context,beforeLift:beforeClose,model:model,
             heldSinceMilliseconds:held,observe:{try await self.servoObservation(context,model:model,heldSince:held,openingAt:openingAt,tableSupport:false)},check:{try self.check()})
         lastVisualGraspEvidence=evidence;try writeVisualGraspEvidence(evidence)
+        let appearanceSupported=evidence.verdict == .supported && evidence.toolEvidenceSource=="independent_observed_fingers" &&
+            evidence.appearanceReferenceSequence != nil
         return ["status":"partial_held","motion_completed":false,"transfer_completed":false,"grasp_attempted":true,
-            "possible_payload_held":true,"grasp_visually_supported":false,"appearance_verified":false,"possession_measured":false,
-            "provisional_co_motion":context.provisionalCoMotion,"visual_servo_verdict":context.provisionalCoMotion ? "provisional_co_motion":evidence.verdict.rawValue,"placement_verified":false,"requires_intervention":evidence.verdict != .supported,
+            "possible_payload_held":true,"grasp_visually_supported":appearanceSupported,"appearance_verified":appearanceSupported,"possession_measured":false,
+            "provisional_co_motion":context.provisionalCoMotion,"visual_servo_verdict":context.provisionalCoMotion ? "provisional_co_motion":evidence.verdict.rawValue,"placement_verified":false,"requires_intervention":!appearanceSupported,
             "detail":"One observed-jaw can grasp and checked verification lift attempted; holding. "+evidence.reason+" ZERO transfers; no carry, release, return or automatic grasp retry."]
     }
 

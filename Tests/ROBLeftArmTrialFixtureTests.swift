@@ -1272,13 +1272,30 @@ final class ROBArmRoutineCoordinator {
             precondition(search.collisionScanCalls == scansBefore + 1 && search.collisionSnapshot != nil)
             precondition(g.q["right"] == front && g.mode["right"] == 2)
             precondition(trial.collisionReviewProposal == nil && trial.collisionReviewStatus["registration_verified"] as? Bool != true)
+            let scanMap=search.collisionSnapshot!
+            let scanMapURL=URL(fileURLWithPath:trial.lastRecordingPath).deletingPathExtension().appendingPathExtension("workspace-map.json")
+            precondition(neckScan["workspace_map_path"] as? String == scanMapURL.path)
+            precondition(trial.collisionReviewStatus["workspace_map_path"] as? String == scanMapURL.path)
+            let scanMapBytes=try Data(contentsOf:scanMapURL)
+            let scanEncoder=JSONEncoder();scanEncoder.outputFormatting=[.sortedKeys]
+            let expectedMapBytes=try scanEncoder.encode(scanMap)
+            precondition(scanMapBytes == expectedMapBytes,
+                "Passive scan export changed the exact snapshot, timestamps or occupied source groups")
+            let exportedMapObject=try JSONSerialization.jsonObject(with:scanMapBytes) as! [String:Any]
+            precondition((exportedMapObject["occupiedSourceSamples"] as? [Any])?.isEmpty == false,
+                "Passive scan fixture must exercise retained occupied source groups")
+            let exportedMap=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:scanMapBytes)
+            precondition(exportedMap.fingerprint == scanMap.fingerprint && exportedMap.sceneID == scanMap.sceneID &&
+                exportedMap.observations.count == scanMap.observations.count && exportedMap.createdAtMilliseconds == scanMap.createdAtMilliseconds)
+            let scanPermissions=try FileManager.default.attributesOfItem(atPath:scanMapURL.path)[.posixPermissions] as? NSNumber
+            precondition(scanPermissions?.intValue == 0o600,"Passive map evidence must stay private")
             noActuation("Neck-only depth scan")
             search.failCollisionScan = true; g.commands = []
             let unavailable = await run("left_scan_clearance")
             precondition(unavailable["status"] as? String == "blocked", unavailable.description)
             precondition(approvals == scanApprovals && g.commands.isEmpty && search.collisionSnapshot == nil)
             search.failCollisionScan = false
-            print("Workspace scan: two advancing RGB-D frames produce a provisional map; scan/failure need no arm approval, activation, jaw or travel commands")
+            print("Workspace scan: two advancing RGB-D frames export the exact private provisional snapshot and source groups; scan/failure need no arm approval, activation, jaw or travel commands")
 
             // Fresh timestamps and unchanged position mode do not substitute
             // for distinct feedback from EACH arm. The other arm continues

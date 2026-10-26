@@ -1051,6 +1051,110 @@ enum ROBWorkspaceBucketOpeningPrior {
     }
 }
 
+/// Shared numerical horizontal-jaw IK only. It neither checks the world nor
+/// grants motion; zero tool offset preserves the original grasp preview math.
+fileprivate struct ROBCanHorizontalIK {
+    let chain:[ROBGhostRobotModel.Joint]
+    let allowed:[String:ClosedRange<Double>]
+    let tip:([String:Double])->SIMD3<Double>
+    let tiltDegrees:([String:Double])->Double
+    let loss:([String:Double],SIMD3<Double>)->Double
+    let closest:(SIMD3<Double>,[String:Double])->[String:Double]
+    init(model:ROBGhostRobotModel,baseline:[String:Double],side:String,pointInTool:SIMD3<Double> = .zero)throws {
+        func tip(_ q: [String: Double]) -> SIMD3<Double> {
+            let frame = model.frames(q)[side + "_tool"]!
+            if pointInTool == .zero {return SIMD3(frame.columns.3.x,frame.columns.3.y,frame.columns.3.z)}
+            let p=frame*SIMD4(pointInTool.x,pointInTool.y,pointInTool.z,1)
+            return SIMD3(p.x,p.y,p.z)
+        }
+        let chain = model.joints.filter { $0.name.hasPrefix(side + "_joint") }
+        let selectedModel=model.physicalSide==side ? model:try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
+        let rawBounds=ROBWorkspaceCollisionPlan.jointBounds(model:selectedModel)
+        let allowed=Dictionary(uniqueKeysWithValues:(0..<7).map { index in
+            let lower=rawBounds[index].lowerBound-selectedModel.armUprightPrior[index]
+            let upper=rawBounds[index].upperBound-selectedModel.armUprightPrior[index]
+            return (side+"_joint\(index+1)",lower...upper)
+        })
+        // Captured gripper: +Z approaches, +Y spans the jaw opening; +X is
+        // its thin plane normal. Keep +Y/+Z horizontal, including wrist roll.
+        func features(_ q: [String: Double]) -> [Double] {
+            let frame = model.frames(q)[side + "_tool"]!
+            let point:SIMD3<Double>
+            if pointInTool == .zero {point=SIMD3(frame.columns.3.x,frame.columns.3.y,frame.columns.3.z)}
+            else {let p=frame*SIMD4(pointInTool.x,pointInTool.y,pointInTool.z,1);point=SIMD3(p.x,p.y,p.z)}
+            return [point.x,point.y,point.z,frame.columns.1.z * 0.25,frame.columns.2.z * 0.25]
+        }
+        func tiltDegrees(_ q: [String: Double]) -> Double {
+            let values = features(q)
+            return asin(min(1, max(abs(values[3]), abs(values[4])) / 0.25)) * 180 / .pi
+        }
+        func loss(_ q: [String: Double], _ target: SIMD3<Double>) -> Double {
+            let values = features(q)
+            return simd_length_squared(tip(q) - target) + values[3]*values[3] + values[4]*values[4]
+        }
+        func solve(_ matrix: [Double], _ rhs: [Double]) -> [Double]? {
+            var a = matrix, b = rhs
+            for column in 0..<5 {
+                let pivot = (column..<5).max { abs(a[$0*5+column]) < abs(a[$1*5+column]) }!
+                guard abs(a[pivot*5+column]) > 1e-12 else { return nil }
+                for k in 0..<5 { a.swapAt(column*5+k, pivot*5+k) }; b.swapAt(column, pivot)
+                let divisor = a[column*5+column]
+                for k in column..<5 { a[column*5+k] /= divisor }; b[column] /= divisor
+                for row in 0..<5 where row != column {
+                    let factor = a[row*5+column]
+                    for k in column..<5 { a[row*5+k] -= factor * a[column*5+k] }
+                    b[row] -= factor * b[column]
+                }
+            }
+            return b.allSatisfy(\.isFinite) ? b : nil
+        }
+        func closest(_ target: SIMD3<Double>, _ seed: [String: Double]) -> [String: Double] {
+            var q=seed
+            for joint in chain {
+                let range=allowed[joint.name]!
+                q[joint.name]=max(range.lowerBound,min(range.upperBound,seed[joint.name,default:0]))
+            }
+            var best=q,bestLoss=Double.infinity
+            let goal = [target.x, target.y, target.z, 0, 0]
+            for _ in 0..<250 {
+                let current = features(q), delta = zip(goal, current).map(-)
+                let loss = delta.reduce(0) { $0 + $1*$1 }
+                if loss < bestLoss { bestLoss = loss; best = q }
+                if sqrt(delta.prefix(3).reduce(0) { $0 + $1*$1 }) < 0.004 && max(abs(current[3]), abs(current[4])) < 0.008 { break }
+                let columns = chain.map { joint -> [Double] in
+                    var shifted = q; shifted[joint.name, default: 0] += 0.0001
+                    return zip(features(shifted), current).map { ($0 - $1) / 0.0001 }
+                }
+                var normal = [Double](repeating: 0, count: 25)
+                for row in 0..<5 { for col in 0..<5 {
+                    normal[row*5+col] = columns.reduce(row == col ? 0.0004 : 0) { $0 + $1[row]*$1[col] }
+                } }
+                guard let correction = solve(normal, delta) else { break }
+                let changes = columns.map { zip($0, correction).reduce(0) { $0 + $1.0*$1.1 } }
+                let scale = min(1, 0.06 / max(0.000001, changes.map(abs).max() ?? 0))
+                for (joint, change) in zip(chain, changes) {
+                    let range=allowed[joint.name]!
+                    q[joint.name] = max(range.lowerBound, min(range.upperBound, q[joint.name, default: 0] + change * scale))
+                }
+            }
+            // Equivalent half-turns preserve the horizontal jaw line. Prefer
+            // the branch nearest the starting wrist, avoiding approach flips.
+            let wrist = side + "_joint7"
+            let reference = seed[wrist, default: baseline[wrist, default: 0]]
+            let wristRange=allowed[wrist]!
+            for delta in [-Double.pi, Double.pi] {
+                let candidate = best[wrist, default: 0] + delta
+                if wristRange.contains(candidate), abs(candidate-reference) < abs(best[wrist, default: 0]-reference) {
+                    best[wrist] = candidate
+                }
+            }
+            return best
+        }
+        self.chain=chain;self.allowed=allowed;self.tip=tip
+        self.tiltDegrees=tiltDegrees;self.loss=loss;self.closest=closest
+    }
+}
+
 /// Visual rehearsal only. Deliberately separate from executable proposals:
 /// selecting a right-hand model does not assert a right-arm hardware mapping.
 struct ROBCanGrabPreview {
@@ -1163,91 +1267,9 @@ struct ROBCanGrabPreview {
             throw ROBGhostMotionError.blocked("Find the can again; its measured position is missing or older than 60 seconds.")
         }
         let graspPoint = can.point + reachOffset
-        func tip(_ q: [String: Double]) -> SIMD3<Double> {
-            let frame = model.frames(q)[side + "_tool"]!
-            return SIMD3(frame.columns.3.x, frame.columns.3.y, frame.columns.3.z)
-        }
-        let chain = model.joints.filter { $0.name.hasPrefix(side + "_joint") }
-        let selectedModel=model.physicalSide==side ? model:try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
-        let rawBounds=ROBWorkspaceCollisionPlan.jointBounds(model:selectedModel)
-        let allowed=Dictionary(uniqueKeysWithValues:(0..<7).map { index in
-            let lower=rawBounds[index].lowerBound-selectedModel.armUprightPrior[index]
-            let upper=rawBounds[index].upperBound-selectedModel.armUprightPrior[index]
-            return (side+"_joint\(index+1)",lower...upper)
-        })
-        // Captured gripper: +Z approaches, +Y spans the jaw opening; +X is
-        // its thin plane normal. Keep +Y/+Z horizontal, including wrist roll.
-        func features(_ q: [String: Double]) -> [Double] {
-            let frame = model.frames(q)[side + "_tool"]!
-            return [frame.columns.3.x, frame.columns.3.y, frame.columns.3.z,
-                frame.columns.1.z * 0.25, frame.columns.2.z * 0.25]
-        }
-        func tiltDegrees(_ q: [String: Double]) -> Double {
-            let values = features(q)
-            return asin(min(1, max(abs(values[3]), abs(values[4])) / 0.25)) * 180 / .pi
-        }
-        func loss(_ q: [String: Double], _ target: SIMD3<Double>) -> Double {
-            let values = features(q)
-            return simd_length_squared(tip(q) - target) + values[3]*values[3] + values[4]*values[4]
-        }
-        func solve(_ matrix: [Double], _ rhs: [Double]) -> [Double]? {
-            var a = matrix, b = rhs
-            for column in 0..<5 {
-                let pivot = (column..<5).max { abs(a[$0*5+column]) < abs(a[$1*5+column]) }!
-                guard abs(a[pivot*5+column]) > 1e-12 else { return nil }
-                for k in 0..<5 { a.swapAt(column*5+k, pivot*5+k) }; b.swapAt(column, pivot)
-                let divisor = a[column*5+column]
-                for k in column..<5 { a[column*5+k] /= divisor }; b[column] /= divisor
-                for row in 0..<5 where row != column {
-                    let factor = a[row*5+column]
-                    for k in column..<5 { a[row*5+k] -= factor * a[column*5+k] }
-                    b[row] -= factor * b[column]
-                }
-            }
-            return b.allSatisfy(\.isFinite) ? b : nil
-        }
-        func closest(_ target: SIMD3<Double>, _ seed: [String: Double]) -> [String: Double] {
-            var q=seed
-            for joint in chain {
-                let range=allowed[joint.name]!
-                q[joint.name]=max(range.lowerBound,min(range.upperBound,seed[joint.name,default:0]))
-            }
-            var best=q,bestLoss=Double.infinity
-            let goal = [target.x, target.y, target.z, 0, 0]
-            for _ in 0..<250 {
-                let current = features(q), delta = zip(goal, current).map(-)
-                let loss = delta.reduce(0) { $0 + $1*$1 }
-                if loss < bestLoss { bestLoss = loss; best = q }
-                if sqrt(delta.prefix(3).reduce(0) { $0 + $1*$1 }) < 0.004 && max(abs(current[3]), abs(current[4])) < 0.008 { break }
-                let columns = chain.map { joint -> [Double] in
-                    var shifted = q; shifted[joint.name, default: 0] += 0.0001
-                    return zip(features(shifted), current).map { ($0 - $1) / 0.0001 }
-                }
-                var normal = [Double](repeating: 0, count: 25)
-                for row in 0..<5 { for col in 0..<5 {
-                    normal[row*5+col] = columns.reduce(row == col ? 0.0004 : 0) { $0 + $1[row]*$1[col] }
-                } }
-                guard let correction = solve(normal, delta) else { break }
-                let changes = columns.map { zip($0, correction).reduce(0) { $0 + $1.0*$1.1 } }
-                let scale = min(1, 0.06 / max(0.000001, changes.map(abs).max() ?? 0))
-                for (joint, change) in zip(chain, changes) {
-                    let range=allowed[joint.name]!
-                    q[joint.name] = max(range.lowerBound, min(range.upperBound, q[joint.name, default: 0] + change * scale))
-                }
-            }
-            // Equivalent half-turns preserve the horizontal jaw line. Prefer
-            // the branch nearest the starting wrist, avoiding approach flips.
-            let wrist = side + "_joint7"
-            let reference = seed[wrist, default: baseline[wrist, default: 0]]
-            let wristRange=allowed[wrist]!
-            for delta in [-Double.pi, Double.pi] {
-                let candidate = best[wrist, default: 0] + delta
-                if wristRange.contains(candidate), abs(candidate-reference) < abs(best[wrist, default: 0]-reference) {
-                    best[wrist] = candidate
-                }
-            }
-            return best
-        }
+        let ik=try ROBCanHorizontalIK(model:model,baseline:baseline,side:side)
+        let chain=ik.chain,allowed=ik.allowed
+        let tip=ik.tip,tiltDegrees=ik.tiltDegrees,loss=ik.loss,closest=ik.closest
         var previous = baseline, steps: [Step] = []
         func append(_ pose: [String: Double], _ stage: String, dwell: Double = 0, action: ROBLeftGestureProposal.JawAction? = nil) {
             let angle = chain.map { abs(pose[$0.name, default: 0] - previous[$0.name, default: 0]) }.max() ?? 0
@@ -1364,6 +1386,161 @@ struct ROBCanGrabPreview {
         return .init(can: can, side: side, baseline: baseline, steps: steps, graspError: error,
             gripperTiltDegrees: tilt, reachesCan: ready, reachOffset:[reachOffset.x,reachOffset.y,reachOffset.z],
             dynamicEntryStepCount:entryStepCount)
+    }
+}
+
+/// Pure continuation from an already held, independently validated payload.
+/// It never enters from hanging, prepares jaws, grips or grants arm motion.
+struct ROBCanCarryPreview {
+    struct DropContainmentEvidence:Codable,Equatable {
+        let payloadMeasurementID:String
+        let destinationSequence:UInt64
+        let destinationCapturedAtMilliseconds:Double
+        let usedCommonOpeningPrior:Bool
+        let openingCenterMeters:[Double]
+        let openingRadiusMeters:Double
+        let payloadCenterAtReleaseMeters:[Double]
+        let payloadProjectedRadiusMeters:Double
+        let payloadCenterOffsetMeters:Double
+        let assumedDropUncertaintyMeters:Double
+        let containmentInsetMeters:Double
+        let remainingOpeningMarginMeters:Double
+        let minimumPayloadBottomAboveRimMeters:Double
+        let toolTiltDegrees:Double
+        let releaseTargetErrorMeters:Double
+    }
+    let can:ROBWorkspaceLocatedObject
+    let destination:ROBWorkspaceLocatedObject
+    let attachedPayload:ROBWorkspaceCarriedObject
+    let baseline:[String:Double]
+    let side:String
+    let steps:[ROBCanGrabPreview.Step]
+    let releaseIndex:Int
+    let dropContainmentEvidence:DropContainmentEvidence
+    var seconds:Double {steps.reduce(0){$0+$1.seconds}}
+
+    static func make(from baseline:[String:Double],can:ROBWorkspaceLocatedObject,
+        attachedPayload:ROBWorkspaceCarriedObject,destination:ROBWorkspaceLocatedObject,
+        model:ROBGhostRobotModel,side:String,now:Double,dropUncertaintyMeters:Double)throws->Self {
+        guard model.physicalSide==side,["left","right"].contains(side),
+              baseline.values.allSatisfy(\.isFinite),now.isFinite,
+              can.target == .can,can.position.count==3,can.position.allSatisfy(\.isFinite),
+              can.confidence.isFinite,(0.35...1).contains(can.confidence),can.sequence>0,
+              can.capturedAt.isFinite,(0...60_000).contains(now-can.capturedAt),
+              let sections=can.sections,sections.valid,attachedPayload.valid,
+              destination.target == .orangeBucket,destination.position.count==3,destination.position.allSatisfy(\.isFinite),
+              destination.confidence.isFinite,(0.35...1).contains(destination.confidence),destination.sequence>0,
+              destination.capturedAt.isFinite,(0...60_000).contains(now-destination.capturedAt),
+              let radius=destination.openingRadius,radius.isFinite,(0.06...0.28).contains(radius),
+              dropUncertaintyMeters.isFinite,(0...0.15).contains(dropUncertaintyMeters) else {
+            throw ROBGhostMotionError.blocked("Carry planning needs a fresh can, an explicit attached payload, an observed bucket opening and bounded drop uncertainty.")
+        }
+        let center=SIMD3(attachedPayload.centerInToolMeters[0],attachedPayload.centerInToolMeters[1],attachedPayload.centerInToolMeters[2])
+        let half=SIMD3(attachedPayload.halfExtentsMeters[0],attachedPayload.halfExtentsMeters[1],attachedPayload.halfExtentsMeters[2])
+        guard (0..<3).allSatisfy({half[$0]+1e-9>=min(sections.diameterMeters/2,sections.heightMeters/2)}),
+              simd_length(half)+1e-9>=sections.heightMeters/2 else {
+            throw ROBGhostMotionError.blocked("The supplied attached envelope is too small for the measured can.")
+        }
+        var rimZ=destination.point.z
+        if let prior=destination.bucketShapePrior {
+            guard prior.valid,destination.registrationID==nil,abs(radius-prior.commonOpeningRadiusMeters)<0.000001 else {
+                throw ROBGhostMotionError.blocked("The estimated bucket opening or its common drop disk changed.")
+            }
+            rimZ=max(rimZ,prior.maximumRimHeightMeters)
+        }
+        let ik=try ROBCanHorizontalIK(model:model,baseline:baseline,side:side,pointInTool:center)
+        guard ik.chain.count==7,ik.chain.allSatisfy({joint in
+            baseline[joint.name].map{ik.allowed[joint.name]!.contains($0)} ?? false
+        }),ik.tiltDegrees(baseline)<=5 else {
+            throw ROBGhostMotionError.blocked("The measured held arm must be within joint limits with horizontal jaws before carrying.")
+        }
+        func corners(_ pose:[String:Double])->[SIMD3<Double>] {
+            let frame=model.frames(pose)[model.toolLink]!
+            var result:[SIMD3<Double>]=[]
+            for x in [-1.0,1] {for y in [-1.0,1] {for z in [-1.0,1] {
+                let p=frame*SIMD4(center.x+x*half.x,center.y+y*half.y,center.z+z*half.z,1)
+                result.append(SIMD3(p.x,p.y,p.z))
+            }}}
+            return result
+        }
+        let startCenter=ik.tip(baseline),openingXY=SIMD2(destination.point.x,destination.point.y)
+        let inset=0.010
+        func containment(_ pose:[String:Double],target:SIMD3<Double>)->DropContainmentEvidence? {
+            let actual=ik.tip(pose),vertices=corners(pose)
+            guard [actual.x,actual.y,actual.z].allSatisfy(\.isFinite),vertices.count==8,
+                  vertices.allSatisfy({[$0.x,$0.y,$0.z].allSatisfy(\.isFinite)}) else {return nil}
+            let footprint=vertices.map{hypot($0.x-actual.x,$0.y-actual.y)}.max()!
+            let offset=simd_distance(SIMD2(actual.x,actual.y),openingXY)
+            let margin=radius-offset-footprint-dropUncertaintyMeters-inset
+            let bottom=vertices.map(\.z).min()!-rimZ
+            let error=simd_distance(actual,target),tilt=ik.tiltDegrees(pose)
+            guard margin>=0,bottom>=dropUncertaintyMeters+0.020,error<=0.012,tilt<=5 else {return nil}
+            return .init(payloadMeasurementID:attachedPayload.measurementID,destinationSequence:destination.sequence,
+                destinationCapturedAtMilliseconds:destination.capturedAt,usedCommonOpeningPrior:destination.bucketShapePrior != nil,
+                openingCenterMeters:[openingXY.x,openingXY.y,rimZ],openingRadiusMeters:radius,
+                payloadCenterAtReleaseMeters:[actual.x,actual.y,actual.z],payloadProjectedRadiusMeters:footprint,
+                payloadCenterOffsetMeters:offset,assumedDropUncertaintyMeters:dropUncertaintyMeters,
+                containmentInsetMeters:inset,remainingOpeningMarginMeters:margin,
+                minimumPayloadBottomAboveRimMeters:bottom,toolTiltDegrees:tilt,releaseTargetErrorMeters:error)
+        }
+        // The full attached BOX is projected. No cylinder axis, fresh world
+        // grasp point or occupied/free evidence is invented from its name.
+        let startFootprint=corners(baseline).map{hypot($0.x-startCenter.x,$0.y-startCenter.y)}.max()!
+        let towardHand=SIMD2(startCenter.x,startCenter.y)-openingXY
+        let availableHandward=max(0,radius-startFootprint-dropUncertaintyMeters-inset-0.012)
+        let handward=destination.bucketShapePrior==nil && simd_length(towardHand)>0.001
+            ? simd_normalize(towardHand)*min(0.04,availableHandward):.zero
+        let dropXY=openingXY+handward
+        var reachableButUncontained=false,containedCandidate=false
+        for extra in [0.15,0.10,0.20,0.25] {
+            let releaseTarget=SIMD3(dropXY.x,dropXY.y,max(startCenter.z+extra,rimZ+simd_length(half)+0.12))
+            let candidate=ik.closest(releaseTarget,baseline)
+            guard simd_distance(ik.tip(candidate),releaseTarget)<=0.012,ik.tiltDegrees(candidate)<=5 else {continue}
+            guard containment(candidate,target:releaseTarget) != nil else {reachableButUncontained=true;continue}
+            containedCandidate=true
+            var previous=baseline,steps:[ROBCanGrabPreview.Step]=[]
+            func step(_ pose:[String:Double],_ stage:String,action:ROBLeftGestureProposal.JawAction?=nil)throws {
+                let angle=ik.chain.map{abs(pose[$0.name,default:0]-previous[$0.name,default:0])}.max() ?? 0
+                let seconds=max(0.8,angle/0.6)
+                guard seconds.isFinite,seconds<=5 else {throw ROBWorkspaceReachError.outOfReach(.orangeBucket)}
+                steps.append(.init(pose:pose,seconds:seconds,stage:stage,jawAction:action));previous=pose
+            }
+            func travel(_ target:SIMD3<Double>,stage:String)throws {
+                let origin=ik.tip(previous),distance=simd_distance(origin,target)
+                guard distance.isFinite,distance<=3 else {throw ROBWorkspaceReachError.outOfReach(.orangeBucket)}
+                let initialCount=max(1,Int(ceil(distance/0.025)))
+                // Numerical IK residuals must not enlarge a nominal3cm
+                // spacing into an actual larger payload-center movement.
+                for factor in [1,2,4] where initialCount*factor<=256 {
+                    let count=initialCount*factor
+                    var cursor=previous,route:[[String:Double]]=[]
+                    for index in 1...count {
+                        let point=origin+(target-origin)*(Double(index)/Double(count)),pose=ik.closest(point,cursor)
+                        guard simd_distance(ik.tip(pose),point)<=0.012,ik.tiltDegrees(pose)<=5,
+                              simd_distance(ik.tip(pose),ik.tip(cursor))<=0.030+1e-9 else {route=[];break}
+                        route.append(pose);cursor=pose
+                    }
+                    if route.count==count {for pose in route {try step(pose,stage)};return}
+                }
+                throw ROBWorkspaceReachError.outOfReach(.orangeBucket)
+            }
+            do {
+                try step(baseline,"Measured held start; carrying explicit payload")
+                try travel(SIMD3(startCenter.x,startCenter.y,releaseTarget.z),stage:"Raise held can for transfer")
+                try travel(releaseTarget,stage:"Carry held can above bucket for gravity drop")
+                guard let evidence=containment(previous,target:releaseTarget) else {continue}
+                let releaseIndex=steps.count,actualRelease=ik.tip(previous)
+                try step(previous,"Release held can above bucket",action:.release)
+                try travel(actualRelease+SIMD3(0,0,0.08),stage:"Empty retreat above bucket")
+                guard steps.count<=512,steps.reduce(0,{$0+$1.seconds})<=135 else {continue}
+                return .init(can:can,destination:destination,attachedPayload:attachedPayload,baseline:baseline,side:side,
+                    steps:steps,releaseIndex:releaseIndex,dropContainmentEvidence:evidence)
+            } catch is ROBWorkspaceReachError {continue}
+        }
+        if reachableButUncontained && !containedCandidate {
+            throw ROBGhostMotionError.blocked("The attached payload box and drop uncertainty do not fit inside the observed opening.")
+        }
+        throw ROBWorkspaceReachError.outOfReach(.orangeBucket)
     }
 }
 
