@@ -87,6 +87,82 @@ def proper_fit(source, target):
     return result
 
 
+def stationary_gravity_initializer(frames, prior):
+    """Improve a fitting seed, never the measured points or fit admission.
+
+    Gravity supplies two rotation constraints. The horizontal image-right
+    heading and translation remain prior values. A level model base is an
+    initialization assumption, not an independently measured world reference.
+    Missing, moving, stale or inconsistent IMU data preserves the legacy seed.
+    """
+    fallback = dict(source="neck_prior_initializer_only", applied=False)
+    if not rigid_valid(prior) or not isinstance(frames, list) or len(frames) < 3:
+        return prior.copy(), fallback
+    directions, evidence, sensors = [], [], []
+    for frame in frames:
+        imu = frame.get("imu")
+        if not isinstance(imu, dict):
+            return prior.copy(), fallback
+        try:
+            gravity = finite_array(imu["gravity_mps2"], (3,), "gravity")
+            deviation = finite_array(imu["gravity_std_mps2"], (3,), "gravity deviation")
+            gyro = finite_array(imu["gyro_rad_s"], (3,), "gyro")
+            rotation = finite_array(imu["imu_to_rgb_rotation"], (9,), "IMU-to-RGB").reshape((3, 3))
+            count, window, age = imu["sample_count"], imu["window_milliseconds"], imu["age_milliseconds"]
+            latest, reference = imu["latest_timestamp_ns"], imu["reference_timestamp_ns"]
+            if (not isinstance(imu.get("sensor"), str) or not 1 <= len(imu["sensor"]) <= 128
+                    or imu.get("stationary") is not True or imu.get("axes") != "sensor_native"
+                    or imu.get("gravity_source") != "stationary_accelerometer_mean"
+                    or not isinstance(count, int) or isinstance(count, bool) or not 10 <= count <= 1000
+                    or not isinstance(window, (int, float)) or not 100 <= window <= 1000
+                    or not isinstance(age, (int, float)) or not 0 <= age <= 100
+                    or not isinstance(latest, int) or not isinstance(reference, int)
+                    or latest <= 0 or reference < latest or abs((reference-latest)/1e6-age) > .02
+                    or not 7 <= np.linalg.norm(gravity) <= 12
+                    or np.any(deviation < 0) or np.max(deviation) > .10
+                    or np.linalg.norm(gyro) > .03
+                    or np.max(np.abs(rotation.T @ rotation-np.eye(3))) > 1e-6
+                    or abs(np.linalg.det(rotation)-1) > 1e-6):
+                return prior.copy(), fallback
+            value = rotation @ gravity
+            sensors.append(imu["sensor"])
+            directions.append(value / np.linalg.norm(value))
+            evidence.append(dict(sequence=frame["sequence"], latestTimestampNs=latest,
+                                 referenceTimestampNs=reference, ageMilliseconds=age,
+                                 sampleCount=count, gravityRGBUnit=directions[-1].tolist()))
+        except (KeyError, TypeError, ValueError):
+            return prior.copy(), fallback
+    if len(set(sensors)) != 1 or len({row["latestTimestampNs"] for row in evidence}) != len(evidence):
+        return prior.copy(), fallback
+    gravity = np.mean(directions, axis=0)
+    if np.linalg.norm(gravity) < .99:
+        return prior.copy(), fallback
+    gravity /= np.linalg.norm(gravity)
+    spread = np.degrees(np.arccos(np.clip(np.asarray(directions) @ gravity, -1, 1)))
+    if np.max(spread) > 1:
+        return prior.copy(), fallback
+    up = np.array([0., 0., 1.])
+    world_right = prior[:3, 0]-up*(prior[:3, 0] @ up)
+    camera_right = np.array([1., 0., 0.])-gravity*gravity[0]
+    if min(np.linalg.norm(world_right), np.linalg.norm(camera_right)) < .1:
+        return prior.copy(), fallback
+    world_right /= np.linalg.norm(world_right)
+    camera_right /= np.linalg.norm(camera_right)
+    world_basis = np.column_stack((world_right, np.cross(up, world_right), up))
+    camera_basis = np.column_stack((camera_right, np.cross(gravity, camera_right), gravity))
+    seed = prior.copy()
+    seed[:3, :3] = world_basis @ camera_basis.T
+    correction = float(Rotation.from_matrix(seed[:3, :3] @ prior[:3, :3].T).magnitude())
+    if not rigid_valid(seed) or correction > math.radians(20):
+        return prior.copy(), fallback
+    return seed, dict(source="stationary_imu_level_base_initializer_only", applied=True,
+        rotationChangeDegrees=math.degrees(correction), maximumGravitySpreadDegrees=float(np.max(spread)),
+        translationUnchanged=True, horizontalImageRightHeadingUnchanged=True, frames=evidence,
+        limitations=["Model base Z is assumed vertical for initialization only.",
+                     "Gravity does not measure camera translation or heading.",
+                     "Original CAD, raw depth, ambiguity and independent validation checks remain required."])
+
+
 def register(document, root, planner=None, monotonic=time.monotonic):
     if document.get("schemaVersion") != 1:
         raise ValueError("Unsupported capture schema")
@@ -112,6 +188,8 @@ def register(document, root, planner=None, monotonic=time.monotonic):
             or any(b["sequence"] <= a["sequence"] or b["timestamp"] <= a["timestamp"] for a, b in zip(captures, captures[1:]))
             or any(not np.array_equal(f["intrinsics"], captures[0]["intrinsics"]) or f["depth"].shape != captures[0]["depth"].shape for f in captures)):
         raise ValueError("Frames must be distinct, advancing and share exact aligned framing/intrinsics")
+    original_prior = prior.copy()
+    prior, initializer = stationary_gravity_initializer(frames, prior)
     if planner is None:
         from worker import ShadowPlanner
         planner = ShadowPlanner()
@@ -129,7 +207,7 @@ def register(document, root, planner=None, monotonic=time.monotonic):
     visible = estimator.visible(points, prior, first["depth"], first["intrinsics"])
     points, normals, labels = points[visible], normals[visible], labels[visible]
     if len(points) < 100:
-        raise ValueError("This held view does not show enough known base and torso surfaces; point the camera toward ROB's rigid body")
+        raise ValueError(f"This held view does not show enough known base and torso surfaces: {len(points)} candidate CAD samples, 100 required. Point the camera toward ROB's rigid body")
     # Whole spatial patches, not random adjacent pixels, are withheld. One
     # reference per 3cm cell reduces correlated surface samples.
     cells = np.floor(points / .03).astype(np.int64)
@@ -146,7 +224,7 @@ def register(document, root, planner=None, monotonic=time.monotonic):
     if len(held) > 50:
         held = held[np.linspace(0, len(held) - 1, 50, dtype=int)]
     if len(train) < 40 or len(held) < 15:
-        raise ValueError("Known robot surfaces need more spatially separated fit and held-out patches")
+        raise ValueError(f"Known robot surfaces need more spatially separated fit and held-out patches: {len(train)} fit / {len(held)} held-out, 40 / 15 required")
     if (sum(labels[train] == "torso_link") < 10
             or sum(np.isin(labels[train], ["base_link", "left_track_link", "right_track_link"])) < 10):
         raise ValueError("Independent registration needs visible torso and base-fixed surfaces")
@@ -182,10 +260,11 @@ def register(document, root, planner=None, monotonic=time.monotonic):
     local_training = (points[train] - camera[:3, 3]) @ camera[:3, :3]
     training_distance = first["tree"].query(local_training)[0]
     inliers = (training_distance <= .04) & (np.abs(residual(best.x)) <= .02)
+    torso_inliers = int(sum(labels[train][inliers] == "torso_link"))
+    base_inliers = int(sum(np.isin(labels[train][inliers], ["base_link", "left_track_link", "right_track_link"])))
     if (np.mean(inliers) < .60 or sum(inliers) < 30
-            or sum(labels[train][inliers] == "torso_link") < 8
-            or sum(np.isin(labels[train][inliers], ["base_link", "left_track_link", "right_track_link"])) < 8):
-        raise ValueError("Too little base/torso CAD is independently observed after fitting")
+            or torso_inliers < 8 or base_inliers < 8):
+        raise ValueError(f"Too little base/torso CAD is independently observed after fitting: {sum(inliers)}/{len(train)} fit patches ({np.mean(inliers):.0%}; 60% required), {torso_inliers} torso / {base_inliers} base (8 each required)")
     error = float(np.sqrt(np.mean(residual(best.x)[inliers] ** 2)))
     observed, sigma = rank_and_uncertainty(numerical_jacobian(lambda x:residual(x)[inliers], best.x), noise=max(.004, error))
     if not observed or error > .02 or max(sigma[:3]) > .015 or max(sigma[3:]) > .04:
@@ -207,7 +286,7 @@ def register(document, root, planner=None, monotonic=time.monotonic):
         usable = distance <= .015
         if frame_index and (sum(usable) < 3 or np.mean(usable) < .60
                 or float(np.sqrt(np.mean(distance[usable]**2))) > .012):
-            raise ValueError("Later validation frame does not independently confirm enough withheld robot patches")
+            raise ValueError(f"Later validation frame does not independently confirm enough withheld robot patches: sequence {capture['sequence']}, {sum(usable)}/{len(chosen)} within 15 mm (3 and 60% required)")
         values = []
         for index, nearest, gap in zip(chosen[usable], ids[usable], distance[usable]):
             raw = capture["cloud"][nearest]
@@ -237,6 +316,8 @@ def register(document, root, planner=None, monotonic=time.monotonic):
         pointNormalRMSEMeters=error,translationStandardDeviationMeters=sigma[:3].tolist(),
         rotationStandardDeviationRadians=sigma[3:].tolist(),alternateStarts=len(fits),nearBestStarts=len(near),
         heldOutFrames=validation_by_frame,referenceUncertaintyMeters=reference_error,
+        initializer=initializer,
+        originalSeedCameraToRobotColumnMajor=original_prior.flatten(order="F").tolist(),
         seedCameraToRobotColumnMajor=prior.flatten(order="F").tolist(),
         candidateCameraToRobotColumnMajor=rebuilt.flatten(order="F").tolist(),
         limitations=["CAD/reference uncertainty is an explicit supplied allowance, not inferred from low fit residual.",
