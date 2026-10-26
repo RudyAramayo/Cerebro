@@ -105,6 +105,9 @@ final class ROBAmberGatewayTunnel {
 }
 final class ROBAmberGatewayTelemetry {
     let arm = "right"
+    let receivedAt=Date(),receivedAtUptime=ProcessInfo.processInfo.systemUptime
+    let controllerSampleAgeMilliseconds=1.0,gripperFeedbackAgeMilliseconds=1.0
+    let jointFeedbackAgeMilliseconds=Array(repeating:NSNumber(value:1.0),count:7)
     var currents: [NSNumber] = Array(repeating: NSNumber(value: 0.2), count: 7)
     let sequence: UInt64
     let positionsRadians: [NSNumber]
@@ -605,51 +608,97 @@ final class ROBArmRoutineCoordinator {
         print("Estimated runtime rejection: decline, Stop before approval/during motion, lost/replaced map, camera/session change, >2mm start/dispatch drift and missing/consumed proof never admit another step or any jaw/encoder/deactivation command")
     }
 
+    @MainActor static func trialFreeRecoveryBlocked()->Bool {
+        guard let model=try? ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner")) else{return false}
+        do {_ = try ROBLeftArmTrial.shared.recoveryProposal(model:model);return false}catch{return true}
+    }
+
     @_optimize(none)
     @MainActor static func delayedTelemetryTests() async throws {
         let g = ROBAmberGatewayClient.shared
-        for scenario in ["delivery", "source", "live_loss", "malformed", "current_jump"] {
+        for scenario in ["delivery", "source", "live_loss", "malformed", "current_jump", "current_jump_hold_rejected", "current_jump_hold_unconfirmed", "record_only_jump"] {
+            let currentTrip=scenario.hasPrefix("current_jump")
+            g.rejectHold=false;g.confirmHold=true
+            var commandsAtTrip:Int?
             g.q["right"] = ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!; g.mode["right"] = 2
             g.calibrated = ["right"]
             g.stale = false; g.commands = []; g.activeLeases = []
             ROBArmRoutineVision.shared.fresh = true
-            UserDefaults.standard.set(scenario == "current_jump" ? 0.5 : 0, forKey: ROBLeftArmTrial.currentLimitKey)
+            UserDefaults.standard.set(currentTrip ? 0.5:0,forKey:ROBLeftArmTrial.currentLimitKey)
             g.afterStateQuery = {
                 g.afterStateQuery = nil
                 let initial = g.sequence
-                if scenario == "current_jump" {
+                if currentTrip || scenario=="record_only_jump" {
                     let fresh = ROBAmberGatewayTelemetry(sequence: initial + 1, positions: g.q["right"]!, stale: false, status: 2)
                     NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g, userInfo: ["telemetry": fresh])
                 }
                 let queued = ROBAmberGatewayTelemetry(sequence: initial + 2, positions: g.q["right"]!,
                     stale: scenario == "source", status: 2, queuedMilliseconds: 700)
                 if scenario == "malformed" { queued.currents[3] = NSNumber(value: Double.nan) }
-                if scenario == "current_jump" { queued.currents = Array(repeating: NSNumber(value: 5), count: 7) }
+                if currentTrip || scenario=="record_only_jump" { queued.currents = Array(repeating: NSNumber(value: 5), count: 7) }
                 g.sequence = initial + 3 // a strictly newer cache exists while the UI drains its older notification
                 g.stale = scenario == "live_loss"
+                if currentTrip {
+                    commandsAtTrip=g.commands.count
+                    g.rejectHold=scenario=="current_jump_hold_rejected";g.confirmHold=scenario != "current_jump_hold_unconfirmed"
+                }
                 NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g,
                     userInfo: ["telemetry": queued])
+                if currentTrip {
+                    for index in 1...4 {
+                        DispatchQueue.main.asyncAfter(deadline:.now()+Double(index)*0.12) {
+                            g.sequence+=1
+                            let after=ROBAmberGatewayTelemetry(sequence:g.sequence,positions:g.q["right"]!,stale:false,status:2)
+                            after.currents=Array(repeating:NSNumber(value:0.3+Double(index)*0.01),count:7)
+                            NotificationCenter.default.post(name:.ROBAmberGatewayTelemetryDidUpdate,object:g,userInfo:["telemetry":after])
+                        }
+                    }
+                }
             }
             let result = await run("left_grip")
             g.afterStateQuery = nil; g.stale = false
-            if scenario == "delivery" {
+            if scenario == "delivery" || scenario=="record_only_jump" {
                 precondition(result["status"] as? String == "accepted_unverified", result.description)
                 precondition(result["delayed_telemetry_samples"] as? Int == 1)
                 precondition((result["max_delayed_telemetry_age_ms"] as? Double ?? 0) >= 700)
                 let csv = try String(contentsOfFile: result["current_recording"] as! String)
                 precondition(csv.contains(",701.0,"), "Queued history must retain its actual delivery age")
+                precondition(result["current_spike_latched"]==nil,"Default zero threshold acquired an automatic cutoff")
             } else {
                 precondition(result["status"] as? String == "blocked", "\(scenario): \(result)")
                 precondition(g.commands.contains("priority_hold:right"), "A genuine feedback/current fault did not request hold")
+            }
+            if currentTrip {
+                precondition(result["current_spike_latched"]as?Bool==true && result["automatic_recovery_eligible"]as?Bool==false)
+                precondition(result["requires_intervention"]as?Bool==true && result["old_waypoint_resumption_permitted"]as?Bool==false)
+                let path=result["current_spike_evidence_path"]as!String
+                let event=try JSONDecoder().decode(ROBArmCurrentSpikeRecording.Event.self,from:Data(contentsOf:URL(fileURLWithPath:path)))
+                precondition(event.configuredJumpLimitRaw==0.5 && abs(event.peakJumpRaw-4.8)<1e-9)
+                precondition(event.before?.currentsRaw==Array(repeating:0.2,count:7) && event.trigger.currentsRaw==Array(repeating:5.0,count:7))
+                precondition(event.currentDeltaRaw==Array(repeating:4.8,count:7) && event.triggerJointIndices==Array(1...7))
+                precondition(event.trigger.positionsRadians==g.q["right"]! && event.trigger.effectiveSampleAgeMilliseconds==701)
+                precondition(event.trigger.sampleAgeAtReceiptMilliseconds==1 && event.trigger.jointFeedbackAgeMilliseconds.count==7)
+                precondition(event.postStopCollectionCompleted && event.postStopSamples.count==4 && event.holds.count==1)
+                precondition((event.postStopCollectionCompletedAtMilliseconds ?? 0)-event.holds[0].requestedAtMilliseconds>=900)
+                precondition(event.holds[0].accepted==(scenario != "current_jump_hold_rejected"))
+                precondition(result["current_spike_hold_confirmed"]as?Bool==(scenario=="current_jump"))
+                precondition(event.postStopSamples.allSatisfy{$0.sequence>event.trigger.sequence && $0.gatewaySessionGeneration==g.generation})
+                precondition(!event.motionAuthority && !event.calibratedForceProtection && !event.automaticReversePermitted)
+                precondition(Array(g.commands.dropFirst(commandsAtTrip!))==["priority_hold:right"],"Spike cleanup sent more than its one hold, repeated or reversed")
+                let permissions=(try FileManager.default.attributesOfItem(atPath:path)[.posixPermissions]as!NSNumber).intValue
+                precondition(permissions==0o600)
+                precondition(trialFreeRecoveryBlocked(),"Current trip exposed an old recovery route")
             }
             precondition(g.commands.allSatisfy { ["mode_query:right", "priority_hold:right", "gripper_state:right", "gripper_hold:right"].contains($0) },
                 "A stationary recording check activated, moved or deactivated an arm")
             precondition(g.q["right"] == ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!)
             precondition(!ROBControllerArmApproval.shared.authorizesLeftArmTrial("invented"),
                 "Recovered feedback restored an old motion grant")
+            g.rejectHold=false;g.confirmHold=true
         }
         UserDefaults.standard.set(0, forKey: ROBLeftArmTrial.currentLimitKey)
         print("Delayed telemetry: 700 ms queued history retained only with newer live feedback; stale source, true feedback loss, malformed currents and historical current jumps still stop; stationary jaws only after valid live feedback; no travel or grant recovery")
+        print("Raw spike evidence: exact before/trigger/delta/q/source ages, one latching hold, one-second passive samples and ACK truth, private0600 JSON; rejected/unconfirmed holds never become confirmed; zero cutoff stays record-only, no reverse/target/reconnect or old recovery")
     }
     @_optimize(none)
     @MainActor static func tests() async throws {

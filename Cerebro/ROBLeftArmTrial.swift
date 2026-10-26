@@ -61,6 +61,63 @@ enum ROBInitialRetreatFailureExport {
     }
 }
 
+/// Raw electrical observations only: no calibrated force or contact claim.
+/// A latched event cannot authorize a waypoint, reverse, restart or release.
+enum ROBArmCurrentSpikeRecording {
+    struct Sample:Codable {
+        let sequence:UInt64,gatewaySessionGeneration:UInt64,arm:String,receivedAtMilliseconds:Double,receivedAtUptime:Double
+        let positionsRadians:[Double],currentsRaw:[Double],statuses:[Int]
+        let sampleAgeAtReceiptMilliseconds:Double?,effectiveSampleAgeMilliseconds:Double?
+        let controllerSampleAgeMilliseconds:Double?,jointFeedbackAgeMilliseconds:[Double?]
+        let gripperFeedbackAgeMilliseconds:Double?,effectiveGripperFeedbackAgeMilliseconds:Double?
+        init(_ sample:ROBAmberGatewayTelemetry,sessionGeneration:UInt64) {
+            func finite(_ value:Double)->Double? {value.isFinite ? value:nil}
+            sequence=sample.sequence;gatewaySessionGeneration=sessionGeneration;arm=sample.arm
+            receivedAtMilliseconds=sample.receivedAt.timeIntervalSince1970*1000;receivedAtUptime=sample.receivedAtUptime
+            positionsRadians=sample.positionsRadians.map(\.doubleValue);currentsRaw=sample.currents.map(\.doubleValue)
+            statuses=sample.statuses.map(\.intValue)
+            sampleAgeAtReceiptMilliseconds=finite(sample.sampleAgeAtReceiptMilliseconds)
+            effectiveSampleAgeMilliseconds=finite(sample.effectiveSampleAgeMilliseconds)
+            controllerSampleAgeMilliseconds=finite(sample.controllerSampleAgeMilliseconds)
+            jointFeedbackAgeMilliseconds=sample.jointFeedbackAgeMilliseconds.map{finite($0.doubleValue)}
+            gripperFeedbackAgeMilliseconds=finite(sample.gripperFeedbackAgeMilliseconds)
+            effectiveGripperFeedbackAgeMilliseconds=finite(sample.effectiveGripperFeedbackAgeMilliseconds)
+        }
+    }
+    struct Hold:Codable {
+        let commandID:UInt64,requestedAtMilliseconds:Double,requestedAtUptime:Double
+        var acknowledgementAtMilliseconds:Double?=nil,accepted:Bool?=nil,holdConfirmed:Bool?=nil
+    }
+    struct Event:Codable {
+        let schemaVersion=1,kind="latched_raw_current_jump_stop",currentUnits="unchanged_vendor_jointCurrent_raw"
+        let calibratedForceProtection=false,motionAuthority=false,automaticReversePermitted=false
+        let configuredJumpLimitRaw:Double,currentDeltaRaw:[Double],peakJumpRaw:Double,triggerJointIndices:[Int]
+        let before:Sample?,trigger:Sample,detectedAtMilliseconds:Double,detectedAtUptime:Double
+        let physicalArm:String,gatewayArm:String,phase:String,sessionGeneration:UInt64
+        let summarySHA256:String,proposalID:String?,proposalSHA256:String?,proposalKind:String?,stepIndex:Int
+        let proposedStepPositionsRadians:[Double]?,proposedStepSeconds:Double?,mapFingerprint:String?
+        let modelID:String?,referenceID:String?,geometryID:String?,mappingID:String?
+        let cameraGeneration:String,cameraFrameGeneration:String?,cameraFrameSequence:UInt64?,cameraFrameCapturedAtMilliseconds:Double?
+        let runtimeCalibrationIdentity:String?,bodyMotionIdentity:String,estimatedCameraProjectionIdentity:String?
+        let possiblePayloadHeldAtTrigger:Bool
+        var holds:[Hold]=[],postStopSamples:[Sample]=[]
+        var postStopWindowSeconds=1.0,postStopCollectionCompleted=false,postStopCollectionCompletedAtMilliseconds:Double?=nil
+    }
+    static func write(_ event:Event,recordingPath:String,proposal:ROBLeftGestureProposal?)throws->URL {
+        let directory=URL(fileURLWithPath:recordingPath).deletingPathExtension().appendingPathExtension("current-spike")
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:directory.path)
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys,.prettyPrinted]
+        func save(_ bytes:Data,_ name:String)throws {
+            let path=directory.appendingPathComponent(name);try bytes.write(to:path,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:path.path)
+        }
+        if let proposal,event.proposalSHA256==proposal.fingerprint {try save(proposal.encoded(),"proposal.json")}
+        try save(encoder.encode(event),"event.json")
+        return directory.appendingPathComponent("event.json")
+    }
+}
+
 /// Operator-supervised trials with fresh scene evidence and a complete
 /// dynamically checked arm sweep. Physical geometry still needs commissioning.
 /// Physical sides are explicit: LEFT=R11/gateway right, RIGHT=L10/gateway left.
@@ -154,6 +211,12 @@ enum ROBInitialRetreatFailureExport {
     private var lastSequence: UInt64 = 0
     private var previousCurrents: [Double]?
     private var currentLimit = 0.0
+    @nonobjc private var previousCurrentEvidence:ROBArmCurrentSpikeRecording.Sample?
+    @nonobjc private var currentSpikeEvidence:ROBArmCurrentSpikeRecording.Event?
+    private var currentSpikeEvidencePath="",currentSpikeEvidenceWriteError:String?
+    private var currentSpikePostStopDeadline:Double?
+    private var currentSpikeCollectionFinished=false
+    private var currentSpikeCompletionTask:Task<Void,Never>?
     private var peakJump = 0.0
     private var sampleCount = 0
     private var delayedSampleCount = 0
@@ -487,6 +550,12 @@ enum ROBInitialRetreatFailureExport {
                 guard let self, self.isRunning,
                       let id = (note.userInfo?["commandID"] as? NSNumber)?.uint64Value else { return }
                 let accepted = note.userInfo?["accepted"] as? Bool == true
+                if note.userInfo?["operation"] as? String=="priority_hold",
+                   let index=self.currentSpikeEvidence?.holds.firstIndex(where:{$0.commandID==id}) {
+                    self.currentSpikeEvidence?.holds[index].acknowledgementAtMilliseconds=Date().timeIntervalSince1970*1000
+                    self.currentSpikeEvidence?.holds[index].accepted=accepted
+                    self.currentSpikeEvidence?.holds[index].holdConfirmed=note.userInfo?["holdConfirmed"] as? Bool
+                }
                 if ["gripper_control","gripper_calibrate"].contains(note.userInfo?["operation"] as? String ?? "") {
                     self.jawCommandDispatched=true
                 }
@@ -512,6 +581,7 @@ enum ROBInitialRetreatFailureExport {
                         if self.servoTelemetryHistory.count>80 {self.servoTelemetryHistory.removeFirst(self.servoTelemetryHistory.count-80)}
                     }
                 }
+                self.recordCurrentSpikePostStop(sample)
                 guard self.isRunning,self.failure==nil,!Self.neckOnlyCommands.contains(self.activeCommand),
                       !self.inactiveWorkspaceSearch,sample.arm==self.arm else{return}
                 do { try self.record(sample) } catch { self.abort(error.localizedDescription) }
@@ -1156,6 +1226,9 @@ enum ROBInitialRetreatFailureExport {
         localReceiptHeldNeckIdentity=nil;localReceiptPerceptionFailure=false;sceneHold = [:];localCampaignRecoveryReason=nil
         activeCommand = command;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=1; recyclingGripDispatched=false; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0;servoTelemetryHistory=[];servoEvidenceWriteError=nil;taskOpeningCommandAtMilliseconds=nil
+        currentSpikeCompletionTask?.cancel();currentSpikeCompletionTask=nil
+        currentSpikeEvidence=nil;previousCurrentEvidence=nil;currentSpikeEvidencePath="";currentSpikeEvidenceWriteError=nil
+        currentSpikePostStopDeadline=nil;currentSpikeCollectionFinished=false
         failure = nil; generation = 0; cameraReady = false; positionReady = false; leased = false
         allowsArmTravel = ["left_wave", "left_prepare", "left_relax", "left_ghost", "left_object_cycle", "left_recycle_can", "left_estimated_calibration"].contains(command)
         proposalStep = -1; sentPath = []
@@ -3079,13 +3152,36 @@ enum ROBInitialRetreatFailureExport {
         let currents = sample.currents.map(\.doubleValue)
         let changes = zip(currents, previousCurrents ?? currents).map { $0 - $1 }
         let jump = changes.map(abs).max() ?? 0
+        let sourceGeneration=(gateway.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value ?? 0
+        let before=previousCurrentEvidence,currentEvidence=ROBArmCurrentSpikeRecording.Sample(sample,sessionGeneration:sourceGeneration)
         peakJump = max(peakJump, jump); previousCurrents = currents; lastSequence = sample.sequence; sampleCount += 1
+        previousCurrentEvidence=currentEvidence
+        let tripped=currentLimit>0 && jump>currentLimit
+        let tripMessage="\(physicalSide.uppercased())-arm current jump \(jump) exceeded \(currentLimit) raw units; hold requested. Inspect the recording before retrying."
+        if tripped,currentSpikeEvidence==nil {
+            let path=proposal,model=collisionModel ?? localReceiptModel,frame=vision.snapshot()["face"]
+            let step=path.flatMap{(0..<$0.steps.count).contains(proposalStep) ? $0.steps[proposalStep]:nil}
+            currentSpikeEvidence = .init(configuredJumpLimitRaw:currentLimit,currentDeltaRaw:changes,peakJumpRaw:jump,
+                triggerJointIndices:changes.indices.filter{abs(changes[$0])>currentLimit}.map{$0+1},before:before,trigger:currentEvidence,
+                detectedAtMilliseconds:Date().timeIntervalSince1970*1000,detectedAtUptime:ProcessInfo.processInfo.systemUptime,
+                physicalArm:physicalSide,gatewayArm:arm,phase:phase,sessionGeneration:generation,
+                summarySHA256:ROBGhostRobotModel.hash(Data(summary.utf8)),proposalID:path?.id.uuidString,proposalSHA256:path?.fingerprint,
+                proposalKind:path?.kind,stepIndex:proposalStep,proposedStepPositionsRadians:step?.positions,proposedStepSeconds:step?.seconds,
+                mapFingerprint:collisionMap?.fingerprint,modelID:path?.modelID ?? model?.modelID,referenceID:path?.referenceID ?? model?.referenceID,
+                geometryID:path?.geometryID ?? model?.geometryID,mappingID:path?.mappingID ?? model?.selectedMappingID,
+                cameraGeneration:vision.cameraGeneration.uuidString,cameraFrameGeneration:frame?.cameraGeneration.uuidString,
+                cameraFrameSequence:frame?.sequence,cameraFrameCapturedAtMilliseconds:frame?.capturedAt,
+                runtimeCalibrationIdentity:frame?.intrinsics?.runtimeCalibration?.identity,
+                bodyMotionIdentity:ROBFixedHeadBodyMotionIdentity.currentIdentity,estimatedCameraProjectionIdentity:collisionMap?.estimatedCameraProjectionIdentity,
+                possiblePayloadHeldAtTrigger:recyclingGripDispatched || servoPossiblePayloadUncertain)
+            // Queue the existing priority hold BEFORE diagnostic disk writes.
+            // Remaining targets/lease renewals stop via the existing latch.
+            abort(tripMessage)
+        }
         let elapsed = ProcessInfo.processInfo.systemUptime - logStarted
         let rows = (0..<7).map { "\(elapsed),\(sample.sequence),\(physicalSide),\(arm),\($0 + 1),\(sample.positionsRadians[$0]),\(currents[$0]),\(changes[$0]),\(deliveredAge),\(phase)\n" }.joined()
         try log?.write(contentsOf: Data(rows.utf8))
-        if currentLimit > 0, jump > currentLimit {
-            throw ROBArmRoutineError.blocked("Left-arm current jump \(jump) exceeded \(currentLimit) raw units; hold requested. Inspect the recording before retrying.")
-        }
+        if tripped {throw ROBArmRoutineError.blocked(tripMessage)}
     }
 
     private func abort(_ message: String) {
@@ -3094,18 +3190,57 @@ enum ROBInitialRetreatFailureExport {
         guard isRunning, failure == nil else { return }
         failure = message; task?.cancel(); reviewedDispatchStart = nil
         interactionStage = ""; readinessConfirmed = false
-        if !Self.neckOnlyCommands.contains(activeCommand) { _ = gateway.priorityHold(forArm: arm) }
+        if !Self.neckOnlyCommands.contains(activeCommand) {
+            let requested=ProcessInfo.processInfo.systemUptime
+            if currentSpikeEvidence != nil {currentSpikePostStopDeadline=requested+1}
+            let commandID=gateway.priorityHold(forArm:arm)
+            if currentSpikeEvidence != nil {
+                currentSpikeEvidence?.holds.append(.init(commandID:commandID,requestedAtMilliseconds:Date().timeIntervalSince1970*1000,requestedAtUptime:requested))
+                persistCurrentSpikeEvidence()
+            }
+        }
         leased = false
         update(message)
     }
 
+    private func persistCurrentSpikeEvidence() {
+        guard let event=currentSpikeEvidence,!lastRecordingPath.isEmpty else{return}
+        do {currentSpikeEvidencePath=try ROBArmCurrentSpikeRecording.write(event,recordingPath:lastRecordingPath,proposal:proposal).path}
+        catch {currentSpikeEvidenceWriteError=error.localizedDescription}
+    }
+
+    private func recordCurrentSpikePostStop(_ sample:ROBAmberGatewayTelemetry) {
+        guard isRunning,!currentSpikeCollectionFinished,let end=currentSpikePostStopDeadline,
+              ProcessInfo.processInfo.systemUptime<=end,sample.arm==arm,let event=currentSpikeEvidence,
+              sample.sequence>(event.postStopSamples.last?.sequence ?? event.trigger.sequence),event.postStopSamples.count<64 else{return}
+        let sourceGeneration=(gateway.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value ?? 0
+        currentSpikeEvidence?.postStopSamples.append(.init(sample,sessionGeneration:sourceGeneration))
+    }
+
     private func finish(_ result: NSDictionary, completion: @escaping (NSDictionary) -> Void) {
+        if currentSpikeEvidence != nil,!currentSpikeCollectionFinished {
+            guard currentSpikeCompletionTask==nil else{return}
+            timer?.invalidate();timer=nil
+            let end=currentSpikePostStopDeadline ?? ProcessInfo.processInfo.systemUptime
+            currentSpikeCompletionTask=Task { @MainActor [weak self] in
+                guard let self else{return}
+                let remaining=max(0,end-ProcessInfo.processInfo.systemUptime)
+                if remaining>0 {try? await Task.sleep(nanoseconds:UInt64(remaining*1_000_000_000))}
+                self.currentSpikeCollectionFinished=true
+                self.currentSpikeEvidence?.postStopCollectionCompleted=true
+                self.currentSpikeEvidence?.postStopCollectionCompletedAtMilliseconds=Date().timeIntervalSince1970*1000
+                self.persistCurrentSpikeEvidence()
+                self.currentSpikeCompletionTask=nil
+                self.finish(result,completion:completion)
+            }
+            return
+        }
         timer?.invalidate(); timer = nil
         let localJob=localReceiptCommand != nil
         let recoveryCommand=localReceiptCommand
         let recoveryCampaignID=localReceiptEvidence?["standingCampaignID"] as? String
         let recoveryReason=localCampaignRecoveryReason
-        let canAutoRecover=localJob && recoveryReason != nil && recoveryCampaignID != nil &&
+        let canAutoRecover=currentSpikeEvidence==nil && localJob && recoveryReason != nil && recoveryCampaignID != nil &&
             !recyclingGripDispatched && !jawSetupDispatchUncertain && !servoPossiblePayloadUncertain &&
             !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled
         var preserveLocalReceipt=false
@@ -3122,9 +3257,9 @@ enum ROBInitialRetreatFailureExport {
                 }catch{}
             }
         }
-        if !Self.neckOnlyCommands.contains(activeCommand), leased || result["status"] as? String == "blocked" { _ = gateway.priorityHold(forArm: arm) }
+        if currentSpikeEvidence==nil,!Self.neckOnlyCommands.contains(activeCommand),leased || result["status"] as? String=="blocked" { _ = gateway.priorityHold(forArm:arm) }
         leased = false
-        if ["tabletop", "recycling", "recycling_grasp_hold", "estimated_calibration", "initial_empty_visual_retreat", "nominal_empty_commissioning", "one_degree_empty_calibration", "incremental_visual_servo_grasp_hold"].contains(proposal?.kind ?? "") {
+        if currentSpikeEvidence != nil || ["tabletop", "recycling", "recycling_grasp_hold", "estimated_calibration", "initial_empty_visual_retreat", "nominal_empty_commissioning", "one_degree_empty_calibration", "incremental_visual_servo_grasp_hold"].contains(proposal?.kind ?? "") {
             // A failed close/open may leave a payload. Never offer the old
             // empty-arm reverse/recovery automatically for a recycling task.
             recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil
@@ -3197,6 +3332,14 @@ enum ROBInitialRetreatFailureExport {
         output["max_delayed_telemetry_age_ms"] = maxDelayedSampleAge
         output["peak_current_jump_raw"] = peakJump
         output["current_jump_limit_raw"] = currentLimit
+        if let event=currentSpikeEvidence {
+            output["current_spike_latched"]=true;output["current_spike_evidence_path"]=currentSpikeEvidencePath
+            output["current_spike_post_stop_samples"]=event.postStopSamples.count
+            output["current_spike_hold_confirmed"]=event.holds.contains{$0.accepted==true && $0.holdConfirmed==true}
+            output["current_force_protection_calibrated"]=false;output["automatic_recovery_eligible"]=false
+            output["requires_new_plan"]=true;output["requires_intervention"]=true;output["old_waypoint_resumption_permitted"]=false
+            if let error=currentSpikeEvidenceWriteError {output["current_spike_evidence_write_error"]=error}
+        }
         if let proposal {
             output["motion_proposal_id"] = proposal.id.uuidString
             output["motion_proposal_sha256"] = proposal.fingerprint
