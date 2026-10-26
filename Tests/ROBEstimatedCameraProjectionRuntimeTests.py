@@ -24,8 +24,8 @@ struct ROBWorkspaceCollisionSnapshot {
     var registrationID:String?;var estimatedCameraProjectionIdentity:String?;var observations:[Observation]
 }
 enum ROBWorkspaceDepthMapError:Error {case acquisition(String),invalidFrame}
-struct Runtime {var identity="fixture-runtime"}
-struct FakeIntrinsics {var rgbOutputUndistorted:Bool?=true;var runtimeCalibration:Runtime?=Runtime();var cameraServiceSourceSHA256:String?="fixture-service"}
+struct Runtime {var actualDeviceMXID="fixture-device";var identity="fixture-runtime"}
+struct FakeIntrinsics {var inertial:String?=nil;var rgbOutputUndistorted:Bool?=true;var runtimeCalibration:Runtime?=Runtime();var cameraServiceSourceSHA256:String?="fixture-service"}
 enum ROBArmRoutineVision {struct Frame {var capturedAt:Double;var intrinsics:FakeIntrinsics?=FakeIntrinsics();var cameraGeneration=UUID()}}
 struct Scope {
     var panTarget=6015,lowerTarget=6011,upperTarget=6160
@@ -41,6 +41,9 @@ struct Scope {
     }
 }
 @MainActor enum ROBNeckRGBPoseDisplay {
+    struct ActualFrameSource {let cameraGeneration:UUID,actualDeviceMXID:String?,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?;let scope:Scope;let inertialJSON:Data?}
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Bool {lastSource=(actualFrame.cameraGeneration,actualFrame.runtimeCalibrationIdentity,actualFrame.cameraServiceSourceSHA256);return sourceAccepted}
+
     static var identity:String?,photoHardwareOpticalOriginRequested=false,unavailable=false
     static var onResolve:(()->Void)?
     static var sourceAccepted=true,lastSource:(UUID,String?,String?)?

@@ -19,9 +19,10 @@ import CoreImage
 /* SCENE */
 /* TRIAL */
 enum ROBGhostMotionError:Error {case blocked(String)}
-struct Runtime {var identity=String(repeating:"a",count:64)}
+struct Runtime {var actualDeviceMXID="fixture-device";var identity=String(repeating:"a",count:64)}
 struct Correspondence {var status="matched"}
 struct CameraIntrinsics {
+    var inertial:String?=nil
     var fx=100.0,fy=100.0,cx=160.0,cy=120.0
     var rgbOutputUndistorted:Bool?=true
     var runtimeCalibration:Runtime?=Runtime()
@@ -119,6 +120,9 @@ final class ROBGhostRobotModel {
     func registration(model:ROBGhostRobotModel,frame:ROBArmRoutineVision.Frame)throws->ROBFixedHeadRegistration? {registrationCalls+=1;return registrationValue}
 }
 @MainActor enum ROBNeckRGBPoseDisplay {
+    struct ActualFrameSource {let cameraGeneration:UUID,actualDeviceMXID:String?,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?;let scope:ROBFixedHeadRegistrationScope;let inertialJSON:Data?}
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Bool {return sourceAccepted}
+
     static var pid=String(repeating:"b",count:64)
     static var matrix=matrix_identity_double4x4
     static var sourceAccepted=true

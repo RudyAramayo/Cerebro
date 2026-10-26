@@ -295,6 +295,9 @@ final class ROBAmberGatewayClient: NSObject {
 }
 
 enum ROBNeckRGBPoseDisplay {
+    struct ActualFrameSource {let cameraGeneration:UUID,actualDeviceMXID:String?,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?;let scope:ROBFixedHeadRegistrationScope;let inertialJSON:Data?}
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Bool {return true}
+
     static var projectionIdentity:String? = nil
     static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,cameraGeneration:UUID,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?)->Bool {true}
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {projectionIdentity}
@@ -436,7 +439,7 @@ final class ROBArmRoutineVision {
     var runtimeIdentity=String(repeating:"a",count:64)
     var stereoPolicyIdentity=String(repeating:"c",count:64)
     var clearsFramesOnSetActive=false,frameAvailable=true
-    struct RuntimeCalibration:Codable {let identity:String;let stereoPolicySHA256:String}
+    struct RuntimeCalibration:Codable {let identity:String;let stereoPolicySHA256:String;let actualDeviceMXID="fixture-device"}
     struct Correspondence {let status="matched"}
     struct Intrinsics {
         let runtimeCalibration:RuntimeCalibration?
