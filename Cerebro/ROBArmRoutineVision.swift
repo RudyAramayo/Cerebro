@@ -478,6 +478,19 @@ final class ROBArmRoutineVision {
             && frame.depthCoverage >= 0.25
     }
 
+    /// Nonactuating depth mapping may use a partly populated native depth
+    /// raster. Each ray still has to pass the depth mapper's existing local
+    /// consistency tests; missing pixels never create free space. Ordinary
+    /// inspection, human clearance and motion keep their25% coverage gate.
+    private func isDepthMappingEligible(_ frame:Frame)->Bool {
+        guard frame.capturedAt.isFinite,(0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+              frame.sequence>0,frame.cameraGeneration==cameraGeneration,
+              frame.depthCoverage.isFinite,frame.depthCoverage>0,frame.depthCoverage<=1,
+              let depth=frame.depth,depth.width>0,depth.height>0,
+              let k=frame.intrinsics,k.isValid(forWidth:depth.width,height:depth.height) else {return false}
+        return true
+    }
+
     private func inspectionEpoch() throws -> UUID {
         lock.lock(); defer { lock.unlock() }
         guard active else { throw CancellationError() }
@@ -486,7 +499,7 @@ final class ROBArmRoutineVision {
 
     /// Depth-only settled capture: no LLM/object inference and no arm command.
     func settledDepthFrame(deadlineUptime:Double?=nil) async throws -> Frame {
-        try await settledInspectionFrame(epoch: inspectionEpoch(), requireStaticScene: true,deadlineUptime:deadlineUptime)
+        try await settledInspectionFrame(epoch: inspectionEpoch(), requireStaticScene: true,deadlineUptime:deadlineUptime,depthMappingOnly:true)
     }
 
     @MainActor func beginCollisionRegistrationProbe() {
@@ -536,7 +549,8 @@ final class ROBArmRoutineVision {
         return Double(changed) / Double(before.count)
     }
 
-    private func settledInspectionFrame(epoch token: UUID, requireStaticScene: Bool = true,deadlineUptime:Double?=nil) async throws -> Frame {
+    private func settledInspectionFrame(epoch token: UUID, requireStaticScene: Bool = true,deadlineUptime:Double?=nil,
+        depthMappingOnly:Bool=false) async throws -> Frame {
         // Called only when the coordinator has stopped motion and the GPU is
         // ready. A previously captured frame may still depict the neck/arms
         // settling, even though the latest commanded pose is now stationary.
@@ -546,7 +560,8 @@ final class ROBArmRoutineVision {
         var distinctSamples = 0
         while ProcessInfo.processInfo.systemUptime < deadline {
             try Task.checkCancellation()
-            if let frame = try inspectionFrame(epoch: token), isFresh(frame), frame.capturedAt >= notBefore {
+            if let frame = try inspectionFrame(epoch: token),
+               (depthMappingOnly ? isDepthMappingEligible(frame):isFresh(frame)),frame.capturedAt >= notBefore {
                 if let previous, frame.sequence < previous.sequence || frame.capturedAt < previous.capturedAt {
                     throw ROBArmRoutineError.blocked("The camera stream restarted during inspection.")
                 }
