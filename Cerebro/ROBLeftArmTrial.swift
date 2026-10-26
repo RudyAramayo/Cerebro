@@ -2530,6 +2530,26 @@ enum ROBArmCurrentSpikeRecording {
             "physical_arm":physicalSide,"detail":"One 4-second estimated EMPTY-\(physicalSide)-arm retreat completed and is held. Joint feedback measured; physical calibration remains unverified. No jaw command or automatic return. Report the observed direction and clearance."]
     }
 
+    /// Rebuild read-only session state before accepting a stationary baseline.
+    @MainActor private func synchronizeSceneArmModes() async throws {
+        // A new gateway session may have current CAN packets but no cached
+        // mode for the opposite arm. Query both; never activate or reset one
+        // merely to populate this read-only state.
+        for side in ["left","right"] {
+            try await accepted {gateway.queryMode(forArm:side)}
+        }
+        try await wait(2) {
+            ["left","right"].allSatisfy {side in
+                guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
+                      sample.effectiveGripperFeedbackAgeMilliseconds<=250,sample.positionsRadians.count==7,
+                      sample.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),sample.statuses.count==7,
+                      let first=sample.statuses.first?.intValue,[0,1,2].contains(first),
+                      sample.statuses.allSatisfy({$0.intValue==first}) else {return false}
+                return self.gateway.modes(forArm:side).map(\.intValue)==sample.statuses.map(\.intValue)
+            }
+        }
+    }
+
     /// Part of the explicit one-shot RIGHT recycling scope: both physical
     /// arms remain at measured positions. This is not a parking trajectory.
     /// Inactive arms need no extra torque; active arms enter a measured hold.
@@ -2538,6 +2558,7 @@ enum ROBArmCurrentSpikeRecording {
               ROBControllerArmApproval.shared.authorizesRightArmTrial(summary), let owner else {
             throw ROBArmRoutineError.blocked("The complete right recycling approval does not cover stationary preparation.")
         }
+        try await synchronizeSceneArmModes()
         var baselines: [String:[Double]] = [:]
         var sequences: [String:UInt64] = [:]
         for side in ["left","right"] {

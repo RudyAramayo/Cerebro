@@ -1136,6 +1136,71 @@ final class ROBAmberGatewayClient: NSObject {
                 "Import started queued recovery or reset its attempt count")
         }
 
+        // Permission-state changes must materialize uncertainty inferred from
+        // an old app's executing job before removing that inference condition.
+        for transition in ["pause","revoke"] {
+            let b=try uncertainObjectStateBroker("old-executing-"+transition)
+            let stateURL=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            value["possiblePayloadHeld"]=false
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:stateURL)
+            check(b.standingCanCampaignMayHoldPayload,"Old executing job lost its implicit payload uncertainty")
+            if transition=="pause" {b.pauseStandingLocalCanCampaign(reason:"Synthetic maintenance quit")}
+            else {b.cancel(reason:"Synthetic Stop after crash")}
+            let saved=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            check(saved["possiblePayloadHeld"]as?Bool==true && saved["state"]as?String==(transition=="pause" ? "paused":"revoked") &&
+                b.standingCanCampaignMayHoldPayload,"Permission transition silently cleared old-executing uncertainty: "+transition)
+            check(saved["lastJobID"]as?String==value["lastJobID"]as?String &&
+                saved["lastJobAppSessionID"]as?String==value["lastJobAppSessionID"]as?String &&
+                (saved["completedTransfers"]as?NSNumber)?.intValue==1 && (saved["recoveryAttempts"]as?NSNumber)?.intValue==2,
+                "Materializing object uncertainty changed the job history or counts")
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(restarted.standingCanCampaignMayHoldPayload,"Another restart silently cleared materialized object uncertainty")
+        }
+        do {
+            let b=localBroker();try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            var done:((NSDictionary)->Void)?
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,
+                summary:"Synthetic completion-transition fixture",contextIdentity:{"current"},receiptOnly:true,
+                permitsUnmeasuredVisualCalibrationTrial:true,execute:{done=$0},cancel:{},completion:{_ in})
+            let url=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            // Inject a saved old-app record and completed counter only into
+            // this socket-free fixture to exercise the private consume path.
+            value["lastJobAppSessionID"]=UUID().uuidString;value["possiblePayloadHeld"]=false;value["completedTransfers"]=4
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:url)
+            done?(["status":"not_found","arm_motion_sent":false,"reach_sent":false])
+            let saved=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            check(saved["state"]as?String=="consumed" && saved["possiblePayloadHeld"]as?Bool==true &&
+                b.standingCanCampaignMayHoldPayload && !b.standingLocalCanCampaignActive && !b.isPending,
+                "Consuming permission erased old-executing payload uncertainty")
+        }
+        do {
+            let b=try uncertainObjectStateBroker("confirmed-empty-maintenance")
+            try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:emptyObservationFile(b))
+            b.pauseStandingLocalCanCampaign(reason:"Synthetic maintenance after actual EMPTY evidence")
+            check(!b.standingCanCampaignMayHoldPayload && b.standingLocalCanCampaignState?["possiblePayloadHeld"]as?Bool==false,
+                "Maintenance turned a supported EMPTY fact into payload uncertainty")
+            b.cancel(reason:"Synthetic Stop after actual EMPTY evidence")
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(!restarted.standingCanCampaignMayHoldPayload,"Revoking known EMPTY permission fabricated a payload")
+        }
+        do {
+            let b=try uncertainObjectStateBroker("failed-maintenance-save")
+            let url=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            value["possiblePayloadHeld"]=false;try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:url)
+            try FileManager.default.setAttributes([.posixPermissions:0o500],ofItemAtPath:b.standingCanCampaignDirectory.path)
+            b.pauseStandingLocalCanCampaign(reason:"Synthetic maintenance with unwritable storage")
+            try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:b.standingCanCampaignDirectory.path)
+            check(b.standingCanCampaignMayHoldPayload,"A failed maintenance save exposed automatic EMPTY setup")
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(restarted.standingCanCampaignMayHoldPayload,"A failed pause lost uncertainty after another crash/restart")
+            b.cancel(reason:"Synthetic Stop after maintenance I/O failure")
+            check(b.standingCanCampaignMayHoldPayload && !b.standingLocalCanCampaignActive,
+                "Fallback revocation after I/O failure erased uncertainty")
+        }
+
         // Global typed Stop is authenticated independently of a task/card ID.
         // The notification consumer owns physical both-arm hold; this broker can
         // truthfully report only that Stop was requested and authority revoked.

@@ -1168,6 +1168,10 @@ struct ROBWorkspaceCanSelection {
     /// Nonactuating mitigation for a specific unknown cell. A new view adds
     /// actual rays to the SAME scene; it never masks robot geometry, erases an
     /// old return or promotes a projected cell into observed free space.
+    // Keep the async orchestration unoptimized: Swift task-stack teardown
+    // aborted in the optimized wrapper after its first detached depth append.
+    // The detached mapper and geometric calculations retain their build mode.
+    @_optimize(none)
     @MainActor @nonobjc func captureBlockerCoverage(blocker:ROBWorkspaceUnknownCellBlocker,
         continuing snapshot:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,generation:UInt64,
         attempted:[ROBWorkspaceView],deadlineUptime:Double,recordStage:(String)->Void,check:() throws ->Void,progress:(String)->Void)

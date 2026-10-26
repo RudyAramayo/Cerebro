@@ -174,7 +174,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
 
 def main():
     source = (ROOT/'Cerebro/ROBArmRoutineVision.swift').read_text()
-    actual = method(source, '    @MainActor @nonobjc func captureBlockerCoverage(')
+    actual = method(source, '    @_optimize(none)\n    @MainActor @nonobjc func captureBlockerCoverage(')
     forbidden = ['observeWorkspace', 'sendApproved', 'setGripper', 'measuredSelfBounds(model:', 'finishView?()']
     assert not any(token in actual for token in forbidden)
     assert 'capturedAtMilliseconds:frame.capturedAt,sequence:frame.sequence' in actual
@@ -182,6 +182,6 @@ def main():
     with tempfile.TemporaryDirectory(prefix='rob-blocker-capture-') as folder:
         p=Path(folder);swift=p/'Fixture.swift';binary=p/'fixture'
         swift.write_text(FIXTURE.replace('__ACTUAL_METHOD__',actual))
-        subprocess.run(['xcrun','swiftc','-swift-version','5','-parse-as-library','-module-cache-path','/private/tmp/cerebro-swift-module-cache',str(swift),'-o',str(binary)],check=True,timeout=60)
+        subprocess.run(['xcrun','swiftc','-O','-swift-version','5','-parse-as-library','-module-cache-path','/private/tmp/cerebro-swift-module-cache',str(swift),'-o',str(binary)],check=True,timeout=60)
         subprocess.run([str(binary)],check=True,timeout=20)
 if __name__=='__main__': main()

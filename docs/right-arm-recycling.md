@@ -15,6 +15,12 @@ hanging and empty: deactivate at that existing pose, initialize the stationary
 jaws and retain the ordinary startup checks. A raised arm is not silently
 returned to initialize grippers.
 
+Preparation queries the current modes of **both** arms before accepting their
+stationary feedback baselines. A newly authenticated session can already have
+fresh CAN positions while its opposite-arm mode cache is still empty. These
+queries populate read-only state; they do not activate, deactivate, reset or
+move either arm. Inconsistent or stale feedback still prevents preparation.
+
 ## Model and calibration identity
 
 The right model uses its actual URDF mount, `right_joint1` through
@@ -74,6 +80,11 @@ job, calibrate/open jaws, credit a transfer or replay a waypoint. Fresh feedback
 scene and complete path review still precede a later Run. A changed job/state,
 replayed or stale observation, non-user source or active manipulation rejects
 the import. This is an operator observation rather than a camera verification.
+An old executing job's effective payload uncertainty is persisted before
+maintenance pause, Stop/revocation, consumption or completion changes the state
+label. A relaunch followed by Quit cannot silently turn that uncertainty into
+an empty-hand claim. A previously recorded actual empty observation remains
+empty across an ordinary paused shutdown.
 
 Before closing, a fresh detector observation and aligned depth must still agree
 with the frozen can. A significant displacement stops closing. The task may

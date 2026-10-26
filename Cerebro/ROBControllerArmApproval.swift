@@ -338,6 +338,10 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             _ = unlink(standingStateURL.path); return
         }
         if FileManager.default.fileExists(atPath: standingTerminalURL(s.campaignID).path) { return }
+        // A previous app's unfinished execution is object-state uncertainty,
+        // even if its last saved explicit flag was false. Changing permission
+        // state must persist that uncertainty before removing the OR condition.
+        s.possiblePayloadHeld=standingMayHoldPayload(s)
         s.state = consumed ? "consumed" : "revoked"; s.detail = reason
         do {
             let e = JSONEncoder(); e.outputFormatting = [.sortedKeys]
@@ -352,6 +356,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     @nonobjc func pauseStandingLocalCanCampaign(reason: String) {
         precondition(Thread.isMainThread)
         if var s = standingRecord() {
+            s.possiblePayloadHeld=standingMayHoldPayload(s)
             s.state = "paused"; s.detail = reason
             do { try saveStanding(s) } catch { standingIOFailure = error.localizedDescription }
         }
@@ -362,6 +367,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         precondition(Thread.isMainThread)
         guard pending == nil, var s = standingRecord(), s.completedTransfers < s.canCount,
               s.state != "waiting_for_intervention", !standingMayHoldPayload(s) else { return false }
+        s.possiblePayloadHeld=standingMayHoldPayload(s)
         guard s.recoveryAttempts < 3 else {
             s.state = "waiting_for_intervention"; s.detail = "Automatic recovery reached its three-attempt limit; intervention is required."
             try? saveStanding(s); update(s.detail); return false
@@ -389,6 +395,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         guard !standingMayHoldPayload(s) else {
             throw localApprovalError("A possible payload is held or its state is unknown. Standing authorization remains active; no new empty-can grasp, jaw calibration or parking is admitted without supported release/object-clear evidence.")
         }
+        s.possiblePayloadHeld=standingMayHoldPayload(s)
         let id = UUID()
         let derived: [String: Any] = ["schemaVersion": 1, "kind": "standing_can_campaign_fresh_job_binding",
             "campaignID": s.campaignID.uuidString, "standingAuthorizationSHA256": s.authorizationSHA256,
@@ -995,8 +1002,9 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
                 if var s = self.standingRecord(), s.campaignID == campaign {
                     if s.completedTransfers == s.canCount { self.endStandingCampaign("All \(s.canCount) native transfers reported; bucket landing remains separately verified.", consumed: true) }
                     else {
-                        s.state = self.standingMayHoldPayload(s) || result["requires_intervention"] as? Bool == true ? "waiting_for_intervention" : "paused"
-                        s.detail = self.standingMayHoldPayload(s)
+                        s.possiblePayloadHeld=self.standingMayHoldPayload(s)
+                        s.state = s.possiblePayloadHeld == true || result["requires_intervention"] as? Bool == true ? "waiting_for_intervention" : "paused"
+                        s.detail = s.possiblePayloadHeld == true
                             ? "Possible payload held: empty-can Run blocked; authorization retained. Supported release/object-clear evidence is required."
                             : result["detail"] as? String ?? "Job ended; a fresh plan is required."
                         do { try self.saveStanding(s) } catch { self.standingIOFailure = error.localizedDescription }
