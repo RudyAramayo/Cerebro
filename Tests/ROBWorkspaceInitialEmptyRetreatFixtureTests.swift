@@ -139,6 +139,9 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
             return
         }
         precondition(proof.step.seconds==4 && proof.step.jawAction==nil && proof.maximumHullTravelMeters<=0.06 && proof.initialEmptyStateAssumed)
+        precondition(proof.context.skippedStaticRobotLinks?.count==1 &&
+            proof.context.skippedStaticRobotLinks?.first?.link=="right_base_link" &&
+            proof.context.skippedStaticRobotLinks?.first?.kind=="deferred_static_world_pair")
         precondition(proof.endpointProxyClearancesMeters.values.allSatisfy{$0>=0.03})
         precondition(model.treadSeparation(vendorLeft:proof.goal)<0.03,
             "The actual rotated-hull fixture no longer exercises its AABB false positive")
@@ -166,6 +169,15 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
             emptyTrialEligibility:true,emptyStateEvidenceSource:"local_first_attempt_no_arm_travel_or_task_grip")}
         let data=try JSONEncoder().encode(proof),decoded=try JSONDecoder().decode(ROBWorkspaceInitialEmptyRetreat.self,from:data)
         precondition(decoded==proof)
+        var altered=try JSONSerialization.jsonObject(with:data) as! [String:Any]
+        var context=altered["context"] as! [String:Any],staticLinks=context["skippedStaticRobotLinks"] as! [[String:Any]]
+        var frame=staticLinks[0]["frameColumnMajor"] as! [Double];frame[12]+=0.001
+        staticLinks[0]["frameColumnMajor"]=frame;context["skippedStaticRobotLinks"]=staticLinks;altered["context"]=context
+        let changedStaticFrame=try JSONDecoder().decode(ROBWorkspaceInitialEmptyRetreat.self,
+            from:JSONSerialization.data(withJSONObject:altered))
+        blocked("geometry proof changed") {try changedStaticFrame.validate(map:map,model:model,generation:generation,
+            sceneID:scene,cameraGeneration:camera,nowMilliseconds:1001,trial:trial(map),measuredAtMilliseconds:1001,
+            measuredBaseline:hanging,emptyTrialEligibility:true,emptyStateEvidenceSource:"local_first_attempt_no_arm_travel_or_task_grip")}
         print("PASS distinct initial-empty retreat: actual RIGHT scan model, monotonically improving pre-existing proxy deficits, >=30mm endpoint, <=60mm full-hull travel, one slow4s/no-jaw step, fresh hanging/history eligibility, map/unknown/occupied/pose rejection, ordinary lane unchanged, Codable proof")
     }
 }
