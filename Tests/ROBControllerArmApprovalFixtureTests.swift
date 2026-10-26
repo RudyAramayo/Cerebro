@@ -835,6 +835,105 @@ final class ROBAmberGatewayClient: NSObject {
             try Data("orphaned authorization after interrupted persistence".utf8).write(to:orphan)
             check(b.standingCanCampaignMayHoldPayload,"Missing state with prior campaign history cannot silently imply EMPTY")
         }
+        // Global typed Stop is authenticated independently of a task/card ID.
+        // The notification consumer owns physical both-arm hold; this broker can
+        // truthfully report only that Stop was requested and authority revoked.
+        let stopHello = ROBRobotActionMessage.controllerHello(senderID: sender, acceptsActions: true,
+            capabilities: ["arm_operation", "stop_motion"])
+        func controllerStop(callID: String = UUID().uuidString, senderID: String = sender,
+                            recipientID: String? = "Cerebro.arm-operations", arguments: NSDictionary = [:]) -> ROBRobotActionMessage {
+            .actionRequest(callID: callID, action: "stop_motion", arguments: arguments,
+                senderID: senderID, recipientID: recipientID, expiresAt: Date().addingTimeInterval(30))
+        }
+        do {
+            let b = localBroker()
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL: standingFile(b))
+            var executed = 0, cancelled = 0, notifications = 0, replies: [ROBRobotActionMessage] = []
+            var cancelledBeforeNotification = false, notificationHasProvenance = false
+            b.send = { message, target, targetSession in
+                check(target == device && targetSession == session, "Stop reply stays in its authenticated transport session")
+                replies.append(message); return true
+            }
+            _ = b.receive(stopHello, device: device, session: session)
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,
+                summary: "Synthetic standing can job", contextIdentity: { "current-source" }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true,
+                execute: { _ in executed += 1 }, cancel: { cancelled += 1 }, completion: { _ in })
+            check(executed == 1 && b.isPending && b.standingLocalCanCampaignActive,
+                "Local job deliberately has no controller action-card approval")
+            let observer = NotificationCenter.default.addObserver(forName: Notification.Name("ROBControllerOperatorPriorityStop"),
+                object: b, queue: nil) { note in
+                    notifications += 1
+                    cancelledBeforeNotification = !b.isPending && !b.standingLocalCanCampaignActive && cancelled == 1
+                    notificationHasProvenance = note.object as AnyObject? === b && !(note.userInfo?["reason"] as? String ?? "").isEmpty
+                }
+            defer { NotificationCenter.default.removeObserver(observer) }
+            let stop = controllerStop()
+            check(b.receive(stop, device: device, session: session), "Fresh unmatched-ID typed Stop is handled")
+            check(notifications == 1 && cancelled == 1 && !b.isPending && !b.standingLocalCanCampaignActive,
+                "Controller Stop ends a local standing job, not only a matching action card")
+            check(cancelledBeforeNotification, "Revocation and executor cancellation finish before global hold notification")
+            check(notificationHasProvenance, "Global Stop has exact broker provenance and a reason")
+            let acknowledgement = replies.last!
+            check(acknowledgement.callID == stop.callID && acknowledgement.state == .accepted &&
+                acknowledgement.result["status"] as? String == "stop_requested" &&
+                acknowledgement.result["physical_hold_confirmed"] as? Bool == false &&
+                acknowledgement.result["automatic_lowering"] as? Bool == false,
+                "Wire acknowledgement never claims measured hold or automatic lowering")
+            _ = b.receive(stop, device: device, session: session)
+            _ = b.receive(controllerStop(callID: stop.callID!), device: device, session: session)
+            check(notifications == 1 && cancelled == 1 && replies.last?.state == .rejected &&
+                replies.last?.result["status"] as? String == "rejected_replay",
+                "Repeated message or new-message replay of the same call cannot reissue a Stop event")
+        }
+        for invalid in ["unknown", "wrongDevice", "wrongSession", "sender", "recipient", "nilRecipient",
+                        "stale", "inactive", "capability", "withdrawn", "expired", "arguments"] {
+            let b = localBroker(); var clock = Date(), notifications = 0
+            b.now = { clock }
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL: standingFile(b))
+            if invalid != "unknown" {
+                _ = b.receive(invalid == "capability" ? hello : stopHello, device: device, session: session)
+            }
+            var stop = controllerStop()
+            if invalid == "sender" { stop = controllerStop(senderID: "forged-alias") }
+            if invalid == "recipient" { stop = controllerStop(recipientID: "another-cerebro") }
+            if invalid == "nilRecipient" { stop = controllerStop(recipientID: nil) }
+            if invalid == "arguments" { stop = controllerStop(arguments: ["return_to_hang": true]) }
+            if invalid == "stale" { clock.addTimeInterval(15) }
+            if invalid == "expired" {
+                clock.addTimeInterval(31)
+                _ = b.receive(stopHello, device: device, session: session)
+            }
+            if invalid == "inactive" { b.sessionIsActive = { _, _ in false } }
+            if invalid == "withdrawn" {
+                _ = b.receive(.controllerHello(senderID: sender, acceptsActions: false, capabilities: ["stop_motion"]),
+                    device: device, session: session)
+            }
+            let observer = NotificationCenter.default.addObserver(forName: Notification.Name("ROBControllerOperatorPriorityStop"),
+                object: b, queue: nil) { _ in notifications += 1 }
+            let handled = b.receive(stop, device: invalid == "wrongDevice" ? UUID() : device,
+                session: invalid == "wrongSession" ? UUID() : session)
+            NotificationCenter.default.removeObserver(observer)
+            check(!handled && notifications == 0 && b.standingLocalCanCampaignActive,
+                "Invalid controller Stop must not alter a local campaign: " + invalid)
+            b.cancel(reason: "Fixture cleanup")
+        }
+        do {
+            let b = localBroker(); var restarts = 0, notifications = 0
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL: standingFile(b))
+            check(b.scheduleStandingLocalCanCampaignRecovery(reason: .transportLost, restart: { restarts += 1 }),
+                "A stationary campaign can have a queued fresh-plan recovery")
+            _ = b.receive(stopHello, device: device, session: session)
+            let observer = NotificationCenter.default.addObserver(forName: Notification.Name("ROBControllerOperatorPriorityStop"),
+                object: b, queue: nil) { _ in notifications += 1 }
+            defer { NotificationCenter.default.removeObserver(observer) }
+            check(b.receive(controllerStop(), device: device, session: session) && !b.standingLocalCanCampaignActive,
+                "Global typed Stop also revokes idle standing authority")
+            RunLoop.current.run(until: Date().addingTimeInterval(1.10))
+            check(restarts == 0 && notifications == 1, "Typed Stop cancels queued recovery without commanding a return")
+            check(b.receive(controllerStop(), device: device, session: session) && notifications == 2,
+                "A distinct fresh operator Stop remains available after the previous job ended")
+        }
         print("Controller/spoken arm approval and session reuse: \(checks) checks passed; no hardware access")
     }
 }

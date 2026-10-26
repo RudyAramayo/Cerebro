@@ -585,6 +585,12 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     }
     private var armSession: ArmSession?
     private var peers: [UUID: Peer] = [:]
+    private struct ControllerStopReceipt {
+        let device: UUID, session: UUID, messageID: String, callID: String
+        let expiresAtMilliseconds: Int64
+    }
+    // Volatile, bounded duplicate suppression; a Stop never creates authority.
+    private var controllerStopReceipts: [ControllerStopReceipt] = []
     private var pending: Pending?
     private var timer: Timer?
     private let senderID = "Cerebro.arm-operations"
@@ -872,6 +878,9 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     @nonobjc func receive(_ message: ROBRobotActionMessage, device: UUID, session: UUID) -> Bool {
         precondition(Thread.isMainThread)
         guard sessionIsActive(device, session), message.validationError == nil else { return false }
+        if message.kind == .actionRequest, message.action == "stop_motion" {
+            return receiveControllerPriorityStop(message, device: device, session: session)
+        }
         if message.kind == .actionCancel, let grant = armSession, message.callID == grant.id,
            let peer = grant.peer, peer.device == device, peer.session == session,
            message.senderID == peer.sender, message.recipientID == senderID {
@@ -930,6 +939,37 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
                 finish(["status": outcome, "detail": detail], state: terminal)
             }
         }
+        return true
+    }
+
+    private func receiveControllerPriorityStop(_ message: ROBRobotActionMessage, device: UUID, session: UUID) -> Bool {
+        // This is independent of any pending task ID (including locally approved
+        // jobs), but not of the authenticated, currently advertised operator.
+        guard let peer = peers[device], peer.session == session, peer.sender == message.senderID,
+              message.recipientID == senderID, peer.capabilities.contains("stop_motion"),
+              (0..<15).contains(now().timeIntervalSince(peer.seen)),
+              message.arguments.count == 0, !isExpired(message), let callID = message.callID else { return false }
+        let milliseconds = now().timeIntervalSince1970 * 1000
+        controllerStopReceipts.removeAll { Double($0.expiresAtMilliseconds) <= milliseconds }
+        if controllerStopReceipts.contains(where: {
+            $0.device == device && $0.session == session && ($0.messageID == message.messageID || $0.callID == callID)
+        }) {
+            _ = send?(.actionStatus(callID: callID, state: .rejected, detail: "This controller Stop request was already handled.",
+                result: ["status": "rejected_replay"], senderID: senderID, recipientID: peer.sender), device, session)
+            return true
+        }
+        if controllerStopReceipts.count >= 512 { controllerStopReceipts.removeFirst() }
+        controllerStopReceipts.append(ControllerStopReceipt(device: device, session: session,
+            messageID: message.messageID, callID: callID, expiresAtMilliseconds: message.expiresAtMilliseconds))
+        let reason = "Authenticated controller Stop; hold requested."
+        cancel(reason: reason)
+        // Synchronous revocation/cancellation above must precede the Main-owned
+        // global both-arm hold. Notification is not confirmation of hardware hold.
+        NotificationCenter.default.post(name: Notification.Name("ROBControllerOperatorPriorityStop"),
+            object: self, userInfo: ["reason": reason])
+        _ = send?(.actionStatus(callID: callID, state: .accepted, detail: reason,
+            result: ["status": "stop_requested", "physical_hold_confirmed": false, "automatic_lowering": false],
+            senderID: senderID, recipientID: peer.sender), device, session)
         return true
     }
 
