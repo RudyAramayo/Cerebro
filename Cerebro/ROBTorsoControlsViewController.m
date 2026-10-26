@@ -102,6 +102,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (IBAction)showNeckSafetyConfiguration:(id)sender;
 - (void)loadNeckSafetyConfigurationControls;
 - (void)refreshNeckCommandReadouts;
+- (BOOL)synchronizeUneditedNeckSlidersForControl:(NSControl *)control;
 - (void)renderServoCommandsOperatorInitiated:(BOOL)operatorInitiated
                   lowerTiltOperatorInitiated:(BOOL)lowerTiltOperatorInitiated;
 @end
@@ -1176,6 +1177,57 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
 #pragma mark - Servo Commands
 
+- (BOOL)synchronizeUneditedNeckSlidersForControl:(NSControl *)control
+{
+    ROBSerialBox *serialBox = self.robMainViewController.serialBox;
+    if (serialBox == nil || serialBox.isSafeNeckStartupInProgress
+        || self.pendingNeckOperatorCommandAfterStartup) return YES;
+
+    // A manual edit changes only its selected axis. Search/tracking may have
+    // changed the other applied targets since these sliders last rendered.
+    // Never overwrite the axis being dragged or a deliberate startup queue.
+    BOOL editsPan = control == self.headPan || control == (id)self.headPan_enabled;
+    BOOL editsLower = control == self.headTilt || control == (id)self.headTilt_enabled;
+    BOOL editsUpper = control == self.headUpperNeckTilt
+        || control == (id)self.headUpperNeckTilt_enabled;
+    BOOL editsEnableToggle = control == (id)self.headPan_enabled
+        || control == (id)self.headTilt_enabled
+        || control == (id)self.headUpperNeckTilt_enabled;
+    BOOL uneditedAxisInactive = NO;
+    NSNumber *upperDemand = serialBox.upperNeckOperatorDemandTarget;
+    if (!editsUpper && serialBox.upperNeckTiltCommandKnown
+        && serialBox.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff
+        && upperDemand == nil) return NO;
+
+    if (!editsPan) {
+        BOOL active = serialBox.neckPanCommandKnown
+            && serialBox.commandedNeckPanTarget != ROBNeckSafetyTargetOff;
+        uneditedAxisInactive = uneditedAxisInactive || !active;
+        self.headPan_enabled.state = active ? NSControlStateValueOn : NSControlStateValueOff;
+        if (active) self.headPan.integerValue = serialBox.commandedNeckPanTarget;
+    }
+    if (!editsLower) {
+        BOOL active = serialBox.lowerNeckTiltCommandKnown
+            && serialBox.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff;
+        uneditedAxisInactive = uneditedAxisInactive || !active;
+        self.headTilt_enabled.state = active ? NSControlStateValueOn : NSControlStateValueOff;
+        if (active) self.headTilt.integerValue = serialBox.commandedLowerNeckTiltTarget;
+    }
+    if (!editsUpper) {
+        uneditedAxisInactive = uneditedAxisInactive || upperDemand == nil;
+        self.headUpperNeckTilt_enabled.state = upperDemand != nil
+            ? NSControlStateValueOn : NSControlStateValueOff;
+        // The slider is an uncompensated demand. Copying the applied upper
+        // output would apply Keep upright's lower-neck adjustment twice.
+        if (upperDemand != nil) self.headUpperNeckTilt.integerValue = upperDemand.integerValue;
+    }
+    // The coupled gateway can recenter/retain supporting axes during an OFF
+    // request. A slider-only gesture must not initiate that recovery on an
+    // untouched inactive/unknown axis. Deliberate enable/disable toggles retain
+    // their original coupled startup/shutdown behavior below.
+    return editsEnableToggle || !uneditedAxisInactive;
+}
+
 - (IBAction) reconnectMaestro:(id)sender;
 {
     [self.robMainViewController.serialBox connectMaestro];
@@ -1221,6 +1273,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         || slider == (id)self.headPan_enabled
         || slider == (id)self.headTilt_enabled
         || slider == (id)self.headUpperNeckTilt_enabled;
+    if (neckOperatorAction && ![self synchronizeUneditedNeckSlidersForControl:slider]) {
+        [self refreshNeckCommandReadouts];
+        NSBeep();
+        return;
+    }
     BOOL allNeckAxesEnabled = self.headPan_enabled.state == NSControlStateValueOn
         && self.headTilt_enabled.state == NSControlStateValueOn
         && self.headUpperNeckTilt_enabled.state == NSControlStateValueOn;
@@ -1247,9 +1304,17 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
             && self.headTilt_enabled.state == NSControlStateValueOff)
         || (slider == (id)self.headUpperNeckTilt_enabled
             && self.headUpperNeckTilt_enabled.state == NSControlStateValueOff);
-    if (neckNeedsSafeStartup && neckActivationAction) {
+    BOOL neckEnableToggleAction = (slider == (id)self.headPan_enabled
+            && self.headPan_enabled.state == NSControlStateValueOn)
+        || (slider == (id)self.headTilt_enabled
+            && self.headTilt_enabled.state == NSControlStateValueOn)
+        || (slider == (id)self.headUpperNeckTilt_enabled
+            && self.headUpperNeckTilt_enabled.state == NSControlStateValueOn);
+    if (neckNeedsSafeStartup && neckActivationAction
+        && (allNeckAxesEnabled || neckEnableToggleAction)) {
         // Recover the neck as one coupled unit; never energize only the first
-        // checkbox an operator happens to switch back on.
+        // checkbox an operator happens to switch back on. A slider-only edit
+        // must not reactivate an untouched OFF or unknown axis.
         self.headPan_enabled.state = NSControlStateValueOn;
         self.headTilt_enabled.state = NSControlStateValueOn;
         self.headUpperNeckTilt_enabled.state = NSControlStateValueOn;

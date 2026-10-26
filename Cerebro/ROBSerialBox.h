@@ -99,6 +99,10 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @property (readonly, assign) NSInteger commandedNeckPanTarget;
 @property (readonly, assign) NSInteger commandedLowerNeckTiltTarget;
 @property (readonly, assign) NSInteger commandedUpperNeckTiltTarget;
+/// Latest accepted upper-camera demand before optional lower-neck leveling.
+/// Manual controls must use this rather than feeding compensated output back
+/// into the gateway. Nil means no active, known demand in the current session.
+@property (readonly, nullable, copy) NSNumber *upperNeckOperatorDemandTarget;
 @property (readonly, assign, getter=isNeckPanCommandKnown) BOOL neckPanCommandKnown;
 @property (readonly, assign, getter=isLowerNeckTiltCommandKnown) BOOL lowerNeckTiltCommandKnown;
 @property (readonly, assign, getter=isUpperNeckTiltCommandKnown) BOOL upperNeckTiltCommandKnown;

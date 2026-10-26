@@ -2041,6 +2041,18 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     }
 }
 
+- (NSNumber *)upperNeckOperatorDemandTarget
+{
+    @synchronized (self) {
+        if (!self.upperNeckTiltCommandKnown
+            || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff
+            || !self.lastDesiredUpperNeckTargetIsKnown) {
+            return nil;
+        }
+        return @(self.lastDesiredUpperNeckTarget);
+    }
+}
+
 - (NSTimeInterval)neckCommandReadyAtUptime
 {
     @synchronized (self) {
