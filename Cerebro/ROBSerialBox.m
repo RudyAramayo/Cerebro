@@ -4488,7 +4488,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     return NSThread.isMainThread && self.maestroConnectionValid && self.neckCommandStateKnown &&
         isfinite(panDegrees) && fabs(panDegrees) <= 70 && upperTarget >= 5300 && upperTarget <= 7500 &&
         ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &panTarget) &&
-        self.commandedNeckPanTarget == panTarget && self.commandedLowerNeckTiltTarget == 6011 &&
+        self.commandedNeckPanTarget == panTarget &&
+        self.commandedLowerNeckTiltTarget >= configuration.lowerMinimumTarget &&
+        self.commandedLowerNeckTiltTarget <= configuration.lowerMaximumTarget &&
         self.commandedUpperNeckTiltTarget == upperTarget &&
         NSProcessInfo.processInfo.systemUptime >= self.neckCommandReadyAtUptime;
 }
@@ -4508,9 +4510,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     if (now < self.manualNeckOverrideUntil || now < self.gestureNeckAuthorityUntil ||
         now < self.visionNeckAuthorityUntil) { return NO; }
     self.torsoNeckAuthorityRequiresOperatorAction = YES;
-    // The existing staging owns recovery from a non-upright neck. All subsequent
-    // search targets still pass through the normal mechanical envelope/ramp.
-    if (self.commandedLowerNeckTiltTarget != 6011 && ![self prepareNeckForPersonFollow]) { return NO; }
+    // Retain the operator's lower-neck viewpoint, including a forward lean
+    // over the shoulder. Search owns pan/upper only; the existing envelope,
+    // ramps and readiness checks still apply at this actual lower target.
     (void)[self applySafeNeckPanTarget:panTarget lowerTiltTarget:(int)self.commandedLowerNeckTiltTarget
                   desiredUpperTarget:(int)upperTarget includeLower:NO
        allowSupervisedLowerRecovery:NO source:@"Local workspace search"];

@@ -83,6 +83,12 @@ final class Sample{var positionsRadians=Array(repeating:NSNumber(value:0),count:
   try await run(pass);try await producer.value
   precondition(pass.strictCalls==1 && pass.checks>0 && old != pass.vision.frame.capturedAt && !pass.cameraReady && !pass.armTravelDispatched && !pass.jawCommandDispatched)
   _ = try controller.scope(model:.init(),frame:pass.vision.frame)
+  // A person from three minutes ago must not reject before a new exposure.
+  let staleHuman=make();staleHuman.vision.frame.capturedAt=Date().timeIntervalSince1970*1000-180_000
+  staleHuman.vision.frame.handsClear=false
+  let freshClear=Task{@MainActor in try await Task.sleep(nanoseconds:40_000_000);advance(staleHuman);staleHuman.vision.frame.handsClear=true}
+  try await run(staleHuman);try await freshClear.value
+  precondition(staleHuman.strictCalls==1 && staleHuman.vision.frame.sequence==2 && !staleHuman.armTravelDispatched)
   for mode in 0..<12{
    let t=make();let task=Task{@MainActor in
     try await Task.sleep(nanoseconds:20_000_000);advance(t)
@@ -108,14 +114,14 @@ final class Sample{var positionsRadians=Array(repeating:NSNumber(value:0),count:
    if mode==11{precondition((t.collisionReviewStatus["initial_empty_view_refresh"]as?NSDictionary)?["reason"]as?String=="held_neck_changed")}
    ROBFixedHeadBodyMotionIdentity.currentIdentity="body";ROBNeckRGBPoseDisplay.accepts=true;controller.readyAt=ProcessInfo.processInfo.systemUptime-0.2
   }
-  let timeout=make();timeout.deadline=ProcessInfo.processInfo.systemUptime+0.06
+  let timeout=make();timeout.deadline=ProcessInfo.processInfo.systemUptime+0.06;timeout.vision.frame.handsClear=false
   do{try await run(timeout);preconditionFailure("Old frame reused/restamped")}catch{}
   precondition(timeout.strictCalls==0 && timeout.vision.frame.sequence==1)
   precondition((timeout.collisionReviewStatus["initial_empty_view_refresh"]as?NSDictionary)?["reason"]as?String=="fresh_post_ready_frame_timeout")
   precondition(timeout.vision.frame.capturedAt<Date().timeIntervalSince1970*1000-500,"Historical exposure was retimed")
   let active=make();active.leased=true
   do{try await run(active);preconditionFailure("Travel lease admitted")}catch{}
-  print("PASS actual native scope + source-only pre-proof pin + fresh-view checkpoint: old reference before ready rejects as a live pose; NEW post-proof/post-ready source accepts; same q/K/runtime/gen/head/body/person; Stop/feedback/gravity veto; shared timeout; no restamp/travel/jaws/lease")
+  print("PASS actual native scope + source-only pre-proof pin + fresh-view checkpoint: three-minute-old person detection reacquires; stale person without a new frame times out as unavailable; fresh person still holds; NEW post-proof/post-ready source accepts; same q/K/runtime/gen/head/body; Stop/feedback/gravity veto; no restamp/travel/jaws/lease")
  }
 }
 '''.replace('/* HELPER */',helper).replace('/* REFERENCE TYPE */',referenceType).replace('/* PIN */',pin).replace('/* ACTUAL SCOPE */',scopeBody)

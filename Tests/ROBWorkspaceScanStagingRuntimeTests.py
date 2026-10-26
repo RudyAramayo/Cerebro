@@ -36,7 +36,7 @@ final class ROBFixedHeadCalibrationWindowController {
 }
 enum ROBNeckRGBPoseDisplay {
  static func provisionalCameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
-  precondition(lowerTarget==6011);return matrix_identity_double4x4
+  precondition(lowerTarget==ROBFixedHeadCalibrationWindowController.shared.neck["lower"]as?Int);return matrix_identity_double4x4
  }
 }
 struct ROBWorkspaceBlockerCoverageCandidate {let view:ROBWorkspaceView;let cameraToRobotColumnMajor:[Double]}
@@ -51,7 +51,7 @@ struct ROBWorkspaceBlockerCoverageCandidate {let view:ROBWorkspaceView;let camer
   precondition(self.canUseView!(p,u),"Issued an out-of-envelope neck request")
   self.prepareCalls.append(.init(panDegrees:p,upperTarget:u))
   if self.mode=="normal" {self.full=true}
-  let lower=self.mode=="wrong_lower" ? 6411:6011
+  let lower=self.mode=="wrong_lower" ? 6411:self.mode=="lean" ? 6819:6011
   ROBFixedHeadCalibrationWindowController.shared.neck=["known":true,"stationary":true,"lower":lower]
   return self.mode != "never_settled"
  }
@@ -60,13 +60,14 @@ struct ROBWorkspaceBlockerCoverageCandidate {let view:ROBWorkspaceView;let camer
  __PREPARE__
  func targetCandidates()->[ROBWorkspaceBlockerCoverageCandidate] {
   let model=ROBGhostRobotModel()
+  let heldLowerTarget=ROBFixedHeadCalibrationWindowController.shared.neck["lower"]as!Int
   __ACTUAL_CANDIDATES__
   return candidates
  }
 }
 @main enum Fixtures {
  @MainActor static func main()async throws {
-  func reset(_ mode:String)->Harness {ProcessInfo.processInfo.systemUptime=100;let h=Harness();h.mode=mode;return h}
+  func reset(_ mode:String)->Harness {ProcessInfo.processInfo.systemUptime=100;let h=Harness();h.mode=mode;ROBFixedHeadCalibrationWindowController.shared.neck=["known":true,"stationary":true,"lower":mode=="lean" ? 6819:6011];return h}
   let recovered=reset("normal")
   var settleSamples=0
   let views=try await recovered.preparedCollisionScanViews(check:{},status:{_,_,_ in settleSamples+=1})
@@ -83,6 +84,11 @@ struct ROBWorkspaceBlockerCoverageCandidate {let view:ROBWorkspaceView;let camer
   precondition(restricted.targetCandidates().allSatisfy{(-15...2.1).contains($0.view.panDegrees)})
   precondition(!restricted.targetCandidates().contains{$0.view.panDegrees == -50})
   precondition(restricted.prepareCalls.allSatisfy{$0.panDegrees==0},"Restricted staging dispatched a forbidden target")
+  let leaned=reset("lean")
+  let leanViews=try await leaned.preparedCollisionScanViews(check:{},status:{_,_,_ in})
+  precondition(leanViews.count==5 && leanViews.allSatisfy{(-15...2.1).contains($0.panDegrees)})
+  precondition(ROBFixedHeadCalibrationWindowController.shared.neck["lower"]as?Int==6819)
+  precondition(!leaned.targetCandidates().isEmpty)
   for mode in ["unavailable","wrong_lower","never_settled","stop"] {
    let h=reset(mode);var checks=0
    do {_=try await h.preparedCollisionScanViews(check:{checks+=1;if mode=="stop" && checks==3 {throw ROBWorkspaceDepthMapError.invalidFrame}},status:{_,_,_ in});preconditionFailure("Accepted failed staging: \(mode)")}
@@ -90,7 +96,7 @@ struct ROBWorkspaceBlockerCoverageCandidate {let view:ROBWorkspaceView;let camer
    precondition(h.prepareCalls.allSatisfy{$0.panDegrees==0},"Failed staging sent a wider view")
    if mode=="unavailable" {precondition(h.prepareCalls.isEmpty)}
   }
-  print("PASS actual scan staging: initial restricted bounds restore full seven-view sweep only AFTER native1.5s settle/raw lower6011; P4333/L6011/U5450 candidate retained; persistent restriction/failed lower/timeout/Stop never dispatch a forbidden view. No camera, arm, actuator transport or authority exists in this fixture.")
+  print("PASS actual scan staging: initial restricted bounds restore full seven-view sweep only AFTER native1.5s settle/unchanged selected lower; forward6819 retains its restricted views and actual-lower projection; persistent restriction/failed lower/timeout/Stop never dispatch a forbidden view. No camera, arm, actuator transport or authority exists in this fixture.")
  }
 }
 '''
@@ -108,7 +114,7 @@ def main():
     start = source.index("        var candidates:[ROBWorkspaceBlockerCoverageCandidate]=[]", source.index("func captureBlockerCoverage("))
     end = source.index("        let selected=ROBWorkspaceBlockerCoveragePlan.nextView", start)
     candidates = source[start:end]
-    assert "canUseView?(bounded,upper)==true" in candidates and "lowerTarget:6011" in candidates
+    assert "canUseView?(bounded,upper)==true" in candidates and "lowerTarget:heldLowerTarget" in candidates
     assert not any(x in settle + prepare for x in ["sendApproved", "setGripper", "Task.detached", "markFree", "approve"])
     with tempfile.TemporaryDirectory(prefix="rob-scan-staging-") as folder:
         p = Path(folder)

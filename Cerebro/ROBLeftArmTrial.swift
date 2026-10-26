@@ -3035,21 +3035,24 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 throw reject("baseline_changed","The measured initial-retreat start changed during fresh-view recovery.")
             }
             if let frame=vision.snapshot()["face"] {
-                guard frame.handsClear else {
-                    throw reject("person_or_hand_visible","A hand or person is visible; holding the empty preflight.")
-                }
                 guard frame.cameraGeneration==oldFrame.cameraGeneration,
                       frame.intrinsics?.runtimeCalibration?.identity==runtime,frame.intrinsics?.cameraServiceSourceSHA256==source else {
                     throw reject("source_contract_changed","The RGB-D source changed while awaiting an actual fresh preflight frame.")
                 }
-                if frame.sequence>oldFrame.sequence,frame.capturedAt>=began,vision.fresh,vision.handsClear,
+                if frame.sequence>oldFrame.sequence,frame.capturedAt>=began,vision.fresh,
                    (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
-                   frame.handsClear,frame.depthCoverage>=0.25,let depth=frame.depth,let k=frame.intrinsics,
+                   frame.depthCoverage>=0.25,let depth=frame.depth,let k=frame.intrinsics,
                    k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,
                    k.depthRGBGeometryCorrespondence?.status=="matched" {
                     let capturedUptime=ProcessInfo.processInfo.systemUptime-(Date().timeIntervalSince1970*1000-frame.capturedAt)/1000
                     guard capturedUptime>=reference.readyAtUptime else {
                         throw reject("new_frame_before_ready","The new frame exposure preceded the pinned stationary neck readiness.")
+                    }
+                    // Historical visibility cannot veto a current approach.
+                    // Assess people only in this new post-ready exposure;
+                    // stale observations wait for reacquisition below.
+                    guard frame.handsClear else {
+                        throw reject("person_or_hand_visible","A hand or person is visible in the fresh post-ready frame; holding the empty preflight.")
                     }
                     let scope:ROBFixedHeadRegistrationScope
                     do {scope=try controller.scope(model:model,frame:frame)}

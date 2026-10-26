@@ -42,6 +42,7 @@ selectors = [
     "requestPersonTrackingPanTarget:", "requestOperatorNeckPosePanTarget:",
     "applySafeNeckPanTarget:", "startSafeNeckStartup",
     "advanceSafeNeckStartupForGeneration:", "cancelSafeNeckStartup",
+    "prepareNeckForWorkspaceSearchWithPanDegrees:", "isNeckReadyForWorkspaceSearchWithPanDegrees:",
     "prepareNeckForPersonFollow", "prepareNeckForArmInspection",
     "prepareNeckForArmInspectionWithPanDegrees:", "isNeckReadyForArmInspectionWithPanDegrees:",
     "prepareNeckForArmInteraction", "isNeckReadyForArmInteraction",
@@ -531,6 +532,36 @@ int main(void) { @autoreleasepool {
     NSUInteger offCount = neckPackets(box).count;
     render(box, 0, 0, 0, NO);
     assert(neckPackets(box).count == offCount);
+    // Workspace search retains an explicitly selected forward lower-neck pose.
+    // Pan and upper commands still use production output/ramp/envelope gates.
+    for (NSNumber *lower in @[@6411, @6819]) {
+        NeckFixture *scan = activeNeck();
+        scan.neckSafetyCalibrationConfirmed = NO;
+        scan.commandedLowerNeckTiltTarget = lower.intValue;
+        scan.panEnvelopeLowerTarget = lower.intValue;
+        ROBNeckSafetyConfig config = [scan neckSafetyConfiguration];
+        int32_t center = 0;
+        assert(ROBNeckSafetyPanDegreesToTarget(&config, 0, &center));
+        scan.commandedNeckPanTarget = center;
+        scan.commandedNeckPanDegrees = 0;
+        for (int tick=0; tick<10; tick++) {
+            [scan prepareNeckForWorkspaceSearchWithPanDegrees:0 upperTarget:6100];
+            settle(scan);
+        }
+        assert([scan isNeckReadyForWorkspaceSearchWithPanDegrees:0 upperTarget:6100]);
+        assert(scan.commandedLowerNeckTiltTarget == lower.intValue);
+        for (NSArray *packet in neckPackets(scan)) assert([packet[0] intValue] != 1);
+        NSUInteger count = neckPackets(scan).count;
+        scan.manualNeckOverrideUntil = fixtureNow + 10;
+        assert(![scan prepareNeckForWorkspaceSearchWithPanDegrees:0 upperTarget:6200]);
+        assert(neckPackets(scan).count == count);
+        scan.manualNeckOverrideUntil = 0;
+        assert(![scan prepareNeckForWorkspaceSearchWithPanDegrees:90 upperTarget:6100]);
+        assert(scan.commandedLowerNeckTiltTarget == lower.intValue);
+        scan.lowerNeckTiltCommandKnown = NO;
+        assert(![scan isNeckReadyForWorkspaceSearchWithPanDegrees:0 upperTarget:6100]);
+        assert(![scan prepareNeckForWorkspaceSearchWithPanDegrees:0 upperTarget:6100]);
+    }
     puts("ROB neck output runtime fixtures passed: startup, pacing, deduplication, ownership, recovery, near-upright wide-pan pairs, forward-overlook endpoint/staging, tightening, unconfirmed automatic holds, OFF");
 } }
 '''

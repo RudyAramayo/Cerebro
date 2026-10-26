@@ -114,7 +114,7 @@ struct ROBWorkspaceDepthMap {
  var current:ROBWorkspaceCollisionSnapshot
  init(continuing snapshot:ROBWorkspaceCollisionSnapshot,modelID:String,geometryID:String,mappingID:String,sessionGeneration:UInt64,cameraGeneration:UUID,estimatedCameraProjectionIdentity:String)throws {current=snapshot}
  mutating func append(width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,depth:(Int,Int)->UInt16?,cameraToRobot:simd_double4x4,capturedAtMilliseconds:Double,sequence:UInt64,cameraGeneration:UUID,measuredSelfBounds:[Int],cameraRegistrationVerified:Bool,recordedPanDegrees:Double,recordedUpperTarget:Int,recordedLowerTarget:Int,estimatedCameraProjectionIdentity:String)throws {
-  precondition(!cameraRegistrationVerified && measuredSelfBounds.isEmpty && recordedLowerTarget==6011)
+  precondition(!cameraRegistrationVerified && measuredSelfBounds.isEmpty && recordedLowerTarget==(Modes.mode=="lean" ? 6819:6011))
   Modes.appended.append((sequence,capturedAtMilliseconds));current.observedFrameCount+=1;current.lastCapturedAtMilliseconds=capturedAtMilliseconds
   current.observations.append(.init(sequence:sequence));current.fingerprint="after\(Modes.appended.count)"
   if Modes.mode != "hole" {current.stateValue = .free}
@@ -131,7 +131,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
  var lastReport:NSDictionary=[:]
  func requireEstimatedProjectionIdentity(_ value:String?,model:ROBGhostRobotModel)throws {precondition(value=="projection")}
  func registeredCameraContext(frame:ROBArmRoutineVision.Frame,model:ROBGhostRobotModel)->Int? {Modes.mode=="registered" ? 1:nil}
- func unregisteredCameraProjection(frame:ROBArmRoutineVision.Frame,view:ROBWorkspaceView,model:ROBGhostRobotModel)throws->(matrix:simd_double4x4,identity:String?,lowerTarget:Int?) {(matrix_identity_double4x4,"projection",6011)}
+ func unregisteredCameraProjection(frame:ROBArmRoutineVision.Frame,view:ROBWorkspaceView,model:ROBGhostRobotModel)throws->(matrix:simd_double4x4,identity:String?,lowerTarget:Int?) {(matrix_identity_double4x4,"projection",ROBFixedHeadCalibrationWindowController.shared.neck["lower"]as?Int)}
  __ACTUAL_WORKERS__
  __ACTUAL_METHOD__
 }
@@ -140,7 +140,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
   Modes.mode=mode;Modes.appended=[];Modes.selected=0;Modes.stages=[];Modes.captures=0;Modes.checks=0;ProcessInfo.processInfo.systemUptime=100
   ROBFixedHeadBodyMotionIdentity.currentIdentity="body";ROBArmRoutineVision.shared.cameraGeneration=UUID();ROBArmRoutineVision.shared.next=2
   let c=ROBFixedHeadCalibrationWindowController.shared
-  c.neck=["known":true,"stationary":true,"lower":6011,"upper":6306,"pan":6000,"pan_degrees":0.0,"ready_at":99.0]
+  c.neck=["known":true,"stationary":true,"lower":["lean","lower_changed"].contains(mode) ? 6819:6011,"upper":6306,"pan":6000,"pan_degrees":0.0,"ready_at":99.0]
   let h=Harness(),s=ROBWorkspaceCollisionSnapshot(cameraGeneration:ROBArmRoutineVision.shared.cameraGeneration)
   h.collisionSnapshotValue=s
   var preparePolls=0
@@ -148,6 +148,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
    preparePolls+=1;ProcessInfo.processInfo.systemUptime+=0.8
    if mode=="in_flight",preparePolls<3 {c.neck["stationary"]=false;return false}
    c.neck["stationary"]=true
+   if mode=="lower_changed" {c.neck["lower"]=6011}
    c.neck["pan"]=Int((6000+pan*100/3).rounded());c.neck["pan_degrees"]=pan;c.neck["upper"]=upper
    return mode != "view_unavailable"
   }
@@ -173,17 +174,18 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
   let holeAttempt=(holeHarness.lastReport["blocker_coverage_attempts"]as![[String:Any]]).last!
   let roi=((holeAttempt["frames"]as![[String:Any]])[0]["blocker_depth_roi"]as![String:Any])
   precondition(roi["valid_depth_pixels"]as!Int==0 && roi["missing_or_zero_depth_pixels"]as!Int>0 && roi["free_space_proof"]as!Bool==false)
+  let (_,leaned,_)=try await exercise("lean");precondition(leaned!.observedFrameCount==7 && Modes.appended.count==2,"Bent lower-neck source lost during coverage")
   let (_,transit,_)=try await exercise("in_flight");precondition(transit!.observedFrameCount==7 && Modes.appended.count==2,"Normal neck transit rejected before settling")
   let (_,none,_)=try await exercise("no_view");precondition(none==nil && Modes.appended.isEmpty)
   let (_,registered,_)=try await exercise("registered");precondition(registered==nil && Modes.selected==0 && Modes.appended.isEmpty)
   let (_,budget,_)=try await exercise(attempted:[.init(panDegrees:0,upperTarget:5300),.init(panDegrees:10,upperTarget:5300)])
   precondition(budget==nil && Modes.selected==0 && Modes.appended.isEmpty)
   let (_,unavailable,_)=try await exercise("view_unavailable");precondition(unavailable==nil && Modes.appended.isEmpty)
-  for mode in ["source_changed","body_changed","changed_k","changed_runtime","unnormalized","unsynchronized","raw_pose_changed","initial_hold_changed","deadline","cancel"] {
+  for mode in ["lower_changed","source_changed","body_changed","changed_k","changed_runtime","unnormalized","unsynchronized","raw_pose_changed","initial_hold_changed","deadline","cancel"] {
    do {_=try await exercise(mode);preconditionFailure("Accepted changed context: \(mode)")}catch {}
    precondition(Modes.appended.isEmpty,"Changed input enrolled actual map rays: \(mode)")
   }
-  print("PASS production targeted blocker capture: bounded novel view, actual raw pan/lower6011/settle checks, same-scene2advancing exposures, original times, persistent hole stays unknown, no view/budget stop, source/body/K/normalization/synchronization/raw hold/deadline/Stop rejection; no actuator or camera IO")
+  print("PASS production targeted blocker capture: bounded novel view, actual raw pan/held lower6011 or6819/settle checks, same-scene2advancing exposures, original times, persistent hole stays unknown, no view/budget stop, source/body/K/normalization/synchronization/raw hold/deadline/Stop rejection; no actuator or camera IO")
  }
 }
 '''

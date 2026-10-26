@@ -1340,6 +1340,9 @@ struct ROBWorkspaceCanSelection {
         let identity=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
         try requireEstimatedProjectionIdentity(identity,model:model)
         guard identity != nil else {
+            guard ROBFixedHeadCalibrationWindowController.shared.readNeck?()["lower"] as? Int == 6011 else {
+                throw ROBWorkspaceDepthMapError.acquisition("A bent-neck scan needs a camera transform for its actual lower-neck pose; the upright fallback cannot be reused.")
+            }
             guard ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:frame.cameraGeneration,
                 runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
                 cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256) else {throw ROBWorkspaceDepthMapError.invalidFrame}
@@ -1504,7 +1507,7 @@ struct ROBWorkspaceCanSelection {
     /// They can add pixels to a map, never send an actuator command or grant.
     @nonobjc private static func appendBlockerDepth(map:ROBWorkspaceDepthMap,pixels:CameraDepthFrame,
         intrinsics:CameraIntrinsics,matrix:simd_double4x4,capturedAtMilliseconds:Double,sequence:UInt64,
-        cameraGeneration:UUID,view:ROBWorkspaceView,projection:String) async throws ->ROBWorkspaceDepthMap {
+        cameraGeneration:UUID,view:ROBWorkspaceView,lowerTarget:Int,projection:String) async throws ->ROBWorkspaceDepthMap {
         let width=pixels.width,height=pixels.height,fx=intrinsics.fx,fy=intrinsics.fy,cx=intrinsics.cx,cy=intrinsics.cy
         let pan=view.panDegrees,upper=view.upperTarget
         return try await withCheckedThrowingContinuation { continuation in
@@ -1515,7 +1518,7 @@ struct ROBWorkspaceCanSelection {
                         depth:{pixels.distanceMillimeters(x:$0,y:$1)},cameraToRobot:matrix,
                         capturedAtMilliseconds:capturedAtMilliseconds,sequence:sequence,cameraGeneration:cameraGeneration,
                         measuredSelfBounds:[],cameraRegistrationVerified:false,recordedPanDegrees:pan,
-                        recordedUpperTarget:upper,recordedLowerTarget:6011,
+                        recordedUpperTarget:upper,recordedLowerTarget:lowerTarget,
                         estimatedCameraProjectionIdentity:projection)
                     continuation.resume(returning:next)
                 } catch {continuation.resume(throwing:error)}
@@ -1550,6 +1553,11 @@ struct ROBWorkspaceCanSelection {
         guard anchor.accept(frameGeneration:snapshot.cameraGeneration,currentGeneration:vision.cameraGeneration) else {
             throw ROBWorkspaceDepthMapError.invalidFrame
         }
+        let initialNeck=controller.readNeck?() ?? [:]
+        guard initialNeck["known"]as?Bool==true,
+              let heldLowerTarget=initialNeck["lower"]as?Int,heldLowerTarget>0 else {
+            throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires a known lower-neck hold.")
+        }
         var diagnostic:[String:Any]=["blocker_link":blocker.link,
             "blocker_voxel":[blocker.voxel.x,blocker.voxel.y,blocker.voxel.z],"candidate_count":0,
             "scene_id":snapshot.sceneID.uuidString,"before_map_fingerprint":snapshot.fingerprint,
@@ -1577,17 +1585,16 @@ struct ROBWorkspaceCanSelection {
                 throw ROBWorkspaceDepthMapError.invalidFrame
             }
             let neck=controller.readNeck?() ?? [:]
-            guard neck["known"]as?Bool==true,neck["lower"]as?Int==6011 else {
-                throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires the unchanged upright lower-neck hold and stationary ROB.")
+            guard neck["known"]as?Bool==true,neck["lower"]as?Int==heldLowerTarget else {
+                throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires the unchanged selected lower-neck hold.")
             }
         }
         try requireContext()
-        let initialNeck=controller.readNeck?() ?? [:]
         guard initialNeck["stationary"]as?Bool==true,
               let initialReady=initialNeck["ready_at"]as?Double,initialReady.isFinite,initialReady<=ProcessInfo.processInfo.systemUptime,
               let initialPan=initialNeck["pan"]as?Int,let initialUpper=initialNeck["upper"]as?Int else {
-            record("initial_hold_unavailable","Targeted coverage requires the unchanged stationary upright neck hold.")
-            throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires the unchanged stationary upright neck hold.")
+            record("initial_hold_unavailable","Targeted coverage requires the unchanged stationary neck hold.")
+            throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires the unchanged stationary neck hold.")
         }
         func requireInitialHold()throws {
             try requireContext()
@@ -1628,7 +1635,9 @@ struct ROBWorkspaceCanSelection {
         guard registeredCameraContext(frame:source,model:model)==nil else {return nil}
         let sourceScope=try controller.scope(model:model,frame:source)
         guard sourceScope.gatewaySessionGeneration==generation,sourceScope.cameraGeneration==snapshot.cameraGeneration,
-              sourceScope.lowerTarget==6011 else {throw ROBWorkspaceDepthMapError.invalidFrame}
+              sourceScope.lowerTarget==heldLowerTarget else {
+            throw ROBWorkspaceDepthMapError.invalidFrame
+        }
         let width=depth.width,height=depth.height,sourceK=[k.fx,k.fy,k.cx,k.cy],sourceService=k.cameraServiceSourceSHA256
         let sourceRuntime=k.runtimeCalibration?.identity
         func blockerDepthDiagnostic(pixels:CameraDepthFrame,intrinsics:CameraIntrinsics,matrix:simd_double4x4)->[String:Any] {
@@ -1684,7 +1693,7 @@ struct ROBWorkspaceCanSelection {
                 guard !candidates.contains(where:{$0.view==view}),canUseView?(bounded,upper)==true,
                       let raw=panTargetForView?(bounded)?.intValue,(3000...10000).contains(raw),
                       let matrix=ROBNeckRGBPoseDisplay.provisionalCameraToModel(model:model,panTarget:raw,
-                        lowerTarget:6011,upperTarget:upper) else {continue}
+                        lowerTarget:heldLowerTarget,upperTarget:upper) else {continue}
                 candidates.append(.init(view:view,cameraToRobotColumnMajor:(0..<4).flatMap { column in (0..<4).map {matrix[column][$0]} }))
             }
         }
@@ -1749,18 +1758,18 @@ struct ROBWorkspaceCanSelection {
                       intrinsics.depthRGBGeometryCorrespondence?.status=="matched",
                       registeredCameraContext(frame:frame,model:model)==nil else {throw ROBWorkspaceDepthMapError.invalidFrame}
                 let scope=try controller.scope(model:model,frame:frame)
-                guard scope.lowerTarget==6011,scope.panTarget==rawPan,scope.upperTarget==view.upperTarget,
+                guard scope.lowerTarget==heldLowerTarget,scope.panTarget==rawPan,scope.upperTarget==view.upperTarget,
                       scope.gatewaySessionGeneration==generation,scope.cameraGeneration==snapshot.cameraGeneration,
                       heldScope.map({$0==scope}) ?? true else {throw ROBWorkspaceDepthMapError.invalidFrame}
                 heldScope=scope;previous=frame.sequence;previousCapture=frame.capturedAt
                 let projectionContext=try unregisteredCameraProjection(frame:frame,view:view,model:model)
-                guard projectionContext.identity==projection,projectionContext.lowerTarget==6011 else {throw ROBWorkspaceDepthMapError.invalidFrame}
+                guard projectionContext.identity==projection,projectionContext.lowerTarget==heldLowerTarget else {throw ROBWorkspaceDepthMapError.invalidFrame}
                 let input=map
                 do {
                     recordStage("append_started")
                     map=try await Self.appendBlockerDepth(map:input,pixels:pixels,intrinsics:intrinsics,
                         matrix:projectionContext.matrix,capturedAtMilliseconds:frame.capturedAt,sequence:frame.sequence,
-                        cameraGeneration:frame.cameraGeneration,view:view,projection:projection)
+                        cameraGeneration:frame.cameraGeneration,view:view,lowerTarget:heldLowerTarget,projection:projection)
                     recordStage("append_complete")
                 } catch {
                     try requireHeldView()
@@ -2077,11 +2086,14 @@ struct ROBWorkspaceCanSelection {
         }
     }
 
-    /// Preparing the first allowed view can restore lower6011 and its native
-    /// pan envelope. Do that BEFORE clamping the full scan, so a restricted
-    /// startup envelope does not silently collapse all later upright views.
+    /// Preserve the selected lower-neck viewpoint while preparing pan/upper.
+    /// Plan views inside the native pan envelope of that settled lower pose.
     @MainActor @nonobjc private func preparedCollisionScanViews(check:()throws->Void,
         status:(ROBWorkspaceView,Bool,Bool)->Void) async throws->[ROBWorkspaceView] {
+        let initialNeck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+        guard initialNeck["known"]as?Bool==true,let heldLowerTarget=initialNeck["lower"]as?Int,heldLowerTarget>0 else {
+            throw ROBWorkspaceDepthMapError.acquisition("Workspace scan needs a known active lower-neck pose before staging.")
+        }
         let stage=ROBWorkspaceView(panDegrees:boundedPan?(0) ?? 0,upperTarget:5650)
         guard stage.panDegrees.isFinite,canUseView?(stage.panDegrees,stage.upperTarget) != false else {
             throw ROBWorkspaceDepthMapError.acquisition("No native-allowed neck view is available to stage the workspace scan.")
@@ -2089,8 +2101,8 @@ struct ROBWorkspaceCanSelection {
         try await settleCollisionScanView(stage,check:check,status:status)
         try check();try Task.checkCancellation()
         let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
-        guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,neck["lower"]as?Int==6011 else {
-            throw ROBWorkspaceDepthMapError.acquisition("Workspace scan staging did not establish the unchanged upright lower-neck hold.")
+        guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,neck["lower"]as?Int==heldLowerTarget else {
+            throw ROBWorkspaceDepthMapError.acquisition("Workspace scan staging changed the selected lower-neck viewpoint.")
         }
         let requested = [-45.0,-15,15,45].map {ROBWorkspaceView(panDegrees:$0,upperTarget:5650)}
             + [30.0,0,-30].map {ROBWorkspaceView(panDegrees:$0,upperTarget:6306)}
@@ -2150,7 +2162,7 @@ struct ROBWorkspaceCanSelection {
             }
             vision.endCollisionRegistrationProbe(); finishView?()
         }
-        scanPhase="staging upright neck before selecting scan views"
+        scanPhase="settling the selected lower-neck pose before choosing scan views"
         let stagingCheck:()throws->Void = {
             try check();try self.requireEstimatedProjectionIdentity(estimatedProjectionIdentity,model:model)
             guard ROBFixedHeadBodyMotionIdentity.currentIdentity==scanBodyIdentity,
