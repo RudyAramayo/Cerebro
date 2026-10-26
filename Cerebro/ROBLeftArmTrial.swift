@@ -1636,7 +1636,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 guard !leased, !positionReady, leaseRenewals.isEmpty, sceneHold.count == 2 else {
                     throw ROBArmRoutineError.blocked("The stationary scene-scan hold is unavailable.")
                 }
-                for (side,baseline) in sceneHold {
+                for (side,baseline) in sceneHold where localReceiptCommand == nil || !passive {
                     guard let sample = gateway.telemetry(forArm:side), sample.effectiveSampleAgeMilliseconds <= 250,
                           gateway.modes(forArm:side).map(\.intValue) == baseline.modes,
                           sample.statuses.map(\.intValue) == baseline.modes,
