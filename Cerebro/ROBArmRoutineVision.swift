@@ -100,6 +100,7 @@ final class ROBArmRoutineVision {
     private var processingMilliseconds: Double = 0
     private var frames: [String: Frame] = [:]
     private var lastInspection: [String: Any] = [:]
+    private var lastSettlingDiagnostics: [String: Any] = [:]
     private let collisionRegistrationProbe = ROBMarkerlessVisionService()
     private var collisionProbeActive = false
     private var collisionProbeObservation: [String: Any] = [:]
@@ -113,7 +114,7 @@ final class ROBArmRoutineVision {
         lock.lock(); defer { lock.unlock() }
         captureIdentity = ROBVisionCaptureIdentity()
         epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
-        lastInspection = [:]; inputNotes = [:]
+        lastInspection = [:]; lastSettlingDiagnostics=[:]; inputNotes = [:]
         lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
     }
 
@@ -124,7 +125,7 @@ final class ROBArmRoutineVision {
         if runtimeContextEnrolled && expectedRuntimeCalibrationIdentity != identity {
             captureIdentity = ROBVisionCaptureIdentity()
             epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
-            lastInspection = [:]; inputNotes = [:]
+            lastInspection = [:]; lastSettlingDiagnostics=[:]; inputNotes = [:]
             lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
         }
         runtimeContextEnrolled = true; expectedRuntimeCalibrationIdentity = identity
@@ -150,6 +151,7 @@ final class ROBArmRoutineVision {
         active = value; self.teaching = teaching; epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]; inputNotes = [:]
         if !value {observedJawFullHeightDemand=false}
         lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
+        lastSettlingDiagnostics=[:]
         if value { lastInspection = [:] }
     }
 
@@ -161,7 +163,7 @@ final class ROBArmRoutineVision {
         observedJawFullHeightDemand=true
         guard !active else {return}
         active=true;teaching=false;epoch=UUID();frames=[:];busy=[];lastOffer=[:];inputNotes=[:]
-        lastIncomingCapture=nil;lastIncomingSequence=0;processingMilliseconds=0;lastInspection=[:]
+        lastIncomingCapture=nil;lastIncomingSequence=0;processingMilliseconds=0;lastInspection=[:];lastSettlingDiagnostics=[:]
     }
 
     func offer(_ frame: CameraFrameSet, role: CameraRole) {
@@ -183,6 +185,7 @@ final class ROBArmRoutineVision {
         if identityUpdate == .changed {
             // Capture identity changes also cancel any pending analysis answer.
             epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
+            lastSettlingDiagnostics=[:]
         }
         if active {
             lastIncomingCapture = frame.capturedAtMilliseconds.flatMap { $0.isFinite ? $0 : nil }
@@ -470,7 +473,7 @@ final class ROBArmRoutineVision {
                 "analysis_age_ms": frame.map { now - $0.capturedAt } ?? -1,
                 "analysis_ms": processingMilliseconds, "depth_coverage": frame?.depthCoverage ?? 0,
                 "hands_clear": frame?.handsClear ?? false, "note": inputNotes["face"] ?? "No frames received",
-                "inspection": lastInspection]
+                "inspection": lastInspection,"settling":lastSettlingDiagnostics]
     }
 
     private func isFresh(_ frame: Frame) -> Bool {
@@ -540,6 +543,12 @@ final class ROBArmRoutineVision {
         lock.lock(); lastInspection = details; lock.unlock()
     }
 
+    private func recordSettlingDiagnostics(_ details:[String:Any],epoch token:UUID) {
+        lock.lock();defer{lock.unlock()}
+        guard epoch==token else{return}
+        lastSettlingDiagnostics=details
+    }
+
     // Preserve the existing veto exactly. This is not a clearance classifier;
     // no brightness compensation, image registration or relaxed threshold can
     // hide an object or viewpoint change from the semantic freshness check.
@@ -549,8 +558,52 @@ final class ROBArmRoutineVision {
         return Double(changed) / Double(before.count)
     }
 
+    /// Diagnostic facts only. Admission still comes exclusively from the
+    /// existing isFresh/isDepthMappingEligible call in the settling loop.
+    private static func settledFrameDiagnostics(_ frame:Frame?,eligible:Bool,depthMappingOnly:Bool,
+        notBefore:Double,nowMilliseconds:Double,currentGeneration:UUID)->(facts:[String:Any],failed:[String]) {
+        guard let frame else {return ( ["frame_present":false,"eligible":false], ["no_analyzed_frame"] )}
+        func number(_ value:Double)->Any {value.isFinite ? value as Any:NSNull()}
+        let age=nowMilliseconds-frame.capturedAt
+        let dimensionsValid=frame.depth.map{$0.width>0 && $0.height>0} ?? false
+        let intrinsicsValid=frame.depth.flatMap {depth in frame.intrinsics.map{$0.isValid(forWidth:depth.width,height:depth.height)}} ?? false
+        var failed:[String]=[]
+        if !frame.capturedAt.isFinite {failed.append("nonfinite_capture_time")}
+        else {
+            if age<0 {failed.append("future_exposure")}
+            if age>700 {failed.append("exposure_older_than_700ms")}
+            if frame.capturedAt<notBefore {failed.append("captured_before_acquisition")}
+        }
+        if depthMappingOnly {
+            if frame.sequence==0 {failed.append("zero_sequence")}
+            if frame.cameraGeneration != currentGeneration {failed.append("camera_generation_mismatch")}
+            if !frame.depthCoverage.isFinite || frame.depthCoverage>1 {failed.append("invalid_depth_coverage")}
+            else if frame.depthCoverage<=0 {failed.append("no_sparse_depth")}
+            if frame.depth==nil {failed.append("missing_depth")}
+            else if !dimensionsValid {failed.append("invalid_depth_dimensions")}
+            if frame.intrinsics==nil {failed.append("missing_intrinsics")}
+            else if !intrinsicsValid {failed.append("invalid_intrinsics")}
+        } else if !(frame.depthCoverage>=0.25) {
+            failed.append("ordinary_depth_coverage_below_25_percent")
+        }
+        if !eligible && failed.isEmpty {failed.append("eligibility_rejected_without_classified_condition")}
+        let imu=frame.intrinsics?.inertial
+        return (["frame_present":true,"eligible":eligible,"sequence":NSNumber(value:frame.sequence),
+            "capture_age_ms":number(age),"capture_time_ms":number(frame.capturedAt),
+            "captured_after_acquisition":frame.capturedAt>=notBefore,
+            "frame_camera_generation":frame.cameraGeneration.uuidString,
+            "current_camera_generation":currentGeneration.uuidString,
+            "depth_coverage":number(frame.depthCoverage),"depth_present":frame.depth != nil,
+            "depth_dimensions_valid":dimensionsValid,"intrinsics_present":frame.intrinsics != nil,
+            "intrinsics_valid_for_depth_dimensions":intrinsicsValid,
+            "imu_present":imu != nil,"imu_valid":imu?.isValid ?? false,"imu_stationary":imu?.stationary ?? false,
+            "imu_window_ms":imu.map{number($0.windowMilliseconds)} ?? NSNull(),
+            "imu_sample_count":imu.map{$0.sampleCount as Any} ?? NSNull(),
+            "imu_age_ms":imu.map{number($0.ageMilliseconds)} ?? NSNull()],failed)
+    }
+
     private func settledInspectionFrame(epoch token: UUID, requireStaticScene: Bool = true,deadlineUptime:Double?=nil,
-        depthMappingOnly:Bool=false) async throws -> Frame {
+        depthMappingOnly:Bool=false,allowStationaryIMUPassiveFrame:Bool=false) async throws -> Frame {
         // Called only when the coordinator has stopped motion and the GPU is
         // ready. A previously captured frame may still depict the neck/arms
         // settling, even though the latest commanded pose is now stationary.
@@ -558,17 +611,56 @@ final class ROBArmRoutineVision {
         let deadline = min(ProcessInfo.processInfo.systemUptime+3,deadlineUptime ?? .infinity)
         var anchor: Frame?, previous: Frame?
         var distinctSamples = 0
+        var pollCount=0,duplicatePolls=0,acceptedDistinctFrames=0,gapResets=0,staticResets=0
+        var maximumCaptureGapMilliseconds=0.0
+        var conditionPollCounts:[String:Int]=[:],latestFrameFacts:[String:Any]=[:]
         while ProcessInfo.processInfo.systemUptime < deadline {
             try Task.checkCancellation()
-            if let frame = try inspectionFrame(epoch: token),
-               (depthMappingOnly ? isDepthMappingEligible(frame):isFresh(frame)),frame.capturedAt >= notBefore {
+            let candidate=try inspectionFrame(epoch:token)
+            let eligible=candidate.map{depthMappingOnly ? isDepthMappingEligible($0):isFresh($0)} ?? false
+            let diagnostics=Self.settledFrameDiagnostics(candidate,eligible:eligible,depthMappingOnly:depthMappingOnly,
+                notBefore:notBefore,nowMilliseconds:Date().timeIntervalSince1970*1000,currentGeneration:cameraGeneration)
+            pollCount+=1;latestFrameFacts=diagnostics.facts
+            for condition in diagnostics.failed {conditionPollCounts[condition,default:0]+=1}
+            if allowStationaryIMUPassiveFrame,depthMappingOnly,!requireStaticScene {
+                if let imu=candidate?.intrinsics?.inertial {
+                    if !imu.isValid {conditionPollCounts["single_frame_imu_invalid",default:0]+=1}
+                    if !imu.stationary {conditionPollCounts["single_frame_imu_not_stationary",default:0]+=1}
+                    if imu.windowMilliseconds<300 {conditionPollCounts["single_frame_imu_window_below_300ms",default:0]+=1}
+                    if imu.sampleCount<20 {conditionPollCounts["single_frame_imu_samples_below_20",default:0]+=1}
+                } else {conditionPollCounts["single_frame_imu_unavailable",default:0]+=1}
+            }
+            if let frame = candidate,eligible,frame.capturedAt >= notBefore {
+                // Object attention sends no arm command and grants no human
+                // clearance. Its actual same-exposure stationary IMU window
+                // can establish a held view without requiring three costly
+                // hand/person analyses less than700ms apart. Mapping/static
+                // captures and every ordinary motion inspection retain their
+                // existing three-frame path and freshness/clearance gates.
+                if allowStationaryIMUPassiveFrame,depthMappingOnly,!requireStaticScene,
+                   let imu=frame.intrinsics?.inertial,imu.isValid,imu.stationary,
+                   imu.windowMilliseconds>=300,imu.sampleCount>=20 {
+                    recordSettlingDiagnostics(["schema_version":1,"status":"accepted",
+                        "method":"stationary_imu_single_actual_post_call_frame","depth_mapping_only":true,
+                        "static_scene_required":false,"recorded_at_ms":Date().timeIntervalSince1970*1000,
+                        "latest_frame":diagnostics.facts,"poll_count":pollCount,"capture_time_refreshed":false,
+                        "motion_authority":false,"human_clearance_granted":false],epoch:token)
+                    return frame
+                }
                 if let previous, frame.sequence < previous.sequence || frame.capturedAt < previous.capturedAt {
                     throw ROBArmRoutineError.blocked("The camera stream restarted during inspection.")
                 }
                 if previous?.sequence != frame.sequence {
+                    acceptedDistinctFrames+=1
                     guard let difference = Self.sceneChangeFraction(anchor?.thumbnail ?? frame.thumbnail, frame.thumbnail) else {
                         throw ROBArmRoutineError.blocked("The inspected camera view is unavailable.")
                     }
+                    if let previous {
+                        let gap=frame.capturedAt-previous.capturedAt
+                        maximumCaptureGapMilliseconds=max(maximumCaptureGapMilliseconds,gap)
+                        if gap>700 {gapResets+=1}
+                    }
+                    if requireStaticScene && difference>=0.025 {staticResets+=1}
                     if anchor == nil || (requireStaticScene && difference >= 0.025) ||
                         previous.map({ frame.capturedAt - $0.capturedAt > 700 }) == true {
                         anchor = frame; distinctSamples = 0
@@ -576,12 +668,35 @@ final class ROBArmRoutineVision {
                     distinctSamples += 1
                     previous = frame
                     if let anchor, distinctSamples >= 3, frame.capturedAt - anchor.capturedAt >= 300 {
+                        recordSettlingDiagnostics(["schema_version":1,"status":"accepted",
+                            "method":"three_distinct_actual_exposures","depth_mapping_only":depthMappingOnly,
+                            "static_scene_required":requireStaticScene,"recorded_at_ms":Date().timeIntervalSince1970*1000,
+                            "latest_frame":diagnostics.facts,"distinct_samples_since_anchor":distinctSamples,
+                            "capture_span_since_anchor_ms":frame.capturedAt-anchor.capturedAt,
+                            "capture_gap_resets":gapResets,"static_scene_resets":staticResets,"capture_time_refreshed":false],epoch:token)
                         return frame
                     }
-                }
+                } else {duplicatePolls+=1}
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+        let span=anchor.flatMap{a in previous.map{$0.capturedAt-a.capturedAt}} ?? 0
+        var diagnostics:[String:Any]=["schema_version":1,"kind":"settled_capture_timeout_diagnostics_only","status":"timeout",
+            "depth_mapping_only":depthMappingOnly,"static_scene_required":requireStaticScene,
+            "stationary_imu_passive_frame_allowed":allowStationaryIMUPassiveFrame,
+            "poll_count":pollCount,"failed_condition_poll_counts":conditionPollCounts,
+            "accepted_distinct_frames":acceptedDistinctFrames,"distinct_samples_since_anchor":distinctSamples,
+            "capture_span_since_anchor_ms":span.isFinite ? span as Any:NSNull(),"duplicate_polls":duplicatePolls,
+            "capture_gap_resets":gapResets,"static_scene_resets":staticResets,
+            "maximum_accepted_capture_gap_ms":maximumCaptureGapMilliseconds,
+            "latest_frame":latestFrameFacts,"recorded_at_ms":Date().timeIntervalSince1970*1000,"capture_time_refreshed":false]
+        let health=healthSnapshot()
+        var healthFields:[String:Any]=[:]
+        for key in ["active","input_sequence","input_age_ms","analysis_age_ms","analysis_ms","depth_coverage","hands_clear","note"] {
+            healthFields[key]=health[key]
+        }
+        diagnostics["camera_health"]=healthFields
+        recordSettlingDiagnostics(diagnostics,epoch:token)
         throw ROBArmRoutineError.blocked("The camera view did not settle within 3 seconds. Keep the workspace still and retry; no new motion was sent.")
     }
 
@@ -660,7 +775,8 @@ final class ROBArmRoutineVision {
             let token = try inspectionEpoch()
             // Passive search may inspect sparse depth without hiding readable
             // RGB objects. Other callers retain ordinary readiness admission.
-            let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false,depthMappingOnly:nonactuatingSparseDepth)
+            let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false,
+                depthMappingOnly:nonactuatingSparseDepth,allowStationaryIMUPassiveFrame:nonactuatingSparseDepth)
             try await onCaptured(frame)
             try Task.checkCancellation()
             guard frame.cameraGeneration == cameraGeneration else { throw CancellationError() }
@@ -2771,8 +2887,10 @@ struct ROBWorkspaceCanSelection {
                 catch is CancellationError { throw CancellationError() }
                 catch {
                     try await searchCheckpoint()
+                    let cameraHealth=vision.healthSnapshot()
                     evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "attempt": attempt + 1,
-                        "error": error.localizedDescription, "local_inference": vision.healthSnapshot()["inspection"] ?? [:]])
+                        "error": error.localizedDescription, "local_inference": cameraHealth["inspection"] ?? [:],
+                        "camera_health":cameraHealth])
                     let transientCamera = ["camera", "settle", "stream", "view"].contains { error.localizedDescription.lowercased().contains($0) }
                     if !transientCamera || attempt == 1 { return }
                     progress("Camera pause; settling and retrying this view")

@@ -292,6 +292,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     @nonobjc private var activeOneDegreeCalibration: ROBWorkspaceOneDegreeEmptyCalibrationStep?
     @nonobjc var oneDegreeEmptyCalibrationStepEnabled = false
     /// DEBUG-only early stop on the ordinary, fully checked empty entry path.
+    @nonobjc var approachCanThenHoldEnabled = false
+    private var activeApproachCanThenHold = false
     @nonobjc var holdAfterInitialEmptyLiftEnabled = false
     private var activeHoldAfterInitialEmptyLift = false
     private var initialEmptyLiftHeldEvidence: NSDictionary?
@@ -999,9 +1001,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let pixelSummary=localReceiptOnly && sourcePixelSelfReviewEnabled
             ? "ONE DEBUG EXPERIMENTAL LLM-VISUAL-REVIEWED SOURCE-PIXEL EMPTY RIGHT-arm step, J2 minus0.075rad ONLY over4seconds,≤60mm full-hull travel, then hold. Fresh RGB/depth+exactneck/BOTHq/device/runtime/source checks matched an historical reviewed template to THIS current raw map; current evidence SHA256 \(currentSourcePixelEvidenceSHA256 ?? "unavailable"). Original template SHA256 \(sourcePixelTemplateSHA256 ?? "unavailable"). Current raw map SHA256 \(sourcePixelCurrentMapFingerprint ?? "unavailable"). This is experimental perception, NOT measured self/registration or motion authority. Only original source groups whose EVERY accepted contributor is positively matched experimental robot may be excluded; table/person/hand/uncertain/unmasked/mixed groups remain external. No MODEL-hull fallback or normal-route exemption; all raw data retained. Prepared fixed P4000L6011U5450, both arms held, only RIGHT J2 travels. Record14 actual RGB-D/BOTHq keyframes3before/8during/3after, no30fps claim. Preserve actual external-contact/joint/fullarm/self-nonworsening/endclearance/person/current/feedback/ownership/Stop checks. No jaw,payload,grip,carry,release,return,retry,automatic chaining or transfer. Empty state and35mm camera error remain assumptions; contact/property risk possible. A fresh exact native private receipt is still required."
             : experimentSummary
-        let approvedSummary=localReceiptOnly && holdAfterInitialEmptyLiftEnabled
+        let liftSummary=localReceiptOnly && holdAfterInitialEmptyLiftEnabled
             ? "DEBUG initial EMPTY lift and hold only, physical RIGHT arm: search fresh can/workspace observations, select one initial empty lift using the ordinary complete occupied/unknown/full-arm/self-clearance review, recheck its exact measured start before dispatch, then measure the endpoint and hold. No jaw commands or startup jaw calibration, grasp, payload, carry, release, return, rescan after lifting, next can or chained motion. If no initial lift is required, remain unchanged and report that. ZERO transfers; the \(requestedCanCount)-can campaign remains unfinished. Both arms may hold their current measured positions. The same explicit visual trial uses assumed spatial error \(localVisualTrialAssumedSpatialErrorMeters*1000) mm; no calibration or collision exemption is added. Preserve joint bounds, fresh motor/gripper feedback, source/body/context identity, exclusive ownership, current-spike hold and immediate Stop."
             : pixelSummary
+        let approvedSummary=localReceiptOnly && approachCanThenHoldEnabled
+            ? "DEBUG approach can then hold with OPEN jaws: search the can and workspace, perform any ordinary fully checked initial empty lift, reobserve and execute the complete checked dynamic entry and bounded observed-jaw alignment. Stop at actual ready-to-grip alignment BEFORE close, verification lift, payload, carry or release. Opening/startup jaw readiness is permitted; closing is prohibited. Hold the measured endpoint, ZERO transfers, no automatic recovery or next attempt. Preserve ordinary occupied/unknown/full-arm/self-clearance, joint/current/person/Stop, fresh feedback and exact camera/body/receipt protections. Assumed visual uncertainty remains \(localVisualTrialAssumedSpatialErrorMeters*1000)mm; no commissioning collision exemption."
+            : liftSummary
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
             start(command, summary: action, limit: limit, completion: completion)
@@ -1024,10 +1029,13 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         if localReceiptOnly {
             #if !DEBUG
-            guard !holdAfterInitialEmptyLiftEnabled,!sourcePixelSelfReviewEnabled else {
+            guard !holdAfterInitialEmptyLiftEnabled,!sourcePixelSelfReviewEnabled,!approachCanThenHoldEnabled else {
                 completion(["status":"rejected","detail":"Initial empty lift-and-hold is available only in DEBUG commissioning builds."]);return
             }
             #endif
+            guard !approachCanThenHoldEnabled || (physicalSide=="right" && !holdAfterInitialEmptyLiftEnabled && !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled && !sourcePixelSelfReviewEnabled) else {
+                completion(["status":"rejected","detail":"Approach-and-hold requires physical RIGHT and excludes the separate lift-only and calibration options."]);return
+            }
             guard !holdAfterInitialEmptyLiftEnabled || (physicalSide=="right" && !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled) else {
                 completion(["status":"rejected","detail":"The fully checked empty lift-and-hold option requires physical RIGHT and excludes both separate calibration experiments."]);return
             }
@@ -1049,7 +1057,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ROBControllerArmApproval.shared.requestRecyclingWorkspaceTask(command:requestedCommand,arm:physicalSide,canCount:canCount,
                 summary:approvedSummary,contextIdentity:{[weak self] in self?.currentLocalRecyclingContextIdentity()},receiptOnly:true,
                 permitsUnmeasuredVisualCalibrationTrial:true,nominalEmptyCommissioningStepEnabled:nominalEmptyCommissioningStepEnabled,
-                nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,
+                nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,approachCanThenHoldEnabled:approachCanThenHoldEnabled,
                 sourcePixelSelfReviewSHA256:currentSourcePixelEvidenceSHA256,
                 oneDegreeEmptyCalibrationStepEnabled:oneDegreeEmptyCalibrationStepEnabled,
                 execute:execute,cancel:cancel,completion:finished)
@@ -1138,6 +1146,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             "nominalEmptyCommissioningStepEnabled":nominalEmptyCommissioningStepEnabled,
             "oneDegreeEmptyCalibrationStepEnabled":oneDegreeEmptyCalibrationStepEnabled,
             "assumedSpatialErrorMeters":localVisualTrialAssumedSpatialErrorMeters]
+        if approachCanThenHoldEnabled {value["approachCanThenHoldEnabled"]=true}
         if holdAfterInitialEmptyLiftEnabled {value["holdAfterInitialEmptyLiftEnabled"]=true}
         if nominalModelAssumedSelfEnabled {value["nominalModelAssumedSelfEnabled"]=true}
         if sourcePixelSelfReviewEnabled {
@@ -1174,6 +1183,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               current["summarySHA256"] as? String==ROBGhostRobotModel.hash(Data(summary.utf8)),
               current["contextIdentity"] as? String==identity,
               current["permitsUnmeasuredVisualCalibrationTrial"] as? Bool==true,
+              (current["approachCanThenHoldEnabled"] as? Bool ?? false)==approachCanThenHoldEnabled,
               (current["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
               (current["nominalModelAssumedSelfEnabled"] as? Bool ?? false)==nominalModelAssumedSelfEnabled,
               current["sourcePixelSelfReviewSHA256"]as?String==currentSourcePixelEvidenceSHA256,
@@ -1182,7 +1192,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               until>Date().timeIntervalSince1970*1000 else {
             throw ROBArmRoutineError.blocked("The exact local recycling-count receipt, current camera/body/profile context or expiry changed; hold requested.")
         }
-        guard (frozen["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
+        guard (frozen["approachCanThenHoldEnabled"] as? Bool ?? false)==approachCanThenHoldEnabled,
+              (frozen["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
               (frozen["nominalModelAssumedSelfEnabled"] as? Bool ?? false)==nominalModelAssumedSelfEnabled,
               frozen["sourcePixelSelfReviewSHA256"]as?String==currentSourcePixelEvidenceSHA256,
               (frozen["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled else {
@@ -1528,6 +1539,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             activeEstimated = nil
         }
         owner = id; isRunning = true; self.summary = summary; currentLimit = limit
+        activeApproachCanThenHold = localReceiptCommand != nil && approachCanThenHoldEnabled
         activeHoldAfterInitialEmptyLift = localReceiptCommand != nil && holdAfterInitialEmptyLiftEnabled
         initialEmptyLiftHeldEvidence = nil
         collisionMap = command == "left_estimated_calibration" ? activeEstimated?.map : nil
@@ -1536,7 +1548,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         armTravelDispatched = false; jawCommandDispatched=false;jawSetupDispatchUncertain=false;servoPossiblePayloadUncertain=false;recyclingReachDispatched=false
         localReceiptHeldNeckIdentity=nil;localReceiptPerceptionFailure=false;sceneHold = [:];localCampaignRecoveryReason=nil
         passiveFeedbackPauseStarted=nil;lastHeldFeedbackDiagnostic=nil
-        activeCommand = command;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=1; recyclingGripDispatched=false; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
+        activeCommand = command;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=activeApproachCanThenHold ? 0:1; recyclingGripDispatched=false; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0;servoTelemetryHistory=[];servoEvidenceWriteError=nil;taskOpeningCommandAtMilliseconds=nil
         currentSpikeCompletionTask?.cancel();currentSpikeCompletionTask=nil
         currentSpikeEvidence=nil;previousCurrentEvidence=nil;currentSpikeEvidencePath="";currentSpikeEvidenceWriteError=nil
@@ -1570,6 +1582,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
         if localReceiptCommand != nil {
+            guard activeApproachCanThenHold==approachCanThenHoldEnabled,!activeApproachCanThenHold || !recyclingGripDispatched else {throw ROBArmRoutineError.blocked("The frozen open-jaw approach option changed or a grip was observed; no further travel is permitted.")}
             guard activeHoldAfterInitialEmptyLift==holdAfterInitialEmptyLiftEnabled else {
                 throw ROBArmRoutineError.blocked("The frozen initial-lift hold option changed; no further motion is permitted.")
             }
@@ -1787,7 +1800,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     }
 
     @MainActor private func execute(_ command: String) async throws -> NSDictionary {
-        if localReceiptCommand != nil,activeHoldAfterInitialEmptyLift {
+        if localReceiptCommand != nil,activeHoldAfterInitialEmptyLift || activeApproachCanThenHold {
             let result=try await executeSingle(command)
             var output=result as! [String:Any]
             output["batch_requested"]=requestedCanCount;output["batch_completed"]=0;output["transfer_completed"]=false
@@ -2430,7 +2443,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             update("Holding the arms still while searching and mapping the current workspace")
             let model = try workspaceModel()
             let calibrationFile = selectedCanReachCalibrationFile
-            var objects = try await ROBWorkspaceSearch.shared.run(targets: activeHoldAfterInitialEmptyLift ? [.can]:ROBWorkspaceTarget.allCases,
+            var objects = try await ROBWorkspaceSearch.shared.run(targets: (activeHoldAfterInitialEmptyLift || activeApproachCanThenHold) ? [.can]:ROBWorkspaceTarget.allCases,
                 model: model, requireDepth: true,permitsLocalCanShapePrior:{
                     guard self.localReceiptCommand != nil else {return false}
                     _ = try self.requireLocalReceipt()
@@ -2528,6 +2541,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 let planningStart = q, session = generation, camera = vision.cameraGeneration
                 let baseline = model.positions(vendorLeft:planningStart), now = Date().timeIntervalSince1970*1000
                 let visual=try visualTrial(map:map,model:model,baseline:planningStart)
+                guard !activeApproachCanThenHold || visual != nil else {throw ROBArmRoutineError.blocked("Open-jaw approach requires the native observed-jaw servo path; no alternate grasp route is permitted.")}
                 var destinationAdmissionFailure:String?
                 if let bucketPrior=bucket?.bucketShapePrior {
                     let contained=visual.map { trial in
@@ -3317,6 +3331,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     }
 
     @MainActor private func taskJaw(_ action: ROBLeftGestureProposal.JawAction, at target: [Double],beforeDispatch:(() async throws->Void)?=nil) async throws {
+        guard !activeApproachCanThenHold || action == .prepare else {throw ROBGhostMotionError.blocked("Open-jaw approach forbids close and release commands.")}
         try await holdTaskPosition(target)
         defer { taskJawTarget = nil }
         if ["recycling","recycling_grasp_hold","incremental_visual_servo_grasp_hold","recycling_carry_release"].contains(proposal?.kind ?? "") {
@@ -3561,6 +3576,24 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         return Date().timeIntervalSince1970*1000
     }
 
+    @MainActor private func approachCanThenHoldResult(readyToGrip:Bool,hasObservation:Bool) async throws -> NSDictionary? {
+        guard activeApproachCanThenHold else {return nil}
+        guard localReceiptCommand != nil,approachCanThenHoldEnabled,readyToGrip,hasObservation,!recyclingGripDispatched else {
+            throw ROBGhostMotionError.blocked("Open-jaw approach needs actual observed alignment and its frozen local scope; no close permitted.")
+        }
+        try check();try checkCollisionContext()
+        let q=try measured().positionsRadians.map(\.doubleValue)
+        try await holdTaskPosition(q)
+        try check()
+        let held=try measured().positionsRadians.map(\.doubleValue)
+        guard 1.5*zip(q,held).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {throw ROBGhostMotionError.blocked("The open-jaw approach endpoint did not remain held.")}
+        return ["status":"partial_open_jaw_approach_held","approach_can_then_hold":true,"joint_motion_measured":true,
+            "measured_positions":held,"endpoint_stopped_and_held":true,"ready_to_grip_observed":true,
+            "grip_sent":false,"transfer_completed":false,"placement_verified":false,"batch_completed":0,
+            "automatic_recovery_eligible":false,"old_waypoint_resumption_permitted":false,
+            "detail":"The complete checked entry and observed alignment reached a measured hold with jaws commanded open. No close, lift, carry or release; ZERO transfers. Physical jaw opening remains unmeasured."]
+    }
+
     @MainActor private func performIncrementalCanGrasp(_ entry:ROBLeftGestureProposal) async throws->NSDictionary {
         guard localReceiptCommand != nil,!nominalEmptyCommissioningStepEnabled,!oneDegreeEmptyCalibrationStepEnabled,
               let map=collisionMap,let model=collisionModel,let trial=entry.workspaceCollisionPlan?.context.visualTrial,
@@ -3615,6 +3648,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         guard observation.decision.readyToGrip,observation.decision.observation != nil else {
             throw ROBGhostMotionError.blocked("The bounded image-guided approach ended without observed jaw/can alignment; holding without closing.")
         }
+        if let held=try await approachCanThenHoldResult(readyToGrip:observation.decision.readyToGrip,hasObservation:observation.decision.observation != nil) {return held}
         let q=try measured().positionsRadians.map(\.doubleValue),positions=model.positions(vendorLeft:q)
         guard let tool=model.toolPosition(positions),let lift=model.solveLeft(target:tool+SIMD3(0,0,0.06),from:positions),
               let lifted=model.toolPosition(lift),abs(lifted.z-tool.z-0.06)<=0.012,hypot(lifted.x-tool.x,lifted.y-tool.y)<=0.015 else {
@@ -4192,7 +4226,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let recoveryReason=localCampaignRecoveryReason
         let canAutoRecover=currentSpikeEvidence==nil && localJob && recoveryReason != nil && recoveryCampaignID != nil &&
             !recyclingGripDispatched && !jawSetupDispatchUncertain && !servoPossiblePayloadUncertain &&
-            !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled && !activeHoldAfterInitialEmptyLift
+            !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled && !activeHoldAfterInitialEmptyLift && !activeApproachCanThenHold
         var preserveLocalReceipt=false
         if localJob,!armTravelDispatched,!recyclingReachDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,failure==nil {
             let perception=["not_found","not_localized","not_reachable","needs_help"].contains(result["status"] as? String ?? "") || localReceiptPerceptionFailure
@@ -4314,6 +4348,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
         owner = nil; isRunning = false; task = nil; proposal = nil;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; proposalStep = -1; reviewedDispatchStart = nil
+        activeApproachCanThenHold=false
         activeHoldAfterInitialEmptyLift=false;initialEmptyLiftHeldEvidence=nil
         activeCommand = ""; recyclingCan=nil; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         localReceiptCommand=nil;localReceiptEvidence=nil;localReceiptContextIdentity=nil;localReceiptHeldNeckIdentity=nil

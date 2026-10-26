@@ -512,6 +512,7 @@ struct ROBTableRelayInitialEmptyEvidence {
         let contextIdentity: String
         let permitsUnmeasuredVisualCalibrationTrial: Bool
         let nominalEmptyCommissioningStepEnabled: Bool
+        let approachCanThenHoldEnabled:Bool
         let nominalModelAssumedSelfEnabled: Bool
         let sourcePixelSelfReviewSHA256:String?
         let oneDegreeEmptyCalibrationStepEnabled: Bool
@@ -524,6 +525,7 @@ struct ROBTableRelayInitialEmptyEvidence {
              "permitsUnmeasuredVisualCalibrationTrial": permitsUnmeasuredVisualCalibrationTrial,
              "nominalEmptyCommissioningStepEnabled": nominalEmptyCommissioningStepEnabled,
              "oneDegreeEmptyCalibrationStepEnabled": oneDegreeEmptyCalibrationStepEnabled]
+            if approachCanThenHoldEnabled {value["approachCanThenHoldEnabled"]=true}
             if nominalModelAssumedSelfEnabled {value["nominalModelAssumedSelfEnabled"]=true}
             if let sourcePixelSelfReviewSHA256 {value["sourcePixelSelfReviewSHA256"]=sourcePixelSelfReviewSHA256}
             return value
@@ -582,14 +584,16 @@ struct ROBTableRelayInitialEmptyEvidence {
         permitsUnmeasuredVisualCalibrationTrial: Bool = false,
         nominalEmptyCommissioningStepEnabled: Bool = false,
         nominalModelAssumedSelfEnabled: Bool = false,
+        approachCanThenHoldEnabled:Bool = false,
         sourcePixelSelfReviewSHA256:String? = nil,
         oneDegreeEmptyCalibrationStepEnabled: Bool = false,
         execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
         cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
         #if !DEBUG
-        guard sourcePixelSelfReviewSHA256==nil else {completion(["status":"rejected","detail":"Experimental source-pixel commissioning is DEBUG-only."]);return}
+        guard sourcePixelSelfReviewSHA256==nil,!approachCanThenHoldEnabled else {completion(["status":"rejected","detail":"Experimental source-pixel commissioning is DEBUG-only."]);return}
         #endif
+        guard !approachCanThenHoldEnabled || (arm=="right" && receiptOnly && permitsUnmeasuredVisualCalibrationTrial && !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled && !nominalModelAssumedSelfEnabled && sourcePixelSelfReviewSHA256==nil) else {completion(["status":"rejected","detail":"Open-jaw approach needs its separate exact DEBUG local scope."]);return}
         guard sourcePixelSelfReviewSHA256.map({$0.count==64 && $0.allSatisfy{$0.isHexDigit && !$0.isUppercase} &&
                   nominalEmptyCommissioningStepEnabled && !nominalModelAssumedSelfEnabled && !oneDegreeEmptyCalibrationStepEnabled &&
                   arm=="right" && receiptOnly && permitsUnmeasuredVisualCalibrationTrial}) ?? true,
@@ -606,7 +610,7 @@ struct ROBTableRelayInitialEmptyEvidence {
         let scope = LocalRecyclingScope(command: command, arm: arm, canCount: canCount, summary: summary, contextIdentity: identity,
             permitsUnmeasuredVisualCalibrationTrial: permitsUnmeasuredVisualCalibrationTrial,
             nominalEmptyCommissioningStepEnabled: nominalEmptyCommissioningStepEnabled,
-            nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,
+            approachCanThenHoldEnabled:approachCanThenHoldEnabled,nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,
             sourcePixelSelfReviewSHA256:sourcePixelSelfReviewSHA256,
             oneDegreeEmptyCalibrationStepEnabled: oneDegreeEmptyCalibrationStepEnabled)
         request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm == "right" ? "both" : "left", "summary": summary],

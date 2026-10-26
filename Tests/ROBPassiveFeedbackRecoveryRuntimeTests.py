@@ -44,6 +44,7 @@ final class Gateway {
  var passiveFeedbackPauseStarted:Double?,lastHeldFeedbackDiagnostic:String?,lastRecordingPath="",phase="passive search"
  var waiting=Set<UInt64>(),acks:[UInt64:Bool]=[:],holdConfirmations:[UInt64:Bool]=[:],dispatches=0
  static let neckOnlyCommands=Set<String>()
+ var activeApproachCanThenHold=false,approachCanThenHoldEnabled=false
  var failure:String?,activeHoldAfterInitialEmptyLift=false,holdAfterInitialEmptyLiftEnabled=false,sourcePixelSelfReviewEnabled=false
  struct PixelView {let physicalLeftBaseline=Array(repeating:0.0,count:7)}
  var sourcePixelCurrentView:PixelView?,physicalSide="right",summary="test",activeCommand="left_recycle_can"

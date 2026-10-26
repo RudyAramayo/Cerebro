@@ -462,6 +462,22 @@ final class ROBAmberGatewayClient: NSObject {
         }
         do {
             let b=localBroker();var executed=0,rejected=false
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:"DEBUG open-jaw approach then hold before close",
+                contextIdentity:{"inert-approach-context"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                approachCanThenHoldEnabled:true,execute:{_ in executed+=1},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            #if DEBUG
+            check(b.pendingLocalRecyclingApprovalScope?["approachCanThenHoldEnabled"]as?Bool==true,"Approach hold must be explicit immutable receipt scope")
+            let wrong=try receipt(b){value in var scope=value["scope"]as![String:Any];scope.removeValue(forKey:"approachCanThenHoldEnabled");value["scope"]=scope}
+            expectReceiptRejection(b,wrong,"Ordinary receipt cannot authorize approach-only scope")
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt(b))
+            check(executed==1 && b.activeLocalRecyclingApprovalEvidence?["approachCanThenHoldEnabled"]as?Bool==true,"Exact approach receipt starts once and preserves scope")
+            b.cancel(reason:"fixture Stop")
+            #else
+            check(rejected && executed==0 && b.pendingLocalRecyclingApprovalScope==nil,"Approach-only mode is DEBUG-only")
+            #endif
+        }
+        do {
+            let b=localBroker();var executed=0,rejected=false
             let summary="DEBUG LLM reviewed source pixels freshly matched; ONE EMPTY J2 step only"
             let evidence=String(repeating:"a",count:64)
             b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:summary,
