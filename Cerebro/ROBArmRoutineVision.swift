@@ -1170,7 +1170,7 @@ struct ROBWorkspaceCanSelection {
     /// old return or promotes a projected cell into observed free space.
     @MainActor @nonobjc func captureBlockerCoverage(blocker:ROBWorkspaceUnknownCellBlocker,
         continuing snapshot:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,generation:UInt64,
-        attempted:[ROBWorkspaceView],deadlineUptime:Double,check:() throws ->Void,progress:(String)->Void)
+        attempted:[ROBWorkspaceView],deadlineUptime:Double,recordStage:(String)->Void,check:() throws ->Void,progress:(String)->Void)
         async throws ->(snapshot:ROBWorkspaceCollisionSnapshot,view:ROBWorkspaceView)? {
         let vision=ROBArmRoutineVision.shared,controller=ROBFixedHeadCalibrationWindowController.shared
         try check();try Task.checkCancellation()
@@ -1293,10 +1293,12 @@ struct ROBWorkspaceCanSelection {
             record("no_new_view","No unused bounded camera view projects the entire blocked cell inside the calibrated image.")
             return nil
         }
+        recordStage("candidate_selected")
         diagnostic["pan"]=view.panDegrees;diagnostic["upper"]=view.upperTarget
         diagnostic["predicted_raw_pan"]=rawPan
         progress("Checking the blocked \(blocker.link) region from a new camera view.")
         do {
+            recordStage("settle_started")
             var settledSince:Double?
             while true {
                 try requireContext()
@@ -1311,9 +1313,12 @@ struct ROBWorkspaceCanSelection {
                 } else {settledSince=nil}
                 try await Task.sleep(nanoseconds:100_000_000)
             }
+            recordStage("settled")
+            recordStage("seed_started")
             var map=try ROBWorkspaceDepthMap(continuing:snapshot,modelID:model.modelID,geometryID:model.geometryID,
                 mappingID:model.selectedMappingID,sessionGeneration:generation,cameraGeneration:snapshot.cameraGeneration,
                 estimatedCameraProjectionIdentity:projection)
+            recordStage("seed_complete")
             var heldScope:ROBFixedHeadRegistrationScope?,previous=snapshot.observations.last?.sequence ?? 0
             var previousCapture=snapshot.lastCapturedAtMilliseconds,frames:[[String:Any]]=[],expired=0
             func requireHeldView()throws {
@@ -1328,7 +1333,9 @@ struct ROBWorkspaceCanSelection {
             while frames.count<2 {
                 try requireHeldView()
                 guard ProcessInfo.processInfo.systemUptime<deadline else {throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage expired before two advancing depth exposures.")}
+                recordStage("frame_wait")
                 let frame=try await vision.settledDepthFrame(deadlineUptime:deadline)
+                recordStage("frame_received")
                 try requireHeldView()
                 guard ProcessInfo.processInfo.systemUptime<deadline,frame.sequence>previous,frame.capturedAt>previousCapture,
                       frame.cameraGeneration==snapshot.cameraGeneration,let pixels=frame.depth,let intrinsics=frame.intrinsics,
@@ -1346,6 +1353,7 @@ struct ROBWorkspaceCanSelection {
                 guard projectionContext.identity==projection,projectionContext.lowerTarget==6011 else {throw ROBWorkspaceDepthMapError.invalidFrame}
                 let input=map
                 do {
+                    recordStage("append_started")
                     map=try await Task.detached(priority:.userInitiated){
                         var next=input
                         try next.append(width:width,height:height,fx:intrinsics.fx,fy:intrinsics.fy,cx:intrinsics.cx,cy:intrinsics.cy,
@@ -1356,6 +1364,7 @@ struct ROBWorkspaceCanSelection {
                             estimatedCameraProjectionIdentity:projection)
                         return next
                     }.value
+                    recordStage("append_complete")
                 } catch {
                     try requireHeldView()
                     guard let typed=error as?ROBWorkspaceDepthMapError,case .expiredAtProjection=typed,expired<2,
@@ -1363,13 +1372,19 @@ struct ROBWorkspaceCanSelection {
                     expired+=1;continue
                 }
                 try requireHeldView()
+                recordStage("roi_started")
+                let roi=blockerDepthDiagnostic(pixels:pixels,intrinsics:intrinsics,matrix:projectionContext.matrix)
+                recordStage("roi_complete")
                 frames.append(["sequence":NSNumber(value:frame.sequence),"captured_at_ms":frame.capturedAt,
                     "pan":view.panDegrees,"raw_pan":scope.panTarget,"lower":scope.lowerTarget,"upper":scope.upperTarget,
-                    "blocker_depth_roi":blockerDepthDiagnostic(pixels:pixels,intrinsics:intrinsics,matrix:projectionContext.matrix)])
+                    "blocker_depth_roi":roi])
                 diagnostic["frames"]=frames
             }
             let input=map
-            guard let result=await Task.detached(priority:.userInitiated,operation:{input.snapshot()}).value else {
+            recordStage("freeze_started")
+            let frozen=await Task.detached(priority:.userInitiated,operation:{input.snapshot()}).value
+            recordStage("freeze_complete")
+            guard let result=frozen else {
                 throw ROBWorkspaceDepthMapError.invalidFrame
             }
             try requireHeldView()
@@ -1380,6 +1395,7 @@ struct ROBWorkspaceCanSelection {
             diagnostic["after_map_fingerprint"]=result.fingerprint
             diagnostic["after_state_raw"]=result.state(at:blocker.center).rawValue
             diagnostic["observed_frames"]=result.observedFrameCount
+            recordStage("publish")
             collisionSnapshotValue=result;collisionSnapshotModel=model
             record("captured","Two original fresh RGB-D exposures appended; only the ordinary full path review may admit motion.")
             return (result,view)

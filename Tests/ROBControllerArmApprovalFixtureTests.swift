@@ -972,6 +972,170 @@ final class ROBAmberGatewayClient: NSObject {
             b.cancel(reason: "Fixture cleanup")
         }
 
+        // These exact words are synthetic object-state fixture input, not a
+        // microphone callback or another arm-motion approval.
+        func uncertainObjectStateBroker(_ label:String)throws->ROBControllerArmApproval {
+            let old=localBroker();old.standingCanCampaignDirectory=localDirectory.appendingPathComponent("empty-observation-"+label)
+            try old.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(old))
+            old.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,
+                summary:"Synthetic old job with uncertain contents",contextIdentity:{"old-job-context"},receiptOnly:true,
+                permitsUnmeasuredVisualCalibrationTrial:true,execute:{_ in},cancel:{},completion:{_ in})
+            try old.recordLocalCanCampaignTransferProgress(1,bucketLandingVerified:true)
+            try old.markLocalCanCampaignPossiblePayloadHeld()
+            let stateURL=old.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            value["recoveryAttempts"]=2
+            // Reproduce the crash guard's old-executing OR even when its
+            // explicit payload flag was still false before the interruption.
+            if label=="positive" {value["possiblePayloadHeld"]=false}
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:stateURL)
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=old.standingCanCampaignDirectory
+            return restarted
+        }
+        func emptyObservationFile(_ b:ROBControllerArmApproval,mutate:(inout[String:Any])->Void={_ in})throws->URL {
+            let file=localDirectory.appendingPathComponent(UUID().uuidString+"-empty-observation.json")
+            try b.exportLocalCanCampaignEmptyObservationTemplate(to:file)
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:file))as![String:Any]
+            value["sourceMessage"]="Both grippers are empty";value["sourceMessageSHA256"]=hash("Both grippers are empty")
+            mutate(&value)
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:file)
+            return file
+        }
+        do {
+            let b=try uncertainObjectStateBroker("positive"),stateURL=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            let before=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            let campaign=before["campaignID"]as!String,authorizationURL=b.standingCanCampaignDirectory.appendingPathComponent("authorization-"+campaign+".json")
+            let authorization=try Data(contentsOf:authorizationURL),holds=ROBAmberGatewayClient.shared.holds
+            var commands=0,prompts=0
+            b.send={_,_,_ in commands+=1;return true};b.announceApproval={_ in prompts+=1}
+            check(b.canImportLocalCanCampaignEmptyObservation && b.standingCanCampaignMayHoldPayload,
+                "Previous-app execution remains uncertain until actual object-state evidence")
+            let file=try emptyObservationFile(b)
+            check(b.standingCanCampaignMayHoldPayload && !b.isPending,"Export alone cleared contents or started work")
+            try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:file)
+            let after=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            let mutable:Set<String>=["possiblePayloadHeld","state","detail"]
+            let beforePreserved=before.filter{!mutable.contains($0.key)},afterPreserved=after.filter{!mutable.contains($0.key)}
+            let beforeBytes=try JSONSerialization.data(withJSONObject:beforePreserved,options:.sortedKeys)
+            let afterBytes=try JSONSerialization.data(withJSONObject:afterPreserved,options:.sortedKeys)
+            check(beforeBytes==afterBytes,
+                "EMPTY fact changed campaign authorization, transfer counts, attempts or job history")
+            check(after["state"]as?String=="paused" && after["possiblePayloadHeld"]as?Bool==false &&
+                !b.standingCanCampaignMayHoldPayload && !b.canImportLocalCanCampaignEmptyObservation,
+                "Previous executing-state uncertainty reasserted after the explicit EMPTY fact")
+            check(!b.isPending && b.standingLocalCanCampaignActive && commands==0 && prompts==0 &&
+                ROBAmberGatewayClient.shared.holds==holds && !b.authorizesRightArmTrial("invented"),
+                "Object-state import created motion authority, spoke approval or issued a command")
+            let retainedAuthorization=try Data(contentsOf:authorizationURL)
+            check(retainedAuthorization==authorization &&
+                !FileManager.default.fileExists(atPath:b.standingCanCampaignDirectory.appendingPathComponent("terminal-"+campaign+".json").path),
+                "Object-state evidence rewrote authorization or terminal history")
+            let receipt=try JSONSerialization.jsonObject(with:Data(contentsOf:file))as![String:Any]
+            let auditURL=b.localRecyclingApprovalAuditDirectory.appendingPathComponent("empty-observation-"+(receipt["observationID"]as!String)+".json")
+            let audit=try JSONSerialization.jsonObject(with:Data(contentsOf:auditURL))as![String:Any]
+            check(audit["source"]as?String=="explicit_user_observation" && audit["sourceMessage"]as?String=="Both grippers are empty" &&
+                audit["motionAuthority"]as?Bool==false && audit["taskStarted"]as?Bool==false && audit["previousPossiblePayloadHeld"]as?Bool==true,
+                "Object-state audit lost truthful source or claimed task authority")
+            let permissions=try FileManager.default.attributesOfItem(atPath:auditURL.path)[.posixPermissions]as?NSNumber
+            check(permissions?.intValue==0o600,"Object-state audit is not private0600")
+            do {try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:file);check(false,"Object observation replay imported")}
+            catch {check(!b.isPending && !b.standingCanCampaignMayHoldPayload,"Replay changed EMPTY fact or started a task")}
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(!restarted.standingCanCampaignMayHoldPayload && restarted.standingLocalCanCampaignActive && !restarted.isPending,
+                "Recorded EMPTY fact did not survive relaunch independently of motion authority")
+            do {try restarted.importLocalCanCampaignEmptyObservation(fromReceiptURL:file);check(false,"Prior-app observation replay imported")}
+            catch {check(!restarted.isPending,"Prior-app replay started a task")}
+        }
+        for invalid in ["stale","future","app","campaign","authorization","state_hash","last_job","last_job_app","nonce",
+            "mic_source","model_source","message","hash","observation","scope","extra","nonce_expired","permissions","symlink","state_changed","pending","current_executing","revoked","consumed","audit_failure"] {
+            let b=try uncertainObjectStateBroker(invalid),stateURL=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var clock=b.now();b.now={clock}
+            let file=try emptyObservationFile(b){value in
+                switch invalid {
+                case "stale":value["issuedAtMilliseconds"]=clock.timeIntervalSince1970*1000-600_001
+                case "future":value["issuedAtMilliseconds"]=clock.timeIntervalSince1970*1000+1
+                case "app":value["appSessionID"]=UUID().uuidString
+                case "campaign":value["campaignID"]=UUID().uuidString
+                case "authorization":value["authorizationSHA256"]=String(repeating:"0",count:64)
+                case "state_hash":value["standingStateSHA256"]=String(repeating:"0",count:64)
+                case "last_job":value["lastJobID"]="other-job"
+                case "last_job_app":value["lastJobAppSessionID"]=UUID().uuidString
+                case "nonce":value["observationID"]=UUID().uuidString
+                case "mic_source":value["source"]="final_clean_local_microphone"
+                case "model_source":value["source"]="model_output"
+                case "message":value["sourceMessage"]="yes proceed";value["sourceMessageSHA256"]=hash("yes proceed")
+                case "hash":value["sourceMessageSHA256"]=String(repeating:"0",count:64)
+                case "observation":value["observation"]="left_gripper_empty"
+                case "scope":var scope=value["scope"]as![String:Any];scope["armTravel"]=true;value["scope"]=scope
+                case "extra":value["newAuthority"]=true
+                default:break
+                }
+            }
+            var input=file
+            if invalid=="nonce_expired" {clock.addTimeInterval(601)}
+            if invalid=="permissions" {try FileManager.default.setAttributes([.posixPermissions:0o644],ofItemAtPath:file.path)}
+            if invalid=="symlink" {
+                input=localDirectory.appendingPathComponent(UUID().uuidString+"-observation-link.json")
+                try FileManager.default.createSymbolicLink(at:input,withDestinationURL:file)
+            }
+            if invalid=="state_changed" || invalid=="current_executing" {
+                var value=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+                if invalid=="state_changed" {value["recoveryAttempts"]=1}
+                else {value["lastJobAppSessionID"]=b.localRecyclingApprovalSessionID}
+                try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:stateURL)
+            }
+            if invalid=="pending" {b.request(operation:"manual",arm:"right",summary:"Synthetic pending task",execute:{_ in check(false,"Pending observation test executed")},cancel:{},completion:{_ in})}
+            if invalid=="revoked" {b.cancel(reason:"Synthetic Stop before importing the fact")}
+            if invalid=="consumed" {
+                var value=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+                value["state"]="consumed";value["completedTransfers"]=4
+                try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:stateURL)
+            }
+            if invalid=="audit_failure" {
+                let blocker=localDirectory.appendingPathComponent(UUID().uuidString+"-audit-is-file")
+                try Data("not-a-directory".utf8).write(to:blocker);b.localRecyclingApprovalAuditDirectory=blocker
+            }
+            let before=try Data(contentsOf:stateURL),holds=ROBAmberGatewayClient.shared.holds
+            do {try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:input);check(false,"Invalid object-state receipt accepted: "+invalid)}
+            catch {
+                let retained=try Data(contentsOf:stateURL)
+                check(retained==before && b.standingCanCampaignMayHoldPayload && ROBAmberGatewayClient.shared.holds==holds,
+                    "Rejected observation changed contents/evidence or issued a command: "+invalid)
+            }
+        }
+        for state in ["active","paused","recovering"] {
+            let b=try uncertainObjectStateBroker("eligible-"+state),url=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            value["state"]=state;try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:url)
+            check(b.canImportLocalCanCampaignEmptyObservation,"Eligible uncertain nonexecuting state lacked the object-state observation path")
+            try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:emptyObservationFile(b))
+            check(!b.standingCanCampaignMayHoldPayload && !b.isPending && b.standingLocalCanCampaignState?["state"]as?String=="paused",
+                "Object-state observation resumed a nonexecuting campaign")
+        }
+        do {
+            let b=try uncertainObjectStateBroker("intervening-operation"),file=try emptyObservationFile(b)
+            var done:((NSDictionary)->Void)?
+            b.request(operation:"manual",arm:"right",summary:"Synthetic intervening operation",execute:{done=$0},cancel:{},completion:{_ in})
+            check(b.receiveSpokenAuthorization("yes proceed") && done != nil,"Synthetic intervening operation did not start")
+            done?(["status":"completed"])
+            check(!b.isPending,"Synthetic intervening operation did not finish")
+            do {try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:file);check(false,"An old object observation crossed an intervening arm operation")}
+            catch {check(b.standingCanCampaignMayHoldPayload && !b.isPending,"Old object fact changed uncertainty after another operation")}
+        }
+        do {
+            let b=localBroker();try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            var restarts=0
+            check(b.scheduleStandingLocalCanCampaignRecovery(reason:.transportLost,restart:{restarts+=1}),"Synthetic recovery did not queue")
+            let url=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            value["possiblePayloadHeld"]=true;try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:url)
+            try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:emptyObservationFile(b))
+            RunLoop.current.run(until:Date().addingTimeInterval(1.1))
+            check(restarts==0 && !b.isPending && !b.standingCanCampaignMayHoldPayload &&
+                (b.standingLocalCanCampaignState?["recoveryAttempts"]as?NSNumber)?.intValue==1,
+                "Import started queued recovery or reset its attempt count")
+        }
+
         // Global typed Stop is authenticated independently of a task/card ID.
         // The notification consumer owns physical both-arm hold; this broker can
         // truthfully report only that Stop was requested and authority revoked.

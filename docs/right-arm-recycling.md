@@ -53,12 +53,27 @@ recording gets a `coverage-recovery.json` audit with the attempted views,
 before/after cell states and map fingerprints. Capture diagnostics also retain
 bounded same-frame depth statistics for the projected cell region. None of
 these records grants motion or claims camera-to-arm registration.
+The adjacent `coverage-stages.log` records capture phases before and after
+settling, seeding, each append, ROI inspection and freezing, so an aborted
+process can be distinguished from an ordinary rejected observation.
 
 Hardware-free validation uses `Tests/ROBLeftArmCoverageRecoveryRuntimeTests.py`,
 `Tests/ROBWorkspaceBlockerCoverageCaptureRuntimeTests.py` and
 `Scripts/test-workspace-depth-map.sh`. These exercise the actual recovery,
 capture and mapper paths with inert camera/robot seams; they do not establish a
 successful physical grasp.
+
+After an interrupted job, possible possession remains separate from task
+authorization. An actual written user observation that **both grippers are
+empty** may be recorded using the sandbox's private empty-hand observation
+template/import actions. The receipt binds the current app, campaign, exact
+standing state, previous job and a unique expiring observation challenge. It
+accepts the user's observation text and hash, records an immutable object-state
+audit, and leaves the same campaign paused. It does not approve motion, start a
+job, calibrate/open jaws, credit a transfer or replay a waypoint. Fresh feedback,
+scene and complete path review still precede a later Run. A changed job/state,
+replayed or stale observation, non-user source or active manipulation rejects
+the import. This is an operator observation rather than a camera verification.
 
 Before closing, a fresh detector observation and aligned depth must still agree
 with the frozen can. A significant displacement stops closing. The task may

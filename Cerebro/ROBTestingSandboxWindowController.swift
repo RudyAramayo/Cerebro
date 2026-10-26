@@ -20,13 +20,13 @@ import UniformTypeIdentifiers
     }
     private static let trials: [Trial] = [
         Trial(id: "right-recycling", title: "Recycle can · right arm", detail: "Use ROB's physical right arm (Amber L10). Find an empty upright can, grasp its middle, verify a small lift with fixed-head visual evidence, then carry and gravity-drop above the bucket. Right-arm calibration is separate from left-arm reach tuning. One task approval covers both arms holding at their measured positions and only the right arm travelling.", parameters: .current,
-              actions: [Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Recycle selected cans", command: "right_recycle_cans"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
+              actions: [Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Export empty-hand observation template…", command: "local-recycling:empty-observation-export"), Action(title: "Import empty-hand observation…", command: "local-recycling:empty-observation-import"), Action(title: "Recycle selected cans", command: "right_recycle_cans"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
         Trial(id: "fixed-head-registration", title: "Camera-to-arm registration", detail: "Measure a local camera-to-robot transform from current RGB-D robot surfaces. Hold the exact head pose; fit and held-out validation use separate surface patches and later frames. A validated fit records its uncertainty and bounded volume. This test never moves an arm and does not manufacture a motion approval.", parameters: .none,
               actions: [Action(title: "Open fixed-head calibration…", command: "registration:open")]),
         Trial(id: "right-estimated-calibration", title: "Right-arm calibration step", detail: "Review one empty-right-arm two-joint retreat away from the table, then hold. The four-second step is capped at 3 cm of full-model travel. It is an estimated commissioning test, with existing modeled self-proxy overlaps required to improve. It does not close the jaws, recycle a can or claim a general arm calibration. Inspect the physical local clearance and ghost before one spoken or controller approval.", parameters: .none,
               actions: [Action(title: "Capture / preview right calibration step", command: "right_estimated_preview"), Action(title: "Inspect estimated ghost…", command: "ghost:collision"), Action(title: "Run reviewed right calibration step", command: "right_estimated_trial")]),
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
-              actions: [Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Recycle selected cans", command: "left_recycle_cans"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
+              actions: [Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Export empty-hand observation template…", command: "local-recycling:empty-observation-export"), Action(title: "Import empty-hand observation…", command: "local-recycling:empty-observation-import"), Action(title: "Recycle selected cans", command: "left_recycle_cans"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
         Trial(id: "depth-alignment", title: "Depth alignment", detail: "Adjust the face camera's modeled downward mounting angle and move head-camera depth points horizontally toward ROB. The camera model, live depth view, new workspace scans and object measurements share the pitch correction. Previous scans and previews are cleared when the values change.", parameters: .depthAlignment,
               actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
         Trial(id: "neck-qr-calibration", title: "Neck / QR calibration", detail: "Select a fixed 120 mm table, floor or wall target. Upper-neck checks start from the current view with lower target 6011 and hold pan fixed. Each selected upper target is checked against the QR, including reverse visits. Protractor mode holds each position until you advance. Posture sweeps repeat pan/upper checks at upright, back and forward lower-neck targets. Keep ROB's base and the target fixed. Results remain unverified until independent measurements validate them.", parameters: .none,
@@ -236,6 +236,7 @@ import UniformTypeIdentifiers
             detailStack.addArrangedSubview(standingCampaignInfo)
             standingCampaignInfo.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
             addHelp("Import this campaign's standing authorization once, then Run. New plans bind fresh robot context without another approval. After Stop, ‘proceed with protections’ starts a new authorization through the local microphone. Connection recovery retries a new plan at most three times. Stop holds the arms; no lowering or old waypoint resumes automatically.")
+            addHelp("Record an actual observation that both grippers are empty; this does not approve or start motion.")
             addField("recyclingCount", "Number of cans", Double(Self.recyclingCount),
                 note: "1–\(ROBRecyclingBatchRequest.maximumCount) · each can is checked again")
             addField("localVisualAllowanceMillimeters", "Assumed visual error (mm)",
@@ -421,6 +422,8 @@ import UniformTypeIdentifiers
         if command == "local-recycling:prepare" { prepareLocalRecyclingSessionJob(); return }
         if command == "local-recycling:standing-import" { importStandingCanCampaign(); return }
         if command == "local-recycling:standing-run" { runStandingCanCampaign(); return }
+        if command == "local-recycling:empty-observation-export" { exportEmptyHandObservationTemplate(); return }
+        if command == "local-recycling:empty-observation-import" { importEmptyHandObservation(); return }
         if command == "belly-qr:open" {
             ROBBellyQRCalibrationWindowController.shared.showWindow(self); return
         }
@@ -490,6 +493,46 @@ import UniformTypeIdentifiers
         do {
             try ROBControllerArmApproval.shared.importLocalCanCampaignAuthorization(fromReceiptURL: url)
             parameterMessage = "Standing authorization imported. Run starts a fresh can plan; import sends no motion."
+        } catch { parameterMessage = error.localizedDescription }
+        refresh()
+    }
+    private var emptyHandObservationFilesEnabled: Bool {
+        canEdit && ["recycling", "right-recycling"].contains(selectedTrial.id)
+            && ROBControllerArmApproval.shared.canImportLocalCanCampaignEmptyObservation
+    }
+    private func exportEmptyHandObservationTemplate() {
+        guard emptyHandObservationFilesEnabled else { return }
+        let panel = NSSavePanel(); panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "rob-empty-hand-observation-template.json"
+        panel.title = "Export empty-hand observation template"
+        panel.message = "Record an actual observation that both grippers are empty; this does not approve or start motion."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard emptyHandObservationFilesEnabled else {
+            parameterMessage = "The campaign or active operation changed while choosing the file. No observation was exported."; refresh(); return
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try ROBControllerArmApproval.shared.exportLocalCanCampaignEmptyObservationTemplate(to: url)
+            parameterMessage = "Exported the private empty-hand observation template. Record the actual observation, then import it. No motion was approved or started."
+        } catch { parameterMessage = error.localizedDescription }
+        refresh()
+    }
+    private func importEmptyHandObservation() {
+        guard emptyHandObservationFilesEnabled else { return }
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.title = "Import empty-hand observation"
+        panel.message = "Record an actual observation that both grippers are empty; this does not approve or start motion."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard emptyHandObservationFilesEnabled else {
+            parameterMessage = "The campaign or active operation changed while choosing the file. No observation was imported."; refresh(); return
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try ROBControllerArmApproval.shared.importLocalCanCampaignEmptyObservation(fromReceiptURL: url)
+            parameterMessage = "Recorded the actual empty-gripper observation. This did not approve, resume or start arm motion."
         } catch { parameterMessage = error.localizedDescription }
         refresh()
     }
@@ -744,6 +787,8 @@ import UniformTypeIdentifiers
                 && selectedTrial.actions[button.tag].command == "qr:next"
             button.isEnabled = ["local-recycling:export", "local-recycling:import"].contains(command)
                 ? localReceiptFilesEnabled
+                : ["local-recycling:empty-observation-export", "local-recycling:empty-observation-import"].contains(command)
+                    ? emptyHandObservationFilesEnabled
                 : command == "local-recycling:standing-run" ? canEdit && ROBControllerArmApproval.shared.standingLocalCanCampaignActive
                 : isQRStop || (isQRNext ? ROBNeckQRCalibration.shared.awaitingProtractor : canEdit)
         }

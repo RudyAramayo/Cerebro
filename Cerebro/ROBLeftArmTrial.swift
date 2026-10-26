@@ -2226,6 +2226,28 @@ enum ROBArmCurrentSpikeRecording {
         return true
     }
 
+    /// Private breadcrumbs survive a process abort without serializing a
+    /// partially built map. Logging never grants or resumes motion.
+    private func recordCoverageStage(_ stage:String) {
+        guard !lastRecordingPath.isEmpty,stage.utf8.count<=512 else {return}
+        let path=URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension("coverage-stages.log")
+        do {
+            if !FileManager.default.fileExists(atPath:path.path) {
+                guard FileManager.default.createFile(atPath:path.path,contents:nil,attributes:[.posixPermissions:0o600]) else {
+                    throw ROBArmRoutineError.blocked("Could not create the private coverage stage log.")
+                }
+            }
+            let handle=try FileHandle(forWritingTo:path)
+            defer {try?handle.close()}
+            try handle.seekToEnd()
+            let line=String(format:"%.3f",Date().timeIntervalSince1970*1000)+" "+stage+"\n"
+            try handle.write(contentsOf:Data(line.utf8))
+        } catch {
+            var status=collisionReviewStatus as? [String:Any] ?? [:]
+            status["coverage_stage_write_error"]=error.localizedDescription;collisionReviewStatus=status as NSDictionary
+        }
+    }
+
     /// Only neck observations may mitigate an unknown-cell preflight failure.
     /// Every attempt rebuilds the complete proof from original retained rays;
     /// neither the diagnostic nor a selected view grants arm travel.
@@ -2286,6 +2308,7 @@ enum ROBArmCurrentSpikeRecording {
                 let before=map
                 guard let capture=try await ROBWorkspaceSearch.shared.captureBlockerCoverage(blocker:blocker,continuing:map,
                     model:model,generation:generation,attempted:attempted,deadlineUptime:recoveryDeadline,
+                    recordStage:{self.recordCoverageStage($0)},
                     check:{try self.check()},progress:{self.update($0)}) else {
                     outcome="no_distinct_observable_view"
                     evidence.append(["status":outcome,"blocked_link":blocker.link,

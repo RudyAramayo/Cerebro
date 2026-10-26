@@ -66,7 +66,7 @@ let occupiedDetail="right_five_Link approaches an observed obstacle; no path was
     func reset() {calls=[];mode="normal";duringCapture=nil}
     func captureBlockerCoverage(blocker:ROBWorkspaceUnknownCellBlocker,
         continuing snapshot:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,generation:UInt64,
-        attempted:[ROBWorkspaceView],deadlineUptime:Double,check:() throws ->Void,progress:(String)->Void)
+        attempted:[ROBWorkspaceView],deadlineUptime:Double,recordStage:(String)->Void,check:() throws ->Void,progress:(String)->Void)
         async throws ->(snapshot:ROBWorkspaceCollisionSnapshot,view:ROBWorkspaceView)? {
         precondition(blocker.link=="right_five_Link" && blocker.voxel.x == -4)
         precondition(generation==1 && deadlineUptime>ProcessInfo.processInfo.systemUptime)
@@ -133,6 +133,7 @@ let occupiedDetail="right_five_Link approaches an observed obstacle; no path was
         return .init(mapFingerprint:map.fingerprint,baseline:baseline)
     }
     func update(_ detail:String) {updates.append(detail)}
+    func recordCoverageStage(_ stage:String) {}
     func publishCollisionReview(map:ROBWorkspaceCollisionSnapshot,detail:String) {publishedMaps.append(map.fingerprint)}
     __ACTUAL_RECOVERY__
     func run(_ map:ROBWorkspaceCollisionSnapshot = .init())async throws

@@ -60,6 +60,21 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     private var standingRecovery: DispatchWorkItem?
     private var standingRecoveryToken = UUID()
     private var standingIOFailure: String?
+    private struct EmptyObservationContext {
+        let observationID:UUID,campaignID:UUID,authorizationSHA256:String,stateSHA256:String
+        let lastJobID:String?,lastJobAppSessionID:UUID?,createdAtMilliseconds:Double
+    }
+    private struct EmptyObservationReceipt:Decodable {
+        let schemaVersion:Int,kind:String,observationID:UUID,appSessionID:UUID,campaignID:UUID
+        let authorizationSHA256:String,standingStateSHA256:String
+        let lastJobID:String?,lastJobAppSessionID:UUID?
+        let source:String,sourceMessage:String,sourceMessageSHA256:String,observation:String
+        let issuedAtMilliseconds:Double
+    }
+    private var pendingEmptyObservation:EmptyObservationContext?
+    private static var emptyObservationScope:[String:Any] {
+        ["arms":["left","right"],"objectStateOnly":true,"armTravel":false,"gripperCommands":false,"resume":false]
+    }
     private static func standingScope(canCount: Int, legacy: Bool) -> [String: Any] {
         ["canCount": canCount, "targetObject": "empty_coke_can", "destination": "orange_bucket", "arms": ["left", "right"],
          "treads": false, "torso": false, "manualGestures": false, "permitsUnmeasuredVisualCalibrationTrial": true,
@@ -197,6 +212,92 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     }
     private func standingMayHoldPayload(_ s: StandingState) -> Bool {
         (s.possiblePayloadHeld ?? true) || (s.state == "executing" && s.lastJobAppSessionID != localSessionID)
+    }
+    private func emptyObservationState()->StandingState? {
+        guard pending==nil,let state=standingRecord(),state.completedTransfers<state.canCount,
+              standingMayHoldPayload(state),
+              ["active","paused","recovering"].contains(state.state) ||
+                (state.state=="executing" && state.lastJobAppSessionID != localSessionID) else {return nil}
+        return state
+    }
+    /// Object-state evidence is independent of motion authorization. It can
+    /// only clear uncertainty for a nonexecuting, still-authorized campaign.
+    var canImportLocalCanCampaignEmptyObservation:Bool {emptyObservationState() != nil}
+
+    /// Invalid-by-default, one-use challenge for the user's actual observation.
+    /// Export and import never start a task, open a jaw or change permission.
+    @nonobjc func exportLocalCanCampaignEmptyObservationTemplate(to url:URL)throws {
+        precondition(Thread.isMainThread)
+        guard url.isFileURL,let state=emptyObservationState() else {
+            throw localApprovalError("An idle active campaign with uncertain gripper contents is required for an empty-gripper observation.")
+        }
+        let created=now().timeIntervalSince1970*1000
+        guard created.isFinite,created>0 else {throw localApprovalError("The observation clock is invalid.")}
+        let context=EmptyObservationContext(observationID:UUID(),campaignID:state.campaignID,
+            authorizationSHA256:state.authorizationSHA256,stateSHA256:Self.localHash(try readPrivateLocalReceipt(standingStateURL)),
+            lastJobID:state.lastJobID,lastJobAppSessionID:state.lastJobAppSessionID,createdAtMilliseconds:created)
+        let value:[String:Any]=["schemaVersion":1,"kind":"local_user_can_campaign_empty_observation",
+            "observationID":context.observationID.uuidString,"appSessionID":localSessionID.uuidString,
+            "campaignID":context.campaignID.uuidString,"authorizationSHA256":context.authorizationSHA256,
+            "standingStateSHA256":context.stateSHA256,"lastJobID":state.lastJobID as Any? ?? NSNull(),
+            "lastJobAppSessionID":state.lastJobAppSessionID?.uuidString as Any? ?? NSNull(),
+            "source":"explicit_user_observation","sourceMessage":"","sourceMessageSHA256":"",
+            "observation":"both_grippers_empty","issuedAtMilliseconds":created,"scope":Self.emptyObservationScope]
+        let bytes=try localCanonical(value),descriptor=open(url.path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0o600)
+        guard descriptor>=0 else {throw localApprovalError("Choose a new private file for this observation template.")}
+        let handle=FileHandle(fileDescriptor:descriptor,closeOnDealloc:true);defer {try?handle.close()}
+        try handle.write(contentsOf:bytes);try handle.synchronize()
+        pendingEmptyObservation=context
+        update("Empty-gripper observation template exported. No task started and no motion permission changed.")
+    }
+
+    @nonobjc func importLocalCanCampaignEmptyObservation(fromReceiptURL url:URL)throws {
+        precondition(Thread.isMainThread)
+        guard var state=emptyObservationState(),let context=pendingEmptyObservation else {
+            throw localApprovalError("Export a fresh empty-gripper observation template for the idle current campaign first.")
+        }
+        let bytes=try readPrivateLocalReceipt(url),value=try JSONSerialization.jsonObject(with:bytes)as?[String:Any]
+        let receipt=try JSONDecoder().decode(EmptyObservationReceipt.self,from:bytes)
+        let keys:Set<String>=["schemaVersion","kind","observationID","appSessionID","campaignID","authorizationSHA256",
+            "standingStateSHA256","lastJobID","lastJobAppSessionID","source","sourceMessage","sourceMessageSHA256",
+            "observation","issuedAtMilliseconds","scope"]
+        let timestamp=now().timeIntervalSince1970*1000
+        guard let value,Set(value.keys)==keys,let scope=value["scope"]as?[String:Any],
+              try localCanonical(scope)==localCanonical(Self.emptyObservationScope),
+              receipt.schemaVersion==1,receipt.kind=="local_user_can_campaign_empty_observation",
+              receipt.observationID==context.observationID,receipt.appSessionID==localSessionID,
+              receipt.campaignID==context.campaignID,receipt.campaignID==state.campaignID,
+              receipt.authorizationSHA256==context.authorizationSHA256,receipt.authorizationSHA256==state.authorizationSHA256,
+              receipt.standingStateSHA256==context.stateSHA256,
+              context.stateSHA256==Self.localHash(try readPrivateLocalReceipt(standingStateURL)),
+              receipt.lastJobID==context.lastJobID,receipt.lastJobID==state.lastJobID,
+              receipt.lastJobAppSessionID==context.lastJobAppSessionID,receipt.lastJobAppSessionID==state.lastJobAppSessionID,
+              receipt.source=="explicit_user_observation",receipt.observation=="both_grippers_empty",
+              receipt.sourceMessage=="Both grippers are empty",
+              receipt.sourceMessageSHA256==Self.localHash(Data(receipt.sourceMessage.utf8)),
+              timestamp.isFinite,receipt.issuedAtMilliseconds.isFinite,receipt.issuedAtMilliseconds>0,
+              (0...600_000).contains(timestamp-receipt.issuedAtMilliseconds),
+              (0...600_000).contains(timestamp-context.createdAtMilliseconds) else {
+            throw localApprovalError("The empty-gripper observation must be fresh, written by the user, and match this exact campaign, app, job history and one-use template.")
+        }
+        // Persist the fact before changing uncertainty. Exclusive creation is
+        // a durable replay tombstone; any audit/save failure leaves execution
+        // closed instead of manufacturing EMPTY or another motion grant.
+        var audit=value
+        audit["importedAtMilliseconds"]=timestamp;audit["receiptSHA256"]=Self.localHash(bytes)
+        audit["sourceReceiptPath"]=url.path;audit["previousState"]=state.state
+        audit["previousPossiblePayloadHeld"]=standingMayHoldPayload(state)
+        audit["motionAuthority"]=false;audit["taskStarted"]=false
+        try writeLocalApprovalAudit(audit,name:"empty-observation-"+receipt.observationID.uuidString+".json")
+        pendingEmptyObservation=nil
+        standingRecovery?.cancel();standingRecovery=nil;standingRecoveryToken=UUID()
+        state.possiblePayloadHeld=false;state.state="paused"
+        state.detail="User observed both grippers empty. Campaign remains paused; Run requires a fresh scene and plan."
+        do {try saveStanding(state)} catch {
+            standingIOFailure="Empty observation audited, but campaign object state could not be saved: "+error.localizedDescription
+            throw error
+        }
+        update("Both grippers recorded empty. Campaign remains paused; no task started or motion permission changed.")
     }
     var standingLocalCanCampaignState: NSDictionary? {
         guard let s = standingRecord(includeTerminal: true) else { return standingIOFailure.map { ["state": "blocked", "detail": $0] as NSDictionary } }
@@ -982,6 +1083,9 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         guard probe.validationError == nil else {
             completion(["status": "rejected", "detail": "Invalid controller motion approval request."]); return
         }
+        // An object observation cannot span an intervening arm operation,
+        // even if that unrelated operation leaves campaign counters unchanged.
+        pendingEmptyObservation=nil
         pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
             created: now(), execute: execute, cancel: cancel, completion: completion, executionLimit: executionLimit)
         pending?.localRecyclingScope = localRecyclingScope
@@ -1130,6 +1234,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         cancelCurrentOperation(reason: reason, standingPause: false)
     }
     private func cancelCurrentOperation(reason: String, standingPause: Bool) {
+        pendingEmptyObservation=nil
         armSession = nil
         revokeLocalApproval(reason: reason)
         guard let p = pending else {

@@ -330,6 +330,7 @@ final class ROBWorkspaceSearch {
     var viewReady:((Double,Int)->Bool)? = {_,_ in true}
     @MainActor func captureBlockerCoverage(blocker:ROBWorkspaceUnknownCellBlocker,continuing snapshot:ROBWorkspaceCollisionSnapshot,
         model:ROBGhostRobotModel,generation:UInt64,attempted:[ROBWorkspaceView],deadlineUptime:Double,
+        recordStage:(String)->Void,
         check:()throws->Void,progress:(String)->Void) async throws ->(snapshot:ROBWorkspaceCollisionSnapshot,view:ROBWorkspaceView)? {
         try check()
         // No actual new source pixels exist at this seam. Never manufacture

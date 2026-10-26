@@ -23,7 +23,7 @@ import Foundation
 import simd
 struct ProcessInfo {static let processInfo=Clock()}
 final class Clock {var systemUptime=100.0}
-final class Modes {static var mode="normal";static var appended:[(UInt64,Double)]=[];static var selected=0}
+final class Modes {static var mode="normal";static var appended:[(UInt64,Double)]=[];static var selected=0;static var stages:[String]=[]}
 struct ROBWorkspaceView:Equatable {let panDegrees:Double;let upperTarget:Int}
 struct ROBWorkspaceVoxel {let x:Int,y:Int,z:Int}
 struct ROBWorkspaceUnknownCellBlocker {let link="right_five_Link";let voxel=ROBWorkspaceVoxel(x:-4,y:-8,z:21);let center=SIMD3<Double>(-0.0875,-0.1875,0.5375);let voxelSizeMeters=0.025}
@@ -125,7 +125,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
 }
 @main struct Fixtures {
  @MainActor static func exercise(_ mode:String="normal",attempted:[ROBWorkspaceView]=[])async throws->(Harness,ROBWorkspaceCollisionSnapshot?,ROBWorkspaceCollisionSnapshot) {
-  Modes.mode=mode;Modes.appended=[];Modes.selected=0;ProcessInfo.processInfo.systemUptime=100
+  Modes.mode=mode;Modes.appended=[];Modes.selected=0;Modes.stages=[];ProcessInfo.processInfo.systemUptime=100
   ROBFixedHeadBodyMotionIdentity.currentIdentity="body";ROBArmRoutineVision.shared.cameraGeneration=UUID();ROBArmRoutineVision.shared.next=2
   let c=ROBFixedHeadCalibrationWindowController.shared
   c.neck=["known":true,"stationary":true,"lower":6011,"upper":6306,"pan":6000,"pan_degrees":0.0,"ready_at":99.0]
@@ -140,7 +140,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
    return mode != "view_unavailable"
   }
   h.viewReady={_,_ in mode != "view_unavailable"}
-  let result=try await h.captureBlockerCoverage(blocker:.init(),continuing:s,model:.init(),generation:1,attempted:attempted,deadlineUptime:130,check:{},progress:{_ in})
+  let result=try await h.captureBlockerCoverage(blocker:.init(),continuing:s,model:.init(),generation:1,attempted:attempted,deadlineUptime:130,recordStage:{Modes.stages.append($0)},check:{},progress:{_ in})
   return (h,result?.snapshot,s)
  }
  @MainActor static func main()async throws {
@@ -148,6 +148,8 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
   precondition(x.sceneID==s.sceneID && x.observedFrameCount==7 && x.occupiedVoxelCount==20 && x.stateValue == .free)
   precondition(Modes.appended.count==2 && Modes.appended[0].0<Modes.appended[1].0 && Modes.appended[0].1<Modes.appended[1].1)
   precondition(h.collisionSnapshotValue!.fingerprint==x.fingerprint)
+  let frameStages=["frame_wait","frame_received","append_started","append_complete","roi_started","roi_complete"]
+  precondition(Modes.stages==["candidate_selected","settle_started","settled","seed_started","seed_complete"]+frameStages+frameStages+["freeze_started","freeze_complete","publish"],"Actual capture diagnostic stages are missing or reordered")
   let diag=(h.lastReport["blocker_coverage_attempts"]as![[String:Any]]).last!
   precondition(diag["free_space_inferred"]as!Bool==false && diag["arm_command_sent"]as!Bool==false)
   precondition(diag["detector_invoked"]as!Bool==false && diag["source_rasters_retained"]as!Bool==false)
