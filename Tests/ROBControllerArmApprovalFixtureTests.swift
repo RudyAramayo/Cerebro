@@ -717,6 +717,35 @@ final class ROBAmberGatewayClient: NSObject {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             return file
         }
+        for approach in [false,true] {
+            let b=localBroker();var rejected=false
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:"Inert UNKNOWN advisory without standing source",
+                contextIdentity:{"inert"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                approachCanThenHoldEnabled:approach,approachUnknownAdvisoryEnabled:true,
+                execute:{_ in check(false,"Missing standing UNKNOWN scope executed")},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            check(rejected && !b.isPending,"UNKNOWN advisory needs both approach-only and standing typed source")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-unknown-approach")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            var executed=0,rejected=false,context="unknown-approach-A"
+            let summary="DEBUG EMPTY open-jaw approach; unknown recorded advisory, occupied/self/person/Stop strict"
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:summary,
+                contextIdentity:{context},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                approachCanThenHoldEnabled:true,approachUnknownAdvisoryEnabled:true,
+                execute:{_ in executed+=1},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            #if DEBUG
+            check(executed==1 && b.activeLocalRecyclingApprovalEvidence?["approachUnknownAdvisoryEnabled"]as?Bool==true,
+                "Exact standing DEBUG subset carries immutable UNKNOWN advisory evidence")
+            check(b.activeLocalRecyclingApprovalEvidence?["standingCampaignID"] != nil,"UNKNOWN subset retains original standing lineage")
+            check(b.authorizesRightArmTrial(summary),"Fresh exact open-jaw UNKNOWN subset authorizes existing route gates")
+            context="unknown-approach-B"
+            check(!b.authorizesRightArmTrial(summary),"Changed UNKNOWN context invalidates the frozen job")
+            #else
+            check(rejected && executed==0,"UNKNOWN approach subset must remain DEBUG-only")
+            #endif
+            b.cancel(reason:"fixture Stop")
+        }
         do {
             let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-positive")
             let input=try standingFile(b);var executions=0,prompts=0,stops=0,context:String?="fresh-source-A"
@@ -729,6 +758,7 @@ final class ROBAmberGatewayClient: NSObject {
                     execute:{executions+=1;done=$0},cancel:{stops+=1},completion:{_ in})
             }
             run(b,"First fresh ordinary can plan")
+            check(b.activeLocalRecyclingApprovalEvidence?["approachUnknownAdvisoryEnabled"]==nil,"OFF remains absent from legacy scope serialization")
             let firstID=b.activeLocalRecyclingApprovalEvidence?["receiptID"] as?String
             check(executions==1 && prompts==0 && firstID != nil && b.authorizesRightArmTrial("First fresh ordinary can plan"),
                 "Standing campaign binds a fresh exact ordinary can plan without another voice/file approval")

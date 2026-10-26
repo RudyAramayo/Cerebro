@@ -44,6 +44,7 @@ final class Gateway {
  var passiveFeedbackPauseStarted:Double?,lastHeldFeedbackDiagnostic:String?,lastRecordingPath="",phase="passive search"
  var waiting=Set<UInt64>(),acks:[UInt64:Bool]=[:],holdConfirmations:[UInt64:Bool]=[:],dispatches=0
  static let neckOnlyCommands=Set<String>()
+ var activeApproachUnknownAdvisory=false,approachUnknownAdvisoryEnabled=false
  var activeApproachCanThenHold=false,approachCanThenHoldEnabled=false
  var failure:String?,activeHoldAfterInitialEmptyLift=false,holdAfterInitialEmptyLiftEnabled=false,sourcePixelSelfReviewEnabled=false
  struct PixelView {let physicalLeftBaseline=Array(repeating:0.0,count:7)}
@@ -90,6 +91,7 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
 @main enum Test {
  @MainActor static func fatal(_ h:Hold,_ expected:String){do{try h.check();preconditionFailure("Unsafe hold admitted")}catch is ROBPassiveFeedbackPause {preconditionFailure("Unsafe mode/q/missing state incorrectly deferred")}catch{precondition(String(describing:error).contains(expected))}}
  @MainActor static func main()async throws {
+  let changedPolicy=Hold();changedPolicy.approachUnknownAdvisoryEnabled=true;fatal(changedPolicy,"frozen UNKNOWN advisory")
   let h=Hold();h.gateway.samples["right"]!.effectiveGripperFeedbackAgeMilliseconds=300
   do{try h.check();preconditionFailure("Strict check soft-passed stale feedback")}catch is ROBPassiveFeedbackPause{}
   precondition(h.lastHeldFeedbackDiagnostic?.contains("gripper_age_ms")==true)

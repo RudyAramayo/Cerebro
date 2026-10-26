@@ -23,7 +23,7 @@ import Foundation
 import simd
 struct ProcessInfo {static let processInfo=Clock()}
 final class Clock {var systemUptime=100.0}
-final class Modes {static var mode="normal";static var appended:[(UInt64,Double)]=[];static var selected=0;static var stages:[String]=[]}
+final class Modes {static var mode="normal";static var appended:[(UInt64,Double)]=[];static var selected=0;static var stages:[String]=[];static var captures=0;static var checks=0}
 struct ROBWorkspaceView:Equatable {let panDegrees:Double;let upperTarget:Int}
 struct ROBWorkspaceVoxel {let x:Int,y:Int,z:Int}
 struct ROBWorkspaceUnknownCellBlocker {let link="right_five_Link";let voxel=ROBWorkspaceVoxel(x:-4,y:-8,z:21);let center=SIMD3<Double>(-0.0875,-0.1875,0.5375);let voxelSizeMeters=0.025}
@@ -44,9 +44,11 @@ struct Pixels {let width=640,height=480;func distanceMillimeters(x:Int,y:Int)->U
 typealias CameraDepthFrame=Pixels
 typealias CameraIntrinsics=K
 struct Correspondence {var status="matched"}
+struct Runtime {var identity="runtime"}
 struct K {
  var fx=500.0,fy=500.0,cx=320.0,cy=240.0;var rgbOutputUndistorted:Bool?=true
  var depthRGBGeometryCorrespondence:Correspondence?=Correspondence();let cameraServiceSourceSHA256:String?="source"
+ var runtimeCalibration:Runtime?=Runtime()
  func isValid(forWidth:Int,height:Int)->Bool {forWidth==640 && height==480}
 }
 struct ROBFixedHeadRegistrationScope:Equatable {
@@ -63,16 +65,25 @@ struct ROBWorkspaceCaptureAnchor {
 final class ROBArmRoutineVision {
  static let shared=ROBArmRoutineVision();var cameraGeneration=UUID();var next:UInt64=2
  struct Frame {let capturedAt:Double;let sequence:UInt64;let cameraGeneration:UUID;var depth:Pixels?=Pixels();var intrinsics:K?=K()}
- func snapshot()->[String:Frame] {["face":Frame(capturedAt:Date().timeIntervalSince1970*1000,sequence:next,cameraGeneration:cameraGeneration)]}
- func settledDepthFrame(deadlineUptime:Double?)async throws->Frame {
+ func snapshot()->[String:Frame] {["face":Frame(capturedAt:Date().timeIntervalSince1970*1000-(Modes.mode=="initial_stale_preview" ? 900:0),sequence:next,cameraGeneration:cameraGeneration)]}
+ func healthSnapshot()->NSDictionary {["fixture":true,"analysis_ms":900.0]}
+ @MainActor func settledPassiveMappingFrame(deadlineUptime:Double?,check:@MainActor ()throws->Void)async throws->Frame {
   precondition(deadlineUptime==112)
+  Modes.captures+=1
+  for poll in 0..<3 {
+   Modes.checks+=1
+   if Modes.mode=="initial_hold_changed",Modes.captures==1,poll==1 {ROBFixedHeadCalibrationWindowController.shared.neck["upper"]=6307}
+   try check()
+  }
   next+=1
   if Modes.mode=="source_changed" {cameraGeneration=UUID()}
   if Modes.mode=="body_changed" {ROBFixedHeadBodyMotionIdentity.currentIdentity="moved"}
   if Modes.mode=="cancel" {throw CancellationError()}
   if Modes.mode=="deadline" {ProcessInfo.processInfo.systemUptime=113}
   var frame=Frame(capturedAt:Date().timeIntervalSince1970*1000,sequence:next,cameraGeneration:cameraGeneration)
-  if Modes.mode=="changed_k" {frame.intrinsics!.fx=501}
+  if Modes.mode=="changed_k",Modes.captures>1 {frame.intrinsics!.fx=501}
+  if Modes.mode=="changed_runtime",Modes.captures>1 {frame.intrinsics!.runtimeCalibration!.identity="other"}
+  if Modes.mode=="initial_expired_once",Modes.captures==1 {return Frame(capturedAt:Date().timeIntervalSince1970*1000-900,sequence:next,cameraGeneration:cameraGeneration)}
   if Modes.mode=="unnormalized" {frame.intrinsics!.rgbOutputUndistorted=false}
   if Modes.mode=="unsynchronized" {frame.intrinsics!.depthRGBGeometryCorrespondence!.status="bad"}
   if Modes.mode=="raw_pose_changed" {ROBFixedHeadCalibrationWindowController.shared.neck["pan"]=6001}
@@ -126,7 +137,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
 }
 @main struct Fixtures {
  @MainActor static func exercise(_ mode:String="normal",attempted:[ROBWorkspaceView]=[])async throws->(Harness,ROBWorkspaceCollisionSnapshot?,ROBWorkspaceCollisionSnapshot) {
-  Modes.mode=mode;Modes.appended=[];Modes.selected=0;Modes.stages=[];ProcessInfo.processInfo.systemUptime=100
+  Modes.mode=mode;Modes.appended=[];Modes.selected=0;Modes.stages=[];Modes.captures=0;Modes.checks=0;ProcessInfo.processInfo.systemUptime=100
   ROBFixedHeadBodyMotionIdentity.currentIdentity="body";ROBArmRoutineVision.shared.cameraGeneration=UUID();ROBArmRoutineVision.shared.next=2
   let c=ROBFixedHeadCalibrationWindowController.shared
   c.neck=["known":true,"stationary":true,"lower":6011,"upper":6306,"pan":6000,"pan_degrees":0.0,"ready_at":99.0]
@@ -149,11 +160,15 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
   precondition(x.sceneID==s.sceneID && x.observedFrameCount==7 && x.occupiedVoxelCount==20 && x.stateValue == .free)
   precondition(Modes.appended.count==2 && Modes.appended[0].0<Modes.appended[1].0 && Modes.appended[0].1<Modes.appended[1].1)
   precondition(h.collisionSnapshotValue!.fingerprint==x.fingerprint)
+  precondition(Modes.captures==3 && Modes.checks>=9,"Initial capture skipped bounded passive acquisition/context polling")
   let frameStages=["frame_wait","frame_received","append_started","append_complete","roi_started","roi_complete"]
   precondition(Modes.stages==["candidate_selected","settle_started","settled","seed_started","seed_complete"]+frameStages+frameStages+["freeze_started","freeze_complete","publish"],"Actual capture diagnostic stages are missing or reordered")
   let diag=(h.lastReport["blocker_coverage_attempts"]as![[String:Any]]).last!
   precondition(diag["free_space_inferred"]as!Bool==false && diag["arm_command_sent"]as!Bool==false)
   precondition(diag["detector_invoked"]as!Bool==false && diag["source_rasters_retained"]as!Bool==false)
+  precondition((diag["camera_health"]as![String:Any])["fixture"]as?Bool==true,"Full source health was lost")
+  let (_,oldPreview,_)=try await exercise("initial_stale_preview");precondition(oldPreview!.observedFrameCount==7,"Retained old snapshot blocked fresh passive source wait")
+  let (_,expiredOnce,_)=try await exercise("initial_expired_once");precondition(expiredOnce!.observedFrameCount==7 && Modes.captures==4,"Expired initial source was restamped or not reacquired")
   let (holeHarness,hole,_)=try await exercise("hole");precondition(hole!.stateValue == .unknown && hole!.observedFrameCount==7,"A missing region was invented free")
   let holeAttempt=(holeHarness.lastReport["blocker_coverage_attempts"]as![[String:Any]]).last!
   let roi=((holeAttempt["frames"]as![[String:Any]])[0]["blocker_depth_roi"]as![String:Any])
@@ -164,7 +179,7 @@ enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)
   let (_,budget,_)=try await exercise(attempted:[.init(panDegrees:0,upperTarget:5300),.init(panDegrees:10,upperTarget:5300)])
   precondition(budget==nil && Modes.selected==0 && Modes.appended.isEmpty)
   let (_,unavailable,_)=try await exercise("view_unavailable");precondition(unavailable==nil && Modes.appended.isEmpty)
-  for mode in ["source_changed","body_changed","changed_k","unnormalized","unsynchronized","raw_pose_changed","deadline","cancel"] {
+  for mode in ["source_changed","body_changed","changed_k","changed_runtime","unnormalized","unsynchronized","raw_pose_changed","initial_hold_changed","deadline","cancel"] {
    do {_=try await exercise(mode);preconditionFailure("Accepted changed context: \(mode)")}catch {}
    precondition(Modes.appended.isEmpty,"Changed input enrolled actual map rays: \(mode)")
   }

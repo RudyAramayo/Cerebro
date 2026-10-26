@@ -505,6 +505,17 @@ final class ROBArmRoutineVision {
         try await settledInspectionFrame(epoch: inspectionEpoch(), requireStaticScene: true,deadlineUptime:deadlineUptime,depthMappingOnly:true)
     }
 
+    /// Passive map acquisition only. Actual same-exposure inertial evidence
+    /// may establish a held camera; it grants no arm or person clearance.
+    /// Without that evidence, retain the existing static three-frame path.
+    @MainActor func settledPassiveMappingFrame(deadlineUptime:Double?=nil,
+        check:@MainActor () throws ->Void) async throws ->Frame {
+        try check();try Task.checkCancellation()
+        return try await settledInspectionFrame(epoch:inspectionEpoch(),requireStaticScene:true,
+            deadlineUptime:deadlineUptime,depthMappingOnly:true,allowStationaryIMUPassiveFrame:true,
+            passiveMappingCheck:check)
+    }
+
     @MainActor func beginCollisionRegistrationProbe() {
         collisionRegistrationProbe.onObservation = { [weak self] observation in
             guard let self else { return }
@@ -602,8 +613,11 @@ final class ROBArmRoutineVision {
             "imu_age_ms":imu.map{number($0.ageMilliseconds)} ?? NSNull()],failed)
     }
 
+    @MainActor private static func passiveMappingNoopCheck()throws {}
+
     private func settledInspectionFrame(epoch token: UUID, requireStaticScene: Bool = true,deadlineUptime:Double?=nil,
-        depthMappingOnly:Bool=false,allowStationaryIMUPassiveFrame:Bool=false) async throws -> Frame {
+        depthMappingOnly:Bool=false,allowStationaryIMUPassiveFrame:Bool=false,
+        passiveMappingCheck:@MainActor () throws ->Void = ROBArmRoutineVision.passiveMappingNoopCheck) async throws -> Frame {
         // Called only when the coordinator has stopped motion and the GPU is
         // ready. A previously captured frame may still depict the neck/arms
         // settling, even though the latest commanded pose is now stationary.
@@ -616,13 +630,14 @@ final class ROBArmRoutineVision {
         var conditionPollCounts:[String:Int]=[:],latestFrameFacts:[String:Any]=[:]
         while ProcessInfo.processInfo.systemUptime < deadline {
             try Task.checkCancellation()
+            if allowStationaryIMUPassiveFrame,depthMappingOnly {try await passiveMappingCheck()}
             let candidate=try inspectionFrame(epoch:token)
             let eligible=candidate.map{depthMappingOnly ? isDepthMappingEligible($0):isFresh($0)} ?? false
             let diagnostics=Self.settledFrameDiagnostics(candidate,eligible:eligible,depthMappingOnly:depthMappingOnly,
                 notBefore:notBefore,nowMilliseconds:Date().timeIntervalSince1970*1000,currentGeneration:cameraGeneration)
             pollCount+=1;latestFrameFacts=diagnostics.facts
             for condition in diagnostics.failed {conditionPollCounts[condition,default:0]+=1}
-            if allowStationaryIMUPassiveFrame,depthMappingOnly,!requireStaticScene {
+            if allowStationaryIMUPassiveFrame,depthMappingOnly {
                 if let imu=candidate?.intrinsics?.inertial {
                     if !imu.isValid {conditionPollCounts["single_frame_imu_invalid",default:0]+=1}
                     if !imu.stationary {conditionPollCounts["single_frame_imu_not_stationary",default:0]+=1}
@@ -631,18 +646,19 @@ final class ROBArmRoutineVision {
                 } else {conditionPollCounts["single_frame_imu_unavailable",default:0]+=1}
             }
             if let frame = candidate,eligible,frame.capturedAt >= notBefore {
-                // Object attention sends no arm command and grants no human
+                // Passive attention/mapping sends no arm command and grants no human
                 // clearance. Its actual same-exposure stationary IMU window
                 // can establish a held view without requiring three costly
-                // hand/person analyses less than700ms apart. Mapping/static
-                // captures and every ordinary motion inspection retain their
-                // existing three-frame path and freshness/clearance gates.
-                if allowStationaryIMUPassiveFrame,depthMappingOnly,!requireStaticScene,
+                // hand/person analyses less than700ms apart. Ordinary static
+                // captures and motion inspections retain their existing path;
+                // passive mapping retains that path as its no-IMU fallback.
+                if allowStationaryIMUPassiveFrame,depthMappingOnly,
                    let imu=frame.intrinsics?.inertial,imu.isValid,imu.stationary,
                    imu.windowMilliseconds>=300,imu.sampleCount>=20 {
                     recordSettlingDiagnostics(["schema_version":1,"status":"accepted",
                         "method":"stationary_imu_single_actual_post_call_frame","depth_mapping_only":true,
-                        "static_scene_required":false,"recorded_at_ms":Date().timeIntervalSince1970*1000,
+                        "static_scene_required":false,"three_frame_fallback_requires_static_scene":requireStaticScene,
+                        "recorded_at_ms":Date().timeIntervalSince1970*1000,
                         "latest_frame":diagnostics.facts,"poll_count":pollCount,"capture_time_refreshed":false,
                         "motion_authority":false,"human_clearance_granted":false],epoch:token)
                     return frame
@@ -1368,6 +1384,19 @@ struct ROBWorkspaceCanSelection {
         guard anchor.accept(frameGeneration:snapshot.cameraGeneration,currentGeneration:vision.cameraGeneration) else {
             throw ROBWorkspaceDepthMapError.invalidFrame
         }
+        var diagnostic:[String:Any]=["blocker_link":blocker.link,
+            "blocker_voxel":[blocker.voxel.x,blocker.voxel.y,blocker.voxel.z],"candidate_count":0,
+            "scene_id":snapshot.sceneID.uuidString,"before_map_fingerprint":snapshot.fingerprint,
+            "before_state_raw":snapshot.state(at:blocker.center).rawValue,"maximum_views":2,
+            "source_rasters_retained":false,"detector_invoked":false,"arm_command_sent":false,
+            "free_space_inferred":false,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true]
+        func record(_ status:String,_ detail:String) {
+            diagnostic["status"]=status;diagnostic["detail"]=detail;diagnostic["camera_health"]=vision.healthSnapshot()
+            var report=lastReport as? [String:Any] ?? [:]
+            var attempts=report["blocker_coverage_attempts"]as?[[String:Any]] ?? []
+            attempts.append(diagnostic);report["blocker_coverage_attempts"]=Array(attempts.suffix(2))
+            lastReport=report as NSDictionary
+        }
         func requireContext()throws {
             try check();try Task.checkCancellation()
             try requireEstimatedProjectionIdentity(projection,model:model)
@@ -1390,17 +1419,52 @@ struct ROBWorkspaceCanSelection {
         let initialNeck=controller.readNeck?() ?? [:]
         guard initialNeck["stationary"]as?Bool==true,
               let initialReady=initialNeck["ready_at"]as?Double,initialReady.isFinite,initialReady<=ProcessInfo.processInfo.systemUptime,
-              let source=vision.snapshot()["face"],source.cameraGeneration==snapshot.cameraGeneration,
-              (0...700).contains(Date().timeIntervalSince1970*1000-source.capturedAt),
-              let depth=source.depth,let k=source.intrinsics,k.isValid(forWidth:depth.width,height:depth.height),
-              k.rgbOutputUndistorted==true,k.depthRGBGeometryCorrespondence?.status=="matched" else {
-            throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires the current normalized synchronized face RGB-D source.")
+              let initialPan=initialNeck["pan"]as?Int,let initialUpper=initialNeck["upper"]as?Int else {
+            record("initial_hold_unavailable","Targeted coverage requires the unchanged stationary upright neck hold.")
+            throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires the unchanged stationary upright neck hold.")
         }
+        func requireInitialHold()throws {
+            try requireContext()
+            let neck=controller.readNeck?() ?? [:]
+            guard neck["stationary"]as?Bool==true,neck["pan"]as?Int==initialPan,
+                  neck["upper"]as?Int==initialUpper,neck["ready_at"]as?Double==initialReady else {
+                throw ROBWorkspaceDepthMapError.invalidFrame
+            }
+        }
+        var initialSource:ROBArmRoutineVision.Frame?
+        do {
+            while initialSource==nil {
+                try requireInitialHold()
+                guard ProcessInfo.processInfo.systemUptime<deadline else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage expired while waiting for a fresh source frame.")
+                }
+                let candidate=try await vision.settledPassiveMappingFrame(deadlineUptime:deadline,check:requireInitialHold)
+                try requireInitialHold()
+                guard ProcessInfo.processInfo.systemUptime<deadline else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage expired while waiting for a fresh source frame.")
+                }
+                // A check may consume capture age. Wait for another original
+                // exposure rather than refreshing or widening its timestamp.
+                guard (0...700).contains(Date().timeIntervalSince1970*1000-candidate.capturedAt) else {continue}
+                guard candidate.cameraGeneration==snapshot.cameraGeneration,
+                      let pixels=candidate.depth,let intrinsics=candidate.intrinsics,
+                      intrinsics.isValid(forWidth:pixels.width,height:pixels.height),
+                      intrinsics.rgbOutputUndistorted==true,intrinsics.depthRGBGeometryCorrespondence?.status=="matched" else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires normalized synchronized face RGB-D.")
+                }
+                initialSource=candidate
+            }
+        } catch {
+            record("initial_source_capture_failed",error.localizedDescription)
+            throw error
+        }
+        guard let source=initialSource,let depth=source.depth,let k=source.intrinsics else {throw ROBWorkspaceDepthMapError.invalidFrame}
         guard registeredCameraContext(frame:source,model:model)==nil else {return nil}
         let sourceScope=try controller.scope(model:model,frame:source)
         guard sourceScope.gatewaySessionGeneration==generation,sourceScope.cameraGeneration==snapshot.cameraGeneration,
               sourceScope.lowerTarget==6011 else {throw ROBWorkspaceDepthMapError.invalidFrame}
         let width=depth.width,height=depth.height,sourceK=[k.fx,k.fy,k.cx,k.cy],sourceService=k.cameraServiceSourceSHA256
+        let sourceRuntime=k.runtimeCalibration?.identity
         func blockerDepthDiagnostic(pixels:CameraDepthFrame,intrinsics:CameraIntrinsics,matrix:simd_double4x4)->[String:Any] {
             let half=SIMD3<Double>(repeating:blocker.voxelSizeMeters/2),low=blocker.center-half,high=blocker.center+half
             let inverse=simd_inverse(matrix)
@@ -1461,19 +1525,7 @@ struct ROBWorkspaceCanSelection {
         let selected=ROBWorkspaceBlockerCoveragePlan.nextView(blocker:blocker,candidates:candidates,
             observations:snapshot.observations,attempted:attempted,width:width,height:height,
             fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy)
-        var diagnostic:[String:Any]=["blocker_link":blocker.link,
-            "blocker_voxel":[blocker.voxel.x,blocker.voxel.y,blocker.voxel.z],"candidate_count":candidates.count,
-            "scene_id":snapshot.sceneID.uuidString,"before_map_fingerprint":snapshot.fingerprint,
-            "before_state_raw":snapshot.state(at:blocker.center).rawValue,"maximum_views":2,
-            "source_rasters_retained":false,"detector_invoked":false,"arm_command_sent":false,
-            "free_space_inferred":false,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true]
-        func record(_ status:String,_ detail:String) {
-            diagnostic["status"]=status;diagnostic["detail"]=detail
-            var report=lastReport as? [String:Any] ?? [:]
-            var attempts=report["blocker_coverage_attempts"]as?[[String:Any]] ?? []
-            attempts.append(diagnostic);report["blocker_coverage_attempts"]=Array(attempts.suffix(2))
-            lastReport=report as NSDictionary
-        }
+        diagnostic["candidate_count"]=candidates.count
         guard let view=selected,let rawPan=panTargetForView?(view.panDegrees)?.intValue else {
             record("no_new_view","No unused bounded camera view projects the entire blocked cell inside the calibrated image.")
             return nil
@@ -1519,7 +1571,7 @@ struct ROBWorkspaceCanSelection {
                 try requireHeldView()
                 guard ProcessInfo.processInfo.systemUptime<deadline else {throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage expired before two advancing depth exposures.")}
                 recordStage("frame_wait")
-                let frame=try await vision.settledDepthFrame(deadlineUptime:deadline)
+                let frame=try await vision.settledPassiveMappingFrame(deadlineUptime:deadline,check:requireHeldView)
                 recordStage("frame_received")
                 try requireHeldView()
                 guard ProcessInfo.processInfo.systemUptime<deadline,frame.sequence>previous,frame.capturedAt>previousCapture,
@@ -1527,6 +1579,7 @@ struct ROBWorkspaceCanSelection {
                       pixels.width==width,pixels.height==height,intrinsics.isValid(forWidth:width,height:height),
                       [intrinsics.fx,intrinsics.fy,intrinsics.cx,intrinsics.cy]==sourceK,
                       intrinsics.cameraServiceSourceSHA256==sourceService,intrinsics.rgbOutputUndistorted==true,
+                      intrinsics.runtimeCalibration?.identity==sourceRuntime,
                       intrinsics.depthRGBGeometryCorrespondence?.status=="matched",
                       registeredCameraContext(frame:frame,model:model)==nil else {throw ROBWorkspaceDepthMapError.invalidFrame}
                 let scope=try controller.scope(model:model,frame:frame)
@@ -1994,7 +2047,7 @@ struct ROBWorkspaceCanSelection {
                     try validateHeldView()
                     let beforeCapture = vision.cameraGeneration
                     do {
-                        let candidate = try await vision.settledDepthFrame(deadlineUptime:projectionBudget.deadlineUptime)
+                        let candidate = try await vision.settledPassiveMappingFrame(deadlineUptime:projectionBudget.deadlineUptime,check:validateHeldView)
                         if captureAnchor.accept(frameGeneration:candidate.cameraGeneration,currentGeneration:vision.cameraGeneration) {
                             acceptedFrame = candidate
                         } else if map != nil {
@@ -3074,7 +3127,7 @@ struct ROBWorkspaceCanSelection {
                 let pan=view.panDegrees,upper=view.upperTarget
                 guard try await moveView(view,deadlineUptime:deadline) else {continue}
                 do {
-                    let frame=try await vision.settledDepthFrame(deadlineUptime:deadline)
+                    let frame=try await vision.settledPassiveMappingFrame(deadlineUptime:deadline,check:requireCoverageContext)
                     try await searchCheckpoint();try requireCoverageContext()
                     guard ProcessInfo.processInfo.systemUptime<deadline else {break}
                     try await accumulateCollisionDepth(view,capturedFrame:frame,preservingSceneID:sceneID)
@@ -3089,7 +3142,8 @@ struct ROBWorkspaceCanSelection {
                 catch {
                     try await searchCheckpoint();try requireCoverageContext()
                     evidence.append(["depth_only_arm_coverage":true,"status":"unavailable","pan":pan,"upper":upper,
-                        "detail":error.localizedDescription,"detector_invoked":false,"free_space_inferred":false])
+                        "detail":error.localizedDescription,"detector_invoked":false,"free_space_inferred":false,
+                        "camera_health":vision.healthSnapshot()])
                     if ProcessInfo.processInfo.systemUptime>=deadline {break}
                 }
             }

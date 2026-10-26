@@ -292,6 +292,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     @nonobjc private var activeOneDegreeCalibration: ROBWorkspaceOneDegreeEmptyCalibrationStep?
     @nonobjc var oneDegreeEmptyCalibrationStepEnabled = false
     /// DEBUG-only early stop on the ordinary, fully checked empty entry path.
+    @nonobjc var approachUnknownAdvisoryEnabled = false
+    private var activeApproachUnknownAdvisory = false
     @nonobjc var approachCanThenHoldEnabled = false
     private var activeApproachCanThenHold = false
     @nonobjc var holdAfterInitialEmptyLiftEnabled = false
@@ -1004,9 +1006,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let liftSummary=localReceiptOnly && holdAfterInitialEmptyLiftEnabled
             ? "DEBUG initial EMPTY lift and hold only, physical RIGHT arm: search fresh can/workspace observations, select one initial empty lift using the ordinary complete occupied/unknown/full-arm/self-clearance review, recheck its exact measured start before dispatch, then measure the endpoint and hold. No jaw commands or startup jaw calibration, grasp, payload, carry, release, return, rescan after lifting, next can or chained motion. If no initial lift is required, remain unchanged and report that. ZERO transfers; the \(requestedCanCount)-can campaign remains unfinished. Both arms may hold their current measured positions. The same explicit visual trial uses assumed spatial error \(localVisualTrialAssumedSpatialErrorMeters*1000) mm; no calibration or collision exemption is added. Preserve joint bounds, fresh motor/gripper feedback, source/body/context identity, exclusive ownership, current-spike hold and immediate Stop."
             : pixelSummary
-        let approvedSummary=localReceiptOnly && approachCanThenHoldEnabled
+        let approachSummary=localReceiptOnly && approachCanThenHoldEnabled
             ? "DEBUG approach can then hold with OPEN jaws: search the can and workspace, perform any ordinary fully checked initial empty lift, reobserve and execute the complete checked dynamic entry and bounded observed-jaw alignment. Stop at actual ready-to-grip alignment BEFORE close, verification lift, payload, carry or release. Opening/startup jaw readiness is permitted; closing is prohibited. Hold the measured endpoint, ZERO transfers, no automatic recovery or next attempt. Preserve ordinary occupied/unknown/full-arm/self-clearance, joint/current/person/Stop, fresh feedback and exact camera/body/receipt protections. Assumed visual uncertainty remains \(localVisualTrialAssumedSpatialErrorMeters*1000)mm; no commissioning collision exemption."
             : liftSummary
+        let approvedSummary=localReceiptOnly && approachUnknownAdvisoryEnabled
+            ? "DEBUG operator-cleared UNKNOWN-advisory EMPTY physical RIGHT open-jaw approach: search the can and workspace, perform any needed occupied/full-arm/self-checked initial empty lift, reobserve, then execute the complete checked dynamic entry and bounded observed-jaw alignment. Unobserved cells remain UNKNOWN and are recorded as advisory; they do not veto this approach and are never relabeled free or observed. ALL occupied returns, self-collision, person/Stop, joints/rates/current/fresh feedback and exact camera/body/standing-receipt checks remain enforced. Stop at actual ready-to-grip alignment BEFORE closing. Opening/startup empty-jaw readiness is permitted; no close, verification lift, payload, carry, release, automatic recovery or next attempt. Hold the measured endpoint, ZERO transfers. Assumed visual uncertainty remains \(localVisualTrialAssumedSpatialErrorMeters*1000)mm. This accepted uncertainty is NOT certified collision clearance or measured registration. No other route receives this UNKNOWN policy."
+            : approachSummary
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
             start(command, summary: action, limit: limit, completion: completion)
@@ -1029,10 +1034,13 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         if localReceiptOnly {
             #if !DEBUG
-            guard !holdAfterInitialEmptyLiftEnabled,!sourcePixelSelfReviewEnabled,!approachCanThenHoldEnabled else {
+            guard !holdAfterInitialEmptyLiftEnabled,!sourcePixelSelfReviewEnabled,!approachCanThenHoldEnabled,!approachUnknownAdvisoryEnabled else {
                 completion(["status":"rejected","detail":"Initial empty lift-and-hold is available only in DEBUG commissioning builds."]);return
             }
             #endif
+            guard !approachUnknownAdvisoryEnabled || (approachCanThenHoldEnabled && ROBControllerArmApproval.shared.standingLocalCanCampaignActive) else {
+                completion(["status":"rejected","detail":"UNKNOWN advisory needs the separate exact open-jaw approach option and current standing typed authorization."]);return
+            }
             guard !approachCanThenHoldEnabled || (physicalSide=="right" && !holdAfterInitialEmptyLiftEnabled && !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled && !sourcePixelSelfReviewEnabled) else {
                 completion(["status":"rejected","detail":"Approach-and-hold requires physical RIGHT and excludes the separate lift-only and calibration options."]);return
             }
@@ -1057,7 +1065,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ROBControllerArmApproval.shared.requestRecyclingWorkspaceTask(command:requestedCommand,arm:physicalSide,canCount:canCount,
                 summary:approvedSummary,contextIdentity:{[weak self] in self?.currentLocalRecyclingContextIdentity()},receiptOnly:true,
                 permitsUnmeasuredVisualCalibrationTrial:true,nominalEmptyCommissioningStepEnabled:nominalEmptyCommissioningStepEnabled,
-                nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,approachCanThenHoldEnabled:approachCanThenHoldEnabled,
+                nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,approachCanThenHoldEnabled:approachCanThenHoldEnabled,approachUnknownAdvisoryEnabled:approachUnknownAdvisoryEnabled,
                 sourcePixelSelfReviewSHA256:currentSourcePixelEvidenceSHA256,
                 oneDegreeEmptyCalibrationStepEnabled:oneDegreeEmptyCalibrationStepEnabled,
                 execute:execute,cancel:cancel,completion:finished)
@@ -1146,6 +1154,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             "nominalEmptyCommissioningStepEnabled":nominalEmptyCommissioningStepEnabled,
             "oneDegreeEmptyCalibrationStepEnabled":oneDegreeEmptyCalibrationStepEnabled,
             "assumedSpatialErrorMeters":localVisualTrialAssumedSpatialErrorMeters]
+        if approachUnknownAdvisoryEnabled {value["approachUnknownAdvisoryEnabled"]=true}
         if approachCanThenHoldEnabled {value["approachCanThenHoldEnabled"]=true}
         if holdAfterInitialEmptyLiftEnabled {value["holdAfterInitialEmptyLiftEnabled"]=true}
         if nominalModelAssumedSelfEnabled {value["nominalModelAssumedSelfEnabled"]=true}
@@ -1183,6 +1192,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               current["summarySHA256"] as? String==ROBGhostRobotModel.hash(Data(summary.utf8)),
               current["contextIdentity"] as? String==identity,
               current["permitsUnmeasuredVisualCalibrationTrial"] as? Bool==true,
+              (current["approachUnknownAdvisoryEnabled"] as? Bool ?? false)==approachUnknownAdvisoryEnabled,
               (current["approachCanThenHoldEnabled"] as? Bool ?? false)==approachCanThenHoldEnabled,
               (current["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
               (current["nominalModelAssumedSelfEnabled"] as? Bool ?? false)==nominalModelAssumedSelfEnabled,
@@ -1192,12 +1202,21 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               until>Date().timeIntervalSince1970*1000 else {
             throw ROBArmRoutineError.blocked("The exact local recycling-count receipt, current camera/body/profile context or expiry changed; hold requested.")
         }
-        guard (frozen["approachCanThenHoldEnabled"] as? Bool ?? false)==approachCanThenHoldEnabled,
+        guard (frozen["approachUnknownAdvisoryEnabled"] as? Bool ?? false)==approachUnknownAdvisoryEnabled,
+              (frozen["approachCanThenHoldEnabled"] as? Bool ?? false)==approachCanThenHoldEnabled,
               (frozen["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
               (frozen["nominalModelAssumedSelfEnabled"] as? Bool ?? false)==nominalModelAssumedSelfEnabled,
               frozen["sourcePixelSelfReviewSHA256"]as?String==currentSourcePixelEvidenceSHA256,
               (frozen["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled else {
             throw ROBArmRoutineError.blocked("The receipt's nominal-empty experiment flag changed.")
+        }
+        if approachUnknownAdvisoryEnabled {
+            guard activeApproachUnknownAdvisory,activeApproachCanThenHold,physicalSide=="right",!recyclingGripDispatched,!servoPossiblePayloadUncertain,
+                  let campaign=current["standingCampaignID"]as?String,campaign==frozen["standingCampaignID"]as?String,
+                  ROBControllerArmApproval.shared.standingLocalCanCampaignActive,!ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload,
+                  campaign==ROBControllerArmApproval.shared.standingLocalCanCampaignState?["campaignID"]as?String else {
+                throw ROBArmRoutineError.blocked("UNKNOWN advisory lost its exact standing EMPTY open-jaw approach scope.")
+            }
         }
         for key in ["receiptID","receiptSHA256","appSessionID","pendingID","command","arm","canCount","summarySHA256","contextIdentity","executingUntilMilliseconds"] {
             guard let a=frozen[key] as? NSObject,let b=current[key] as? NSObject,a.isEqual(b) else {
@@ -1233,7 +1252,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             estimatedCameraProjectionIdentity:scope.estimatedCameraProjectionIdentity,observationPoseIdentity:scope.observationPoseIdentity,
             currentPoseIdentity:ROBGhostRobotModel.hash(poseData),baseline:baseline,issuedAtMilliseconds:now,
             expiresAtMilliseconds:min(now+600_000,(receipt["executingUntilMilliseconds"] as? NSNumber)?.doubleValue ?? now),
-            assumedSpatialErrorMeters:localVisualTrialAssumedSpatialErrorMeters)
+            assumedSpatialErrorMeters:localVisualTrialAssumedSpatialErrorMeters,
+            operatorClearedUnknownApproach:activeApproachUnknownAdvisory ? true:nil)
         _ = try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(map,model:model,generation:generation,
             sceneID:map.sceneID,cameraGeneration:vision.cameraGeneration,nowMilliseconds:now,trial:value)
         return value
@@ -1248,7 +1268,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             observationPoseIdentity:value.observationPoseIdentity,
             currentPoseIdentity:ROBGhostRobotModel.hash(Data((value.currentPoseIdentity+baseline.map(String.init(describing:)).joined(separator:",")).utf8)),
             baseline:baseline,issuedAtMilliseconds:value.issuedAtMilliseconds,expiresAtMilliseconds:value.expiresAtMilliseconds,
-            assumedSpatialErrorMeters:value.assumedSpatialErrorMeters)
+            assumedSpatialErrorMeters:value.assumedSpatialErrorMeters,operatorClearedUnknownApproach:value.operatorClearedUnknownApproach)
     }
 
     private func requireLiveVisualTrial(_ trial:ROBWorkspaceVisualCalibrationTrial,map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) throws {
@@ -1257,6 +1277,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         guard trial.receiptID==e["receiptID"] as? String,trial.receiptSHA256==e["receiptSHA256"] as? String,
               trial.appSessionID==e["appSessionID"] as? String,trial.command==e["command"] as? String,
               trial.summarySHA256==e["summarySHA256"] as? String,trial.authorizationContextIdentity==e["contextIdentity"] as? String,
+              (trial.operatorClearedUnknownApproach ?? false)==activeApproachUnknownAdvisory,
+              !activeApproachUnknownAdvisory || (activeApproachCanThenHold && physicalSide=="right" && !recyclingGripDispatched && !servoPossiblePayloadUncertain && !jawSetupDispatchUncertain),
               trial.assumedSpatialErrorMeters==localVisualTrialAssumedSpatialErrorMeters,
               localReceiptHeldNeckIdentity != nil,localReceiptHeldNeckIdentity==localNeckIdentity(),
               ROBWorkspaceSearch.shared.estimatedCameraProjectionIsCurrent(model:model,map:map) else {
@@ -1539,6 +1561,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             activeEstimated = nil
         }
         owner = id; isRunning = true; self.summary = summary; currentLimit = limit
+        activeApproachUnknownAdvisory = localReceiptCommand != nil && approachUnknownAdvisoryEnabled
         activeApproachCanThenHold = localReceiptCommand != nil && approachCanThenHoldEnabled
         activeHoldAfterInitialEmptyLift = localReceiptCommand != nil && holdAfterInitialEmptyLiftEnabled
         initialEmptyLiftHeldEvidence = nil
@@ -1582,6 +1605,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
         if localReceiptCommand != nil {
+            guard activeApproachUnknownAdvisory==approachUnknownAdvisoryEnabled else {throw ROBArmRoutineError.blocked("The frozen UNKNOWN advisory option changed.")}
             guard activeApproachCanThenHold==approachCanThenHoldEnabled,!activeApproachCanThenHold || !recyclingGripDispatched else {throw ROBArmRoutineError.blocked("The frozen open-jaw approach option changed or a grip was observed; no further travel is permitted.")}
             guard activeHoldAfterInitialEmptyLift==holdAfterInitialEmptyLiftEnabled else {
                 throw ROBArmRoutineError.blocked("The frozen initial-lift hold option changed; no further motion is permitted.")
@@ -4257,6 +4281,11 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         var output = result as! [String: Any]
         output["physical_arm"]=physicalSide
+        if activeApproachUnknownAdvisory {
+            output["approach_unknown_advisory"]=true;output["unknown_space_policy"]="operator_cleared_advisory_only"
+            output["unknown_cells_observed"]=false;output["unknown_cells_relabeled_free"]=false
+            output["occupied_and_self_checks_retained"]=true;output["collision_protection_certified"]=false
+        }
         if let lastHeldFeedbackDiagnostic {output["held_feedback_diagnostic"]=lastHeldFeedbackDiagnostic}
         output["arm_motion_sent"]=armTravelDispatched
         output["reach_sent"]=recyclingReachDispatched
@@ -4351,6 +4380,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
         owner = nil; isRunning = false; task = nil; proposal = nil;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; proposalStep = -1; reviewedDispatchStart = nil
+        activeApproachUnknownAdvisory=false
         activeApproachCanThenHold=false
         activeHoldAfterInitialEmptyLift=false;initialEmptyLiftHeldEvidence=nil
         activeCommand = ""; recyclingCan=nil; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil

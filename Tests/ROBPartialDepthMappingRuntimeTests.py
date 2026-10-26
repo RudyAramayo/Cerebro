@@ -19,6 +19,7 @@ final class Clock {
  static var tick:(()->Void)?
  static var cancelled=false
  static var latestVision:ROBArmRoutineVision?
+ static var passiveChecks=0,stopAtPassiveCheck:Int?
 }
 struct Date {var timeIntervalSince1970:Double {Clock.milliseconds/1000}}
 struct ProcessInfo {static let processInfo=ProcessInfo();var systemUptime:Double {Clock.milliseconds/1000}}
@@ -90,12 +91,19 @@ final class Feed {
  }
 }
 @main enum PartialDepthFixture {
- static func run(_ mode:String="normal",coverage:Double=0.18,mapping:Bool=true,passiveObject:Bool=false,deadlineSeconds:Double?=nil)async throws->(ROBArmRoutineVision.Frame,Feed,Double) {
+ static func run(_ mode:String="normal",coverage:Double=0.18,mapping:Bool=true,passiveObject:Bool=false,
+  passiveMapping:Bool=false,stopAtCheck:Int?=nil,deadlineSeconds:Double?=nil)async throws->(ROBArmRoutineVision.Frame,Feed,Double) {
   Clock.milliseconds=1_000_000;Clock.cancelled=false
+  Clock.passiveChecks=0;Clock.stopAtPassiveCheck=stopAtCheck
   let feed=Feed(mode,coverage);Clock.tick={feed.tick()};defer{Clock.tick=nil}
   let start=Clock.milliseconds
   let result:ROBArmRoutineVision.Frame
   if passiveObject {result=try await feed.vision.passiveObjectSettled()}
+  else if passiveMapping {
+   result=try await feed.vision.settledPassiveMappingFrame(deadlineUptime:deadlineSeconds.map{ProcessInfo.processInfo.systemUptime+$0},check:{
+    Clock.passiveChecks+=1;if Clock.stopAtPassiveCheck==Clock.passiveChecks {throw CancellationError()}
+   })
+  }
   else if mapping {result=try await feed.vision.settledDepthFrame(deadlineUptime:deadlineSeconds.map{ProcessInfo.processInfo.systemUptime+$0})}
   else {result=try await feed.vision.ordinarySettled()}
   return(result,feed,Clock.milliseconds-start)
@@ -104,8 +112,8 @@ final class Feed {
   do {_=try await run(mode,coverage:coverage,mapping:mapping);preconditionFailure("Bad frame admitted: \(mode)")}
   catch {if let contains {precondition(error.localizedDescription.contains(contains),error.localizedDescription)}}
  }
- static func timeoutDiagnostics(_ mode:String,passiveObject:Bool=false,mapping:Bool=true,coverage:Double=0.18)async->[String:Any] {
-  do {_=try await run(mode,coverage:coverage,mapping:mapping,passiveObject:passiveObject);preconditionFailure("Expected diagnostic timeout: \(mode)")}
+ static func timeoutDiagnostics(_ mode:String,passiveObject:Bool=false,mapping:Bool=true,coverage:Double=0.18,passiveMapping:Bool=false)async->[String:Any] {
+  do {_=try await run(mode,coverage:coverage,mapping:mapping,passiveObject:passiveObject,passiveMapping:passiveMapping);preconditionFailure("Expected diagnostic timeout: \(mode)")}
   catch {
    let text=error.localizedDescription
    precondition(text.contains("did not settle") && !text.contains("Diagnostics:") && text.count<180,"Verbose robot error: \(text)")
@@ -164,6 +172,21 @@ final class Feed {
   precondition(ordinaryIMU["stationary_imu_passive_frame_allowed"]as?Bool==false,"IMU changed ordinary capture")
   let mappingIMU=await timeoutDiagnostics("slow_imu_valid")
   precondition(mappingIMU["stationary_imu_passive_frame_allowed"]as?Bool==false,"IMU changed static depth capture")
+  let passiveMap=try await run("slow_imu_valid",passiveMapping:true)
+  precondition(passiveMap.2==1200 && passiveMap.0.sequence==21 && Clock.passiveChecks>=20,"Passive mapping did not await/check actual sparse cadence")
+  precondition(passiveMap.1.vision.lastSettlingDiagnostics["three_frame_fallback_requires_static_scene"]as?Bool==true)
+  precondition(!passiveMap.1.vision.fresh && !passiveMap.1.vision.handsClear,"Passive mapping supplied motion/human readiness")
+  let fallback=try await run(passiveMapping:true)
+  precondition(fallback.0.sequence==22 && fallback.2==300,"No-IMU passive mapping lost static3frame fallback")
+  let changedFallback=await timeoutDiagnostics("changing",passiveMapping:true)
+  precondition(changedFallback["static_scene_resets"]as!Int>0,"Passive mapping weakened fallback scene-change veto")
+  for mode in ["slow_imu_moving","slow_imu_old_imu","slow_imu_invalid_rotation","imu_valid_stale","imu_valid_wrong_source","imu_valid_invalid_k"] {
+   _=await timeoutDiagnostics(mode,passiveMapping:true)
+  }
+  do {_=try await run("slow_imu_valid",passiveMapping:true,stopAtCheck:4);preconditionFailure("Passive context/Stop failure ignored")}
+  catch {precondition(error is CancellationError && Clock.passiveChecks==4)}
+  do {_=try await run("slow_imu_valid",passiveMapping:true,deadlineSeconds:0.2);preconditionFailure("Passive deadline extended")}
+  catch {precondition(Clock.milliseconds==1_000_200)}
   let gaps=await timeoutDiagnostics("gap_resets",passiveObject:true)
   precondition(gaps["capture_gap_resets"]as!Int>=2 && gaps["maximum_accepted_capture_gap_ms"]as!Double==800)
   precondition(gaps["static_scene_resets"]as!Int==0,"Passive failure mislabeled scene motion")
@@ -183,7 +206,8 @@ def main():
     camera=(ROOT/'Cerebro/CameraManager.swift').read_text()
     markers=['func snapshot() -> [String: Frame]', 'var fresh: Bool', 'var handsClear: Bool',
              'private func isFresh(', 'private func isDepthMappingEligible(', 'private func inspectionEpoch(',
-             'func settledDepthFrame(', 'private func inspectionFrame(', 'static func sceneChangeFraction(',
+             'func settledDepthFrame(', '@MainActor func settledPassiveMappingFrame(',
+             'private static func passiveMappingNoopCheck(', 'private func inspectionFrame(', 'static func sceneChangeFraction(',
              'private static func settledFrameDiagnostics(', 'private func recordSettlingDiagnostics(',
              'private func settledInspectionFrame(']
     actual='\n'.join(block(vision,m) for m in markers)
@@ -192,7 +216,7 @@ def main():
         (0 ... 700).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt)
             && frame.depthCoverage >= 0.25
     }'''
-    assert vision.count('depthMappingOnly:true')==1
+    assert vision.count('depthMappingOnly:true')==2
     assert 'depthMappingOnly:true' in block(vision,'func settledDepthFrame(')
     assert 'depthMappingOnly:Bool=false' in block(vision,'private func settledInspectionFrame(')
     object_branch=vision[vision.index('func observeWorkspace('):].split('if objectDetection {',1)[1].split('let result = try await ROBMLXEngine',1)[0]

@@ -69,6 +69,7 @@ import UniformTypeIdentifiers
     private let nominalModelAssumedSelf = NSButton(checkboxWithTitle: "MODEL-ASSUMED self groups + 14 keyframes (one nominal step)", target:nil, action:nil)
     private let nominalEmptyCommissioningStep = NSButton(checkboxWithTitle: "One slow empty-arm commissioning step", target: nil, action: nil)
     private let oneDegreeEmptyCalibrationStep = NSButton(checkboxWithTitle: "One-degree empty-arm calibration step", target: nil, action: nil)
+    private let approachUnknownAdvisory = NSButton(checkboxWithTitle:"UNKNOWN advisory for open-jaw approach (experimental)",target:nil,action:nil)
     private let approachCanThenHold = NSButton(checkboxWithTitle:"Approach can then hold (open jaws)",target:nil,action:nil)
     private let holdAfterInitialEmptyLift = NSButton(checkboxWithTitle: "Hold after initial empty lift", target: nil, action: nil)
     private var collisionRefreshTimer: Timer?
@@ -278,7 +279,12 @@ import UniformTypeIdentifiers
                 approachCanThenHold.target=self;approachCanThenHold.action=#selector(changeApproachCanThenHold)
                 approachCanThenHold.state=ROBLeftArmTrial.shared.approachCanThenHoldEnabled ? .on:.off
                 detailStack.addArrangedSubview(approachCanThenHold)
-                addHelp("DEBUG: find the can, perform ordinary fully checked initial lift and complete approach with open jaws, then hold at observed ready-to-grip alignment. No closing, verification lift, payload, carry, release, automatic recovery or next attempt. ZERO transfers. All ordinary collision/person/Stop/feedback guards remain.")
+                approachUnknownAdvisory.identifier=NSUserInterfaceItemIdentifier("sandbox-approach-unknown-advisory")
+                approachUnknownAdvisory.target=self;approachUnknownAdvisory.action=#selector(changeApproachUnknownAdvisory)
+                approachUnknownAdvisory.state=ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled ? .on:.off
+                detailStack.addArrangedSubview(approachUnknownAdvisory)
+                addHelp("DEBUG, exact standing open-jaw approach only: unobserved cells stay UNKNOWN and are reported as advisory, never relabeled free or observed. Occupied returns, self-collision, person/Stop, joint/rate/current and fresh-feedback checks remain. Explicit uncertainty acceptance is not measured registration or certified clearance. No grip, payload or carry.")
+                addHelp("DEBUG: find the can, perform ordinary fully checked initial lift and complete approach with open jaws, then hold at observed ready-to-grip alignment. No closing, verification lift, payload, carry, release, automatic recovery or next attempt. ZERO transfers. All occupied/self-collision, person/Stop/joint/rate/current/feedback checks remain; UNKNOWN advisory needs its separate explicit option.")
                 holdAfterInitialEmptyLift.identifier = NSUserInterfaceItemIdentifier("sandbox-hold-after-initial-empty-lift")
                 holdAfterInitialEmptyLift.target = self; holdAfterInitialEmptyLift.action = #selector(changeHoldAfterInitialEmptyLift)
                 holdAfterInitialEmptyLift.state = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled ? .on : .off
@@ -628,6 +634,7 @@ import UniformTypeIdentifiers
         guard !approachHold || (holdAfterInitialEmptyLift.state != .on && nominalEmptyCommissioningStep.state != .on && oneDegreeEmptyCalibrationStep.state != .on) else {
             parameterMessage="Choose approach-and-hold separately from lift-only and calibration options.";refresh();return
         }
+        ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled=approachHold && approachUnknownAdvisory.state == .on
         ROBLeftArmTrial.shared.approachCanThenHoldEnabled=approachHold
         let liftHold = selectedTrial.id == "right-recycling" && holdAfterInitialEmptyLift.state == .on
         guard !liftHold || (nominalEmptyCommissioningStep.state != .on && oneDegreeEmptyCalibrationStep.state != .on) else {
@@ -728,10 +735,19 @@ import UniformTypeIdentifiers
             : "One-degree calibration is off; ordinary recycling admission applies."
         approval.tick(); refresh()
     }
+    @objc private func changeApproachUnknownAdvisory() {
+        guard canEdit else{return}
+        ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled=selectedTrial.id=="right-recycling" && approachCanThenHold.state == .on && approachUnknownAdvisory.state == .on
+        parameterMessage=ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled
+            ? "Next exact standing open-jaw approach: UNKNOWN cells advisory only; occupied/self/person/Stop checks remain. Not certified clearance. ZERO transfers."
+            : "UNKNOWN advisory is off; ordinary unobserved-space checks apply."
+        ROBControllerArmApproval.shared.tick();refresh()
+    }
     @objc private func changeApproachCanThenHold() {
         guard canEdit else{return}
         let enabled=selectedTrial.id=="right-recycling" && approachCanThenHold.state == .on
         ROBLeftArmTrial.shared.approachCanThenHoldEnabled=enabled
+        if !enabled {approachUnknownAdvisory.state = .off;ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled=false}
         if enabled {
             holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled=false
             nominalEmptyCommissioningStep.state = .off;ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled=false
@@ -903,6 +919,8 @@ import UniformTypeIdentifiers
         importSourcePixelReview.isEnabled=canEdit && selectedTrial.id=="right-recycling"
         oneDegreeEmptyCalibrationStep.isEnabled = canEdit
         oneDegreeEmptyCalibrationStep.state = left.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
+        approachUnknownAdvisory.isEnabled=canEdit && selectedTrial.id=="right-recycling" && left.approachCanThenHoldEnabled
+        approachUnknownAdvisory.state=left.approachUnknownAdvisoryEnabled ? .on:.off
         approachCanThenHold.isEnabled=canEdit && selectedTrial.id=="right-recycling"
         approachCanThenHold.state=left.approachCanThenHoldEnabled ? .on:.off
         holdAfterInitialEmptyLift.isEnabled = canEdit && selectedTrial.id == "right-recycling"
