@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import simd
 
 // Hardware-free workspace-gate fixtures do not fabricate pixel evidence.
@@ -434,17 +435,20 @@ final class ROBArmRoutineVision {
     var runtimeIdentity=String(repeating:"a",count:64)
     var stereoPolicyIdentity=String(repeating:"c",count:64)
     var clearsFramesOnSetActive=false,frameAvailable=true
-    struct RuntimeCalibration {let identity:String;let stereoPolicySHA256:String}
+    struct RuntimeCalibration:Codable {let identity:String;let stereoPolicySHA256:String}
     struct Correspondence {let status="matched"}
     struct Intrinsics {
         let runtimeCalibration:RuntimeCalibration?
         var cameraServiceSourceSHA256:String? = nil
         var fx=24.0,fy=24.0,cx=12.0,cy=12.0
+        var inertial:String?=nil
+        var sourceSize:[Int]?=nil,depthSourceSize:[Int]?=nil
+        var sourceIntrinsics:[Double]?=nil,imageTransform:[Double]?=nil,depthSourceIntrinsics:[Double]?=nil,depthImageTransform:[Double]?=nil,rgbSourceDistortionCoefficients:[Double]?=nil,depthSourceDistortionCoefficients:[Double]?=nil
         let rgbOutputUndistorted:Bool?=true,depthRGBGeometryCorrespondence:Correspondence?=Correspondence()
         func isValid(forWidth:Int,height:Int)->Bool {forWidth==24 && height==24 && fx>0 && fy>0}
     }
-    struct Depth {var width=24,height=24;func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
-    struct Frame {let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true}
+    struct Depth {var width=24,height=24;var millimetersLittleEndian:Data {Data(repeating:0,count:width*height*2)};func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
+    struct Frame {var image=CIImage(color:CIColor(red:0,green:0,blue:0)).cropped(to:CGRect(x:0,y:0,width:24,height:24));let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true}
     var frameSequence:UInt64=10,captureFocalLength=24.0
     var captureWidth=24,captureHeight=24
     func snapshot()->[String:Frame] {

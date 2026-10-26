@@ -251,6 +251,12 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
         return result.isEmpty ? nil:result
     }
 
+    var originalOccupiedSourceGroups:[ROBWorkspaceOccupiedSourceGroup]? {
+        guard sourceSamplesAreComplete,let source=occupiedSourceSamples else{return nil}
+        return source.map{cell,b in ROBWorkspaceOccupiedSourceGroup(sourceVoxel:[cell.x,cell.y,cell.z],
+            bounds:.init(lowMeters:[b.low.x,b.low.y,b.low.z],highMeters:[b.high.x,b.high.y,b.high.z]))}.sorted{$0.id<$1.id}
+    }
+
     var originalOccupiedReturnBounds:[ROBWorkspaceOccupiedReturnBounds]? {
         guard occupied.allSatisfy({occupiedSamples[$0] != nil}) else{return nil}
         return occupied.map { voxel in let b=occupiedSamples[voxel]!

@@ -158,6 +158,16 @@ final class ROBWorkspaceRawScanArchive: @unchecked Sendable {
             }
         }
     }
+    /// Ends an incomplete capture without a successful/complete manifest.
+    /// A previously finished archive is immutable and remains unchanged.
+    func closeIncomplete(reason:String) async {
+        await withCheckedContinuation {continuation in
+            queue.async {
+                if !self.closed {self.closed=true;_ = try?self.writeManifest(status:"failed",failure:String(reason.prefix(1024)))}
+                continuation.resume()
+            }
+        }
+    }
     func finish() async throws->Manifest {
         try await withCheckedThrowingContinuation {continuation in
             queue.async {

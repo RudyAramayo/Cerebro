@@ -273,6 +273,12 @@ enum ROBWorkspaceVoxelState: UInt8, Codable { case unknown, free, occupied }
 
 /// A map is evidence from this camera/robot scene, never arm authority. Free
 /// space must have been observed; absence of an obstacle is not free space.
+struct ROBWorkspaceOccupiedSourceGroup:Codable,Equatable {
+    let sourceVoxel:[Int]
+    let bounds:ROBWorkspaceOccupiedReturnBounds
+    var id:String {sourceVoxel.map(String.init).joined(separator:",")}
+}
+
 protocol ROBWorkspaceCollisionMap {
     var sceneID: UUID { get }
     var cameraGeneration: UUID { get }
@@ -289,6 +295,7 @@ protocol ROBWorkspaceCollisionMap {
     var fingerprint: String { get }
     var visualCalibrationScope: ROBWorkspaceVisualCalibrationMapScope? { get }
     var originalOccupiedReturnBounds:[ROBWorkspaceOccupiedReturnBounds]? {get}
+    var originalOccupiedSourceGroups:[ROBWorkspaceOccupiedSourceGroup]? {get}
     func state(at point: SIMD3<Double>) -> ROBWorkspaceVoxelState
     func state(inBoundsLow low: SIMD3<Double>, high: SIMD3<Double>) -> ROBWorkspaceVoxelState
     func containsTargetObservation(sequence: UInt64, capturedAtMilliseconds: Double) -> Bool
@@ -299,6 +306,7 @@ protocol ROBWorkspaceCollisionMap {
 extension ROBWorkspaceCollisionMap {
     var visualCalibrationScope: ROBWorkspaceVisualCalibrationMapScope? { nil }
     var originalOccupiedReturnBounds:[ROBWorkspaceOccupiedReturnBounds]? {nil}
+    var originalOccupiedSourceGroups:[ROBWorkspaceOccupiedSourceGroup]? {nil}
     func containsTargetObservation(sequence:UInt64,capturedAtMilliseconds:Double) -> Bool { false }
     func occupiedSampleBounds(at point:SIMD3<Double>) -> (low:SIMD3<Double>,high:SIMD3<Double>)? { nil }
     func occupiedSampleSubBounds(at point:SIMD3<Double>) -> [ROBWorkspaceOccupiedReturnBounds]? { nil }
@@ -1589,14 +1597,41 @@ struct ROBWorkspaceNominalEmptyCommissioningRetreat:Codable,Equatable {
     let calibrationUncertaintyCertified:Bool
     let occupiedVoxelsMutated:Bool
     let automaticChainingPermitted:Bool
+    struct AssumedSelfGroup:Codable,Equatable {
+        let sourceGroupID:String
+        let sourceVoxel:[Int]
+        let originalBounds:ROBWorkspaceOccupiedReturnBounds
+        let baselineMovingLink:String
+    }
+    struct AssumedSelfAudit:Codable,Equatable {
+        let label:String
+        let completeSourceGroupCount:Int
+        let completeSourceGroupsSHA256:String
+        let baseline:[Double]
+        let mapFingerprint:String,modelID:String,referenceID:String,geometryID:String,mappingID:String
+        let bodyMotionIdentity:String,cameraGeneration:UUID,gatewayGeneration:UInt64
+        let groups:[AssumedSelfGroup]
+        let observedSelf:Bool
+        let rawMapModified:Bool
+    }
+    let modelAssumedSelfAudit:AssumedSelfAudit?
     var step:ROBLeftGestureProposal.Step {.init(positions:goal,seconds:4,stage:"One UNVERIFIED nominal EMPTY commissioning retreat, then hold")}
     func validateContext(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
         cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
-        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String)throws {
+        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String,modelAssumedSelfEnabled:Bool=false)throws {
         let current=try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(map,model:model,generation:generation,
             sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
         let drift=1.5*zip(baseline,measuredBaseline).reduce(0.0){$0+abs($1.0-$1.1)}
-        guard nominalEmptyCommissioningEnabled,mode=="unverified_nominal_empty_commissioning_retreat",model.physicalSide=="right",
+        if let audit=modelAssumedSelfAudit {
+            guard modelAssumedSelfEnabled,audit.label=="assumed_alignment_not_observed_self",!audit.observedSelf,!audit.rawMapModified,
+                  audit.baseline==baseline,audit.mapFingerprint==map.fingerprint,audit.modelID==model.modelID,audit.referenceID==model.referenceID,
+                  audit.geometryID==model.geometryID,audit.mappingID==model.selectedMappingID,audit.bodyMotionIdentity==trial.bodyMotionIdentity,
+                  audit.cameraGeneration==cameraGeneration,audit.gatewayGeneration==generation,!audit.groups.isEmpty else {
+                throw ROBGhostMotionError.blocked("Frozen MODEL-ASSUMED group/q0/reference/source identity changed.")
+            }
+        }
+        guard nominalEmptyCommissioningEnabled,mode==(modelAssumedSelfEnabled ? "unverified_nominal_empty_model_assumed_self_commissioning_retreat":"unverified_nominal_empty_commissioning_retreat"),
+              (modelAssumedSelfAudit != nil)==modelAssumedSelfEnabled,model.physicalSide=="right",
               context.visualTrial==trial,current.mapFingerprint==context.mapFingerprint,
               context.modelID==current.modelID,context.geometryID==current.geometryID,context.mappingID==current.mappingID,
               measuredBaseline.count==7,drift.isFinite,drift<=min(0.002,minimumSweptNominalClearanceMeters/2),
@@ -1612,14 +1647,14 @@ struct ROBWorkspaceNominalEmptyCommissioningRetreat:Codable,Equatable {
     }
     func validate(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
         cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
-        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String)throws {
+        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String,modelAssumedSelfEnabled:Bool=false)throws {
         try validateContext(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,
             nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,measuredBaseline:measuredBaseline,
-            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource)
+            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource,modelAssumedSelfEnabled:modelAssumedSelfEnabled)
         let expected=try ROBWorkspaceCollisionPlan.buildNominalEmptyCommissioningRetreat(id:id,from:baseline,map:map,model:model,
             generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:context.checkedAtMilliseconds,
             trial:trial,measuredAtMilliseconds:self.measuredAtMilliseconds,nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,
-            emptyStateEvidenceSource:emptyStateEvidenceSource)
+            emptyStateEvidenceSource:emptyStateEvidenceSource,modelAssumedSelfEnabled:modelAssumedSelfEnabled)
         guard expected==self else {throw ROBGhostMotionError.blocked("The nominal commissioning geometry, raw returns or recorded local scope changed.")}
     }
 }
@@ -1627,19 +1662,19 @@ extension ROBWorkspaceCollisionPlan {
     static func reviewNominalEmptyCommissioningRetreat(from baseline:[Double],map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
         trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,nominalEmptyCommissioningEnabled:Bool,
-        emptyStateEvidenceSource:String)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
+        emptyStateEvidenceSource:String,modelAssumedSelfEnabled:Bool=false)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
         try buildNominalEmptyCommissioningRetreat(id:UUID(),from:baseline,map:map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,
-            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource)
+            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource,modelAssumedSelfEnabled:modelAssumedSelfEnabled)
     }
     fileprivate static func buildNominalEmptyCommissioningRetreat(id:UUID,from baseline:[Double],map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
         trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,nominalEmptyCommissioningEnabled:Bool,
-        emptyStateEvidenceSource:String)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
+        emptyStateEvidenceSource:String,modelAssumedSelfEnabled:Bool=false)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
         let context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
         guard nominalEmptyCommissioningEnabled,model.physicalSide=="right",baseline.count==7,baseline==trial.baseline,
-              baseline.allSatisfy({$0.isFinite && abs($0)<=0.004}),trial.assumedSpatialErrorMeters==0.035,
+              baseline.enumerated().allSatisfy({i,q in q.isFinite && (modelAssumedSelfEnabled && i==1 ? (-0.04...0.004).contains(q):abs(q)<=0.004)}),trial.assumedSpatialErrorMeters==0.035,
               ["operator_declared_empty","local_first_attempt_no_arm_travel_or_task_grip"].contains(emptyStateEvidenceSource),
               measuredAtMilliseconds.isFinite,(0...150).contains(nowMilliseconds-measuredAtMilliseconds),
               let supplied=map.originalOccupiedReturnBounds,!supplied.isEmpty,supplied.count<=400_000 else {
@@ -1685,6 +1720,60 @@ extension ROBWorkspaceCollisionPlan {
                 if joint.name==movingJoint {depends=true};child=joint.parent
             }
             if !depends {fixed.insert(link)}
+        }
+        var assumedAudit:ROBWorkspaceNominalEmptyCommissioningRetreat.AssumedSelfAudit?
+        if modelAssumedSelfEnabled {
+            guard let groups=map.originalOccupiedSourceGroups,!groups.isEmpty,groups.count<=400_000,map.voxelSizeMeters==0.025 else {
+                throw ROBGhostMotionError.blocked("MODEL-ASSUMED self commissioning requires complete original source groups; legacy/incomplete unions remain external.")
+            }
+            var cells:[SIMD3<Int>:ROBNominalRawBox]=[:],groupIDs=Set<String>(),ordered:[(ROBWorkspaceOccupiedSourceGroup,ROBNominalRawBox)]=[]
+            for group in groups {
+                guard group.sourceVoxel.count==3,groupIDs.insert(group.id).inserted,
+                      group.bounds.lowMeters.count==3,group.bounds.highMeters.count==3 else {throw ROBGhostMotionError.blocked("Incomplete original source-group provenance.")}
+                let lo=group.bounds.lowMeters,hi=group.bounds.highMeters,size=map.voxelSizeMeters
+                guard (lo+hi).allSatisfy({$0.isFinite && abs($0)<=10}),zip(lo,hi).allSatisfy({$0<=$1}),
+                      (0..<3).allSatisfy({Int(floor(lo[$0]/size))==group.sourceVoxel[$0] && Int(floor(hi[$0]/size))==group.sourceVoxel[$0]}) else {throw ROBGhostMotionError.blocked("An original source group exceeds its exact source voxel.")}
+                let b=ROBNominalRawBox(low:SIMD3(lo[0],lo[1],lo[2]),high:SIMD3(hi[0],hi[1],hi[2]),key:group.id)
+                ordered.append((group,b))
+                for x in -1...1 {for y in -1...1 {for z in -1...1 {
+                    let c=SIMD3(group.sourceVoxel[0]+x,group.sourceVoxel[1]+y,group.sourceVoxel[2]+z)
+                    if let old=cells[c] {cells[c] = .init(low:simd_min(old.low,b.low),high:simd_max(old.high,b.high),key:"")}
+                    else {cells[c]=b}
+                }}}
+            }
+            var reconstructed=Set<String>()
+            for (cell,b) in cells {
+                let point=(SIMD3<Double>(Double(cell.x),Double(cell.y),Double(cell.z))+0.5)*map.voxelSizeMeters
+                guard map.state(at:point) == .occupied,let actual=map.occupiedSampleBounds(at:point),
+                      (0..<3).allSatisfy({abs(actual.low[$0]-b.low[$0])<=1e-12 && abs(actual.high[$0]-b.high[$0])<=1e-12}) else {
+                    throw ROBGhostMotionError.blocked("Incomplete source groups cannot reconstruct every retained occupied union.")
+                }
+                reconstructed.insert(([b.low.x,b.low.y,b.low.z,b.high.x,b.high.y,b.high.z]).map{String($0.bitPattern)}.joined(separator:":"))
+            }
+            guard reconstructed==seen else {throw ROBGhostMotionError.blocked("Incomplete source groups leave an original occupied union unaccounted for.")}
+            var excluded:[ROBWorkspaceNominalEmptyCommissioningRetreat.AssumedSelfGroup]=[],external:[ROBNominalRawBox]=[]
+            let moving=links.filter{!fixed.contains($0)}.map{($0,ROBNominalWorldShape(shapes[$0]!,startFrames[$0]!))}
+            for (group,b) in ordered.sorted(by:{$0.0.id<$1.0.id}) {
+                let owner=moving.first{_,shape in
+                    // Every corner must be in the NONinflated convex hull.
+                    // Never test only a center or an intersecting AABB.
+                    for x in [b.low.x,b.high.x] {for y in [b.low.y,b.high.y] {for z in [b.low.z,b.high.z] {
+                        let p=SIMD3(x,y,z)
+                        if !zip(shape.axes,shape.supportIntervals).allSatisfy({n,interval in let d=simd_dot(n,p);return d>=interval.0 && d<=interval.1}) {return false}
+                    }}}
+                    return true
+                }?.0
+                if let owner {excluded.append(.init(sourceGroupID:group.id,sourceVoxel:group.sourceVoxel,originalBounds:group.bounds,baselineMovingLink:owner))}
+                else {external.append(b)}
+            }
+            guard !excluded.isEmpty,!external.isEmpty else {throw ROBGhostMotionError.blocked("MODEL-ASSUMED commissioning needs isolated complete self hypotheses and retained external returns.")}
+            let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+            assumedAudit = .init(label:"assumed_alignment_not_observed_self",completeSourceGroupCount:groups.count,
+                completeSourceGroupsSHA256:ROBGhostRobotModel.hash(try encoder.encode(ordered.sorted{$0.0.id<$1.0.id}.map{$0.0})),baseline:baseline,
+                mapFingerprint:map.fingerprint,modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+                bodyMotionIdentity:trial.bodyMotionIdentity,cameraGeneration:cameraGeneration,gatewayGeneration:generation,
+                groups:excluded,observedSelf:false,rawMapModified:false)
+            raw=external
         }
         let intersample=1.5*0.075/(2*Double(count)),curvature=0.75*pow(0.075/Double(count),2)
         var minimumRaw=Double.infinity,minimumJaw=Double.infinity,closestLink="",closestBox:ROBNominalRawBox?
@@ -1740,7 +1829,7 @@ extension ROBWorkspaceCollisionPlan {
             }}}
             regions.append(.init(link:link,lowMeters:[low.x,low.y,low.z],highMeters:[high.x,high.y,high.z]))
         }
-        return .init(id:id,mode:"unverified_nominal_empty_commissioning_retreat",context:context,baseline:baseline,goal:goal,
+        return .init(id:id,mode:modelAssumedSelfEnabled ? "unverified_nominal_empty_model_assumed_self_commissioning_retreat":"unverified_nominal_empty_commissioning_retreat",context:context,baseline:baseline,goal:goal,
             measuredAtMilliseconds:measuredAtMilliseconds,checkedPoseCount:count+1,originalOccupiedBoundsCount:supplied.count,
             deduplicatedOccupiedBoundsCount:raw.count,originalOccupiedBoundsSHA256:rawHash,
             minimumRawClearanceMeters:minimumRaw,minimumAfterJawEnvelopeMeters:minimumJaw,
@@ -1749,7 +1838,7 @@ extension ROBWorkspaceCollisionPlan {
             assumedCalibrationUncertaintyMeters:0.035,isotropicJawEnvelopeMeters:0.040,intersamplePointTravelAllowanceMeters:intersample,
             curvatureAllowanceMeters:curvature,maximumHullTravelMeters:maximumTravel,unknownVoxelCount:unknown.count,unknownLocalRegions:regions,
             staticRobotLinks:fixedEvidence,initialSelfMinimumMeters:initialSelf!.values.min()!,endpointSelfMinimumMeters:endpointSelf.values.min()!,
-            emptyStateEvidenceSource:emptyStateEvidenceSource,calibrationUncertaintyCertified:false,occupiedVoxelsMutated:false,automaticChainingPermitted:false)
+            emptyStateEvidenceSource:emptyStateEvidenceSource,calibrationUncertaintyCertified:false,occupiedVoxelsMutated:false,automaticChainingPermitted:false,modelAssumedSelfAudit:assumedAudit)
     }
 }
 

@@ -64,6 +64,7 @@ import UniformTypeIdentifiers
     private let collisionInfo = NSTextField(wrappingLabelWithString: "")
     private let localApprovalInfo = NSTextField(wrappingLabelWithString: "")
     private let standingCampaignInfo = NSTextField(wrappingLabelWithString: "")
+    private let nominalModelAssumedSelf = NSButton(checkboxWithTitle: "MODEL-ASSUMED self groups + 14 keyframes (one nominal step)", target:nil, action:nil)
     private let nominalEmptyCommissioningStep = NSButton(checkboxWithTitle: "One slow empty-arm commissioning step", target: nil, action: nil)
     private let oneDegreeEmptyCalibrationStep = NSButton(checkboxWithTitle: "One-degree empty-arm calibration step", target: nil, action: nil)
     private let holdAfterInitialEmptyLift = NSButton(checkboxWithTitle: "Hold after initial empty lift", target: nil, action: nil)
@@ -249,6 +250,10 @@ import UniformTypeIdentifiers
             nominalEmptyCommissioningStep.action = #selector(changeNominalEmptyCommissioningStep)
             nominalEmptyCommissioningStep.state = ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled ? .on : .off
             detailStack.addArrangedSubview(nominalEmptyCommissioningStep)
+            nominalModelAssumedSelf.identifier=NSUserInterfaceItemIdentifier("sandbox-nominal-model-assumed-self")
+            nominalModelAssumedSelf.target=self;nominalModelAssumedSelf.action=#selector(changeNominalModelAssumedSelf)
+            nominalModelAssumedSelf.state=ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled ? .on:.off
+            detailStack.addArrangedSubview(nominalModelAssumedSelf)
             addHelp("Commissioning only: one slow outward empty-arm step, then hold. Current robot occupancy is assumed from the model; calibration error and nearby unobserved space remain unverified. No grip, carry, release or automatic return. Zero cans are transferred.")
             oneDegreeEmptyCalibrationStep.identifier = NSUserInterfaceItemIdentifier("sandbox-one-degree-empty-calibration-step")
             oneDegreeEmptyCalibrationStep.target = self
@@ -556,6 +561,7 @@ import UniformTypeIdentifiers
         }
         nominalEmptyCommissioningStep.state = .off; oneDegreeEmptyCalibrationStep.state = .off
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
+        nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
         prepareLocalRecyclingSessionJob()
     }
@@ -608,6 +614,7 @@ import UniformTypeIdentifiers
         ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = liftHold
         ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters = spatial
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled = nominalModelAssumedSelf.state == .on && nominalEmptyCommissioningStep.state == .on
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
         parameterMessage = ""; observingLeftOperation = true
         ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: String(Self.recyclingCount)) { [weak self] result in
@@ -622,6 +629,21 @@ import UniformTypeIdentifiers
         }
         refresh()
     }
+    @objc private func changeNominalModelAssumedSelf() {
+        guard canEdit else{return}
+        let approval=ROBControllerArmApproval.shared
+        if approval.localRecyclingApprovalState != nil || approval.pendingLocalRecyclingApprovalScope != nil {
+            approval.cancel(reason:"MODEL-ASSUMED self commissioning scope changed; prepare its exact receipt.")
+        }
+        if nominalModelAssumedSelf.state == .on {
+            nominalEmptyCommissioningStep.state = .on;oneDegreeEmptyCalibrationStep.state = .off;holdAfterInitialEmptyLift.state = .off
+            ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled=true
+            ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled=false;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled=false
+        }
+        ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=nominalModelAssumedSelf.state == .on
+        parameterMessage="MODEL-ASSUMED self is an explicit property-risk hypothesis, not observed recognition. One RIGHT J2 step +14 keyframes; no jaws or chaining."
+        approval.tick();refresh()
+    }
     @objc private func changeNominalEmptyCommissioningStep() {
         guard canEdit else { return }
         let approval = ROBControllerArmApproval.shared
@@ -629,6 +651,7 @@ import UniformTypeIdentifiers
             approval.cancel(reason: "The one-step commissioning option changed; review a new exact job receipt.")
         }
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled = nominalModelAssumedSelf.state == .on && nominalEmptyCommissioningStep.state == .on
         if nominalEmptyCommissioningStep.state == .on {
             holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = false
             oneDegreeEmptyCalibrationStep.state = .off
@@ -650,6 +673,7 @@ import UniformTypeIdentifiers
             holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = false
             nominalEmptyCommissioningStep.state = .off
             ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
+        nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
         }
         parameterMessage = oneDegreeEmptyCalibrationStep.state == .on
             ? "Next local receipt: one four-second RIGHT J2 −0.02 rad calibration step, then hold; contact clearance is unverified; zero transfers."
@@ -662,6 +686,7 @@ import UniformTypeIdentifiers
         if ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled {
             nominalEmptyCommissioningStep.state = .off;oneDegreeEmptyCalibrationStep.state = .off
             ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
+        nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
             ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
         }
         parameterMessage = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled
@@ -808,6 +833,8 @@ import UniformTypeIdentifiers
         for field in fields.values { field.isEnabled = canEdit }
         nominalEmptyCommissioningStep.isEnabled = canEdit
         nominalEmptyCommissioningStep.state = left.nominalEmptyCommissioningStepEnabled ? .on : .off
+        nominalModelAssumedSelf.state = left.nominalModelAssumedSelfEnabled ? .on:.off
+        nominalModelAssumedSelf.isEnabled = canEdit && selectedTrial.id=="right-recycling"
         oneDegreeEmptyCalibrationStep.isEnabled = canEdit
         oneDegreeEmptyCalibrationStep.state = left.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
         holdAfterInitialEmptyLift.isEnabled = canEdit && selectedTrial.id == "right-recycling"
@@ -918,6 +945,9 @@ enum ROBLocalRecyclingSandboxRouting {
         }
         if scope["permitsUnmeasuredVisualCalibrationTrial"] as? Bool == true {
             lines.append(imported == nil ? "Unmeasured visual trial: requested, not yet approved." : "Unmeasured visual trial: explicitly permitted; planner admission is separate.")
+        }
+        if scope["nominalModelAssumedSelfEnabled"]as?Bool==true {
+            lines.append("MODEL-ASSUMED alignment, NOT observed self. Whole original groups inside noninflated baseline moving-link hulls only; all raw data retained. One J2-only step, 14 timed keyframes, hold. Contact/property risk accepted for this experiment; no normal clearance or transfer credit.")
         }
         if scope["nominalEmptyCommissioningStepEnabled"] as? Bool == true {
             lines.append("Commissioning only: one slow empty-arm outward step, then hold. Current robot occupancy is assumed from the model; calibration and local unknown space unverified. No grip, carry, release or automatic return. Zero transfers.")

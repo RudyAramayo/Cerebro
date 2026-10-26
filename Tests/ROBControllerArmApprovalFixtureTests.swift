@@ -412,6 +412,7 @@ final class ROBAmberGatewayClient: NSObject {
                 execute: { executed += 1; done = $0 }, cancel: {}, completion: { _ in })
             check(b.pendingLocalRecyclingApprovalScope?["nominalEmptyCommissioningStepEnabled"] as? Bool == true,
                 "The exact one-step flag must be visible in the immutable prepared scope")
+            check(b.pendingLocalRecyclingApprovalScope?["nominalModelAssumedSelfEnabled"]==nil,"OFF scope serialization must omit the new optional flag")
             check(!b.receiveSpokenAuthorization("yes proceed") && executed == 0,
                 "Speech cannot enable or grant the one-step receipt-only experiment")
             let changed = try receipt(b) { value in
@@ -432,6 +433,31 @@ final class ROBAmberGatewayClient: NSObject {
             done?(["status": "partial", "transfersCompleted": 0])
             check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: summary, arm: "right") &&
                 b.localRecyclingApprovalState == nil, "Finishing the one-step experiment cannot retain a reusable motion grant")
+        }
+        do {
+            let b=localBroker();var executed=0
+            let summary="ONE model-assumed EMPTY RIGHT J2 nominal step with14keyframes; not observed self"
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:summary,
+                contextIdentity:{"inert-model-assumed-context"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                nominalEmptyCommissioningStepEnabled:true,nominalModelAssumedSelfEnabled:true,
+                execute:{_ in executed+=1},cancel:{},completion:{_ in})
+            check(b.pendingLocalRecyclingApprovalScope?["nominalModelAssumedSelfEnabled"]as?Bool==true,"New model hypothesis flag must be explicit in immutable receipt")
+            let changed=try receipt(b){value in var scope=value["scope"]as![String:Any];scope.removeValue(forKey:"nominalModelAssumedSelfEnabled");value["scope"]=scope}
+            expectReceiptRejection(b,changed,"Legacy nominal receipt cannot authorize model-assumed source-group admission")
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt(b))
+            check(executed==1 && b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",modelAssumedSelfEnabled:true),"Exact native model-assumed flag admits only its dedicated experiment")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right"),"New assumption permission must not alias legacy nominal OFF binding")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"left",modelAssumedSelfEnabled:true),"Model assumption cannot cross physical side")
+            b.cancel(reason:"fixture Stop")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",modelAssumedSelfEnabled:true),"Stop revokes model-assumed commissioning")
+        }
+        for (side,nominal,oneDegree) in [("left",true,false),("right",false,false),("right",true,true)] {
+            let b=localBroker();var rejected=false
+            b.requestRecyclingWorkspaceTask(command:side+"_recycle_cans",arm:side,canCount:4,summary:"inert invalid model assumption",
+                contextIdentity:{"inert"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                nominalEmptyCommissioningStepEnabled:nominal,nominalModelAssumedSelfEnabled:true,oneDegreeEmptyCalibrationStepEnabled:oneDegree,
+                execute:{_ in},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            check(rejected && b.pendingLocalRecyclingApprovalScope==nil,"Model assumption requires RIGHT+nominal and excludes other calibration modes")
         }
         for (receiptOnly, visualTrial) in [(false, true), (true, false)] {
             let b = localBroker(); var executed = 0, rejected = false

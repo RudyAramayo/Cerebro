@@ -73,6 +73,13 @@ import CryptoKit
    let failed=try JSONDecoder().decode(Archive.Manifest.self,from:Data(contentsOf:w.directory.appendingPathComponent("manifest.json")))
    precondition(failed.status=="failed" && failed.failure != nil)
   }
+  let incompleteCapture=try await new();_ = try await incompleteCapture.append(frame())
+  await incompleteCapture.closeIncomplete(reason:"actual after-hold camera observation unavailable")
+  await reject{_ = try await incompleteCapture.finish()}
+  let incompleteManifest=try JSONDecoder().decode(Archive.Manifest.self,from:Data(contentsOf:incompleteCapture.directory.appendingPathComponent("manifest.json")))
+  precondition(incompleteManifest.status=="failed" && incompleteManifest.frames.count==1)
+  await writer.closeIncomplete(reason:"late caller failure cannot rewrite complete capture")
+  let completeAfterLateClose=try Data(contentsOf:manifestPath);precondition(completeAfterLateClose==finishedBytes)
   let concurrent=try await new()
   await withTaskGroup(of:Bool.self){group in
    for _ in 0..<3 {group.addTask{do{_ = try await concurrent.append(frame(1));return true}catch{return false}}}

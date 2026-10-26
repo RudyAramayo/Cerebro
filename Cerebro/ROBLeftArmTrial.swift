@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import simd
 
 /// Ephemeral admission evidence for one already-authorized waypoint. It is
@@ -193,6 +194,7 @@ enum ROBArmCurrentSpikeRecording {
     @nonobjc private var activeLocalRetreat: ROBWorkspaceInitialEmptyRetreat?
     @nonobjc private var activeNominalRetreat: ROBWorkspaceNominalEmptyCommissioningRetreat?
     @nonobjc var nominalEmptyCommissioningStepEnabled = false
+    @nonobjc var nominalModelAssumedSelfEnabled = false
     @nonobjc private var activeOneDegreeCalibration: ROBWorkspaceOneDegreeEmptyCalibrationStep?
     @nonobjc var oneDegreeEmptyCalibrationStepEnabled = false
     /// DEBUG-only early stop on the ordinary, fully checked empty entry path.
@@ -265,6 +267,9 @@ enum ROBArmCurrentSpikeRecording {
     private var localCampaignRecoveryReason: ROBStandingCanCampaignRecoveryReason?
     private var localCampaignRecoveryTask: Task<Void,Never>?
     private var standingPreparationTask:Task<Void,Never>?
+    @nonobjc private var nominalBothArmHistory:[String:[(generation:UInt64,sample:ROBAmberGatewayTelemetry)]] = [:]
+    private var nominalArchiveLastSequence:UInt64=0
+    private var nominalArchiveTimes:[(stage:String,time:Double)]=[]
     private var servoTelemetryHistory:[(generation:UInt64,sample:ROBAmberGatewayTelemetry)]=[]
 
 
@@ -626,6 +631,13 @@ enum ROBArmCurrentSpikeRecording {
                         if self.servoTelemetryHistory.count>80 {self.servoTelemetryHistory.removeFirst(self.servoTelemetryHistory.count-80)}
                     }
                 }
+                if self.isRunning,self.nominalModelAssumedSelfEnabled,sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds<=250 {
+                    let current=(self.gateway.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value ?? 0
+                    var history=self.nominalBothArmHistory[sample.arm] ?? []
+                    if history.last?.generation != current {history=[]}
+                    if history.last?.sample.sequence != sample.sequence {history.append((current,sample));if history.count>240 {history.removeFirst(history.count-240)}}
+                    self.nominalBothArmHistory[sample.arm]=history
+                }
                 self.recordCurrentSpikePostStop(sample)
                 guard self.isRunning,self.failure==nil,!Self.neckOnlyCommands.contains(self.activeCommand),
                       !self.inactiveWorkspaceSearch,sample.arm==self.arm else{return}
@@ -649,7 +661,7 @@ enum ROBArmCurrentSpikeRecording {
             completion(["status":"rejected","detail":"Choose an exact local recycling count from1 through8."]);return
         }
         let broker=ROBControllerArmApproval.shared
-        if broker.standingLocalCanCampaignActive,!nominalEmptyCommissioningStepEnabled,!oneDegreeEmptyCalibrationStepEnabled {
+        if broker.standingLocalCanCampaignActive,!nominalEmptyCommissioningStepEnabled,!nominalModelAssumedSelfEnabled,!oneDegreeEmptyCalibrationStepEnabled {
             let state=broker.standingLocalCanCampaignState
             let targetCount=(state?["targetCanCount"]as?NSNumber)?.intValue ?? (state?["canCount"]as?NSNumber)?.intValue ?? 4
             guard canCount==targetCount else {
@@ -769,9 +781,12 @@ enum ROBArmCurrentSpikeRecording {
         let nominalSummary=localReceiptOnly && nominalEmptyCommissioningStepEnabled
             ? "ONE NOMINAL EMPTY physical RIGHT-arm commissioning experiment only: fresh measured q0 to J2 minus0.075rad over4seconds, at most6cm full-hull travel and0.20rad per joint. No jaw command, grasp, payload, carry, release, automatic return or chained can attempt. Both arms may hold their measured positions. Watch the arm in the actual recorded RIGHT camera view. Exact raw-return bounds are checked for nominal no-contact; unknown space is admitted ONLY in the recorded local swept regions. Current robot occupancy is assumed from the model; this is a geometric assumption, not sensor classification or removal of raw returns. Modeled millimeter-scale gaps are much smaller than the explicitly ASSUMED35mm camera uncertainty: this is NOT certified collision protection and physical contact remains possible. Stop, ownership, current limits, fresh motor/gripper feedback, source/body/profile identity and exact receipt remain required. After this ONE step, measure the endpoint and hold, report partial with ZERO recycled cans; the \(requestedCanCount)-can job remains unfinished. Empty state is assumed from startup/task history, not sensed possession."
             : recyclingSummary
+        let assumedSummary=localReceiptOnly && nominalModelAssumedSelfEnabled
+            ? "ONE MODEL-ASSUMED EMPTY RIGHT-arm commissioning step: exact fresh q0 to J2 minus0.075rad only,4seconds,at most60mm full-hull travel. Assumed alignment is NOT observed self recognition. Only COMPLETE original source groups entirely inside NONinflated baseline moving-link model hulls are treated as assumed robot material for this one nominal proof; an external object inside that assumed volume could be misclassified and contact/property damage is possible. All other raw groups retain existing nominal external-contact checks. Raw occupied data and unknown space remain unchanged; no normal clearance certificate. Fixed head/body and BOTH measured arm holds; only RIGHT J2 moves. Collect14 explicit RGB-D keyframes (3before,8during,3after) with actual timestamps/cadence and BOTH measured q. No jaws, payload, grip,carry,release,return,retry or automatic chaining. Preserve Stop/person/current/fresh feedback/ownership/joint/self-nonworsening/endclearance checks. Hold after one step; ZERO transfers; camera35mm error and empty startup/history remain assumptions. Requires current prepared P4000 L6011 U5450; no head change by this variant."
+            : nominalSummary
         let experimentSummary=localReceiptOnly && oneDegreeEmptyCalibrationStepEnabled
             ? "ONE EMPTY physical RIGHT-arm actuator/geometry calibration experiment only: fresh measured q0 to J2 minus0.02rad (about one degree) over4seconds, at most2cm modeled full-hull travel. No jaw command, payload, grasp, carry, release, automatic return or chained can attempt. Both arms remain stationary except this ONE selected-joint step. Watch the actual RIGHT arm in the recorded camera view. Best-available camera/model alignment has explicitly ASSUMED35mm error; raw contact predictions and unknown regions are recorded as diagnostics and are NOT verified motion clearance or a collision certificate. Physical contact and calibration mistakes are accepted for this bounded experiment. Stop, ownership, current limits, fresh motor/gripper feedback, source/body/profile identity, q0, joint bounds and a tight measured motion corridor remain required. After the ONE step, measure the endpoint and hold, report partial with ZERO recycled cans. Empty state is assumed from startup/task history, not sensed possession."
-            : nominalSummary
+            : assumedSummary
         let approvedSummary=localReceiptOnly && holdAfterInitialEmptyLiftEnabled
             ? "DEBUG initial EMPTY lift and hold only, physical RIGHT arm: search fresh can/workspace observations, select one initial empty lift using the ordinary complete occupied/unknown/full-arm/self-clearance review, recheck its exact measured start before dispatch, then measure the endpoint and hold. No jaw commands or startup jaw calibration, grasp, payload, carry, release, return, rescan after lifting, next can or chained motion. If no initial lift is required, remain unchanged and report that. ZERO transfers; the \(requestedCanCount)-can campaign remains unfinished. Both arms may hold their current measured positions. The same explicit visual trial uses assumed spatial error \(localVisualTrialAssumedSpatialErrorMeters*1000) mm; no calibration or collision exemption is added. Preserve joint bounds, fresh motor/gripper feedback, source/body/context identity, exclusive ownership, current-spike hold and immediate Stop."
             : experimentSummary
@@ -805,6 +820,7 @@ enum ROBArmCurrentSpikeRecording {
                 completion(["status":"rejected","detail":"The fully checked empty lift-and-hold option requires physical RIGHT and excludes both separate calibration experiments."]);return
             }
             guard !(nominalEmptyCommissioningStepEnabled && oneDegreeEmptyCalibrationStepEnabled),
+                  !nominalModelAssumedSelfEnabled || nominalEmptyCommissioningStepEnabled && physicalSide=="right",
                   !(nominalEmptyCommissioningStepEnabled || oneDegreeEmptyCalibrationStepEnabled) || physicalSide=="right" && localVisualTrialAssumedSpatialErrorMeters==0.035 else {
                 completion(["status":"rejected","detail":"The separate empty calibration experiments are mutually exclusive and require physical RIGHT and an explicit35mm assumed camera uncertainty."]);return
             }
@@ -820,6 +836,7 @@ enum ROBArmCurrentSpikeRecording {
             ROBControllerArmApproval.shared.requestRecyclingWorkspaceTask(command:requestedCommand,arm:physicalSide,canCount:canCount,
                 summary:approvedSummary,contextIdentity:{[weak self] in self?.currentLocalRecyclingContextIdentity()},receiptOnly:true,
                 permitsUnmeasuredVisualCalibrationTrial:true,nominalEmptyCommissioningStepEnabled:nominalEmptyCommissioningStepEnabled,
+                nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,
                 oneDegreeEmptyCalibrationStepEnabled:oneDegreeEmptyCalibrationStepEnabled,
                 execute:execute,cancel:cancel,completion:finished)
         } else if workspace && physicalSide == "right" {
@@ -907,6 +924,7 @@ enum ROBArmCurrentSpikeRecording {
             "oneDegreeEmptyCalibrationStepEnabled":oneDegreeEmptyCalibrationStepEnabled,
             "assumedSpatialErrorMeters":localVisualTrialAssumedSpatialErrorMeters]
         if holdAfterInitialEmptyLiftEnabled {value["holdAfterInitialEmptyLiftEnabled"]=true}
+        if nominalModelAssumedSelfEnabled {value["nominalModelAssumedSelfEnabled"]=true}
         let components=value.mapValues{String(describing:$0)}
         let changed=localReceiptContextComponents.map { prior in components.keys.filter{prior[$0] != components[$0]}.sorted() } ?? []
         if localReceiptContextComponents==nil {localReceiptContextComponents=components}
@@ -936,12 +954,14 @@ enum ROBArmCurrentSpikeRecording {
               current["contextIdentity"] as? String==identity,
               current["permitsUnmeasuredVisualCalibrationTrial"] as? Bool==true,
               (current["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
+              (current["nominalModelAssumedSelfEnabled"] as? Bool ?? false)==nominalModelAssumedSelfEnabled,
               (current["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled,
               let until=(current["executingUntilMilliseconds"] as? NSNumber)?.doubleValue,
               until>Date().timeIntervalSince1970*1000 else {
             throw ROBArmRoutineError.blocked("The exact local recycling-count receipt, current camera/body/profile context or expiry changed; hold requested.")
         }
         guard (frozen["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
+              (frozen["nominalModelAssumedSelfEnabled"] as? Bool ?? false)==nominalModelAssumedSelfEnabled,
               (frozen["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled else {
             throw ROBArmRoutineError.blocked("The receipt's nominal-empty experiment flag changed.")
         }
@@ -1169,8 +1189,9 @@ enum ROBArmCurrentSpikeRecording {
         }
         if let nominal=activeNominalRetreat {
             guard nominalEmptyCommissioningStepEnabled,localReceiptCommand=="right_recycle_cans",physicalSide=="right",
-                  ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide),
+                  ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide,modelAssumedSelfEnabled:nominalModelAssumedSelfEnabled),
                   let map=collisionMap,let model=collisionModel,let trial=nominal.context.visualTrial,
+                  (nominal.modelAssumedSelfAudit != nil)==nominalModelAssumedSelfEnabled,
                   map.fingerprint==nominal.context.mapFingerprint,let path=proposal,path.kind=="nominal_empty_commissioning",
                   path.baseline==nominal.baseline,path.steps==[nominal.step],path.steps[0].jawAction==nil,
                   !jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched else {
@@ -1544,14 +1565,37 @@ enum ROBArmCurrentSpikeRecording {
     }
 
     @MainActor private func captureRightArmCalibrationView(model:ROBGhostRobotModel) async throws ->ROBWorkspaceCollisionSnapshot {
-        let search=ROBWorkspaceSearch.shared,pan = -55.0,upper=5650
+        let search=ROBWorkspaceSearch.shared
+        let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+        let pan:Double,upper:Int
+        if nominalModelAssumedSelfEnabled {
+            guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,neck["pan"]as?Int==4000,
+                  neck["lower"]as?Int==6011,neck["upper"]as?Int==5450,let actual=neck["pan_degrees"]as?Double else {
+                throw ROBArmRoutineError.blocked("MODEL-ASSUMED commissioning needs already prepared fixed P4000 L6011 U5450; no head movement sent.")
+            }
+            pan=actual;upper=5450
+        }else {pan = -55.0;upper=5650}
         phase="settling RIGHT arm commissioning view";cameraReady=false;localReceiptHeldNeckIdentity=nil
-        try await wait(12){search.prepareView?(pan,upper)==true}
+        if !nominalModelAssumedSelfEnabled {try await wait(12){search.prepareView?(pan,upper)==true}}
         let settledSince=ProcessInfo.processInfo.systemUptime
         try await wait(8){search.viewReady?(pan,upper)==true && self.vision.fresh &&
             ROBArmRoutineCoordinator.shared.viewIsStationary?()==true && ProcessInfo.processInfo.systemUptime-settledSince>=1.5}
         guard let pid=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model) else {throw ROBArmRoutineError.blocked("No current physical camera projection for this empty calibration experiment.")}
         let camera=vision.cameraGeneration,body=ROBFixedHeadBodyMotionIdentity.currentIdentity,session=generation
+        if nominalModelAssumedSelfEnabled {
+            guard let prior=search.collisionSnapshot,prior.registrationID==nil,prior.bodyMotionIdentity==body,
+                  prior.sessionGeneration==session,prior.cameraGeneration==camera,prior.modelID==model.modelID,
+                  prior.geometryID==model.geometryID,prior.mappingID==model.selectedMappingID,
+                  prior.estimatedCameraProjectionIdentity==pid,prior.originalOccupiedSourceGroups != nil,
+                  let held=localNeckIdentity() else {
+                throw ROBArmRoutineError.blocked("MODEL-ASSUMED step needs the fresh native full workspace scan with complete original groups; no object search or replacement single-view map.")
+            }
+            // Preserve the exact full native raw map/fingerprint. The three
+            // independent before-keyframes below record the current view;
+            // they do not restamp or replace the workspace observations.
+            localReceiptHeldNeckIdentity=held;collisionMap=prior;collisionModel=model;sceneCapturedForThisTask=true
+            return prior
+        }
         var map=ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
             sessionGeneration:session,cameraGeneration:camera,estimatedCameraProjectionIdentity:pid)
         let deadline=ProcessInfo.processInfo.systemUptime+12
@@ -1606,9 +1650,97 @@ enum ROBArmCurrentSpikeRecording {
         return snapshot
     }
 
+    @MainActor private func archiveNominalKeyframe(_ frame:ROBArmRoutineVision.Frame,stage:String,map:ROBWorkspaceCollisionSnapshot,
+        model:ROBGhostRobotModel,writer:ROBWorkspaceRawScanArchive) async throws->ROBWorkspaceRawScanArchive.Record {
+        try check();try checkCollisionContext()
+        guard nominalModelAssumedSelfEnabled,let depth=frame.depth,let k=frame.intrinsics,let runtime=k.runtimeCalibration,
+              k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,k.depthRGBGeometryCorrespondence?.status=="matched",
+              frame.cameraGeneration==map.cameraGeneration,frame.handsClear,
+              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+              let image=CIContext(options:[.useSoftwareRenderer:true]).createCGImage(frame.image,from:frame.image.extent),
+              image.width==depth.width,image.height==depth.height else {throw ROBArmRoutineError.blocked("Commissioning keyframe lost actual paired RGB-D/source pixels.")}
+        let controller=ROBFixedHeadCalibrationWindowController.shared,scope=try controller.scope(model:model,frame:frame),neck=controller.readNeck?() ?? [:]
+        guard scope.panTarget==4000,scope.lowerTarget==6011,scope.upperTarget==5450,scope.gatewaySessionGeneration==generation,
+              neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,let matrix=ROBNeckRGBPoseDisplay.provisionalCameraToModel(model:model,
+                panTarget:scope.panTarget,lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget) else {
+            throw ROBArmRoutineError.blocked("Commissioning keyframe lost its exact already-prepared fixed head.")
+        }
+        var rgba=[UInt8](repeating:0,count:depth.width*depth.height*4)
+        let rendered=rgba.withUnsafeMutableBytes{bytes->Bool in
+            guard let drawing=CGContext(data:bytes.baseAddress,width:depth.width,height:depth.height,bitsPerComponent:8,
+                bytesPerRow:depth.width*4,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue|CGBitmapInfo.byteOrder32Big.rawValue) else{return false}
+            drawing.draw(image,in:CGRect(x:0,y:0,width:depth.width,height:depth.height));return true
+        }
+        guard rendered else {throw ROBArmRoutineError.blocked("Commissioning RGB888 copy failed; no learning success claimed.")}
+        var rgb=Data(count:depth.width*depth.height*3)
+        rgb.withUnsafeMutableBytes{buffer in let bytes=buffer.bindMemory(to:UInt8.self)
+            for i in 0..<(depth.width*depth.height) {bytes[i*3]=rgba[i*4];bytes[i*3+1]=rgba[i*4+1];bytes[i*3+2]=rgba[i*4+2]}}
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        func json(_ object:[String:Any])throws->Data {try JSONSerialization.data(withJSONObject:object,options:.sortedKeys)}
+        func measuredArm(_ side:String,_ gatewayArm:String)throws->ROBWorkspaceRawScanArchive.ArmFeedback {
+            let candidates=nominalBothArmHistory[gatewayArm] ?? []
+            let sample=candidates.filter{$0.generation==generation}.map(\.sample).min{a,b in
+                abs(a.receivedAt.timeIntervalSince1970*1000-a.sampleAgeAtReceiptMilliseconds-frame.capturedAt)<abs(b.receivedAt.timeIntervalSince1970*1000-b.sampleAgeAtReceiptMilliseconds-frame.capturedAt)
+            }
+            guard let sample,sample.sampleAgeAtReceiptMilliseconds.isFinite,
+                  abs(sample.receivedAt.timeIntervalSince1970*1000-sample.sampleAgeAtReceiptMilliseconds-frame.capturedAt)<=150 else {
+                throw ROBArmRoutineError.blocked("Commissioning keyframe lacks actual exposure-matched BOTH-arm measured q; no substitute planned pose.")
+            }
+            let sourceModel=try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
+            let feedbackTime=sample.receivedAt.timeIntervalSince1970*1000-sample.sampleAgeAtReceiptMilliseconds
+            return .init(physicalSide:side,gatewayArm:gatewayArm,telemetrySequence:sample.sequence,
+                receivedAtHostMilliseconds:sample.receivedAt.timeIntervalSince1970*1000,effectiveSampleAgeMilliseconds:sample.effectiveSampleAgeMilliseconds,
+                effectiveGripperAgeMilliseconds:sample.effectiveGripperFeedbackAgeMilliseconds,positionsRadians:sample.positionsRadians.map(\.doubleValue),
+                reportedModes:sample.statuses.map(\.intValue),gatewayModes:gateway.modes(forArm:gatewayArm).map(\.intValue),
+                exposureOffsetMilliseconds:.available(frame.capturedAt-feedbackTime),referenceIdentity:.unavailable("Raw vendor encoders; native reference token has no archive export identity"),
+                modelID:sourceModel.modelID,geometryID:sourceModel.geometryID,mappingID:sourceModel.selectedMappingID)
+        }
+        let left=try measuredArm("left","right"),right=try measuredArm("right","left")
+        let contracts:[String:Any]=["stage":stage,"pixelSource":"retained normalized CIImage rendered RGB888 at original paired depth dimensions",
+            "rgbOutputUndistorted":k.rgbOutputUndistorted as Any? ?? NSNull(),"depthRGBGeometryCorrespondence":k.depthRGBGeometryCorrespondence?.status as Any? ?? NSNull(),
+            "cameraServiceSourceSHA256":k.cameraServiceSourceSHA256 as Any? ?? NSNull(),"runtimeCalibrationIdentity":runtime.identity,
+            "sourceSize":k.sourceSize as Any? ?? NSNull(),"sourceIntrinsics":k.sourceIntrinsics as Any? ?? NSNull(),"imageTransform":k.imageTransform as Any? ?? NSNull(),
+            "depthSourceSize":k.depthSourceSize as Any? ?? NSNull(),"depthSourceIntrinsics":k.depthSourceIntrinsics as Any? ?? NSNull(),"depthImageTransform":k.depthImageTransform as Any? ?? NSNull(),
+            "rgbSourceDistortionCoefficients":k.rgbSourceDistortionCoefficients as Any? ?? NSNull(),"depthSourceDistortionCoefficients":k.depthSourceDistortionCoefficients as Any? ?? NSNull()]
+        let input=ROBWorkspaceRawScanArchive.Frame(frameID:UUID(),sequence:frame.sequence,capturedAtHostMilliseconds:frame.capturedAt,
+            rgbCapturedAtHostMilliseconds:.unavailable("Independent RGB exposure host timestamp not exported by retained Vision frame"),
+            depthCapturedAtHostMilliseconds:.unavailable("Independent depth exposure host timestamp not exported by retained Vision frame"),
+            sourceTimestampJSON:.unavailable("Device RGB/depth clock timestamps not exported by retained Vision frame"),cameraGeneration:frame.cameraGeneration,
+            width:depth.width,height:depth.height,rgb888:rgb,depthU16LittleEndian:Data(depth.millimetersLittleEndian),
+            infrared:.unavailable("IR not exported by retained frame"),infraredContractJSON:.unavailable("IR not exported by retained frame"),
+            intrinsics:[k.fx,k.fy,k.cx,k.cy],sourceContractsJSON:try json(contracts),runtimeCalibrationJSON:try encoder.encode(runtime),
+            imuJSON:try k.inertial.map{.available(try encoder.encode($0))} ?? .unavailable("No actual synchronized IMU packet in retained frame"),
+            actualAppliedNeck:.available(.init(appliedPanTarget:scope.panTarget,appliedLowerTarget:scope.lowerTarget,appliedUpperTarget:scope.upperTarget,
+                observedAtHostMilliseconds:Date().timeIntervalSince1970*1000,stationary:true,source:"native current applied neck feedback at archive copy; original frame scope separately frozen")),
+            physicalLeftFeedback:.available(left),physicalRightFeedback:.available(right),cameraToRobotColumnMajor:(0..<4).flatMap{c in(0..<4).map{r in matrix[c][r]}},
+            projectionMethod:"assumed_alignment_not_observed_self",projectionScopeJSON:try encoder.encode(scope),
+            returnSamplingContractJSON:try json(["pixelCoordinates":"original normalized top-left RGB-D raster","depthUnits":"u16le_mm",
+                "sourceMapFingerprint":map.fingerprint,"firstPixel":[1,1],"stride":max(2,Int(ceil(sqrt(Double(depth.width*depth.height)/12000)))),
+                "observedSelf":false,"stage":stage]))
+        return try await writer.append(input)
+    }
+    @MainActor private func collectNominalKeyframes(count:Int,stage:String,map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
+        writer:ROBWorkspaceRawScanArchive,startUptime:Double?=nil,startHostMilliseconds:Double?=nil) async throws {
+        let began=startUptime ?? ProcessInfo.processInfo.systemUptime
+        for index in 0..<count {
+            let target=began+(stage=="during" ? 0.2+Double(index)*0.5:Double(index)*0.15)
+            let deadline=stage=="during" ? began+5:target+3
+            while true {
+                try check();try Task.checkCancellation()
+                guard ProcessInfo.processInfo.systemUptime<deadline else {throw ROBArmRoutineError.blocked("Missing \(stage) commissioning keyframe; stopped held with incomplete learning archive.")}
+                if ProcessInfo.processInfo.systemUptime>=target,let frame=vision.snapshot()["face"],frame.sequence>nominalArchiveLastSequence,
+                   startHostMilliseconds.map({frame.capturedAt >= $0 && (stage != "during" || frame.capturedAt <= $0+4000)}) ?? true {
+                    _ = try await archiveNominalKeyframe(frame,stage:stage,map:map,model:model,writer:writer)
+                    nominalArchiveLastSequence=frame.sequence;nominalArchiveTimes.append((stage,frame.capturedAt));break
+                }
+                try await Task.sleep(nanoseconds:20_000_000)
+            }
+        }
+    }
+
     @MainActor private func executeNominalEmptyCommissioning() async throws ->NSDictionary {
         guard nominalEmptyCommissioningStepEnabled,physicalSide=="right",(1...ROBRecyclingBatchRequest.maximumCount).contains(requestedCanCount),
-              ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide),
+              ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide,modelAssumedSelfEnabled:nominalModelAssumedSelfEnabled),
               !armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched else {
             throw ROBArmRoutineError.blocked("No exact separate nominal EMPTY commissioning permission is active.")
         }
@@ -1626,17 +1758,28 @@ enum ROBArmCurrentSpikeRecording {
         // it never initializes jaws, zeros encoders or restores another view.
         inactiveWorkspaceSearch=false
         try await prepareCameraAndMode(stationaryJaw:false)
+        var archive:ROBWorkspaceRawScanArchive?
+        defer {if let writer=archive {Task {await writer.closeIncomplete(reason:"Commissioning phase ended before a complete14-keyframe archive; no learning success claimed.")}}}
+        if nominalModelAssumedSelfEnabled {
+            nominalArchiveLastSequence=0;nominalArchiveTimes=[]
+            let parent=URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension("model-assumed-self-keyframes")
+            let writer=try await ROBWorkspaceRawScanArchive.create(parentDirectory:parent,scene:.init(archiveID:UUID(),workspaceSceneID:map.sceneID,
+                bodyMotionIdentity:map.bodyMotionIdentity,gatewayGeneration:generation,modelID:model.modelID,referenceID:model.referenceID,
+                geometryID:model.geometryID,mappingID:model.selectedMappingID))
+            archive=writer
+            try await collectNominalKeyframes(count:3,stage:"before",map:map,model:model,writer:writer)
+        }
         let sample=try measured(),q=sample.positionsRadians.map(\.doubleValue),session=generation,camera=vision.cameraGeneration
         guard !jawCommandDispatched,!armTravelDispatched,let trial=try visualTrial(map:map,model:model,baseline:q) else {
             throw ROBArmRoutineError.blocked("Nominal experiment lost its fresh q0, no-jaw state or explicit trial scope.")
         }
         let now=Date().timeIntervalSince1970*1000,measuredAt=now-sample.effectiveSampleAgeMilliseconds
-        let emptySource="local_first_attempt_no_arm_travel_or_task_grip"
+        let emptySource="local_first_attempt_no_arm_travel_or_task_grip",assumedSelf=nominalModelAssumedSelfEnabled
         let proof:ROBWorkspaceNominalEmptyCommissioningRetreat
         do {proof=try await Task.detached(priority:.userInitiated){
             try ROBWorkspaceCollisionPlan.reviewNominalEmptyCommissioningRetreat(from:q,map:map,model:model,generation:session,
                 sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial,measuredAtMilliseconds:measuredAt,
-                nominalEmptyCommissioningEnabled:true,emptyStateEvidenceSource:emptySource)
+                nominalEmptyCommissioningEnabled:true,emptyStateEvidenceSource:emptySource,modelAssumedSelfEnabled:assumedSelf)
         }.value} catch {
             let original=error,recording=lastRecordingPath,detail=error.localizedDescription
             if !recording.isEmpty { _ = try?await Task.detached(priority:.utility){
@@ -1662,7 +1805,7 @@ enum ROBArmCurrentSpikeRecording {
         let current=try measured(),admissionTime=Date().timeIntervalSince1970*1000
         try proof.validateContext(map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,
             nowMilliseconds:admissionTime,trial:trial,measuredAtMilliseconds:admissionTime-current.effectiveSampleAgeMilliseconds,
-            measuredBaseline:current.positionsRadians.map(\.doubleValue),nominalEmptyCommissioningEnabled:true,emptyStateEvidenceSource:emptySource)
+            measuredBaseline:current.positionsRadians.map(\.doubleValue),nominalEmptyCommissioningEnabled:true,emptyStateEvidenceSource:emptySource,modelAssumedSelfEnabled:assumedSelf)
         guard dispatch.matches(proposalID:path.id,index:0,generation:session,mapFingerprint:map.fingerprint,
             positions:current.positionsRadians.map(\.doubleValue),sequence:current.sequence,nowUptime:ProcessInfo.processInfo.systemUptime) else {
             throw ROBArmRoutineError.blocked("The fresh nominal commissioning start changed after proof review; no step sent.")
@@ -1670,6 +1813,15 @@ enum ROBArmCurrentSpikeRecording {
         proposalStep=0;phase="ONE nominal EMPTY commissioning step";sentPath=[q,proof.goal]
         update("One four-second nominal EMPTY step; watching the RIGHT arm, then holding. Collision uncertainty remains unverified.")
         reviewedDispatchStart=dispatch;armTravelDispatched=true
+        let dispatchedUptime=ProcessInfo.processInfo.systemUptime,dispatchedHost=Date().timeIntervalSince1970*1000
+        let duringTask:Task<Void,Error>?=archive.map{writer in Task { @MainActor in
+            do {try await self.collectNominalKeyframes(count:8,stage:"during",map:map,model:model,writer:writer,
+                startUptime:dispatchedUptime,startHostMilliseconds:dispatchedHost)}
+            catch {self.abort("Commissioning pixel/q recording failed; immediate hold: "+error.localizedDescription)
+                await writer.closeIncomplete(reason:error.localizedDescription);throw error}
+        }}
+        defer {duringTask?.cancel()}
+        if assumedSelf {ROBWorkspaceSearch.shared.announce?("Moving my right arm a little.")}
         try await accepted{gateway.sendApprovedLeftGestureStep(proposalID:path.id,index:0,duration:4,expectedSessionGeneration:session)}
         reviewedDispatchStart=nil;leased=true;lastRenewal=ProcessInfo.processInfo.systemUptime
         let began=ProcessInfo.processInfo.systemUptime;var settler=ROBArmRoutineSettler()
@@ -1679,24 +1831,48 @@ enum ROBArmCurrentSpikeRecording {
                 now:ProcessInfo.processInfo.systemUptime) && ProcessInfo.processInfo.systemUptime-began>=4
         }
         try await holdTaskPosition(proof.goal);taskJawTarget=nil
+        try await duringTask?.value
+        if let archive {
+            try await collectNominalKeyframes(count:3,stage:"after",map:map,model:model,writer:archive,
+                startHostMilliseconds:Date().timeIntervalSince1970*1000)
+            _ = try await archive.finish()
+        }
         let endpoint=try measured().positionsRadians.map(\.doubleValue)
         guard 1.5*zip(endpoint,proof.goal).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {throw ROBArmRoutineError.blocked("The nominal endpoint is held but did not reach its reviewed goal; no further step admitted.")}
-        let recording=lastRecordingPath
+        if assumedSelf {ROBWorkspaceSearch.shared.announce?("Arm movement complete. Holding here.")}
+        let recording=lastRecordingPath,keyframeTimes=nominalArchiveTimes,archivePath=archive?.directory.path
         try await Task.detached(priority:.utility){
             let directory=URL(fileURLWithPath:recording).deletingPathExtension().appendingPathExtension("nominal-empty-evidence")
             try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
             let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+            if let archivePath {
+                let times=keyframeTimes.map(\.time),gaps=zip(times.dropFirst(),times).map{$0-$1}
+                let data=try JSONSerialization.data(withJSONObject:["kind":"fourteen_explicit_commissioning_keyframes_not_30fps",
+                    "archivePath":archivePath,"learningCaptureComplete":keyframeTimes.count==14,"observedSelf":false,
+                    "frames":keyframeTimes.map{["stage":$0.stage,"capturedAtHostMilliseconds":$0.time]},
+                    "maximumInterframeGapMilliseconds":gaps.max() ?? 0,"achievedFramesPerSecond":times.count>1 ? Double(times.count-1)*1000/(times.last!-times.first!):0],options:.sortedKeys)
+                let file=directory.appendingPathComponent("keyframe-cadence.json");try data.write(to:file,options:.atomic)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+            }
             for (name,data) in [("proof.json",try encoder.encode(proof)),("collision-map.json",try encoder.encode(map))] {
                 let file=directory.appendingPathComponent(name);try data.write(to:file,options:.atomic)
                 try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
             }
         }.value
-        return ["status":"partial_empty_step_held","measured":false,"joint_motion_measured":true,"motion_completed":false,
+        var result:[String:Any] = ["status":"partial_empty_step_held","measured":false,"joint_motion_measured":true,"motion_completed":false,
             "transfer_completed":false,"nominal_empty_commissioning_step":true,"collision_protection_certified":false,
             "baseline_positions":q,"goal_positions":proof.goal,"measured_positions":endpoint,"endpoint_stopped_and_held":true,
             "assumed_camera_uncertainty_m":0.035,"minimum_swept_nominal_clearance_m":proof.minimumSweptNominalClearanceMeters,
             "unknown_local_regions":proof.unknownLocalRegions.count,"jaw_command_sent":false,
             "detail":"ONE four-second nominal EMPTY commissioning step reached its measured endpoint and is held. Camera uncertainty remains unverified; no jaw, grasp, carry, release, return or chained can attempt. ZERO transfers completed."]
+        if assumedSelf {
+            result["model_assumed_self_enabled"]=true;result["self_identity_label"]="assumed_alignment_not_observed_self"
+            result["observed_self"]=false;result["learning_keyframes_complete"]=nominalArchiveTimes.count==14
+            result["keyframe_archive_path"]=archivePath as Any? ?? NSNull()
+            result["assumed_source_groups"]=proof.modelAssumedSelfAudit?.groups.count ?? 0
+            result["detail"]="ONE MODEL-ASSUMED J2-only EMPTY step is measured held.14 explicit timestamped pixel/BOTH-q keyframes retained, NOT30fps or observed-self recognition. Raw map/unknown unchanged; no jaws, carry, release, return, retry or chaining. ZERO transfers."
+        }
+        return result as NSDictionary
     }
 
     @MainActor private func executeOneDegreeEmptyCalibration() async throws ->NSDictionary {

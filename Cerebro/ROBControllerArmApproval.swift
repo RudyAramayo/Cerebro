@@ -512,9 +512,10 @@ struct ROBTableRelayInitialEmptyEvidence {
         let contextIdentity: String
         let permitsUnmeasuredVisualCalibrationTrial: Bool
         let nominalEmptyCommissioningStepEnabled: Bool
+        let nominalModelAssumedSelfEnabled: Bool
         let oneDegreeEmptyCalibrationStepEnabled: Bool
         var object: [String: Any] {
-            ["command": command, "arm": arm, "canCount": canCount, "summary": summary,
+            var value:[String:Any] = ["command": command, "arm": arm, "canCount": canCount, "summary": summary,
              "summarySHA256": ROBControllerArmApproval.localHash(Data(summary.utf8)),
              "contextIdentity": contextIdentity, "targetObject": "empty_coke_can",
              "destination": "orange_bucket", "bothArmsStationaryHolds": true,
@@ -522,6 +523,8 @@ struct ROBTableRelayInitialEmptyEvidence {
              "permitsUnmeasuredVisualCalibrationTrial": permitsUnmeasuredVisualCalibrationTrial,
              "nominalEmptyCommissioningStepEnabled": nominalEmptyCommissioningStepEnabled,
              "oneDegreeEmptyCalibrationStepEnabled": oneDegreeEmptyCalibrationStepEnabled]
+            if nominalModelAssumedSelfEnabled {value["nominalModelAssumedSelfEnabled"]=true}
+            return value
         }
     }
     private struct LocalRecyclingApproval {
@@ -576,12 +579,14 @@ struct ROBTableRelayInitialEmptyEvidence {
         summary: String, contextIdentity: @escaping () -> String?, receiptOnly: Bool,
         permitsUnmeasuredVisualCalibrationTrial: Bool = false,
         nominalEmptyCommissioningStepEnabled: Bool = false,
+        nominalModelAssumedSelfEnabled: Bool = false,
         oneDegreeEmptyCalibrationStepEnabled: Bool = false,
         execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
         cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
         guard (1...8).contains(canCount), ["left", "right"].contains(arm), command == arm + "_recycle_cans",
               !nominalEmptyCommissioningStepEnabled || (receiptOnly && permitsUnmeasuredVisualCalibrationTrial),
+              !nominalModelAssumedSelfEnabled || (nominalEmptyCommissioningStepEnabled && arm=="right" && !oneDegreeEmptyCalibrationStepEnabled),
               !oneDegreeEmptyCalibrationStepEnabled || (arm == "right" && receiptOnly && permitsUnmeasuredVisualCalibrationTrial),
               !(nominalEmptyCommissioningStepEnabled && oneDegreeEmptyCalibrationStepEnabled),
               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, summary.count <= 2048,
@@ -592,6 +597,7 @@ struct ROBTableRelayInitialEmptyEvidence {
         let scope = LocalRecyclingScope(command: command, arm: arm, canCount: canCount, summary: summary, contextIdentity: identity,
             permitsUnmeasuredVisualCalibrationTrial: permitsUnmeasuredVisualCalibrationTrial,
             nominalEmptyCommissioningStepEnabled: nominalEmptyCommissioningStepEnabled,
+            nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,
             oneDegreeEmptyCalibrationStepEnabled: oneDegreeEmptyCalibrationStepEnabled)
         request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm == "right" ? "both" : "left", "summary": summary],
             summary: summary, executionLimit: 600, localRecyclingScope: scope,
@@ -665,9 +671,9 @@ struct ROBTableRelayInitialEmptyEvidence {
 
     /// Separate one-step commissioning permission, never inferred from speech,
     /// a general visual trial or a previously imported ordinary recycling job.
-    @nonobjc func authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: String, arm: String) -> Bool {
+    @nonobjc func authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: String, arm: String,modelAssumedSelfEnabled:Bool=false) -> Bool {
         guard let p = pending, let scope = p.localRecyclingScope,
-              scope.nominalEmptyCommissioningStepEnabled, !scope.oneDegreeEmptyCalibrationStepEnabled, p.awaitingLocalReceipt,
+              scope.nominalEmptyCommissioningStepEnabled,scope.nominalModelAssumedSelfEnabled==modelAssumedSelfEnabled, !scope.oneDegreeEmptyCalibrationStepEnabled, p.awaitingLocalReceipt,
               scope.arm == arm, scope.summary == summary,
               scope.permitsUnmeasuredVisualCalibrationTrial,
               p.localSessionApprovalID != nil else { return false }
