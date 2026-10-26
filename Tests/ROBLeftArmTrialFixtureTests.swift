@@ -9,9 +9,9 @@ enum ROBRecyclingVisualInspection {
     static var fixedContext=false
     @_optimize(none)
     @MainActor static func fixedHeadContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {fixedContext}
-    struct VisualProjection {var cameraToModel=matrix_identity_double4x4}
+    struct VisualProjection {var cameraToModel=matrix_identity_double4x4;var frameContractIdentity=String(repeating:"a",count:64)}
     enum Projection {case visualTrial(VisualProjection)}
-    struct Context {var projection=Projection.visualTrial(.init());var viewIdentity="fixture"
+    struct Context {var projection=Projection.visualTrial(.init());var viewIdentity="fixture";var targetIdentity="fixture"
         var scope=ROBFixedHeadRegistrationScope(modelID:"fixture",geometryID:"fixture",mappingID:"fixture",cameraGeneration:UUID(),
             gatewaySessionGeneration:1,displayCorrectionIdentity:"fixture",panTarget:6015,lowerTarget:6011,upperTarget:6160,intrinsicsIdentity:"fixture")}
     final class ServoContext {
@@ -19,8 +19,12 @@ enum ROBRecyclingVisualInspection {
         var observations:[[String:Any]]=[]
         var retainedFrames:[ROBGripperVisualServo.Frame]=[]
         var provisionalCoMotion=false
+        var nativeObservedSupport:ROBVisualGraspVerifier.ObservedSupport?
     }
     struct ServoObservation {let frame:ROBGripperVisualServo.Frame;let decision:ROBGripperVisualServo.Decision;let canBox:[Double]}
+    @MainActor static func validateNativeObservedSupportContext(_ context:ServoContext,model:ROBGhostRobotModel)throws {
+        throw ROBArmRoutineError.blocked("No actual supported finger/source observation in passive fixture.")
+    }
     @MainActor static func beginIncrementalVisualServo(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
         map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
         feedbackForFrame:@escaping(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,check:()throws->Void) async throws->ServoContext {

@@ -192,6 +192,7 @@ import CoreImage
         var retainedFrames:[ROBGripperVisualServo.Frame]=[]
         var provisionalCoMotion=false
         var canAppearanceSeed:ROBVisualGraspVerifier.AppearanceSeed?
+        var nativeObservedSupport:ROBVisualGraspVerifier.ObservedSupport?
         @MainActor init(baseline:ServoBaseline,can:ROBWorkspaceLocatedObject,model:ROBGhostRobotModel,box:[Double]) {
             self.baseline=baseline;self.can=can;targetBox=box
             request=VNTrackObjectRequest(detectedObjectObservation:VNDetectedObjectObservation(boundingBox:
@@ -364,8 +365,17 @@ import CoreImage
         return ServoObservation(frame:pixels,decision:decision,canBox:box,handsClear:frame.handsClear,cameraGeneration:frame.cameraGeneration,sourceIdentity:try visualFrameContract(frame))
     }
 
+    static func validateNativeObservedSupportContext(_ context:ServoContext,model:ROBGhostRobotModel)throws {
+        guard context.nativeObservedSupport != nil,case .visualTrial(let projection)=context.baseline.projection,
+              let frame=ROBArmRoutineVision.shared.snapshot()["face"] else {
+            throw ROBGhostMotionError.blocked("No live native observed-finger support/source context.")
+        }
+        try validateVisualProjection(projection,scope:context.baseline.scope,frame:frame,model:model)
+    }
+
     static func verifyIncrementalServoLift(context:ServoContext,beforeLift:ServoObservation,model:ROBGhostRobotModel,
         heldSinceMilliseconds:Double,observe:() async throws->ServoObservation,check:()throws->Void) async throws->ROBVisualGraspVerifier.Evidence {
+        context.nativeObservedSupport=nil
         let base=beforeLift.frame,box=beforeLift.canBox
         var result=ROBVisualGraspVerifier.Evidence(verdict:.collecting,reason:"Waiting for observed jaw/can lift co-motion.",samples:0,
             firstSequence:base.sequence,lastSequence:base.sequence,cameraGeneration:context.baseline.scope.cameraGeneration,
@@ -412,7 +422,10 @@ import CoreImage
             } catch {
                 try check();result.verdict = .unknown;result.reason="Independent can/finger verification unavailable: "+error.localizedDescription;return result
             }
-            if result.verdict != .collecting {return result}
+            if result.verdict != .collecting {
+                if result.verdict == .supported {context.nativeObservedSupport=verifier.nativeSupportedObservation}
+                return result
+            }
         }
         return verifier.finish()
     }

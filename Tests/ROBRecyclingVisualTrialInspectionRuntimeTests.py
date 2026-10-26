@@ -241,10 +241,12 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
         let provisional=try await ROBRecyclingVisualInspection.verifyIncrementalServoLift(context:servoContext,beforeLift:beforeServo,model:model,
             heldSinceMilliseconds:0,observe:{servoSeq+=1;return servoSample(servoSeq,12,-8,12,-8)},check:{})
         precondition(provisional.verdict == .unknown && !provisional.possessionMeasured)
+        precondition(servoContext.nativeObservedSupport == nil,"UNKNOWN must never mint native attachment support")
         precondition(provisional.reason.contains("No independent pre-approach can appearance"),"Box co-motion must not confirm grasp or carry without independent appearance")
         let missContext=ROBRecyclingVisualInspection.ServoContext(baseline:servoBase,can:can,model:model,box:[0.4,0.4,0.6,0.7])
         let missed=try await ROBRecyclingVisualInspection.verifyIncrementalServoLift(context:missContext,beforeLift:beforeServo,model:model,
             heldSinceMilliseconds:0,observe:{servoSeq+=1;return servoSample(servoSeq,0,0,12,-8)},check:{})
+        precondition(missContext.nativeObservedSupport == nil)
         precondition(missed.verdict == .unknown && !missContext.provisionalCoMotion,
             "A missing appearance reference remains unknown even when synthetic boxes disagree")
         print("PASS actual incremental lift inspection: synthetic box/jaw motion without independent pre-approach appearance remains UNKNOWN; no possession or transfer claim")

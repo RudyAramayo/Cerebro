@@ -13,9 +13,12 @@ batch = braced_declaration(source, '@MainActor private func execute(_ command: S
 batch = batch.replace('@MainActor private func', 'func', 1)
 move = braced_declaration(source, '@MainActor private func move(_ proposal: ROBLeftGestureProposal) async throws {')
 terminal = braced_declaration(move, 'if proposal.kind=="recycling_grasp_hold" {')
+batch_request = braced_declaration((root / 'Cerebro/ROBWorkspaceSearchPlan.swift').read_text(), 'enum ROBRecyclingBatchRequest {')
 fixture = r'''
 import Foundation
+/* BATCH_REQUEST */
 enum ROBArmRoutineError:Error {case blocked(String)}
+enum ROBGhostMotionError:Error {case blocked(String)}
 enum Verdict:String {case supported,inconclusive}
 struct Evidence {var verdict:Verdict;let reason="synthetic raw evidence"}
 enum Jaw {case grip,release}
@@ -31,6 +34,8 @@ struct Sample {let positionsRadians=[NSNumber](repeating:0,count:7)}
 }
 @MainActor final class Fixture {
     var requestedCanCount=4,physicalSide="right",calls=0
+    var localReceiptCommand:String?,localReceiptEvidence:NSDictionary?
+    var activeHoldAfterInitialEmptyLift=false,oneDegreeEmptyCalibrationStepEnabled=false,nominalEmptyCommissioningStepEnabled=false
     var localReceiptHeldNeckIdentity:String?,recyclingCan:String?,lastVisualGraspEvidence:Evidence?
     var movingTargetReplansRemaining=0,recyclingGripDispatched=false,sceneCapturedForThisTask=false
     var collisionMap:String?,collisionModel:String?,collisionReviewProposal:String?
@@ -40,6 +45,8 @@ struct Sample {let positionsRadians=[NSNumber](repeating:0,count:7)}
     func check()throws {}
     func update(_ message:String) {}
     func executeSingle(_ command:String)async throws->NSDictionary {calls+=1;return result}
+    func executeOneDegreeEmptyCalibration()async throws->NSDictionary {preconditionFailure("Unconfigured calibration seam reached")}
+    func executeNominalEmptyCommissioning()async throws->NSDictionary {preconditionFailure("Unconfigured commissioning seam reached")}
     func measured()throws->Sample {Sample()}
     func holdTaskPosition(_ q:[Double])async throws {holdCalls+=1}
     func writeVisualGraspEvidence(_ e:Evidence)throws {savedEvidence+=1}
@@ -76,7 +83,7 @@ struct Sample {let positionsRadians=[NSNumber](repeating:0,count:7)}
         print("PASS actual terminal-lift/batch flow: verify after final lift, supported and inconclusive both hold, no release/carry, partial/unsupported stops at0transfers; complete4-transfer behavior unchanged")
     }
 }
-'''.replace('/* BATCH */', batch).replace('/* TERMINAL */', terminal)
+'''.replace('/* BATCH_REQUEST */', batch_request).replace('/* BATCH */', batch).replace('/* TERMINAL */', terminal)
 with tempfile.TemporaryDirectory(prefix='rob-grasp-hold-flow-', dir='/private/tmp') as folder:
     path = Path(folder) / 'Fixture.swift'
     path.write_text(fixture)

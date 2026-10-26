@@ -256,6 +256,10 @@ enum ROBArmCurrentSpikeRecording {
     private var activeCommand = ""
     private var requestedCanCount = 1
     @nonobjc private var recyclingCan: ROBWorkspaceLocatedObject?
+    @nonobjc private var recyclingDestination:ROBWorkspaceLocatedObject?
+    @nonobjc private var nativeCanAttachment:ROBNativeCanAttachment?
+    @nonobjc private var nativeCarryServoContext:ROBRecyclingVisualInspection.ServoContext?
+    @nonobjc private var nativeCarryDispatchTicket:ROBNativeCanAttachment.DispatchTicket?
     @nonobjc private var lastVisualGraspEvidence: ROBVisualGraspVerifier.Evidence?
     private var movingTargetReplansRemaining = 1
     private var localCampaignRecoveryReason: ROBStandingCanCampaignRecoveryReason?
@@ -543,6 +547,16 @@ enum ROBArmCurrentSpikeRecording {
               review.matches(proposalID:id,index:index,generation:generation,mapFingerprint:map.fingerprint,
                 positions:sample.positionsRadians.map(\.doubleValue),sequence:sample.sequence,
                 nowUptime:ProcessInfo.processInfo.systemUptime) else { return nil }
+        if proposal.kind=="recycling_carry_release" {
+            guard Thread.isMainThread,MainActor.assumeIsolated({
+                guard let attachment=nativeCanAttachment,let ticket=nativeCarryDispatchTicket,let model=collisionModel,
+                      let context=try?nativeAttachmentContext(attachment.context),let feedback=try?nativeAttachmentFeedback() else{return false}
+                return attachment.matchesAndConsumeDispatch(ticket,proposalID:id,proposalSHA256:proposal.fingerprint,index:index,seconds:seconds,
+                    currentContext:context,map:map,model:model,feedback:feedback,nowMilliseconds:Date().timeIntervalSince1970*1000,
+                    nowUptime:ProcessInfo.processInfo.systemUptime)
+            }) else{return nil}
+            nativeCarryDispatchTicket=nil
+        }
         reviewedDispatchStart = nil
         return proposal.steps[index].positions
     }
@@ -1927,7 +1941,7 @@ enum ROBArmCurrentSpikeRecording {
             update("Holding the arms still while searching and mapping the current workspace")
             let model = try workspaceModel()
             let calibrationFile = selectedCanReachCalibrationFile
-            var objects = try await ROBWorkspaceSearch.shared.run(targets: localReceiptCommand != nil ? [.can]:ROBWorkspaceTarget.allCases,
+            var objects = try await ROBWorkspaceSearch.shared.run(targets: activeHoldAfterInitialEmptyLift ? [.can]:ROBWorkspaceTarget.allCases,
                 model: model, requireDepth: true,permitsLocalCanShapePrior:{
                     guard self.localReceiptCommand != nil else {return false}
                     _ = try self.requireLocalReceipt()
@@ -1985,7 +1999,7 @@ enum ROBArmCurrentSpikeRecording {
             }
             let bucket=objects[.orangeBucket]
             let observedObjects=[can]+(bucket.map{[$0]} ?? [])
-            recyclingCan=can
+            recyclingCan=can;recyclingDestination=bucket
             guard observedObjects.allSatisfy({ Date().timeIntervalSince1970 * 1000 - $0.capturedAt < 60_000 }) else {
                 throw ROBGhostMotionError.blocked("Object observations expired during search; no reach was sent.")
             }
@@ -2815,7 +2829,7 @@ enum ROBArmCurrentSpikeRecording {
     @MainActor private func taskJaw(_ action: ROBLeftGestureProposal.JawAction, at target: [Double],beforeDispatch:(() async throws->Void)?=nil) async throws {
         try await holdTaskPosition(target)
         defer { taskJawTarget = nil }
-        if ["recycling","recycling_grasp_hold","incremental_visual_servo_grasp_hold"].contains(proposal?.kind ?? "") {
+        if ["recycling","recycling_grasp_hold","incremental_visual_servo_grasp_hold","recycling_carry_release"].contains(proposal?.kind ?? "") {
             guard ROBGripperStartupCalibration.shared.calibrationReady(forArm: arm) else {
                 throw ROBArmRoutineError.blocked("Stationary startup gripper setup is unavailable; no grasp was sent.")
             }
@@ -2824,7 +2838,7 @@ enum ROBArmCurrentSpikeRecording {
         phase = "tabletop \(action.rawValue)"
         update(action == .grip ? "Local task: gripping empty can at intensity 2" : "Local task: opening gripper at the planned position")
         ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my \(physicalSide) hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
-        let intensity = action != .grip && ["recycling","recycling_grasp_hold","incremental_visual_servo_grasp_hold"].contains(proposal?.kind ?? "") ? 10 : ROBTabletopPickPlace.intensity
+        let intensity = action != .grip && ["recycling","recycling_grasp_hold","incremental_visual_servo_grasp_hold","recycling_carry_release"].contains(proposal?.kind ?? "") ? 10 : ROBTabletopPickPlace.intensity
         try await beforeDispatch?()
         try await accepted { accountedJawCommand {
             let id=gateway.controlGripper(forArm:arm,action:action == .grip ? "hold":"release",force:intensity)
@@ -3125,6 +3139,23 @@ enum ROBArmCurrentSpikeRecording {
         _ = try await Task.detached(priority:.userInitiated){try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:q,steps:closeAndLift,
             map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:closeTrial,
             payload:payload,intentionalContact:contact)}.value
+        // Do not intentionally acquire a can without a complete destination
+        // route. This predicted route is geometry only, never grasp evidence.
+        guard let destination=recyclingDestination else {throw ROBGhostMotionError.blocked("No observed reachable bucket; remaining EMPTY before grip. A table relay needs its own checked native phase.")}
+        let predictedCarry=try ROBCanCarryPreview.make(from:model.positions(vendorLeft:liftQ),can:can,attachedPayload:payload,
+            destination:destination,model:model,side:physicalSide,now:Date().timeIntervalSince1970*1000,
+            dropUncertaintyMeters:trial.assumedSpatialErrorMeters)
+        let predictedSteps=try nativeCarrySteps(predictedCarry,model:model,baseline:liftQ)
+        let feasibilitySteps=closeAndLift+predictedSteps
+        let feasibilityContact=ROBWorkspaceIntentionalContact(measurementID:contact.measurementID,observationSequence:contact.observationSequence,
+            capturedAtMilliseconds:contact.capturedAtMilliseconds,sceneID:contact.sceneID,cameraGeneration:contact.cameraGeneration,
+            mapFingerprint:contact.mapFingerprint,modelID:contact.modelID,geometryID:contact.geometryID,mappingID:contact.mappingID,
+            toolLink:contact.toolLink,topCenterMeters:contact.topCenterMeters,bottomCenterMeters:contact.bottomCenterMeters,
+            diameterMeters:contact.diameterMeters,firstContactStepIndex:contact.firstContactStepIndex,gripStepIndex:1,
+            releaseStepIndex:closeAndLift.count+predictedCarry.releaseIndex,stepCount:feasibilitySteps.count)
+        _ = try await Task.detached(priority:.userInitiated){try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:q,steps:feasibilitySteps,
+            map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:Date().timeIntervalSince1970*1000,
+            trial:closeTrial,payload:payload,intentionalContact:feasibilityContact)}.value
         try check();try requireLiveVisualTrial(trial,map:map,model:model)
         guard 1.5*zip(q,try measured().positionsRadians.map(\.doubleValue)).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.002 else {throw ROBGhostMotionError.blocked("The actual grasp pose changed during contact/lift review; no close sent.")}
         var beforeClose=observation
@@ -3145,10 +3176,158 @@ enum ROBArmCurrentSpikeRecording {
         lastVisualGraspEvidence=evidence;try writeVisualGraspEvidence(evidence)
         let appearanceSupported=evidence.verdict == .supported && evidence.toolEvidenceSource=="independent_observed_fingers" &&
             evidence.appearanceReferenceSequence != nil
+        if appearanceSupported,let support=context.nativeObservedSupport {
+            return try await performNativeSupportedCarry(context:context,support:support,can:can,payload:payload,sourceContact:contact,
+                map:map,model:model,trial:trial)
+        }
         return ["status":"partial_held","motion_completed":false,"transfer_completed":false,"grasp_attempted":true,
             "possible_payload_held":true,"grasp_visually_supported":appearanceSupported,"appearance_verified":appearanceSupported,"possession_measured":false,
             "provisional_co_motion":context.provisionalCoMotion,"visual_servo_verdict":context.provisionalCoMotion ? "provisional_co_motion":evidence.verdict.rawValue,"placement_verified":false,"requires_intervention":!appearanceSupported,
             "detail":"One observed-jaw can grasp and checked verification lift attempted; holding. "+evidence.reason+" ZERO transfers; no carry, release, return or automatic grasp retry."]
+    }
+
+    @MainActor private func nativeAttachmentFeedback()throws->ROBNativeCanAttachment.HeldFeedback {
+        let sample=try measured(),now=Date().timeIntervalSince1970*1000,q=sample.positionsRadians.map(\.doubleValue)
+        let previous=servoTelemetryHistory.reversed().first{entry in
+            entry.generation==generation && entry.sample.sequence<sample.sequence &&
+            (100...500).contains(sample.receivedAt.timeIntervalSince1970*1000-entry.sample.receivedAt.timeIntervalSince1970*1000)
+        }?.sample
+        let stationary=previous.map{1.5*zip(q,$0.positionsRadians.map(\.doubleValue)).reduce(0.0){$0+abs($1.0-$1.1)}<=0.002} ?? false
+        return .init(physicalArm:physicalSide,gatewayGeneration:generation,sequence:sample.sequence,
+            capturedAtMilliseconds:now-sample.effectiveSampleAgeMilliseconds,positions:q,
+            motorAgeMilliseconds:sample.effectiveSampleAgeMilliseconds,gripperAgeMilliseconds:sample.effectiveGripperFeedbackAgeMilliseconds,
+            jointModes:sample.statuses.map(\.intValue),gatewayModes:gateway.modes(forArm:arm).map(\.intValue),stationary:stationary)
+    }
+    @MainActor private func nativeAttachmentContext(_ frozen:ROBNativeCanAttachment.Context)throws->ROBNativeCanAttachment.Context {
+        try check();try checkCollisionContext()
+        let receipt=try requireLocalReceipt()
+        guard let liveServo=nativeCarryServoContext,let liveModel=collisionModel else {throw ROBGhostMotionError.blocked("Native attachment has no live observed source context.")}
+        try ROBRecyclingVisualInspection.validateNativeObservedSupportContext(liveServo,model:liveModel)
+        guard let owner,let map=collisionMap,let model=collisionModel,let body=map.visualCalibrationScope,
+              body.bodyContextIsCurrent,let app=UUID(uuidString:receipt["appSessionID"] as? String ?? ""),
+              let task=UUID(uuidString:receipt["pendingID"] as? String ?? ""),
+              let frame=vision.snapshot()["face"],frame.cameraGeneration==map.cameraGeneration,
+              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt) else {
+            throw ROBGhostMotionError.blocked("Native attachment lost its live task/body/source context.")
+        }
+        return .init(appSessionID:app,taskID:task,ownershipID:owner,physicalArm:physicalSide,bodyMotionIdentity:body.bodyMotionIdentity,
+            gatewayGeneration:generation,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,modelID:model.modelID,
+            referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+            fixedViewIdentity:frozen.fixedViewIdentity,targetIdentity:frozen.targetIdentity,sourceIdentity:frozen.sourceIdentity)
+    }
+    @MainActor private func nativeCarrySteps(_ preview:ROBCanCarryPreview,model:ROBGhostRobotModel,baseline:[Double])throws->[ROBLeftGestureProposal.Step] {
+        var previous=baseline,result:[ROBLeftGestureProposal.Step]=[]
+        for step in preview.steps {
+            let goal=model.vendorLeft(step.pose)
+            guard let minimum=ROBLeftArmInteractionPlan.duration(from:previous,to:goal,padding:0.002),
+                  max(step.seconds,minimum).isFinite,max(step.seconds,minimum)<=5 else {
+                throw ROBGhostMotionError.blocked("Carry endpoint exceeds current transport limits.")
+            }
+            result.append(.init(positions:goal,seconds:max(step.seconds,minimum),jawAction:step.jawAction,stage:step.stage));previous=goal
+        }
+        return result
+    }
+    @MainActor private func performNativeSupportedCarry(context:ROBRecyclingVisualInspection.ServoContext,
+        support:ROBVisualGraspVerifier.ObservedSupport,can:ROBWorkspaceLocatedObject,payload:ROBWorkspaceCarriedObject,
+        sourceContact:ROBWorkspaceIntentionalContact,map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
+        trial:ROBWorkspaceVisualCalibrationTrial) async throws->NSDictionary {
+        try check();try requireLiveVisualTrial(trial,map:map,model:model)
+        guard let destination=recyclingDestination,let owner,let body=map.visualCalibrationScope,
+              case .visualTrial(let projection)=context.baseline.projection,
+              let app=UUID(uuidString:trial.appSessionID),let receipt=try?requireLocalReceipt(),
+              let task=UUID(uuidString:receipt["pendingID"] as? String ?? "") else {
+            throw ROBGhostMotionError.blocked("Supported grasp held: destination or live native source lineage unavailable.")
+        }
+        let binding=ROBNativeCanAttachment.Context(appSessionID:app,taskID:task,ownershipID:owner,physicalArm:physicalSide,
+            bodyMotionIdentity:body.bodyMotionIdentity,gatewayGeneration:generation,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,
+            modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+            fixedViewIdentity:context.baseline.viewIdentity,targetIdentity:context.baseline.targetIdentity,sourceIdentity:projection.frameContractIdentity)
+        let baseline=try nativeAttachmentFeedback(),now=Date().timeIntervalSince1970*1000
+        let attachment=try ROBNativeCanAttachment.create(support:support,sourceContact:sourceContact,payload:payload,context:binding,
+            map:map,model:model,baseline:baseline,nowMilliseconds:now)
+        nativeCanAttachment=attachment;nativeCarryServoContext=context
+        defer {nativeCarryServoContext=nil;attachment.invalidate(reason:"Native carry phase ended; no persisted restore authority.");nativeCanAttachment=nil;nativeCarryDispatchTicket=nil;reviewedDispatchStart=nil;proposalStep = -1}
+        let preview:ROBCanCarryPreview
+        do {preview=try ROBCanCarryPreview.make(from:model.positions(vendorLeft:baseline.positions),can:can,attachedPayload:payload,
+            destination:destination,model:model,side:physicalSide,now:now,dropUncertaintyMeters:trial.assumedSpatialErrorMeters)}
+        catch {return ["status":"partial_held","transfer_completed":false,"possible_payload_held":true,"grasp_visually_supported":true,
+            "requires_intervention":true,"detail":"Actual supported grasp held; bucket carry is unreachable: "+error.localizedDescription]}
+        let steps=try nativeCarrySteps(preview,model:model,baseline:baseline.positions)
+        let contact=ROBWorkspaceIntentionalContact(measurementID:sourceContact.measurementID,observationSequence:sourceContact.observationSequence,
+            capturedAtMilliseconds:sourceContact.capturedAtMilliseconds,sceneID:sourceContact.sceneID,cameraGeneration:sourceContact.cameraGeneration,
+            mapFingerprint:sourceContact.mapFingerprint,modelID:sourceContact.modelID,geometryID:sourceContact.geometryID,mappingID:sourceContact.mappingID,
+            toolLink:sourceContact.toolLink,topCenterMeters:sourceContact.topCenterMeters,bottomCenterMeters:sourceContact.bottomCenterMeters,
+            diameterMeters:sourceContact.diameterMeters,firstContactStepIndex:0,gripStepIndex:nil,releaseStepIndex:preview.releaseIndex,
+            stepCount:steps.count,verifiedAttachment:attachment.record)
+        let carryTrial=Self.rebasedVisualTrial(trial,baseline:baseline.positions),session=generation,camera=vision.cameraGeneration
+        let proof=try await Task.detached(priority:.userInitiated){try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(
+            baseline:baseline.positions,steps:steps,map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,
+            nowMilliseconds:now,trial:carryTrial,payload:payload,intentionalContact:contact,carryingAtStart:true)}.value
+        let carry=try ROBLeftGestureCompiler.compile(kind:"recycling_carry_release",name:"Observed supported can to observed bucket",
+            poses:[],model:model,baseline:baseline.positions,generation:session,workspaceCollisionPlan:proof,collisionMap:map,
+            collisionSceneID:map.sceneID,collisionCameraGeneration:camera,visualCalibrationTrial:carryTrial,
+            verifiedAttachment:attachment.record,nowMilliseconds:Date().timeIntervalSince1970*1000)
+        try attachment.bind(proposal:carry,currentContext:try nativeAttachmentContext(binding),map:map,model:model,
+            feedback:try nativeAttachmentFeedback(),nowMilliseconds:Date().timeIntervalSince1970*1000)
+        proposal=carry
+        for (index,step) in carry.steps.enumerated() {
+            // Post-release travel requires independently verified EMPTY and
+            // landing. Command acceptance never admits that retreat.
+            guard index<=preview.releaseIndex else{break}
+            try check();try requireLiveVisualTrial(carryTrial,map:map,model:model)
+            let feedback=try nativeAttachmentFeedback(),checkedAt=Date().timeIntervalSince1970*1000
+            let segmentTrial=Self.rebasedVisualTrial(carryTrial,baseline:feedback.positions)
+            let segment=try await Task.detached(priority:.userInitiated){try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(
+                baseline:feedback.positions,steps:[step],map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,
+                nowMilliseconds:checkedAt,trial:segmentTrial,payload:payload,intentionalContact:contact,contactStepIndex:index,carryingAtStart:true)}.value
+            let fresh=try nativeAttachmentFeedback()
+            nativeCarryDispatchTicket=try attachment.prepareDispatch(index:index,segmentProof:segment,currentContext:try nativeAttachmentContext(binding),
+                map:map,model:model,feedback:fresh,nowMilliseconds:Date().timeIntervalSince1970*1000,nowUptime:ProcessInfo.processInfo.systemUptime)
+            reviewedDispatchStart=ROBReviewedArmDispatchStart(proposalID:carry.id,index:index,generation:session,mapFingerprint:map.fingerprint,
+                positions:feedback.positions,sequence:feedback.sequence,reviewCompletedAtUptime:ProcessInfo.processInfo.systemUptime)
+            proposalStep=index;phase="native checked carry \(index)";armTravelDispatched=true;recyclingReachDispatched=true;sentPath.append(step.positions)
+            let started=ProcessInfo.processInfo.systemUptime
+            try await accepted{gateway.sendApprovedLeftGestureStep(proposalID:carry.id,index:index,duration:step.seconds,expectedSessionGeneration:session)}
+            nativeCarryDispatchTicket=nil;reviewedDispatchStart=nil;leased=true;lastRenewal=ProcessInfo.processInfo.systemUptime
+            var settler=ROBArmRoutineSettler()
+            try await wait(step.seconds+3){
+                guard let sample=try?self.measured() else{return false}
+                return settler.observe(sequence:sample.sequence,positions:sample.positionsRadians.map(\.doubleValue),target:step.positions,
+                    now:ProcessInfo.processInfo.systemUptime) && ProcessInfo.processInfo.systemUptime-started>=step.seconds
+            }
+            try await holdTaskPosition(step.positions)
+            if step.jawAction == .release {
+                try await taskJaw(.release,at:step.positions,beforeDispatch:{
+                    let held=try self.nativeAttachmentFeedback(),releaseNow=Date().timeIntervalSince1970*1000
+                    let releaseTrial=Self.rebasedVisualTrial(carryTrial,baseline:held.positions)
+                    let releaseProof=try await Task.detached(priority:.userInitiated){try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(
+                        baseline:held.positions,steps:[step],map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,
+                        nowMilliseconds:releaseNow,trial:releaseTrial,payload:payload,intentionalContact:contact,contactStepIndex:index,carryingAtStart:true)}.value
+                    let fresh=try self.nativeAttachmentFeedback(),current=try self.nativeAttachmentContext(binding)
+                    let ticket=try attachment.prepareReleaseCommand(segmentProof:releaseProof,currentContext:current,map:map,model:model,feedback:fresh,
+                        nowMilliseconds:Date().timeIntervalSince1970*1000,nowUptime:ProcessInfo.processInfo.systemUptime)
+                    guard attachment.matchesAndConsumeReleaseCommand(ticket,proposalID:carry.id,proposalSHA256:carry.fingerprint,
+                        currentContext:try self.nativeAttachmentContext(binding),map:map,model:model,feedback:try self.nativeAttachmentFeedback(),
+                        nowMilliseconds:Date().timeIntervalSince1970*1000,nowUptime:ProcessInfo.processInfo.systemUptime) else {
+                        throw ROBGhostMotionError.blocked("Fresh settled native release admission failed; jaws remain unchanged.")
+                    }
+                })
+                let releaseAt=lastTaskOpeningCommandAtMilliseconds ?? Date().timeIntervalSince1970*1000
+                // Retain actual advancing raw observations, including failure
+                // or occlusion. No tracker disappearance is EMPTY/landing proof.
+                for _ in 0..<3 {
+                    do {_ = try await servoObservation(context,model:model,heldSince:releaseAt,openingAt:releaseAt,tableSupport:false)}
+                    catch {try check();context.observations.append(["stage":"post_release_raw_observation_unavailable","detail":error.localizedDescription,
+                        "captured_at_ms":Date().timeIntervalSince1970*1000,"placement_verified":false,"empty_verified":false])}
+                    try check()
+                }
+                return ["status":"released_unverified_held","motion_completed":false,"transfer_completed":false,
+                    "possible_payload_held":true,"grasp_visually_supported":true,"release_command_accepted":true,
+                    "placement_verified":false,"requires_intervention":true,
+                    "detail":"Checked supported-can carry reached the contained bucket opening and a separately admitted jaw release was accepted. Raw post-release observations retained; detachment and landing remain unverified. Holding; ZERO credited transfers and no EMPTY retreat."]
+            }
+        }
+        throw ROBGhostMotionError.blocked("Native carry ended without a verified release phase; holding possible payload.")
     }
 
     private var lastTaskOpeningCommandAtMilliseconds:Double? {
@@ -3170,7 +3349,7 @@ enum ROBArmCurrentSpikeRecording {
                 "depthPath":depth,"depthSHA256":ROBGhostRobotModel.hash(raw)])
         }
         let data=try JSONSerialization.data(withJSONObject:["schemaVersion":1,"kind":"observed_jaw_incremental_can_attempt",
-            "registrationVerified":false,"possessionMeasured":false,"appearanceVerified":false,"provisionalCoMotion":context.provisionalCoMotion,"observations":context.observations,"frames":frames],options:[.sortedKeys])
+            "registrationVerified":false,"possessionMeasured":false,"appearanceVerified":context.nativeObservedSupport != nil,"provisionalCoMotion":context.provisionalCoMotion,"observations":context.observations,"frames":frames],options:[.sortedKeys])
         let path=directory.appendingPathComponent("evidence.json");try data.write(to:path,options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:path.path)
     }
@@ -3469,6 +3648,7 @@ enum ROBArmCurrentSpikeRecording {
         activeEstimated = nil
         guard isRunning, failure == nil else { return }
         failure = message; task?.cancel(); reviewedDispatchStart = nil
+        if Thread.isMainThread {MainActor.assumeIsolated {nativeCanAttachment?.invalidate(reason:message);nativeCarryDispatchTicket=nil}}
         interactionStage = ""; readinessConfirmed = false
         if !Self.neckOnlyCommands.contains(activeCommand) {
             let requested=ProcessInfo.processInfo.systemUptime
@@ -3539,7 +3719,7 @@ enum ROBArmCurrentSpikeRecording {
         }
         if currentSpikeEvidence==nil,!Self.neckOnlyCommands.contains(activeCommand),leased || result["status"] as? String=="blocked" { _ = gateway.priorityHold(forArm:arm) }
         leased = false
-        if activeHoldAfterInitialEmptyLift || currentSpikeEvidence != nil || ["tabletop", "recycling", "recycling_grasp_hold", "estimated_calibration", "initial_empty_visual_retreat", "nominal_empty_commissioning", "one_degree_empty_calibration", "incremental_visual_servo_grasp_hold"].contains(proposal?.kind ?? "") {
+        if activeHoldAfterInitialEmptyLift || currentSpikeEvidence != nil || ["tabletop", "recycling", "recycling_grasp_hold", "estimated_calibration", "initial_empty_visual_retreat", "nominal_empty_commissioning", "one_degree_empty_calibration", "incremental_visual_servo_grasp_hold", "recycling_carry_release"].contains(proposal?.kind ?? "") {
             // A failed close/open may leave a payload. Never offer the old
             // empty-arm reverse/recovery automatically for a recycling task.
             recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil
