@@ -413,6 +413,7 @@ final class ROBAmberGatewayClient: NSObject {
             check(b.pendingLocalRecyclingApprovalScope?["nominalEmptyCommissioningStepEnabled"] as? Bool == true,
                 "The exact one-step flag must be visible in the immutable prepared scope")
             check(b.pendingLocalRecyclingApprovalScope?["nominalModelAssumedSelfEnabled"]==nil,"OFF scope serialization must omit the new optional flag")
+            check(b.pendingLocalRecyclingApprovalScope?["sourcePixelSelfReviewSHA256"]==nil,"OFF scope serialization must omit optional source-pixel evidence")
             check(!b.receiveSpokenAuthorization("yes proceed") && executed == 0,
                 "Speech cannot enable or grant the one-step receipt-only experiment")
             let changed = try receipt(b) { value in
@@ -459,6 +460,41 @@ final class ROBAmberGatewayClient: NSObject {
                 execute:{_ in},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
             check(rejected && b.pendingLocalRecyclingApprovalScope==nil,"Model assumption requires RIGHT+nominal and excludes other calibration modes")
         }
+        do {
+            let b=localBroker();var executed=0,rejected=false
+            let summary="DEBUG LLM reviewed source pixels freshly matched; ONE EMPTY J2 step only"
+            let evidence=String(repeating:"a",count:64)
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:summary,
+                contextIdentity:{"inert-current-pixel-context"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                nominalEmptyCommissioningStepEnabled:true,sourcePixelSelfReviewSHA256:evidence,
+                execute:{_ in executed+=1},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            #if DEBUG
+            check(!rejected && executed==0,"Pixel evidence requests a new receipt, never starts motion")
+            check(b.pendingLocalRecyclingApprovalScope?["sourcePixelSelfReviewSHA256"]as?String==evidence,"Current native pixel view hash must be visible in exact scope")
+            let changed=try receipt(b){value in var scope=value["scope"]as![String:Any];scope.removeValue(forKey:"sourcePixelSelfReviewSHA256");value["scope"]=scope}
+            expectReceiptRejection(b,changed,"Historical/default nominal receipt cannot grant reviewed source pixels")
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt(b))
+            check(executed==1 && b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",sourcePixelSelfReviewSHA256:evidence),"Exact fresh private receipt binds current native pixel evidence")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right"),"Pixel assumption cannot alias OFF nominal grant")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",sourcePixelSelfReviewSHA256:String(repeating:"b",count:64)),"Changed pixel evidence requires new receipt")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",modelAssumedSelfEnabled:true,sourcePixelSelfReviewSHA256:evidence),"Pixel evidence cannot enable MODEL hull fallback")
+            b.cancel(reason:"fixture Stop")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",sourcePixelSelfReviewSHA256:evidence),"Stop revokes pixel commissioning receipt")
+            #else
+            check(rejected && executed==0 && b.pendingLocalRecyclingApprovalScope==nil,"Source-pixel commissioning must reject in nonDEBUG builds")
+            #endif
+        }
+        #if DEBUG
+        for (side,nominal,modelAssumed,receiptOnly,hash) in [("left",true,false,true,String(repeating:"a",count:64)),
+            ("right",false,false,true,String(repeating:"a",count:64)),("right",true,true,true,String(repeating:"a",count:64)),
+            ("right",true,false,false,String(repeating:"a",count:64)),("right",true,false,true,"bad")] {
+            let b=localBroker();var rejected=false
+            b.requestRecyclingWorkspaceTask(command:side+"_recycle_cans",arm:side,canCount:4,summary:"inert invalid source-pixel scope",contextIdentity:{"inert"},
+                receiptOnly:receiptOnly,permitsUnmeasuredVisualCalibrationTrial:true,nominalEmptyCommissioningStepEnabled:nominal,
+                nominalModelAssumedSelfEnabled:modelAssumed,sourcePixelSelfReviewSHA256:hash,execute:{_ in},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            check(rejected && b.pendingLocalRecyclingApprovalScope==nil,"Pixel commissioning requires RIGHT/nominal/private/validhash and NO MODEL fallback")
+        }
+        #endif
         for (receiptOnly, visualTrial) in [(false, true), (true, false)] {
             let b = localBroker(); var executed = 0, rejected = false
             b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,

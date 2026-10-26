@@ -64,6 +64,8 @@ import UniformTypeIdentifiers
     private let collisionInfo = NSTextField(wrappingLabelWithString: "")
     private let localApprovalInfo = NSTextField(wrappingLabelWithString: "")
     private let standingCampaignInfo = NSTextField(wrappingLabelWithString: "")
+    private let sourcePixelSelfReview = NSButton(checkboxWithTitle:"LLM-reviewed self pixels, freshly matched (experimental)",target:nil,action:nil)
+    private let importSourcePixelReview = NSButton(title:"Import experimental pixel template…",target:nil,action:nil)
     private let nominalModelAssumedSelf = NSButton(checkboxWithTitle: "MODEL-ASSUMED self groups + 14 keyframes (one nominal step)", target:nil, action:nil)
     private let nominalEmptyCommissioningStep = NSButton(checkboxWithTitle: "One slow empty-arm commissioning step", target: nil, action: nil)
     private let oneDegreeEmptyCalibrationStep = NSButton(checkboxWithTitle: "One-degree empty-arm calibration step", target: nil, action: nil)
@@ -263,6 +265,14 @@ import UniformTypeIdentifiers
             addHelp("Actuator/model calibration only: RIGHT J2 −0.02 rad over 4 seconds, at most 2 cm modeled travel, then hold. Collision clearance is unverified; contact predictions are diagnostic only. Contact could push the table or lift ROB. No payload, jaw command, grasp, carry, release, return or chained motion. Zero transfers. Stop and fresh feedback remain required.")
             #if DEBUG
             if trial.id == "right-recycling" {
+                sourcePixelSelfReview.identifier=NSUserInterfaceItemIdentifier("sandbox-source-pixel-self-review")
+                sourcePixelSelfReview.target=self;sourcePixelSelfReview.action=#selector(changeSourcePixelSelfReview)
+                sourcePixelSelfReview.state=ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled ? .on:.off
+                detailStack.addArrangedSubview(sourcePixelSelfReview)
+                importSourcePixelReview.identifier=NSUserInterfaceItemIdentifier("sandbox-import-source-pixel-template")
+                importSourcePixelReview.target=self;importSourcePixelReview.action=#selector(importSourcePixelSelfTemplate)
+                detailStack.addArrangedSubview(importSourcePixelReview)
+                addHelp("DEBUG perception assumption only: import a private historical LLM pixel review once; Prepare matches actual next fresh native RAW scan. Table/person/unmasked/mixed groups stay external. Separate exact native receipt required for ONE J2-only empty step +14keyframes; no MODEL-hull fallback, jaws or chaining.")
                 holdAfterInitialEmptyLift.identifier = NSUserInterfaceItemIdentifier("sandbox-hold-after-initial-empty-lift")
                 holdAfterInitialEmptyLift.target = self; holdAfterInitialEmptyLift.action = #selector(changeHoldAfterInitialEmptyLift)
                 holdAfterInitialEmptyLift.state = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled ? .on : .off
@@ -562,6 +572,7 @@ import UniformTypeIdentifiers
         nominalEmptyCommissioningStep.state = .off; oneDegreeEmptyCalibrationStep.state = .off
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
         nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+        sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
         prepareLocalRecyclingSessionJob()
     }
@@ -615,6 +626,7 @@ import UniformTypeIdentifiers
         ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters = spatial
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
         ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled = nominalModelAssumedSelf.state == .on && nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled = sourcePixelSelfReview.state == .on && nominalEmptyCommissioningStep.state == .on
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
         parameterMessage = ""; observingLeftOperation = true
         ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: String(Self.recyclingCount)) { [weak self] result in
@@ -629,6 +641,28 @@ import UniformTypeIdentifiers
         }
         refresh()
     }
+    @objc private func importSourcePixelSelfTemplate() {
+        guard canEdit else{return}
+        let panel=NSOpenPanel();panel.canChooseFiles=true;panel.canChooseDirectories=false;panel.allowsMultipleSelection=false
+        panel.allowedFileTypes=["json"];panel.message="Import private experimental LLM source-pixel template (perception only; no movement approval)."
+        guard panel.runModal() == .OK,let url=panel.url else{return}
+        ROBLeftArmTrial.shared.importSourcePixelSelfReview(from:url){[weak self] result in
+            self?.parameterMessage=result["detail"]as?String ?? "Pixel template import ended; no movement authority imported."
+            self?.refresh()
+        }
+    }
+    @objc private func changeSourcePixelSelfReview() {
+        guard canEdit else{return}
+        ROBControllerArmApproval.shared.cancel(reason:"Experimental source-pixel option changed; prepare a new exact job.")
+        if sourcePixelSelfReview.state == .on {
+            nominalEmptyCommissioningStep.state = .on;nominalModelAssumedSelf.state = .off;oneDegreeEmptyCalibrationStep.state = .off;holdAfterInitialEmptyLift.state = .off
+            ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled=true;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+            ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled=false;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled=false
+        }
+        ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=sourcePixelSelfReview.state == .on
+        parameterMessage="Experimental reviewed pixels are NOT registration or movement authority. Prepare freshly matches current source; all external/table/mixed points remain checked."
+        ROBControllerArmApproval.shared.tick();refresh()
+    }
     @objc private func changeNominalModelAssumedSelf() {
         guard canEdit else{return}
         let approval=ROBControllerArmApproval.shared
@@ -636,6 +670,7 @@ import UniformTypeIdentifiers
             approval.cancel(reason:"MODEL-ASSUMED self commissioning scope changed; prepare its exact receipt.")
         }
         if nominalModelAssumedSelf.state == .on {
+            sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
             nominalEmptyCommissioningStep.state = .on;oneDegreeEmptyCalibrationStep.state = .off;holdAfterInitialEmptyLift.state = .off
             ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled=true
             ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled=false;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled=false
@@ -652,6 +687,7 @@ import UniformTypeIdentifiers
         }
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
         ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled = nominalModelAssumedSelf.state == .on && nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled = sourcePixelSelfReview.state == .on && nominalEmptyCommissioningStep.state == .on
         if nominalEmptyCommissioningStep.state == .on {
             holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = false
             oneDegreeEmptyCalibrationStep.state = .off
@@ -674,6 +710,7 @@ import UniformTypeIdentifiers
             nominalEmptyCommissioningStep.state = .off
             ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
         nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+        sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
         }
         parameterMessage = oneDegreeEmptyCalibrationStep.state == .on
             ? "Next local receipt: one four-second RIGHT J2 −0.02 rad calibration step, then hold; contact clearance is unverified; zero transfers."
@@ -687,6 +724,7 @@ import UniformTypeIdentifiers
             nominalEmptyCommissioningStep.state = .off;oneDegreeEmptyCalibrationStep.state = .off
             ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
         nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+        sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
             ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
         }
         parameterMessage = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled
@@ -835,6 +873,9 @@ import UniformTypeIdentifiers
         nominalEmptyCommissioningStep.state = left.nominalEmptyCommissioningStepEnabled ? .on : .off
         nominalModelAssumedSelf.state = left.nominalModelAssumedSelfEnabled ? .on:.off
         nominalModelAssumedSelf.isEnabled = canEdit && selectedTrial.id=="right-recycling"
+        sourcePixelSelfReview.state=left.sourcePixelSelfReviewEnabled ? .on:.off
+        sourcePixelSelfReview.isEnabled=canEdit && selectedTrial.id=="right-recycling"
+        importSourcePixelReview.isEnabled=canEdit && selectedTrial.id=="right-recycling"
         oneDegreeEmptyCalibrationStep.isEnabled = canEdit
         oneDegreeEmptyCalibrationStep.state = left.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
         holdAfterInitialEmptyLift.isEnabled = canEdit && selectedTrial.id == "right-recycling"
@@ -945,6 +986,9 @@ enum ROBLocalRecyclingSandboxRouting {
         }
         if scope["permitsUnmeasuredVisualCalibrationTrial"] as? Bool == true {
             lines.append(imported == nil ? "Unmeasured visual trial: requested, not yet approved." : "Unmeasured visual trial: explicitly permitted; planner admission is separate.")
+        }
+        if let hash=scope["sourcePixelSelfReviewSHA256"]as?String {
+            lines.append("DEBUG LLM-reviewed source pixels, matched to current RAW scene. Evidence SHA256 "+hash+". Experimental/not registration; no MODEL-hull fallback. Table/person/uncertain/unmasked/mixed groups remain external. One J2-only empty step +14keyframes; exact receipt still required.")
         }
         if scope["nominalModelAssumedSelfEnabled"]as?Bool==true {
             lines.append("MODEL-ASSUMED alignment, NOT observed self. Whole original groups inside noninflated baseline moving-link hulls only; all raw data retained. One J2-only step, 14 timed keyframes, hold. Contact/property risk accepted for this experiment; no normal clearance or transfer credit.")

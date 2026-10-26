@@ -11,13 +11,13 @@ method=braced_declaration(source,'    @MainActor private func collectNominalKeyf
 execute=braced_declaration(source,'    @MainActor private func executeNominalEmptyCommissioning()')
 view=braced_declaration(source,'    @MainActor private func captureRightArmCalibrationView(')
 assert 'executeSingle(' not in execute and 'search.run(' not in execute
-assert execute.count('if assumedSelf {ROBWorkspaceSearch.shared.announce?("Moving my right arm a little.")}')==1
-assert execute.count('if assumedSelf {ROBWorkspaceSearch.shared.announce?("Arm movement complete. Holding here.")}')==1
+assert execute.count('if usesFixedCommissioningKeyframes {ROBWorkspaceSearch.shared.announce?("Moving my right arm a little.")}')==1
+assert execute.count('if usesFixedCommissioningKeyframes {ROBWorkspaceSearch.shared.announce?("Arm movement complete. Holding here.")}')==1
 assert execute.index('Moving my right arm a little.')<execute.index('gateway.sendApprovedLeftGestureStep(')
 assert execute.index('Arm movement complete. Holding here.')>execute.index('try await archive.finish()')
 assert execute.index('Arm movement complete. Holding here.')>execute.index('guard 1.5*zip(endpoint,proof.goal)')
 
-assert 'if !nominalModelAssumedSelfEnabled {try await wait(12){search.prepareView?' in view
+assert 'if !usesFixedCommissioningKeyframes {try await wait(12){search.prepareView?' in view
 assert view.index('return prior')<view.index('var map=ROBWorkspaceDepthMap')
 assert 'prior.originalOccupiedSourceGroups != nil' in view
 fixture=r'''

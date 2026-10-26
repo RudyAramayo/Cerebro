@@ -1,5 +1,6 @@
 import AppKit
 import CoreImage
+import Darwin
 import simd
 
 /// Ephemeral admission evidence for one already-authorized waypoint. It is
@@ -151,6 +152,63 @@ enum ROBArmCurrentSpikeRecording {
 /// Physical sides are explicit: LEFT=R11/gateway right, RIGHT=L10/gateway left.
 /// Existing left gesture commands retain their original scope; right recycling
 /// has an independent model mapping and one-shot approval.
+/// Private perception files only. This loader never imports an arm grant.
+private struct ROBSourcePixelArchiveInputs {
+    let manifestJSON:Data,sourceMapJSON:Data,frames:[ROBWorkspaceSourcePixelSelf.ReplayFrame]
+    static func privateFile(_ url:URL,limit:Int)throws->Data {
+        let attributes=try FileManager.default.attributesOfItem(atPath:url.path)
+        guard url.isFileURL,attributes[.type]as?FileAttributeType == .typeRegular,
+              (attributes[.posixPermissions]as?NSNumber).map({$0.intValue & 0o077 == 0})==true,
+              (attributes[.ownerAccountID]as?NSNumber)?.uint32Value==getuid(),
+              let size=(attributes[.size]as?NSNumber)?.intValue,size>=0,size<=limit else {
+            throw ROBGhostMotionError.blocked("Experimental pixel review requires bounded private regular files owned by the current user.")
+        }
+        let bytes=try Data(contentsOf:url)
+        guard bytes.count==size else {throw ROBGhostMotionError.blocked("A pixel evidence file changed during reading.")}
+        return bytes
+    }
+    static func load(directory:URL)throws->Self {
+        let root=directory.standardizedFileURL
+        let attributes=try FileManager.default.attributesOfItem(atPath:root.path)
+        guard root.isFileURL,root.path==root.resolvingSymlinksInPath().path,
+              attributes[.type]as?FileAttributeType == .typeDirectory,
+              (attributes[.posixPermissions]as?NSNumber).map({$0.intValue & 0o077 == 0})==true else {
+            throw ROBGhostMotionError.blocked("The reviewed raw archive must be a private original directory, not a symlink.")
+        }
+        let manifestData=try privateFile(root.appendingPathComponent("manifest.json"),limit:1_000_000)
+        let manifest=try JSONDecoder().decode(ROBWorkspaceRawScanArchive.Manifest.self,from:manifestData)
+        guard manifest.schemaVersion==1,manifest.kind=="raw_workspace_pixel_provenance_only",manifest.status=="complete",
+              !manifest.motionAuthority,!manifest.classificationAuthority,(1...14).contains(manifest.frames.count),
+              let binding=manifest.sourceMapBinding,binding.relativePath=="source-map.json",
+              binding.workspaceSceneID==manifest.scene.workspaceSceneID else {
+            throw ROBGhostMotionError.blocked("Experimental review requires a complete native raw archive and final source-map binding.")
+        }
+        let mapData=try privateFile(root.appendingPathComponent(binding.relativePath),limit:64_000_000)
+        guard ROBGhostRobotModel.hash(mapData)==binding.serializedSHA256 else {throw ROBGhostMotionError.blocked("Raw source-map bytes changed.")}
+        var total=manifestData.count+mapData.count,frames:[ROBWorkspaceSourcePixelSelf.ReplayFrame]=[]
+        for record in manifest.frames {
+            guard record.relativeDirectory==record.frameID.uuidString else {throw ROBGhostMotionError.blocked("A source frame path is not its exact native UUID directory.")}
+            let folder=root.appendingPathComponent(record.relativeDirectory,isDirectory:true)
+            guard folder.path==folder.resolvingSymlinksInPath().path else {throw ROBGhostMotionError.blocked("A source frame directory is a symlink.")}
+            let metadata=try privateFile(folder.appendingPathComponent("frame.json"),limit:1_000_000)
+            guard ROBGhostRobotModel.hash(metadata)==record.metadataSHA256,
+                  let object=try JSONSerialization.jsonObject(with:metadata)as?[String:Any],
+                  object["rgbPath"]as?String=="rgb888.raw",object["depthPath"]as?String=="depth-u16le.raw" else {
+                throw ROBGhostMotionError.blocked("Raw frame metadata/hash/path changed.")
+            }
+            let rgb=try privateFile(folder.appendingPathComponent("rgb888.raw"),limit:8_000_000)
+            let depth=try privateFile(folder.appendingPathComponent("depth-u16le.raw"),limit:5_000_000)
+            guard ROBGhostRobotModel.hash(rgb)==record.rgbSHA256,ROBGhostRobotModel.hash(depth)==record.depthSHA256 else {
+                throw ROBGhostMotionError.blocked("Original RGB/depth evidence bytes changed.")
+            }
+            total+=metadata.count+rgb.count+depth.count
+            guard total<=64_000_000 else {throw ROBGhostMotionError.blocked("Pixel evidence exceeds the private64MB source budget.")}
+            frames.append(.init(metadataJSON:metadata,rgb888:rgb,depthU16LittleEndian:depth))
+        }
+        return .init(manifestJSON:manifestData,sourceMapJSON:mapData,frames:frames)
+    }
+}
+
 @objcMembers final class ROBLeftArmTrial: NSObject {
     static let shared = ROBLeftArmTrial()
     static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax", "left_object_cycle",
@@ -195,6 +253,17 @@ enum ROBArmCurrentSpikeRecording {
     @nonobjc private var activeNominalRetreat: ROBWorkspaceNominalEmptyCommissioningRetreat?
     @nonobjc var nominalEmptyCommissioningStepEnabled = false
     @nonobjc var nominalModelAssumedSelfEnabled = false
+    @nonobjc var sourcePixelSelfReviewEnabled=false
+    @nonobjc private var sourcePixelTemplate:ROBWorkspaceSourcePixelSelf.Template?
+    private var sourcePixelTemplateSHA256:String?,sourcePixelTemplatePath:String?
+    @nonobjc private var sourcePixelCurrentView:ROBWorkspaceSourcePixelSelf.View?
+    private var sourcePixelCurrentMapFingerprint:String?
+    private var sourcePixelCurrentSourceMapJSON:Data?,sourcePixelCurrentEvidenceSHA256:String?
+    private var sourcePixelPreparationTask:Task<Void,Never>?
+    private var sourcePixelPreparationID:UUID?
+    private static let sourcePixelQueue=DispatchQueue(label:"com.orbitusrobotics.source-pixel-review",qos:.userInitiated)
+    private var usesFixedCommissioningKeyframes:Bool {nominalModelAssumedSelfEnabled || sourcePixelSelfReviewEnabled}
+    private var currentSourcePixelEvidenceSHA256:String? {sourcePixelSelfReviewEnabled ? sourcePixelCurrentEvidenceSHA256:nil}
     @nonobjc private var activeOneDegreeCalibration: ROBWorkspaceOneDegreeEmptyCalibrationStep?
     @nonobjc var oneDegreeEmptyCalibrationStepEnabled = false
     /// DEBUG-only early stop on the ordinary, fully checked empty entry path.
@@ -631,7 +700,7 @@ enum ROBArmCurrentSpikeRecording {
                         if self.servoTelemetryHistory.count>80 {self.servoTelemetryHistory.removeFirst(self.servoTelemetryHistory.count-80)}
                     }
                 }
-                if self.isRunning,self.nominalModelAssumedSelfEnabled,sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds<=250 {
+                if self.isRunning,self.usesFixedCommissioningKeyframes,sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds<=250 {
                     let current=(self.gateway.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value ?? 0
                     var history=self.nominalBothArmHistory[sample.arm] ?? []
                     if history.last?.generation != current {history=[]}
@@ -655,10 +724,109 @@ enum ROBArmCurrentSpikeRecording {
 
     /// Dedicated local Sandbox action; ordinary model/controller commands do
     /// not enter this lane by naming a task or by decoding a saved proposal.
+    @nonobjc var sourcePixelSelfReviewStatus:NSDictionary {
+        ["enabled":sourcePixelSelfReviewEnabled,"templateSHA256":sourcePixelTemplateSHA256 as Any? ?? NSNull(),
+         "templatePath":sourcePixelTemplatePath as Any? ?? NSNull(),"currentEvidenceSHA256":sourcePixelCurrentEvidenceSHA256 as Any? ?? NSNull(),
+         "currentMapFingerprint":sourcePixelCurrentMapFingerprint as Any? ?? NSNull(),
+         "classificationBasis":"llm_visual_review_experimental","motionAuthority":false]
+    }
+    @nonobjc func importSourcePixelSelfReview(from url:URL,completion:@escaping(NSDictionary)->Void) {
+        #if !DEBUG
+        completion(["status":"rejected","detail":"Experimental source-pixel commissioning is DEBUG-only."]);return
+        #else
+        guard Thread.isMainThread,!isRunning,sourcePixelPreparationTask==nil else {completion(["status":"busy","detail":"Finish the active operation before importing perception evidence."]);return}
+        ROBControllerArmApproval.shared.cancel(reason:"Experimental source-pixel template changed; old job scope is invalid.")
+        sourcePixelCurrentView=nil;sourcePixelCurrentMapFingerprint=nil;sourcePixelCurrentSourceMapJSON=nil;sourcePixelCurrentEvidenceSHA256=nil
+        let preparationID=UUID();sourcePixelPreparationID=preparationID
+        sourcePixelPreparationTask=Task { @MainActor [weak self] in
+            guard let self else{return};defer {if self.sourcePixelPreparationID==preparationID {self.sourcePixelPreparationTask=nil;self.sourcePixelPreparationID=nil}}
+            do {
+                let result:(ROBWorkspaceSourcePixelSelf.Template,String)=try await withCheckedThrowingContinuation{continuation in
+                    Self.sourcePixelQueue.async {
+                        do {
+                            let bytes=try ROBSourcePixelArchiveInputs.privateFile(url,limit:8_000_000)
+                            guard let review=try JSONSerialization.jsonObject(with:bytes)as?[String:Any],
+                                  let path=review["archiveDirectory"]as?String,path.hasPrefix("/"),
+                                  let directory=Bundle.main.url(forResource:"ShadowPlanner",withExtension:nil) else {
+                                throw ROBGhostMotionError.blocked("Experimental review lacks its original native archive directory or bundled model.")
+                            }
+                            let inputs=try ROBSourcePixelArchiveInputs.load(directory:URL(fileURLWithPath:path))
+                            let model=try ROBGhostRobotModel(directory:directory,physicalSide:"right")
+                            let template=try ROBWorkspaceSourcePixelSelf.loadTemplate(reviewJSON:bytes,manifestJSON:inputs.manifestJSON,
+                                sourceMapJSON:inputs.sourceMapJSON,frames:inputs.frames,model:model)
+                            continuation.resume(returning:(template,ROBGhostRobotModel.hash(bytes)))
+                        }catch {continuation.resume(throwing:error)}
+                    }
+                }
+                try Task.checkCancellation();guard !self.isRunning,self.sourcePixelPreparationID==preparationID else {throw ROBGhostMotionError.blocked("The arm task changed while loading perception evidence.")}
+                self.sourcePixelTemplate=result.0;self.sourcePixelTemplateSHA256=result.1;self.sourcePixelTemplatePath=url.path
+                completion(["status":"perception_template_imported","motionAuthority":false,"detail":"Historical LLM visual pixel template loaded. Prepare will match actual NEXT fresh scan; no motion permission imported."])
+            }catch {completion(["status":"blocked","motionAuthority":false,"detail":error.localizedDescription])}
+        }
+        #endif
+    }
+    private func prepareSourcePixelSelfReview(command:String,target:String,completion:@escaping(NSDictionary)->Void) {
+        #if !DEBUG
+        completion(["status":"rejected","detail":"Experimental source-pixel commissioning is DEBUG-only."]);return
+        #else
+        guard !isRunning,sourcePixelPreparationTask==nil,!ROBControllerArmApproval.shared.isPending,
+              nominalEmptyCommissioningStepEnabled,!nominalModelAssumedSelfEnabled,!oneDegreeEmptyCalibrationStepEnabled,
+              let template=sourcePixelTemplate,let templateHash=sourcePixelTemplateSHA256,
+              let map=ROBWorkspaceSearch.shared.collisionSnapshot,
+              let report=ROBWorkspaceSearch.shared.lastReport["raw_archive"]as?[String:Any],report["status"]as?String=="complete",
+              let path=report["directory"]as?String,
+              let directory=Bundle.main.url(forResource:"ShadowPlanner",withExtension:nil) else {
+            completion(["status":"blocked","detail":"Select only the DEBUG source-pixel nominal variant, import its historical template once, and capture a fresh complete native RAW scan."]);return
+        }
+        let fingerprint=map.fingerprint,scene=map.sceneID,body=map.bodyMotionIdentity,camera=map.cameraGeneration,session=map.sessionGeneration
+        sourcePixelCurrentView=nil;sourcePixelCurrentMapFingerprint=nil;sourcePixelCurrentSourceMapJSON=nil;sourcePixelCurrentEvidenceSHA256=nil
+        let preparationID=UUID();sourcePixelPreparationID=preparationID
+        sourcePixelPreparationTask=Task { @MainActor [weak self] in
+            guard let self else{return};defer {if self.sourcePixelPreparationID==preparationID {self.sourcePixelPreparationTask=nil;self.sourcePixelPreparationID=nil}}
+            do {
+                let classified:(ROBWorkspaceSourcePixelSelf.View,String,Data)=try await withCheckedThrowingContinuation{continuation in
+                    // Decode/model/replay/NCC stay on one serial value-only
+                    // worker. No camera buffers or live map actor cross it.
+                    Self.sourcePixelQueue.async {
+                        do {
+                            let inputs=try ROBSourcePixelArchiveInputs.load(directory:URL(fileURLWithPath:path))
+                            let source=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:inputs.sourceMapJSON)
+                            guard source.fingerprint==fingerprint,source.sceneID==scene,source.bodyMotionIdentity==body,
+                                  source.cameraGeneration==camera,source.sessionGeneration==session else {
+                                throw ROBGhostMotionError.blocked("Current raw archive differs from the actual native scan; no historical relabeling accepted.")
+                            }
+                            let model=try ROBGhostRobotModel(directory:directory,physicalSide:"right")
+                            let view=try ROBWorkspaceSourcePixelSelf.classify(template:template,currentManifestJSON:inputs.manifestJSON,
+                                currentSourceMapJSON:inputs.sourceMapJSON,currentFrames:inputs.frames,map:source,model:model,
+                                nowMilliseconds:Date().timeIntervalSince1970*1000)
+                            continuation.resume(returning:(view,view.fingerprint,inputs.sourceMapJSON))
+                        }catch {continuation.resume(throwing:error)}
+                    }
+                }
+                try Task.checkCancellation()
+                guard self.sourcePixelSelfReviewEnabled,self.sourcePixelTemplateSHA256==templateHash,self.sourcePixelPreparationID==preparationID,!self.isRunning,
+                      !ROBControllerArmApproval.shared.isPending,let current=ROBWorkspaceSearch.shared.collisionSnapshot,
+                      current.fingerprint==fingerprint,current.sceneID==scene,current.bodyMotionIdentity==body,
+                      current.cameraGeneration==camera,current.sessionGeneration==session else {
+                    throw ROBGhostMotionError.blocked("Source-pixel preparation lost the current60s scene, source, template or idle scope.")
+                }
+                self.sourcePixelCurrentView=classified.0;self.sourcePixelCurrentMapFingerprint=fingerprint
+                self.sourcePixelCurrentEvidenceSHA256=classified.1;self.sourcePixelCurrentSourceMapJSON=classified.2
+                self.performImpl(command,target:target,localReceiptOnly:true,completion:completion)
+            }catch {self.sourcePixelCurrentView=nil;self.sourcePixelCurrentMapFingerprint=nil;self.sourcePixelCurrentSourceMapJSON=nil;self.sourcePixelCurrentEvidenceSHA256=nil
+                completion(["status":"blocked","arm_motion_sent":false,"jaw_command_sent":false,"detail":error.localizedDescription])}
+        }
+        #endif
+    }
+
     @nonobjc func performUsingLocalRecyclingReceipt(_ command:String,target:String,completion:@escaping(NSDictionary)->Void) {
         guard ["left_recycle_cans","right_recycle_cans"].contains(command),
               let canCount=try? ROBRecyclingBatchRequest.requestedCount(command:command,target:target) else {
             completion(["status":"rejected","detail":"Choose an exact local recycling count from1 through8."]);return
+        }
+        if sourcePixelSelfReviewEnabled {
+            guard command=="right_recycle_cans" else {completion(["status":"rejected","detail":"Source-pixel commissioning is physical RIGHT only."]);return}
+            prepareSourcePixelSelfReview(command:command,target:target,completion:completion);return
         }
         let broker=ROBControllerArmApproval.shared
         if broker.standingLocalCanCampaignActive,!nominalEmptyCommissioningStepEnabled,!nominalModelAssumedSelfEnabled,!oneDegreeEmptyCalibrationStepEnabled {
@@ -787,9 +955,12 @@ enum ROBArmCurrentSpikeRecording {
         let experimentSummary=localReceiptOnly && oneDegreeEmptyCalibrationStepEnabled
             ? "ONE EMPTY physical RIGHT-arm actuator/geometry calibration experiment only: fresh measured q0 to J2 minus0.02rad (about one degree) over4seconds, at most2cm modeled full-hull travel. No jaw command, payload, grasp, carry, release, automatic return or chained can attempt. Both arms remain stationary except this ONE selected-joint step. Watch the actual RIGHT arm in the recorded camera view. Best-available camera/model alignment has explicitly ASSUMED35mm error; raw contact predictions and unknown regions are recorded as diagnostics and are NOT verified motion clearance or a collision certificate. Physical contact and calibration mistakes are accepted for this bounded experiment. Stop, ownership, current limits, fresh motor/gripper feedback, source/body/profile identity, q0, joint bounds and a tight measured motion corridor remain required. After the ONE step, measure the endpoint and hold, report partial with ZERO recycled cans. Empty state is assumed from startup/task history, not sensed possession."
             : assumedSummary
+        let pixelSummary=localReceiptOnly && sourcePixelSelfReviewEnabled
+            ? "ONE DEBUG EXPERIMENTAL LLM-VISUAL-REVIEWED SOURCE-PIXEL EMPTY RIGHT-arm step, J2 minus0.075rad ONLY over4seconds,≤60mm full-hull travel, then hold. Fresh RGB/depth+exactneck/BOTHq/device/runtime/source checks matched an historical reviewed template to THIS current raw map; current evidence SHA256 \(currentSourcePixelEvidenceSHA256 ?? "unavailable"). Original template SHA256 \(sourcePixelTemplateSHA256 ?? "unavailable"). Current raw map SHA256 \(sourcePixelCurrentMapFingerprint ?? "unavailable"). This is experimental perception, NOT measured self/registration or motion authority. Only original source groups whose EVERY accepted contributor is positively matched experimental robot may be excluded; table/person/hand/uncertain/unmasked/mixed groups remain external. No MODEL-hull fallback or normal-route exemption; all raw data retained. Prepared fixed P4000L6011U5450, both arms held, only RIGHT J2 travels. Record14 actual RGB-D/BOTHq keyframes3before/8during/3after, no30fps claim. Preserve actual external-contact/joint/fullarm/self-nonworsening/endclearance/person/current/feedback/ownership/Stop checks. No jaw,payload,grip,carry,release,return,retry,automatic chaining or transfer. Empty state and35mm camera error remain assumptions; contact/property risk possible. A fresh exact native private receipt is still required."
+            : experimentSummary
         let approvedSummary=localReceiptOnly && holdAfterInitialEmptyLiftEnabled
             ? "DEBUG initial EMPTY lift and hold only, physical RIGHT arm: search fresh can/workspace observations, select one initial empty lift using the ordinary complete occupied/unknown/full-arm/self-clearance review, recheck its exact measured start before dispatch, then measure the endpoint and hold. No jaw commands or startup jaw calibration, grasp, payload, carry, release, return, rescan after lifting, next can or chained motion. If no initial lift is required, remain unchanged and report that. ZERO transfers; the \(requestedCanCount)-can campaign remains unfinished. Both arms may hold their current measured positions. The same explicit visual trial uses assumed spatial error \(localVisualTrialAssumedSpatialErrorMeters*1000) mm; no calibration or collision exemption is added. Preserve joint bounds, fresh motor/gripper feedback, source/body/context identity, exclusive ownership, current-spike hold and immediate Stop."
-            : experimentSummary
+            : pixelSummary
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
             start(command, summary: action, limit: limit, completion: completion)
@@ -812,7 +983,7 @@ enum ROBArmCurrentSpikeRecording {
         }
         if localReceiptOnly {
             #if !DEBUG
-            guard !holdAfterInitialEmptyLiftEnabled else {
+            guard !holdAfterInitialEmptyLiftEnabled,!sourcePixelSelfReviewEnabled else {
                 completion(["status":"rejected","detail":"Initial empty lift-and-hold is available only in DEBUG commissioning builds."]);return
             }
             #endif
@@ -821,6 +992,7 @@ enum ROBArmCurrentSpikeRecording {
             }
             guard !(nominalEmptyCommissioningStepEnabled && oneDegreeEmptyCalibrationStepEnabled),
                   !nominalModelAssumedSelfEnabled || nominalEmptyCommissioningStepEnabled && physicalSide=="right",
+                  !sourcePixelSelfReviewEnabled || (nominalEmptyCommissioningStepEnabled && !nominalModelAssumedSelfEnabled && !oneDegreeEmptyCalibrationStepEnabled && physicalSide=="right" && currentSourcePixelEvidenceSHA256 != nil),
                   !(nominalEmptyCommissioningStepEnabled || oneDegreeEmptyCalibrationStepEnabled) || physicalSide=="right" && localVisualTrialAssumedSpatialErrorMeters==0.035 else {
                 completion(["status":"rejected","detail":"The separate empty calibration experiments are mutually exclusive and require physical RIGHT and an explicit35mm assumed camera uncertainty."]);return
             }
@@ -837,6 +1009,7 @@ enum ROBArmCurrentSpikeRecording {
                 summary:approvedSummary,contextIdentity:{[weak self] in self?.currentLocalRecyclingContextIdentity()},receiptOnly:true,
                 permitsUnmeasuredVisualCalibrationTrial:true,nominalEmptyCommissioningStepEnabled:nominalEmptyCommissioningStepEnabled,
                 nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,
+                sourcePixelSelfReviewSHA256:currentSourcePixelEvidenceSHA256,
                 oneDegreeEmptyCalibrationStepEnabled:oneDegreeEmptyCalibrationStepEnabled,
                 execute:execute,cancel:cancel,completion:finished)
         } else if workspace && physicalSide == "right" {
@@ -854,7 +1027,8 @@ enum ROBArmCurrentSpikeRecording {
     }
 
     func cancel(reason: String) {
-        localCampaignRecoveryTask?.cancel();localCampaignRecoveryTask=nil;standingPreparationTask?.cancel();standingPreparationTask=nil;localCampaignRecoveryReason=nil
+        sourcePixelCurrentView=nil;sourcePixelCurrentEvidenceSHA256=nil;sourcePixelCurrentMapFingerprint=nil;sourcePixelCurrentSourceMapJSON=nil
+        sourcePixelPreparationTask?.cancel();sourcePixelPreparationTask=nil;sourcePixelPreparationID=nil;localCampaignRecoveryTask?.cancel();localCampaignRecoveryTask=nil;standingPreparationTask?.cancel();standingPreparationTask=nil;localCampaignRecoveryReason=nil
         abort(reason)
     }
 
@@ -925,6 +1099,12 @@ enum ROBArmCurrentSpikeRecording {
             "assumedSpatialErrorMeters":localVisualTrialAssumedSpatialErrorMeters]
         if holdAfterInitialEmptyLiftEnabled {value["holdAfterInitialEmptyLiftEnabled"]=true}
         if nominalModelAssumedSelfEnabled {value["nominalModelAssumedSelfEnabled"]=true}
+        if sourcePixelSelfReviewEnabled {
+            guard sourcePixelCurrentView != nil,let evidence=sourcePixelCurrentEvidenceSHA256,let current=ROBWorkspaceSearch.shared.collisionSnapshot,
+                  current.fingerprint==sourcePixelCurrentMapFingerprint else{return nil}
+            value["sourcePixelSelfReviewSHA256"]=evidence
+            value["sourcePixelSelfMapFingerprint"]=current.fingerprint
+        }
         let components=value.mapValues{String(describing:$0)}
         let changed=localReceiptContextComponents.map { prior in components.keys.filter{prior[$0] != components[$0]}.sorted() } ?? []
         if localReceiptContextComponents==nil {localReceiptContextComponents=components}
@@ -955,6 +1135,7 @@ enum ROBArmCurrentSpikeRecording {
               current["permitsUnmeasuredVisualCalibrationTrial"] as? Bool==true,
               (current["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
               (current["nominalModelAssumedSelfEnabled"] as? Bool ?? false)==nominalModelAssumedSelfEnabled,
+              current["sourcePixelSelfReviewSHA256"]as?String==currentSourcePixelEvidenceSHA256,
               (current["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled,
               let until=(current["executingUntilMilliseconds"] as? NSNumber)?.doubleValue,
               until>Date().timeIntervalSince1970*1000 else {
@@ -962,6 +1143,7 @@ enum ROBArmCurrentSpikeRecording {
         }
         guard (frozen["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
               (frozen["nominalModelAssumedSelfEnabled"] as? Bool ?? false)==nominalModelAssumedSelfEnabled,
+              frozen["sourcePixelSelfReviewSHA256"]as?String==currentSourcePixelEvidenceSHA256,
               (frozen["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled else {
             throw ROBArmRoutineError.blocked("The receipt's nominal-empty experiment flag changed.")
         }
@@ -1189,9 +1371,10 @@ enum ROBArmCurrentSpikeRecording {
         }
         if let nominal=activeNominalRetreat {
             guard nominalEmptyCommissioningStepEnabled,localReceiptCommand=="right_recycle_cans",physicalSide=="right",
-                  ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide,modelAssumedSelfEnabled:nominalModelAssumedSelfEnabled),
+                  ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide,modelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,sourcePixelSelfReviewSHA256:currentSourcePixelEvidenceSHA256),
                   let map=collisionMap,let model=collisionModel,let trial=nominal.context.visualTrial,
                   (nominal.modelAssumedSelfAudit != nil)==nominalModelAssumedSelfEnabled,
+                  (nominal.sourcePixelSelfAudit != nil)==sourcePixelSelfReviewEnabled,
                   map.fingerprint==nominal.context.mapFingerprint,let path=proposal,path.kind=="nominal_empty_commissioning",
                   path.baseline==nominal.baseline,path.steps==[nominal.step],path.steps[0].jawAction==nil,
                   !jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched else {
@@ -1361,6 +1544,13 @@ enum ROBArmCurrentSpikeRecording {
                   gateway.modes(forArm:other).map(\.intValue)==held.modes,sample.statuses.map(\.intValue)==held.modes,
                   1.5*zip(sample.positionsRadians.map(\.doubleValue),held.positions).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
                 throw ROBArmRoutineError.blocked("The other arm changed during the local recycling job.")
+            }
+        }
+        if localReceiptCommand != nil,sourcePixelSelfReviewEnabled {
+            guard let view=sourcePixelCurrentView,let sample=gateway.telemetry(forArm:"right"),sample.effectiveSampleAgeMilliseconds<=150,
+                  sample.positionsRadians.count==7,view.physicalLeftBaseline.count==7,
+                  1.5*zip(sample.positionsRadians.map(\.doubleValue),view.physicalLeftBaseline).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.002 else {
+                throw ROBArmRoutineError.blocked("The observed source-pixel scene's physical LEFT held pose changed.")
             }
         }
         guard Self.neckOnlyCommands.contains(activeCommand) || activeCommand == "left_relax" || (physicalSide == "left" ? ROBControllerArmApproval.shared.authorizesLeftArmTrial(summary) : ROBControllerArmApproval.shared.authorizesRightArmTrial(summary)) else {
@@ -1568,27 +1758,27 @@ enum ROBArmCurrentSpikeRecording {
         let search=ROBWorkspaceSearch.shared
         let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
         let pan:Double,upper:Int
-        if nominalModelAssumedSelfEnabled {
+        if usesFixedCommissioningKeyframes {
             guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,neck["pan"]as?Int==4000,
                   neck["lower"]as?Int==6011,neck["upper"]as?Int==5450,let actual=neck["pan_degrees"]as?Double else {
-                throw ROBArmRoutineError.blocked("MODEL-ASSUMED commissioning needs already prepared fixed P4000 L6011 U5450; no head movement sent.")
+                throw ROBArmRoutineError.blocked(sourcePixelSelfReviewEnabled ? "Source-pixel commissioning needs already prepared fixed P4000 L6011 U5450; no head movement sent.":"MODEL-ASSUMED commissioning needs already prepared fixed P4000 L6011 U5450; no head movement sent.")
             }
             pan=actual;upper=5450
         }else {pan = -55.0;upper=5650}
         phase="settling RIGHT arm commissioning view";cameraReady=false;localReceiptHeldNeckIdentity=nil
-        if !nominalModelAssumedSelfEnabled {try await wait(12){search.prepareView?(pan,upper)==true}}
+        if !usesFixedCommissioningKeyframes {try await wait(12){search.prepareView?(pan,upper)==true}}
         let settledSince=ProcessInfo.processInfo.systemUptime
         try await wait(8){search.viewReady?(pan,upper)==true && self.vision.fresh &&
             ROBArmRoutineCoordinator.shared.viewIsStationary?()==true && ProcessInfo.processInfo.systemUptime-settledSince>=1.5}
         guard let pid=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model) else {throw ROBArmRoutineError.blocked("No current physical camera projection for this empty calibration experiment.")}
         let camera=vision.cameraGeneration,body=ROBFixedHeadBodyMotionIdentity.currentIdentity,session=generation
-        if nominalModelAssumedSelfEnabled {
+        if usesFixedCommissioningKeyframes {
             guard let prior=search.collisionSnapshot,prior.registrationID==nil,prior.bodyMotionIdentity==body,
                   prior.sessionGeneration==session,prior.cameraGeneration==camera,prior.modelID==model.modelID,
                   prior.geometryID==model.geometryID,prior.mappingID==model.selectedMappingID,
                   prior.estimatedCameraProjectionIdentity==pid,prior.originalOccupiedSourceGroups != nil,
                   let held=localNeckIdentity() else {
-                throw ROBArmRoutineError.blocked("MODEL-ASSUMED step needs the fresh native full workspace scan with complete original groups; no object search or replacement single-view map.")
+                throw ROBArmRoutineError.blocked(sourcePixelSelfReviewEnabled ? "Source-pixel commissioning needs its exact fresh native complete RAW scan; no object search or replacement scene.":"MODEL-ASSUMED step needs the fresh native full workspace scan with complete original groups; no object search or replacement single-view map.")
             }
             // Preserve the exact full native raw map/fingerprint. The three
             // independent before-keyframes below record the current view;
@@ -1653,7 +1843,7 @@ enum ROBArmCurrentSpikeRecording {
     @MainActor private func archiveNominalKeyframe(_ frame:ROBArmRoutineVision.Frame,stage:String,map:ROBWorkspaceCollisionSnapshot,
         model:ROBGhostRobotModel,writer:ROBWorkspaceRawScanArchive) async throws->ROBWorkspaceRawScanArchive.Record {
         try check();try checkCollisionContext()
-        guard nominalModelAssumedSelfEnabled,let depth=frame.depth,let k=frame.intrinsics,let runtime=k.runtimeCalibration,
+        guard usesFixedCommissioningKeyframes,let depth=frame.depth,let k=frame.intrinsics,let runtime=k.runtimeCalibration,
               k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,k.depthRGBGeometryCorrespondence?.status=="matched",
               frame.cameraGeneration==map.cameraGeneration,frame.handsClear,
               (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
@@ -1713,7 +1903,7 @@ enum ROBArmCurrentSpikeRecording {
             actualAppliedNeck:.available(.init(appliedPanTarget:scope.panTarget,appliedLowerTarget:scope.lowerTarget,appliedUpperTarget:scope.upperTarget,
                 observedAtHostMilliseconds:Date().timeIntervalSince1970*1000,stationary:true,source:"native current applied neck feedback at archive copy; original frame scope separately frozen")),
             physicalLeftFeedback:.available(left),physicalRightFeedback:.available(right),cameraToRobotColumnMajor:(0..<4).flatMap{c in(0..<4).map{r in matrix[c][r]}},
-            projectionMethod:"assumed_alignment_not_observed_self",projectionScopeJSON:try encoder.encode(scope),
+            projectionMethod:sourcePixelSelfReviewEnabled ? "llm_visual_review_experimental_not_registration":"assumed_alignment_not_observed_self",projectionScopeJSON:try encoder.encode(scope),
             returnSamplingContractJSON:try json(["pixelCoordinates":"original normalized top-left RGB-D raster","depthUnits":"u16le_mm",
                 "sourceMapFingerprint":map.fingerprint,"firstPixel":[1,1],"stride":max(2,Int(ceil(sqrt(Double(depth.width*depth.height)/12000)))),
                 "observedSelf":false,"stage":stage]))
@@ -1738,9 +1928,34 @@ enum ROBArmCurrentSpikeRecording {
         }
     }
 
+    @MainActor private func reviewCurrentSourcePixelStep(from q:[Double],map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
+        trial:ROBWorkspaceVisualCalibrationTrial,now:Double,measuredAt:Double,emptySource:String,
+        view:ROBWorkspaceSourcePixelSelf.View) async throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
+        guard let bytes=sourcePixelCurrentSourceMapJSON,sourcePixelCurrentMapFingerprint==map.fingerprint else {
+            throw ROBArmRoutineError.blocked("No current native pixel classification/source map for this exact scene.")
+        }
+        let fingerprint=map.fingerprint,scene=map.sceneID,camera=map.cameraGeneration,session=map.sessionGeneration,directory=model.directory
+        return try await withCheckedThrowingContinuation{continuation in
+            Self.sourcePixelQueue.async {
+                do {
+                    let source=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:bytes)
+                    guard source.fingerprint==fingerprint,source.sceneID==scene,source.cameraGeneration==camera,source.sessionGeneration==session else {
+                        throw ROBGhostMotionError.blocked("Source-pixel proof source differs from the native current scan.")
+                    }
+                    let workerModel=try ROBGhostRobotModel(directory:directory,physicalSide:"right")
+                    let proof=try ROBWorkspaceCollisionPlan.reviewSourcePixelNominalEmptyCommissioningRetreat(from:q,map:source,model:workerModel,
+                        generation:session,sceneID:scene,cameraGeneration:camera,nowMilliseconds:now,trial:trial,
+                        measuredAtMilliseconds:measuredAt,nominalEmptyCommissioningEnabled:true,emptyStateEvidenceSource:emptySource,
+                        sourcePixelSelfView:view)
+                    continuation.resume(returning:proof)
+                }catch {continuation.resume(throwing:error)}
+            }
+        }
+    }
+
     @MainActor private func executeNominalEmptyCommissioning() async throws ->NSDictionary {
         guard nominalEmptyCommissioningStepEnabled,physicalSide=="right",(1...ROBRecyclingBatchRequest.maximumCount).contains(requestedCanCount),
-              ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide,modelAssumedSelfEnabled:nominalModelAssumedSelfEnabled),
+              ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide,modelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,sourcePixelSelfReviewSHA256:currentSourcePixelEvidenceSHA256),
               !armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched else {
             throw ROBArmRoutineError.blocked("No exact separate nominal EMPTY commissioning permission is active.")
         }
@@ -1760,9 +1975,9 @@ enum ROBArmCurrentSpikeRecording {
         try await prepareCameraAndMode(stationaryJaw:false)
         var archive:ROBWorkspaceRawScanArchive?
         defer {if let writer=archive {Task {await writer.closeIncomplete(reason:"Commissioning phase ended before a complete14-keyframe archive; no learning success claimed.")}}}
-        if nominalModelAssumedSelfEnabled {
+        if usesFixedCommissioningKeyframes {
             nominalArchiveLastSequence=0;nominalArchiveTimes=[]
-            let parent=URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension("model-assumed-self-keyframes")
+            let parent=URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension(sourcePixelSelfReviewEnabled ? "source-pixel-self-keyframes":"model-assumed-self-keyframes")
             let writer=try await ROBWorkspaceRawScanArchive.create(parentDirectory:parent,scene:.init(archiveID:UUID(),workspaceSceneID:map.sceneID,
                 bodyMotionIdentity:map.bodyMotionIdentity,gatewayGeneration:generation,modelID:model.modelID,referenceID:model.referenceID,
                 geometryID:model.geometryID,mappingID:model.selectedMappingID))
@@ -1776,11 +1991,16 @@ enum ROBArmCurrentSpikeRecording {
         let now=Date().timeIntervalSince1970*1000,measuredAt=now-sample.effectiveSampleAgeMilliseconds
         let emptySource="local_first_attempt_no_arm_travel_or_task_grip",assumedSelf=nominalModelAssumedSelfEnabled
         let proof:ROBWorkspaceNominalEmptyCommissioningRetreat
-        do {proof=try await Task.detached(priority:.userInitiated){
+        do {
+            if sourcePixelSelfReviewEnabled {
+                guard let view=sourcePixelCurrentView else {throw ROBArmRoutineError.blocked("No current native source-pixel view; historical template is not movement authority.")}
+                proof=try await reviewCurrentSourcePixelStep(from:q,map:map,model:model,trial:trial,now:now,measuredAt:measuredAt,emptySource:emptySource,view:view)
+            }else {proof=try await Task.detached(priority:.userInitiated){
             try ROBWorkspaceCollisionPlan.reviewNominalEmptyCommissioningRetreat(from:q,map:map,model:model,generation:session,
                 sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial,measuredAtMilliseconds:measuredAt,
                 nominalEmptyCommissioningEnabled:true,emptyStateEvidenceSource:emptySource,modelAssumedSelfEnabled:assumedSelf)
-        }.value} catch {
+        }.value}
+        } catch {
             let original=error,recording=lastRecordingPath,detail=error.localizedDescription
             if !recording.isEmpty { _ = try?await Task.detached(priority:.utility){
                 try ROBInitialRetreatFailureExport.write(recording:URL(fileURLWithPath:recording),map:map,model:model,
@@ -1803,9 +2023,17 @@ enum ROBArmCurrentSpikeRecording {
             positions:q,sequence:sample.sequence,reviewCompletedAtUptime:reviewedAt)
         try check();try checkCollisionContext();try requireLiveVisualTrial(trial,map:map,model:model)
         let current=try measured(),admissionTime=Date().timeIntervalSince1970*1000
+        if sourcePixelSelfReviewEnabled {
+            guard let view=sourcePixelCurrentView else {throw ROBArmRoutineError.blocked("Native current pixel classification was lost before dispatch.")}
+            try proof.validateSourcePixelContext(map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,
+                nowMilliseconds:admissionTime,trial:trial,measuredAtMilliseconds:admissionTime-current.effectiveSampleAgeMilliseconds,
+                measuredBaseline:current.positionsRadians.map(\.doubleValue),nominalEmptyCommissioningEnabled:true,
+                emptyStateEvidenceSource:emptySource,sourcePixelSelfView:view)
+        }else {
         try proof.validateContext(map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,
             nowMilliseconds:admissionTime,trial:trial,measuredAtMilliseconds:admissionTime-current.effectiveSampleAgeMilliseconds,
             measuredBaseline:current.positionsRadians.map(\.doubleValue),nominalEmptyCommissioningEnabled:true,emptyStateEvidenceSource:emptySource,modelAssumedSelfEnabled:assumedSelf)
+        }
         guard dispatch.matches(proposalID:path.id,index:0,generation:session,mapFingerprint:map.fingerprint,
             positions:current.positionsRadians.map(\.doubleValue),sequence:current.sequence,nowUptime:ProcessInfo.processInfo.systemUptime) else {
             throw ROBArmRoutineError.blocked("The fresh nominal commissioning start changed after proof review; no step sent.")
@@ -1821,7 +2049,7 @@ enum ROBArmCurrentSpikeRecording {
                 await writer.closeIncomplete(reason:error.localizedDescription);throw error}
         }}
         defer {duringTask?.cancel()}
-        if assumedSelf {ROBWorkspaceSearch.shared.announce?("Moving my right arm a little.")}
+        if usesFixedCommissioningKeyframes {ROBWorkspaceSearch.shared.announce?("Moving my right arm a little.")}
         try await accepted{gateway.sendApprovedLeftGestureStep(proposalID:path.id,index:0,duration:4,expectedSessionGeneration:session)}
         reviewedDispatchStart=nil;leased=true;lastRenewal=ProcessInfo.processInfo.systemUptime
         let began=ProcessInfo.processInfo.systemUptime;var settler=ROBArmRoutineSettler()
@@ -1839,7 +2067,7 @@ enum ROBArmCurrentSpikeRecording {
         }
         let endpoint=try measured().positionsRadians.map(\.doubleValue)
         guard 1.5*zip(endpoint,proof.goal).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {throw ROBArmRoutineError.blocked("The nominal endpoint is held but did not reach its reviewed goal; no further step admitted.")}
-        if assumedSelf {ROBWorkspaceSearch.shared.announce?("Arm movement complete. Holding here.")}
+        if usesFixedCommissioningKeyframes {ROBWorkspaceSearch.shared.announce?("Arm movement complete. Holding here.")}
         let recording=lastRecordingPath,keyframeTimes=nominalArchiveTimes,archivePath=archive?.directory.path
         try await Task.detached(priority:.utility){
             let directory=URL(fileURLWithPath:recording).deletingPathExtension().appendingPathExtension("nominal-empty-evidence")
@@ -1871,6 +2099,13 @@ enum ROBArmCurrentSpikeRecording {
             result["keyframe_archive_path"]=archivePath as Any? ?? NSNull()
             result["assumed_source_groups"]=proof.modelAssumedSelfAudit?.groups.count ?? 0
             result["detail"]="ONE MODEL-ASSUMED J2-only EMPTY step is measured held.14 explicit timestamped pixel/BOTH-q keyframes retained, NOT30fps or observed-self recognition. Raw map/unknown unchanged; no jaws, carry, release, return, retry or chaining. ZERO transfers."
+        }
+        if sourcePixelSelfReviewEnabled {
+            result["source_pixel_self_review"]=true;result["source_basis"]="llm_visual_review_experimental_current_rgb_depth_match"
+            result["source_pixel_evidence_sha256"]=currentSourcePixelEvidenceSHA256 as Any? ?? NSNull()
+            result["observed_self"]=false;result["learning_keyframes_complete"]=nominalArchiveTimes.count==14
+            result["keyframe_archive_path"]=archivePath as Any? ?? NSNull()
+            result["detail"]="ONE experimental source-pixel J2-only EMPTY step is measured held;14 timed actual pixel/BOTHq keyframes retained. LLM-reviewed masks were freshly matched, not registration or measured self recognition. Table/unmasked/uncertain/mixed returns retained. No jaw,carry,release,return,retry or chaining; ZERO transfers."
         }
         return result as NSDictionary
     }

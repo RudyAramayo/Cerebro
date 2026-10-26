@@ -1615,13 +1615,25 @@ struct ROBWorkspaceNominalEmptyCommissioningRetreat:Codable,Equatable {
         let rawMapModified:Bool
     }
     let modelAssumedSelfAudit:AssumedSelfAudit?
+    var sourcePixelSelfAudit:ROBWorkspaceSourcePixelSelf.Audit? = nil
     var step:ROBLeftGestureProposal.Step {.init(positions:goal,seconds:4,stage:"One UNVERIFIED nominal EMPTY commissioning retreat, then hold")}
     func validateContext(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
         cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
-        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String,modelAssumedSelfEnabled:Bool=false)throws {
+        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String,modelAssumedSelfEnabled:Bool=false,
+        sourcePixelSelfView:ROBWorkspaceSourcePixelSelf.View?=nil)throws {
         let current=try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(map,model:model,generation:generation,
             sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
         let drift=1.5*zip(baseline,measuredBaseline).reduce(0.0){$0+abs($1.0-$1.1)}
+        if let view=sourcePixelSelfView {
+#if DEBUG
+            try view.validate(map:map,model:model,baseline:measuredBaseline,now:nowMilliseconds)
+            guard !modelAssumedSelfEnabled,modelAssumedSelfAudit==nil,sourcePixelSelfAudit==view.audit,!view.audit.excludedGroups.isEmpty else {
+                throw ROBGhostMotionError.blocked("Frozen experimental source-pixel classification/audit changed.")
+            }
+#else
+            throw ROBGhostMotionError.blocked("Source-pixel EMPTY commissioning is DEBUG only.")
+#endif
+        } else if sourcePixelSelfAudit != nil {throw ROBGhostMotionError.blocked("A decoded source-pixel proof needs its current native perception view.")}
         if let audit=modelAssumedSelfAudit {
             guard modelAssumedSelfEnabled,audit.label=="assumed_alignment_not_observed_self",!audit.observedSelf,!audit.rawMapModified,
                   audit.baseline==baseline,audit.mapFingerprint==map.fingerprint,audit.modelID==model.modelID,audit.referenceID==model.referenceID,
@@ -1630,7 +1642,9 @@ struct ROBWorkspaceNominalEmptyCommissioningRetreat:Codable,Equatable {
                 throw ROBGhostMotionError.blocked("Frozen MODEL-ASSUMED group/q0/reference/source identity changed.")
             }
         }
-        guard nominalEmptyCommissioningEnabled,mode==(modelAssumedSelfEnabled ? "unverified_nominal_empty_model_assumed_self_commissioning_retreat":"unverified_nominal_empty_commissioning_retreat"),
+        let expectedMode=sourcePixelSelfView != nil ? "unverified_nominal_empty_source_pixel_self_commissioning_retreat":
+            (modelAssumedSelfEnabled ? "unverified_nominal_empty_model_assumed_self_commissioning_retreat":"unverified_nominal_empty_commissioning_retreat")
+        guard nominalEmptyCommissioningEnabled,mode==expectedMode,
               (modelAssumedSelfAudit != nil)==modelAssumedSelfEnabled,model.physicalSide=="right",
               context.visualTrial==trial,current.mapFingerprint==context.mapFingerprint,
               context.modelID==current.modelID,context.geometryID==current.geometryID,context.mappingID==current.mappingID,
@@ -1657,8 +1671,42 @@ struct ROBWorkspaceNominalEmptyCommissioningRetreat:Codable,Equatable {
             emptyStateEvidenceSource:emptyStateEvidenceSource,modelAssumedSelfEnabled:modelAssumedSelfEnabled)
         guard expected==self else {throw ROBGhostMotionError.blocked("The nominal commissioning geometry, raw returns or recorded local scope changed.")}
     }
+    func validateSourcePixelContext(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
+        cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
+        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String,
+        sourcePixelSelfView:ROBWorkspaceSourcePixelSelf.View)throws {
+        try validateContext(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,
+            nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,measuredBaseline:measuredBaseline,
+            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource,
+            sourcePixelSelfView:sourcePixelSelfView)
+    }
+    func validateSourcePixel(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
+        cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
+        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String,
+        sourcePixelSelfView:ROBWorkspaceSourcePixelSelf.View)throws {
+        try validateSourcePixelContext(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,
+            nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,measuredBaseline:measuredBaseline,
+            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource,sourcePixelSelfView:sourcePixelSelfView)
+        let expected=try ROBWorkspaceCollisionPlan.buildNominalEmptyCommissioningRetreat(id:id,from:baseline,map:map,model:model,
+            generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:context.checkedAtMilliseconds,
+            trial:trial,measuredAtMilliseconds:self.measuredAtMilliseconds,nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,
+            emptyStateEvidenceSource:emptyStateEvidenceSource,sourcePixelSelfView:sourcePixelSelfView)
+        guard expected==self else {throw ROBGhostMotionError.blocked("The source-pixel commissioning geometry, actual sources or classified-return audit changed.")}
+    }
 }
 extension ROBWorkspaceCollisionPlan {
+    static func reviewSourcePixelNominalEmptyCommissioningRetreat(from baseline:[Double],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
+        trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,nominalEmptyCommissioningEnabled:Bool,
+        emptyStateEvidenceSource:String,sourcePixelSelfView:ROBWorkspaceSourcePixelSelf.View)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
+#if DEBUG
+        try buildNominalEmptyCommissioningRetreat(id:UUID(),from:baseline,map:map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,
+            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource,sourcePixelSelfView:sourcePixelSelfView)
+#else
+        throw ROBGhostMotionError.blocked("Source-pixel EMPTY commissioning is DEBUG only.")
+#endif
+    }
     static func reviewNominalEmptyCommissioningRetreat(from baseline:[Double],map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
         trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,nominalEmptyCommissioningEnabled:Bool,
@@ -1670,11 +1718,19 @@ extension ROBWorkspaceCollisionPlan {
     fileprivate static func buildNominalEmptyCommissioningRetreat(id:UUID,from baseline:[Double],map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
         trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,nominalEmptyCommissioningEnabled:Bool,
-        emptyStateEvidenceSource:String,modelAssumedSelfEnabled:Bool=false)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
+        emptyStateEvidenceSource:String,modelAssumedSelfEnabled:Bool=false,sourcePixelSelfView:ROBWorkspaceSourcePixelSelf.View?=nil)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
         let context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
+        if let view=sourcePixelSelfView {
+#if DEBUG
+            try view.validate(map:map,model:model,baseline:baseline,now:nowMilliseconds)
+            guard !modelAssumedSelfEnabled,!view.audit.excludedGroups.isEmpty else {throw ROBGhostMotionError.blocked("No isolated current experimental robot-pixel group was recognized; every raw obstacle remains.")}
+#else
+            throw ROBGhostMotionError.blocked("Source-pixel EMPTY commissioning is DEBUG only.")
+#endif
+        }
         guard nominalEmptyCommissioningEnabled,model.physicalSide=="right",baseline.count==7,baseline==trial.baseline,
-              baseline.enumerated().allSatisfy({i,q in q.isFinite && (modelAssumedSelfEnabled && i==1 ? (-0.04...0.004).contains(q):abs(q)<=0.004)}),trial.assumedSpatialErrorMeters==0.035,
+              baseline.enumerated().allSatisfy({i,q in q.isFinite && ((modelAssumedSelfEnabled || sourcePixelSelfView != nil) && i==1 ? (-0.04...0.004).contains(q):abs(q)<=0.004)}),trial.assumedSpatialErrorMeters==0.035,
               ["operator_declared_empty","local_first_attempt_no_arm_travel_or_task_grip"].contains(emptyStateEvidenceSource),
               measuredAtMilliseconds.isFinite,(0...150).contains(nowMilliseconds-measuredAtMilliseconds),
               let supplied=map.originalOccupiedReturnBounds,!supplied.isEmpty,supplied.count<=400_000 else {
@@ -1775,6 +1831,12 @@ extension ROBWorkspaceCollisionPlan {
                 groups:excluded,observedSelf:false,rawMapModified:false)
             raw=external
         }
+        if let view=sourcePixelSelfView {
+            raw=view.retainedGroups.map { group in
+                let a=group.bounds.lowMeters,b=group.bounds.highMeters
+                return ROBNominalRawBox(low:SIMD3(a[0],a[1],a[2]),high:SIMD3(b[0],b[1],b[2]),key:group.id)
+            }
+        }
         let intersample=1.5*0.075/(2*Double(count)),curvature=0.75*pow(0.075/Double(count),2)
         var minimumRaw=Double.infinity,minimumJaw=Double.infinity,closestLink="",closestBox:ROBNominalRawBox?
         var previous:[String:[SIMD3<Double>]]=[:],cumulative:[String:[Double]]=[:],maximumTravel=0.0
@@ -1829,7 +1891,9 @@ extension ROBWorkspaceCollisionPlan {
             }}}
             regions.append(.init(link:link,lowMeters:[low.x,low.y,low.z],highMeters:[high.x,high.y,high.z]))
         }
-        return .init(id:id,mode:modelAssumedSelfEnabled ? "unverified_nominal_empty_model_assumed_self_commissioning_retreat":"unverified_nominal_empty_commissioning_retreat",context:context,baseline:baseline,goal:goal,
+        let mode=sourcePixelSelfView != nil ? "unverified_nominal_empty_source_pixel_self_commissioning_retreat":
+            (modelAssumedSelfEnabled ? "unverified_nominal_empty_model_assumed_self_commissioning_retreat":"unverified_nominal_empty_commissioning_retreat")
+        return .init(id:id,mode:mode,context:context,baseline:baseline,goal:goal,
             measuredAtMilliseconds:measuredAtMilliseconds,checkedPoseCount:count+1,originalOccupiedBoundsCount:supplied.count,
             deduplicatedOccupiedBoundsCount:raw.count,originalOccupiedBoundsSHA256:rawHash,
             minimumRawClearanceMeters:minimumRaw,minimumAfterJawEnvelopeMeters:minimumJaw,
@@ -1838,7 +1902,7 @@ extension ROBWorkspaceCollisionPlan {
             assumedCalibrationUncertaintyMeters:0.035,isotropicJawEnvelopeMeters:0.040,intersamplePointTravelAllowanceMeters:intersample,
             curvatureAllowanceMeters:curvature,maximumHullTravelMeters:maximumTravel,unknownVoxelCount:unknown.count,unknownLocalRegions:regions,
             staticRobotLinks:fixedEvidence,initialSelfMinimumMeters:initialSelf!.values.min()!,endpointSelfMinimumMeters:endpointSelf.values.min()!,
-            emptyStateEvidenceSource:emptyStateEvidenceSource,calibrationUncertaintyCertified:false,occupiedVoxelsMutated:false,automaticChainingPermitted:false,modelAssumedSelfAudit:assumedAudit)
+            emptyStateEvidenceSource:emptyStateEvidenceSource,calibrationUncertaintyCertified:false,occupiedVoxelsMutated:false,automaticChainingPermitted:false,modelAssumedSelfAudit:assumedAudit,sourcePixelSelfAudit:sourcePixelSelfView?.audit)
     }
 }
 
@@ -2023,5 +2087,404 @@ extension ROBWorkspaceCollisionPlan {
             initialSelfMinimumMeters:initialSelf!.values.min()!,endpointSelfMinimumMeters:lastSelf.values.min()!,unknownVoxelCount:unknown.count,
             unknownLocalRegions:regions,environmentDiagnostics:diagnostics,environmentPredictionIsDiagnosticOnly:true,collisionCertificate:false,
             occupiedVoxelsMutated:false,automaticChainingPermitted:false,emptyStateAssumed:true,emptyStateEvidenceSource:emptyStateEvidenceSource,completedTransferCount:0)
+    }
+}
+
+/// DEBUG commissioning perception hypothesis only. Historical images train a
+/// narrowly repeated pixel recognizer; only fresh actually matched returns can
+/// be excluded from its separate EMPTY-step review. No object here is a map,
+/// measured registration or arm capability, and Template/View cannot decode.
+enum ROBWorkspaceSourcePixelSelf {
+    struct ReplayFrame {
+        let metadataJSON:Data,rgb888:Data,depthU16LittleEndian:Data
+    }
+    struct ProtectedPolygon:Codable {let label:String,points:[[Int]]}
+    struct FrameReview:Codable {
+        let frameID:UUID,sequence:UInt64,capturedAtHostMilliseconds:Double,cameraGeneration:UUID
+        let width:Int,height:Int,metadataSHA256:String,rgbSHA256:String,depthSHA256:String
+        let robotPolygons:[[[Int]]],protectedPolygons:[ProtectedPolygon]
+    }
+    struct ReviewDocument:Codable {
+        let schemaVersion:Int,kind:String,classificationBasis:String,reviewID:UUID,reviewedAtMilliseconds:Double
+        let archiveDirectory:String,archiveManifestSHA256:String,sourceMapSHA256:String,mapFingerprint:String
+        let frames:[FrameReview]
+    }
+    struct SourceBinding:Codable,Equatable {
+        let manifestSHA256:String,sourceMapSHA256:String,mapFingerprint:String
+        let archiveID:UUID,sceneID:UUID,cameraGeneration:UUID,bodyMotionIdentity:String,gatewayGeneration:UInt64
+        let modelID:String,referenceID:String,geometryID:String,mappingID:String,estimatedCameraProjectionIdentity:String
+    }
+    struct Contributor:Codable,Equatable {
+        let frameID:UUID,x:Int,y:Int,depthMillimeters:Int
+    }
+    struct GroupAudit:Codable,Equatable {
+        let sourceGroupID:String,sourceVoxel:[Int],originalBounds:ROBWorkspaceOccupiedReturnBounds
+        let contributors:[Contributor]
+    }
+    struct FrameMatch:Codable,Equatable {
+        let currentFrameID:UUID,sequence:UInt64,capturedAtHostMilliseconds:Double,cameraGeneration:UUID
+        let currentMetadataSHA256:String,currentRGBSHA256:String,currentDepthSHA256:String
+        let referenceFrameIDs:[UUID],matchedComponentCount:Int,classifiedAcceptedReturnCount:Int
+    }
+    struct Audit:Codable,Equatable {
+        let label:String,templateReviewSHA256:String,reviewID:UUID,reviewedAtMilliseconds:Double
+        let historical:SourceBinding,current:SourceBinding
+        let physicalLeftBaseline:[Double],physicalRightBaseline:[Double]
+        let frames:[FrameMatch],completeSourceGroupCount:Int,completeSourceGroupsSHA256:String
+        let excludedGroups:[GroupAudit],retainedGroupCount:Int,acceptedReturnCount:Int
+        let maximumRGBChannelDifference:Int,maximumDepthDifferenceMillimeters:Int,maskErosionPixels:Int
+        let minimumAnchorCorrelation:Double,minimumAnchorStandardDeviation:Double
+        let rawMapModified:Bool,unknownPromotedToFree:Bool,measuredRegistration:Bool,motionAuthority:Bool
+    }
+    final class Template {
+        fileprivate let archive:Archive,document:ReviewDocument,reviewSHA256:String,components:[[Component]]
+        fileprivate init(_ archive:Archive,_ document:ReviewDocument,_ sha:String,_ components:[[Component]]) {
+            self.archive=archive;self.document=document;reviewSHA256=sha;self.components=components
+        }
+    }
+    final class View {
+        let audit:Audit,fingerprint:String,physicalLeftBaseline:[Double],physicalRightBaseline:[Double]
+        fileprivate let retainedGroups:[ROBWorkspaceOccupiedSourceGroup]
+        fileprivate init(audit:Audit,retained:[ROBWorkspaceOccupiedSourceGroup])throws {
+            self.audit=audit;retainedGroups=retained;physicalLeftBaseline=audit.physicalLeftBaseline;physicalRightBaseline=audit.physicalRightBaseline
+            let e=JSONEncoder();e.outputFormatting=[.sortedKeys];fingerprint=ROBGhostRobotModel.hash(try e.encode(audit))
+        }
+        fileprivate func validate(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,baseline:[Double],now:Double)throws {
+            let c=audit.current
+            guard audit.label=="llm_visual_review_experimental_fresh_pixel_match_not_registration",!audit.rawMapModified,!audit.unknownPromotedToFree,
+                  !audit.measuredRegistration,!audit.motionAuthority,map.fingerprint==c.mapFingerprint,map.sceneID==c.sceneID,
+                  map.cameraGeneration==c.cameraGeneration,map.sessionGeneration==c.gatewayGeneration,
+                  model.modelID==c.modelID,model.referenceID==c.referenceID,model.geometryID==c.geometryID,model.selectedMappingID==c.mappingID,
+                  map.modelID==c.modelID,map.geometryID==c.geometryID,map.mappingID==c.mappingID,
+                  let scope=map.visualCalibrationScope,scope.bodyContextIsCurrent,scope.bodyMotionIdentity==c.bodyMotionIdentity,
+                  scope.estimatedCameraProjectionIdentity==c.estimatedCameraProjectionIdentity,
+                  now.isFinite,(0...60_000).contains(now-map.oldestCapturedAtMilliseconds),now>=map.createdAtMilliseconds,
+                  baseline.count==7,physicalRightBaseline.count==7,physicalLeftBaseline.count==7,
+                  Self.drift(baseline,physicalRightBaseline)<=0.002 else {
+                throw ROBGhostMotionError.blocked("The experimental source-pixel view lost its current map/body/source or actual observed RIGHT q0 binding.")
+            }
+        }
+        private static func drift(_ a:[Double],_ b:[Double])->Double {1.5*zip(a,b).reduce(0.0){$0+abs($1.0-$1.1)}}
+    }
+    fileprivate struct Cell:Codable,Hashable {let x:Int,y:Int,z:Int;var vector:SIMD3<Int>{SIMD3(x,y,z)};var id:String{"\(x),\(y),\(z)"}}
+    fileprivate struct Bounds:Codable {var low:SIMD3<Double>,high:SIMD3<Double>}
+    fileprivate struct EmptyScope:Codable {}
+    fileprivate struct Observation:Codable {
+        let sequence:UInt64,capturedAtMilliseconds:Double,recordedPanDegrees:Double?,recordedUpperTarget:Int?,recordedLowerTarget:Int?
+        let registrationID:String?,registrationUncertaintyMeters:Double?,fixedHeadScope:EmptyScope?
+        let cameraToRobotColumnMajor:[Double],measuredSelfMaskApplied:Bool,estimatedDepthHypothesisID:String?,estimatedCameraProjectionIdentity:String?
+    }
+    fileprivate struct MapDocument:Decodable {
+        let sceneID:UUID,modelID:String,geometryID:String,mappingID:String,sessionGeneration:UInt64,cameraGeneration:UUID
+        let createdAtMilliseconds:Double,oldestCapturedAtMilliseconds:Double,lastCapturedAtMilliseconds:Double,voxelSizeMeters:Double
+        let observedFrameCount:Int,isTruncated:Bool,capturedRegistrationID:String?,registrationUncertaintyMeters:Double?,bodyMotionIdentity:String
+        let occupied:Set<Cell>,free:Set<Cell>,occupiedSamples:[Cell:Bounds],occupiedSourceSamples:[Cell:Bounds]
+        let observations:[Observation],estimatedCameraProjectionIdentity:String?,fingerprint:String
+    }
+    fileprivate struct Scene:Decodable {let archiveID:UUID,workspaceSceneID:UUID,bodyMotionIdentity:String,gatewayGeneration:UInt64,modelID:String,referenceID:String,geometryID:String,mappingID:String}
+    fileprivate struct Record:Decodable {let frameID:UUID,sequence:UInt64,capturedAtHostMilliseconds:Double,cameraGeneration:UUID,relativeDirectory:String,rgbSHA256:String,depthSHA256:String,metadataSHA256:String,byteCount:Int}
+    fileprivate struct SourceObservation:Decodable {let sequence:UInt64,capturedAtHostMilliseconds:Double,cameraGeneration:UUID}
+    fileprivate struct SourceMapBinding:Decodable {let workspaceSceneID:UUID,mapFingerprint:String,relativePath:String,serializedSHA256:String,observations:[SourceObservation]}
+    fileprivate struct Manifest:Decodable {let schemaVersion:Int,kind:String,scene:Scene,status:String,frames:[Record],sourceMapBinding:SourceMapBinding?,classificationAuthority:Bool,motionAuthority:Bool}
+    fileprivate struct Available<T:Decodable>:Decodable {let value:T?,unavailableReason:String?}
+    fileprivate struct Neck:Decodable {let appliedPanTarget:Int,appliedLowerTarget:Int,appliedUpperTarget:Int,observedAtHostMilliseconds:Double,stationary:Bool,source:String}
+    fileprivate struct Arm:Decodable {
+        let physicalSide:String,gatewayArm:String,telemetrySequence:UInt64,receivedAtHostMilliseconds:Double,effectiveSampleAgeMilliseconds:Double,effectiveGripperAgeMilliseconds:Double
+        let positionsRadians:[Double],reportedModes:[Int],gatewayModes:[Int],modelID:String,geometryID:String,mappingID:String
+    }
+    fileprivate struct Metadata:Decodable {
+        let schemaVersion:Int,frameID:UUID,sequence:UInt64,capturedAtHostMilliseconds:Double,cameraGeneration:UUID,width:Int,height:Int
+        let rgbPath:String,rgbSHA256:String,depthPath:String,depthSHA256:String,intrinsics:[Double],sourceContractsJSON:Data,runtimeCalibrationJSON:Data
+        let actualAppliedNeck:Available<Neck>,physicalLeftFeedback:Available<Arm>,physicalRightFeedback:Available<Arm>
+        let cameraToRobotColumnMajor:[Double],projectionMethod:String,projectionScopeJSON:Data,returnSamplingContractJSON:Data
+        let classificationAuthority:Bool,motionAuthority:Bool
+    }
+    fileprivate struct Runtime:Decodable {
+        let schemaVersion:Int,actualDeviceMXID:String,cameraRole:String,sdkVersion:String,factoryEEPROMSHA256:String,effectiveRuntimeCalibrationSHA256:String,stereoPolicySHA256:String,candidateSHA256:String?,profileSHA256:String?
+        var identity:String {ROBGhostRobotModel.hash(Data(["runtime-camera-calibration-v1",actualDeviceMXID,cameraRole,sdkVersion,factoryEEPROMSHA256,effectiveRuntimeCalibrationSHA256,stereoPolicySHA256,candidateSHA256 ?? "-",profileSHA256 ?? "-"].joined(separator:"\n").utf8))}
+    }
+    fileprivate struct ParsedFrame {
+        let raw:ReplayFrame,metadata:Metadata,runtime:Runtime,serviceSHA:String
+        let depth:[UInt16],rgb:[UInt8],gray:[Double],matrix:simd_double4x4
+    }
+    fileprivate struct Archive {
+        let binding:SourceBinding,manifest:Manifest,map:MapDocument,frames:[ParsedFrame],groups:[ROBWorkspaceOccupiedSourceGroup]
+        let contributors:[Cell:[Contributor]],acceptedCount:Int
+    }
+    fileprivate struct Anchor {let x:Int,y:Int,values:[Double],mean:Double,norm:Double}
+    fileprivate struct Component {let pixels:Set<Int>,anchors:[Anchor]}
+    private static func reject(_ text:String)->ROBGhostMotionError { .blocked("Experimental source-pixel perception rejected: "+text) }
+    private static func hash(_ data:Data)->String {ROBGhostRobotModel.hash(data)}
+    private static func isHash(_ value:String)->Bool {value.count==64 && value.allSatisfy(\.isHexDigit)}
+    private static func encode<T:Encodable>(_ x:T)throws->Data {let e=JSONEncoder();e.outputFormatting=[.sortedKeys];return try e.encode(x)}
+    private static func object(_ d:Data)throws->[String:Any] {guard d.count<=64_000_000,let x=try JSONSerialization.jsonObject(with:d)as?[String:Any] else {throw reject("bounded JSON object required")};return x}
+    private static func same(_ a:Bounds,_ b:Bounds)->Bool {(0..<3).allSatisfy{abs(a.low[$0]-b.low[$0])<=1e-12 && abs(a.high[$0]-b.high[$0])<=1e-12}}
+    private static func ordered(_ cells:Set<Cell>)->[[Int]] {cells.map{[$0.x,$0.y,$0.z]}.sorted{a,b in a[0] != b[0] ? a[0]<b[0]:a[1] != b[1] ? a[1]<b[1]:a[2]<b[2]}}
+    private static func rows(_ bounds:[Cell:Bounds])->[[Double]] {bounds.map{c,b in [Double(c.x),Double(c.y),Double(c.z),b.low.x,b.low.y,b.low.z,b.high.x,b.high.y,b.high.z]}.sorted{a,b in a[0] != b[0] ? a[0]<b[0]:a[1] != b[1] ? a[1]<b[1]:a[2]<b[2]}}
+    private static func canonicalFingerprint(_ m:MapDocument)throws->String {
+        var identity:[String:Any]=["scene":m.sceneID.uuidString,"model":m.modelID,"geometry":m.geometryID,"mapping":m.mappingID,
+            "session":NSNumber(value:m.sessionGeneration),"camera":m.cameraGeneration.uuidString,"bodyMotionIdentity":m.bodyMotionIdentity,
+            "created":m.createdAtMilliseconds,"oldest":m.oldestCapturedAtMilliseconds,"latest":m.lastCapturedAtMilliseconds,
+            "voxel_size":m.voxelSizeMeters,"frames":m.observedFrameCount,"truncated":m.isTruncated,"registration":m.capturedRegistrationID ?? "unverified",
+            "registrationUncertaintyMeters":m.registrationUncertaintyMeters as Any? ?? NSNull(),"occupied":ordered(m.occupied),"free":ordered(m.free.subtracting(m.occupied)),
+            "occupiedSampleBounds":rows(m.occupiedSamples),"occupiedSourceSampleBounds":rows(m.occupiedSourceSamples)]
+        if let p=m.estimatedCameraProjectionIdentity {identity["estimatedCameraProjectionIdentity"]=p}
+        var bytes=try JSONSerialization.data(withJSONObject:identity,options:[.sortedKeys]);bytes.append(try encode(m.observations));return hash(bytes)
+    }
+    private static func archive(manifestJSON:Data,sourceMapJSON:Data,frames:[ReplayFrame],model:ROBGhostRobotModel)throws->Archive {
+        let d=JSONDecoder(),manifest=try d.decode(Manifest.self,from:manifestJSON),m=try d.decode(MapDocument.self,from:sourceMapJSON)
+        guard manifestJSON.count<=2_000_000,sourceMapJSON.count<=64_000_000,manifest.schemaVersion==1,manifest.kind=="raw_workspace_pixel_provenance_only",
+              manifest.status=="complete",!manifest.classificationAuthority,!manifest.motionAuthority,(1...14).contains(frames.count),frames.count==manifest.frames.count,
+              let binding=manifest.sourceMapBinding,binding.relativePath=="source-map.json",binding.serializedSHA256==hash(sourceMapJSON),binding.mapFingerprint==m.fingerprint,
+              binding.workspaceSceneID==m.sceneID,manifest.scene.workspaceSceneID==m.sceneID,manifest.scene.gatewayGeneration==m.sessionGeneration,
+              manifest.scene.bodyMotionIdentity==m.bodyMotionIdentity,manifest.scene.modelID==model.modelID,manifest.scene.referenceID==model.referenceID,
+              manifest.scene.geometryID==model.geometryID,manifest.scene.mappingID==model.selectedMappingID,
+              m.modelID==model.modelID,m.geometryID==model.geometryID,m.mappingID==model.selectedMappingID,m.voxelSizeMeters==0.025,!m.isTruncated,
+              m.capturedRegistrationID==nil,m.registrationUncertaintyMeters==nil,m.occupied.count<=400_000,m.free.count<=500_000,
+              !m.occupiedSourceSamples.isEmpty,m.occupiedSourceSamples.count<=400_000,m.observedFrameCount==frames.count,m.observations.count==frames.count,
+              binding.observations.count==frames.count,Set(manifest.frames.map(\.frameID)).count==frames.count,
+              let projection=m.estimatedCameraProjectionIdentity,isHash(projection),try canonicalFingerprint(m)==m.fingerprint else {
+            throw reject("archive/map/model/fingerprint must be complete original unregistered normalized-depth evidence")
+        }
+        var parsed:[ParsedFrame]=[],source:[Cell:Bounds]=[:],contributors:[Cell:[Contributor]]=[:],accepted=0,totalBytes=0
+        for index in frames.indices {
+            let raw=frames[index],r=manifest.frames[index],meta=try d.decode(Metadata.self,from:raw.metadataJSON),o=m.observations[index],b=binding.observations[index]
+            totalBytes+=raw.metadataJSON.count+raw.rgb888.count+raw.depthU16LittleEndian.count
+            guard totalBytes<=64_000_000,hash(raw.metadataJSON)==r.metadataSHA256,hash(raw.rgb888)==r.rgbSHA256,hash(raw.depthU16LittleEndian)==r.depthSHA256,
+                  meta.schemaVersion==1,!meta.classificationAuthority,!meta.motionAuthority,meta.frameID==r.frameID,meta.sequence==r.sequence,
+                  meta.capturedAtHostMilliseconds==r.capturedAtHostMilliseconds,meta.cameraGeneration==r.cameraGeneration,meta.cameraGeneration==m.cameraGeneration,
+                  meta.sequence==o.sequence,meta.capturedAtHostMilliseconds==o.capturedAtMilliseconds,meta.sequence==b.sequence,
+                  meta.capturedAtHostMilliseconds==b.capturedAtHostMilliseconds,meta.cameraGeneration==b.cameraGeneration,
+                  meta.rgbSHA256==r.rgbSHA256,meta.depthSHA256==r.depthSHA256,meta.rgbPath=="rgb888.raw",meta.depthPath=="depth-u16le.raw",
+                  (16...1920).contains(meta.width),(16...1200).contains(meta.height),raw.rgb888.count==meta.width*meta.height*3,raw.depthU16LittleEndian.count==meta.width*meta.height*2,
+                  meta.intrinsics.count==4,meta.intrinsics.allSatisfy(\.isFinite),meta.intrinsics[0]>0,meta.intrinsics[1]>0,
+                  meta.cameraToRobotColumnMajor==o.cameraToRobotColumnMajor,meta.cameraToRobotColumnMajor.count==16,
+                  meta.cameraToRobotColumnMajor.allSatisfy(\.isFinite),o.registrationID==nil,o.fixedHeadScope==nil,!o.measuredSelfMaskApplied,
+                  o.estimatedDepthHypothesisID==nil,o.estimatedCameraProjectionIdentity==projection,
+                  index==0 || (meta.sequence>parsed[index-1].metadata.sequence && meta.capturedAtHostMilliseconds>parsed[index-1].metadata.capturedAtHostMilliseconds) else {
+                throw reject("a raw frame/hash/order/source differs from its original map observation")
+            }
+            let contract=try object(meta.returnSamplingContractJSON),scope=try object(meta.projectionScopeJSON),contracts=try object(meta.sourceContractsJSON)
+            let step=max(2,Int(ceil(sqrt(Double(meta.width*meta.height)/12_000))))
+            guard contract["mapper"]as?String=="ROBWorkspaceDepthMap.append_original_normalized_depth_v1",contract["firstPixel"]as?[Int]==[1,1],
+                  contract["exclusivePixelUpperBound"]as?[Int]==[meta.width-1,meta.height-1],contract["stride"]as?Int==step,
+                  contract["acceptedDepthMillimeters"]as?[Int]==[100,3000],contract["depthUnits"]as?String=="u16le_mm",contract["sourceVoxelSizeMeters"]as?Double==0.025,
+                  contract["occupiedDilationOffsets"]as?[Int]==[-1,0,1],contract["workspaceLowMeters"]as?[Double]==[-2,-2,-0.3],contract["workspaceHighMeters"]as?[Double]==[2,2,2.4],
+                  contract["measuredSelfMaskApplied"]as?Bool==false,(contract["measuredSelfBounds"]as?[[String:Any]])?.isEmpty==true,
+                  contract["registeredValidRobotVolume"]is NSNull,scope["registrationID"]is NSNull,scope["estimatedCameraProjectionIdentity"]as?String==projection,
+                  contracts["rgbOutputUndistorted"]as?Bool==true,contracts["depthRGBGeometryCorrespondence"]as?String=="matched",
+                  let service=contracts["cameraServiceSourceSHA256"]as?String,isHash(service) else {throw reject("unsupported or changed original sampling/projection/source contract")}
+            let runtime=try d.decode(Runtime.self,from:meta.runtimeCalibrationJSON)
+            guard runtime.schemaVersion==1,runtime.cameraRole=="face",!runtime.actualDeviceMXID.isEmpty,!runtime.sdkVersion.isEmpty,
+                  [runtime.factoryEEPROMSHA256,runtime.effectiveRuntimeCalibrationSHA256,runtime.stereoPolicySHA256].allSatisfy(isHash),
+                  contracts["runtimeCalibrationIdentity"]as?String==runtime.identity else {throw reject("actual device/runtime source identity is missing")}
+            let bytes=[UInt8](raw.depthU16LittleEndian),depth=stride(from:0,to:bytes.count,by:2).map{UInt16(bytes[$0]) | UInt16(bytes[$0+1])<<8}
+            let rgb=[UInt8](raw.rgb888);var gray:[Double]=[];gray.reserveCapacity(meta.width*meta.height)
+            for i in stride(from:0,to:rgb.count,by:3) {gray.append(Double(rgb[i])*0.299+Double(rgb[i+1])*0.587+Double(rgb[i+2])*0.114)}
+            let c=meta.cameraToRobotColumnMajor,T=simd_double4x4(columns:(SIMD4(c[0],c[1],c[2],c[3]),SIMD4(c[4],c[5],c[6],c[7]),SIMD4(c[8],c[9],c[10],c[11]),SIMD4(c[12],c[13],c[14],c[15])))
+            let rotation=simd_double3x3(columns:(SIMD3(T[0].x,T[0].y,T[0].z),SIMD3(T[1].x,T[1].y,T[1].z),SIMD3(T[2].x,T[2].y,T[2].z)))
+            guard abs(simd_determinant(rotation)-1)<0.001,(0..<3).allSatisfy({abs(simd_length(rotation[$0])-1)<0.001}),
+                  abs(simd_dot(rotation[0],rotation[1]))+abs(simd_dot(rotation[1],rotation[2]))+abs(simd_dot(rotation[0],rotation[2]))<0.001,
+                  abs(T[0].w)+abs(T[1].w)+abs(T[2].w)<0.001,abs(T[3].w-1)<0.001 else {throw reject("nonrigid original camera transform")}
+            let origin=SIMD3(T[3].x,T[3].y,T[3].z),k=meta.intrinsics
+            // Occupied endpoints are accepted BEFORE the mapper's four-neighbor
+            // free-ray check. Missing neighbors never discard an obstacle here.
+            for y in stride(from:1,to:meta.height-1,by:step) {for x in stride(from:1,to:meta.width-1,by:step) {
+                let mm=depth[y*meta.width+x];guard (100...3000).contains(Int(mm)) else{continue}
+                let z=Double(mm)/1000,p=T*SIMD4((Double(x)-k[2])*z/k[0],(Double(y)-k[3])*z/k[1],z,1),point=SIMD3(p.x,p.y,p.z)
+                guard (-2...2).contains(point.x),(-2...2).contains(point.y),(-0.3...2.4).contains(point.z),simd_length(point-origin)>0.1 else{continue}
+                let cell=Cell(x:Int(floor(point.x/0.025)),y:Int(floor(point.y/0.025)),z:Int(floor(point.z/0.025)))
+                if var bounds=source[cell] {bounds.low=simd_min(bounds.low,point);bounds.high=simd_max(bounds.high,point);source[cell]=bounds}
+                else {source[cell]=Bounds(low:point,high:point)}
+                contributors[cell,default:[]].append(.init(frameID:meta.frameID,x:x,y:y,depthMillimeters:Int(mm)));accepted+=1
+            }}
+            parsed.append(.init(raw:raw,metadata:meta,runtime:runtime,serviceSHA:service,depth:depth,rgb:rgb,gray:gray,matrix:T))
+        }
+        guard parsed.first?.metadata.capturedAtHostMilliseconds==m.oldestCapturedAtMilliseconds,
+              parsed.last?.metadata.capturedAtHostMilliseconds==m.lastCapturedAtMilliseconds,
+              source.count==m.occupiedSourceSamples.count else {
+            // Keep the comparison explicit below; every original group matters.
+            throw reject("raw endpoint replay omitted or changed an original group")
+        }
+        for (cell,bounds) in source {guard let original=m.occupiedSourceSamples[cell],same(bounds,original) else{throw reject("raw endpoint bounds differ from original group")}}
+        var unions:[Cell:Bounds]=[:]
+        for (cell,b) in source {for x in -1...1 {for y in -1...1 {for z in -1...1 {
+            let c=Cell(x:cell.x+x,y:cell.y+y,z:cell.z+z)
+            if var old=unions[c] {old.low=simd_min(old.low,b.low);old.high=simd_max(old.high,b.high);unions[c]=old}else{unions[c]=b}
+        }}}}
+        guard Set(unions.keys)==m.occupied,unions.count==m.occupiedSamples.count else {throw reject("original27-cell occupied union is incomplete")}
+        for (cell,b) in unions {guard let old=m.occupiedSamples[cell],same(b,old) else{throw reject("original27-cell occupied union bounds changed")}}
+        let groups=m.occupiedSourceSamples.map{c,b in ROBWorkspaceOccupiedSourceGroup(sourceVoxel:[c.x,c.y,c.z],bounds:.init(lowMeters:[b.low.x,b.low.y,b.low.z],highMeters:[b.high.x,b.high.y,b.high.z]))}.sorted{$0.id<$1.id}
+        return Archive(binding:.init(manifestSHA256:hash(manifestJSON),sourceMapSHA256:hash(sourceMapJSON),mapFingerprint:m.fingerprint,
+            archiveID:manifest.scene.archiveID,sceneID:m.sceneID,cameraGeneration:m.cameraGeneration,bodyMotionIdentity:m.bodyMotionIdentity,gatewayGeneration:m.sessionGeneration,
+            modelID:m.modelID,referenceID:model.referenceID,geometryID:m.geometryID,mappingID:m.mappingID,estimatedCameraProjectionIdentity:projection),manifest:manifest,map:m,frames:parsed,groups:groups,contributors:contributors,acceptedCount:accepted)
+    }
+}
+
+extension ROBWorkspaceSourcePixelSelf {
+    private static func inside(_ x:Double,_ y:Double,_ polygon:[[Int]])->Bool {
+        var result=false,j=polygon.count-1
+        for i in polygon.indices {let a=polygon[i],b=polygon[j]
+            if (Double(a[1])>y) != (Double(b[1])>y),x < Double(b[0]-a[0])*(y-Double(a[1]))/Double(b[1]-a[1])+Double(a[0]) {result.toggle()};j=i
+        };return result
+    }
+    private static func polygon(_ p:[[Int]],width:Int,height:Int)throws {
+        guard (3...64).contains(p.count),p.allSatisfy({$0.count==2 && (0...width).contains($0[0]) && (0...height).contains($0[1])}),
+              Set(p.map{$0.map(String.init).joined(separator:",")}).count==p.count else {throw reject("invalid bounded pixel polygon")}
+        var area=0
+        for i in p.indices {let a=p[i],b=p[(i+1)%p.count];area+=a[0]*b[1]-b[0]*a[1]}
+        guard abs(area)>=16 else {throw reject("degenerate pixel polygon")}
+        func orient(_ a:[Int],_ b:[Int],_ c:[Int])->Int {(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])}
+        for i in p.indices {for j in p.indices where j>i+1 && !(i==0 && j==p.count-1) {
+            let a=p[i],b=p[(i+1)%p.count],c=p[j],d=p[(j+1)%p.count]
+            if orient(a,b,c)*orient(a,b,d)<=0 && orient(c,d,a)*orient(c,d,b)<=0 {throw reject("self-intersecting pixel polygon")}
+        }}
+    }
+    private static func components(_ review:FrameReview,frame:ParsedFrame)throws->[Component] {
+        let w=frame.metadata.width,h=frame.metadata.height
+        guard review.robotPolygons.count<=64,review.protectedPolygons.count<=64 else {throw reject("pixel polygon budget exceeded")}
+        for p in review.robotPolygons {try polygon(p,width:w,height:h)}
+        for p in review.protectedPolygons {guard ["table","person","hand","uncertain"].contains(p.label) else{throw reject("unknown protected pixel class")};try polygon(p.points,width:w,height:h)}
+        var result:[Component]=[]
+        for p in review.robotPolygons {
+            let loX=p.map{$0[0]}.min()!,hiX=min(w-1,p.map{$0[0]}.max()!),loY=p.map{$0[1]}.min()!,hiY=min(h-1,p.map{$0[1]}.max()!)
+            guard (hiX-loX+1)*(hiY-loY+1)<=250_000 else {throw reject("an experimental robot polygon exceeds the narrow image-area budget")}
+            guard max(2,loX)<=min(w-3,hiX),max(2,loY)<=min(h-3,hiY) else {result.append(.init(pixels:[],anchors:[]));continue}
+            var pixels=Set<Int>()
+            for y in max(2,loY)...min(h-3,hiY) {for x in max(2,loX)...min(w-3,hiX) {
+                let allInside=[-2,0,2].allSatisfy{dy in [-2,0,2].allSatisfy{dx in inside(Double(x+dx)+0.5,Double(y+dy)+0.5,p)}}
+                let protected=review.protectedPolygons.contains{keep in [-2,0,2].contains{dy in [-2,0,2].contains{dx in inside(Double(x+dx)+0.5,Double(y+dy)+0.5,keep.points)}}}
+                if allInside && !protected {pixels.insert(y*w+x)}
+            }}
+            var anchors:[Anchor]=[]
+            let spacing=max(4,min(hiX-loX+1,hiY-loY+1)/4)
+            for y in stride(from:max(4,loY),through:min(h-8,hiY),by:spacing) {for x in stride(from:max(4,loX),through:min(w-8,hiX),by:spacing) {
+                guard (0..<8).allSatisfy({dy in (0..<8).allSatisfy{dx in pixels.contains((y+dy)*w+x+dx)}}) else{continue}
+                var values:[Double]=[];for dy in 0..<8 {for dx in 0..<8 {values.append(frame.gray[(y+dy)*w+x+dx])}}
+                let mean=values.reduce(0,+)/64,norm=sqrt(values.reduce(0){$0+pow($1-mean,2)})
+                if norm/8>=10 {anchors.append(.init(x:x,y:y,values:values,mean:mean,norm:norm))}
+            }}
+            anchors.sort{$0.norm>$1.norm};anchors=Array(anchors.prefix(12))
+            result.append(.init(pixels:pixels,anchors:anchors))
+        }
+        return result
+    }
+    private static func held(_ arm:Arm?,side:String,model:ROBGhostRobotModel)->[Double]? {
+        guard let arm,arm.physicalSide==side,arm.modelID==model.modelID,arm.geometryID==model.geometryID,
+              arm.telemetrySequence>0,arm.positionsRadians.count==7,arm.positionsRadians.allSatisfy(\.isFinite),
+              arm.effectiveSampleAgeMilliseconds.isFinite,(0...700).contains(arm.effectiveSampleAgeMilliseconds),
+              arm.effectiveGripperAgeMilliseconds.isFinite,(0...700).contains(arm.effectiveGripperAgeMilliseconds) else{return nil}
+        return arm.positionsRadians
+    }
+    private static func samePose(_ a:[Double],_ b:[Double])->Bool {a.count==7 && b.count==7 && 1.5*zip(a,b).reduce(0.0){$0+abs($1.0-$1.1)}<=0.002}
+    private static func compatible(_ ref:ParsedFrame,_ current:ParsedFrame,model:ROBGhostRobotModel)->Bool {
+        let a=ref.metadata,b=current.metadata
+        guard a.width==b.width,a.height==b.height,a.intrinsics==b.intrinsics,ref.runtime.identity==current.runtime.identity,
+              ref.runtime.actualDeviceMXID==current.runtime.actualDeviceMXID,ref.serviceSHA==current.serviceSHA,a.sourceContractsJSON==b.sourceContractsJSON,
+              let n=a.actualAppliedNeck.value,let m=b.actualAppliedNeck.value,n.stationary,m.stationary,
+              n.appliedPanTarget==m.appliedPanTarget,n.appliedLowerTarget==m.appliedLowerTarget,n.appliedUpperTarget==m.appliedUpperTarget,
+              let al=held(a.physicalLeftFeedback.value,side:"left",model:model),let ar=held(a.physicalRightFeedback.value,side:"right",model:model),
+              let bl=held(b.physicalLeftFeedback.value,side:"left",model:model),let br=held(b.physicalRightFeedback.value,side:"right",model:model),
+              a.physicalLeftFeedback.value?.mappingID==b.physicalLeftFeedback.value?.mappingID,
+              a.physicalRightFeedback.value?.mappingID==b.physicalRightFeedback.value?.mappingID,samePose(al,bl),samePose(ar,br) else{return false}
+        return true
+    }
+    private static func matches(_ component:Component,reference:ParsedFrame,current:ParsedFrame)->Bool {
+        guard component.anchors.count>=3 else{return false}
+        let spread=component.anchors.map{a in component.anchors.map{b in hypot(Double(a.x-b.x),Double(a.y-b.y))}.max() ?? 0}.max() ?? 0
+        guard spread>=8 else{return false}
+        let w=current.metadata.width
+        for a in component.anchors {
+            var values:[Double]=[];for dy in 0..<8 {for dx in 0..<8 {values.append(current.gray[(a.y+dy)*w+a.x+dx])}}
+            let mean=values.reduce(0,+)/64,variance=values.reduce(0){$0+pow($1-mean,2)},norm=sqrt(variance)
+            guard norm/8>=10,abs(mean-a.mean)<=20 else{return false}
+            let dot=zip(a.values,values).reduce(0.0){$0+($1.0-a.mean)*($1.1-mean)}
+            let i=(a.y+4)*w+a.x+4,old=Int(reference.depth[i]),now=Int(current.depth[i])
+            guard dot/(a.norm*norm)>=0.95,(100...3000).contains(old),(100...3000).contains(now),abs(old-now)<=10 else{return false}
+        }
+        return true
+    }
+    private static func pixelAgrees(_ i:Int,reference:ParsedFrame,current:ParsedFrame)->Bool {
+        let w=current.metadata.width,x=i%w,y=i/w,old=Int(reference.depth[i]),now=Int(current.depth[i])
+        guard x>=1,y>=1,x<w-1,y<current.metadata.height-1,(100...3000).contains(old),(100...3000).contains(now),abs(old-now)<=10,
+              (0..<3).allSatisfy({abs(Int(reference.rgb[i*3+$0])-Int(current.rgb[i*3+$0]))<=20}) else{return false}
+        for j in [i-1,i+1,i-w,i+w] {
+            let a=Int(reference.depth[j]),b=Int(current.depth[j])
+            guard (100...3000).contains(a),(100...3000).contains(b),abs(a-old)<=30,abs(b-now)<=30,abs(a-b)<=10 else{return false}
+        }
+        return true
+    }
+    static func loadTemplate(reviewJSON:Data,manifestJSON:Data,sourceMapJSON:Data,frames:[ReplayFrame],model:ROBGhostRobotModel)throws->Template {
+#if DEBUG
+        guard reviewJSON.count<=2_000_000 else{throw reject("review JSON exceeds its bounded perception record")}
+        let doc=try JSONDecoder().decode(ReviewDocument.self,from:reviewJSON),a=try archive(manifestJSON:manifestJSON,sourceMapJSON:sourceMapJSON,frames:frames,model:model)
+        let expected:Set<String>=["schemaVersion","kind","classificationBasis","reviewID","reviewedAtMilliseconds","archiveDirectory","archiveManifestSHA256","sourceMapSHA256","mapFingerprint","frames"]
+        guard Set(try object(reviewJSON).keys)==expected,doc.schemaVersion==1,doc.kind=="experimental_robot_source_pixel_template",doc.classificationBasis=="llm_visual_review_experimental",
+              doc.archiveDirectory.hasPrefix("/"),doc.archiveDirectory.utf8.count<=4096,doc.reviewedAtMilliseconds.isFinite,doc.reviewedAtMilliseconds>=a.map.lastCapturedAtMilliseconds,
+              doc.archiveManifestSHA256==a.binding.manifestSHA256,doc.sourceMapSHA256==a.binding.sourceMapSHA256,doc.mapFingerprint==a.binding.mapFingerprint,
+              doc.frames.count==a.frames.count else{throw reject("historical review must name its exact immutable raw sources and experimental LLM basis")}
+        var allComponents:[[Component]]=[]
+        for i in doc.frames.indices {
+            let r=doc.frames[i],f=a.frames[i],m=f.metadata,record=a.manifest.frames[i]
+            guard r.frameID==m.frameID,r.sequence==m.sequence,r.capturedAtHostMilliseconds==m.capturedAtHostMilliseconds,r.cameraGeneration==m.cameraGeneration,
+                  r.width==m.width,r.height==m.height,r.metadataSHA256==record.metadataSHA256,r.rgbSHA256==record.rgbSHA256,r.depthSHA256==record.depthSHA256 else{throw reject("historical review relabelled a source frame")}
+            allComponents.append(try components(r,frame:f))
+        }
+        return Template(a,doc,hash(reviewJSON),allComponents)
+#else
+        throw reject("source-pixel commissioning is DEBUG only")
+#endif
+    }
+    static func classify(template:Template,currentManifestJSON:Data,currentSourceMapJSON:Data,currentFrames:[ReplayFrame],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,nowMilliseconds:Double)throws->View {
+#if DEBUG
+        let current=try archive(manifestJSON:currentManifestJSON,sourceMapJSON:currentSourceMapJSON,frames:currentFrames,model:model)
+        let b=current.binding
+        guard nowMilliseconds.isFinite,(0...60_000).contains(nowMilliseconds-map.oldestCapturedAtMilliseconds),nowMilliseconds>=map.createdAtMilliseconds,
+              map.fingerprint==b.mapFingerprint,map.sceneID==b.sceneID,map.cameraGeneration==b.cameraGeneration,map.sessionGeneration==b.gatewayGeneration,
+              map.modelID==b.modelID,map.geometryID==b.geometryID,map.mappingID==b.mappingID,
+              let scope=map.visualCalibrationScope,scope.bodyContextIsCurrent,scope.bodyMotionIdentity==b.bodyMotionIdentity,
+              scope.estimatedCameraProjectionIdentity==b.estimatedCameraProjectionIdentity,
+              map.originalOccupiedSourceGroups==current.groups,
+              let first=current.frames.first,let left=held(first.metadata.physicalLeftFeedback.value,side:"left",model:model),
+              let right=held(first.metadata.physicalRightFeedback.value,side:"right",model:model) else {throw reject("fresh native map/source/both-arm baseline does not match the replayed current archive")}
+        var classified:[UUID:Set<Int>]=[:],frameAudits:[FrameMatch]=[]
+        for f in current.frames {
+            guard let l=held(f.metadata.physicalLeftFeedback.value,side:"left",model:model),let r=held(f.metadata.physicalRightFeedback.value,side:"right",model:model),samePose(left,l),samePose(right,r) else {throw reject("both observed arm poses were not held throughout the current source frames")}
+            var pixels=Set<Int>(),referenceIDs=Set<UUID>(),count=0
+            for i in template.archive.frames.indices {
+                let reference=template.archive.frames[i]
+                guard compatible(reference,f,model:model) else{continue}
+                for component in template.components[i] where matches(component,reference:reference,current:f) {
+                    count+=1;referenceIDs.insert(reference.metadata.frameID)
+                    for p in component.pixels where pixelAgrees(p,reference:reference,current:f) {pixels.insert(p)}
+                }
+            }
+            classified[f.metadata.frameID]=pixels
+            let record=current.manifest.frames.first{$0.frameID==f.metadata.frameID}!
+            let accepted=current.contributors.values.flatMap{$0}.filter{$0.frameID==f.metadata.frameID && pixels.contains($0.y*f.metadata.width+$0.x)}.count
+            frameAudits.append(.init(currentFrameID:f.metadata.frameID,sequence:f.metadata.sequence,capturedAtHostMilliseconds:f.metadata.capturedAtHostMilliseconds,cameraGeneration:f.metadata.cameraGeneration,
+                currentMetadataSHA256:record.metadataSHA256,currentRGBSHA256:record.rgbSHA256,currentDepthSHA256:record.depthSHA256,
+                referenceFrameIDs:referenceIDs.sorted{$0.uuidString<$1.uuidString},matchedComponentCount:count,classifiedAcceptedReturnCount:accepted))
+        }
+        let widths=Dictionary(uniqueKeysWithValues:current.frames.map{($0.metadata.frameID,$0.metadata.width)})
+        var excluded:[GroupAudit]=[],retained:[ROBWorkspaceOccupiedSourceGroup]=[]
+        for group in current.groups {
+            let cell=Cell(x:group.sourceVoxel[0],y:group.sourceVoxel[1],z:group.sourceVoxel[2]),points=current.contributors[cell] ?? []
+            if !points.isEmpty,points.allSatisfy({classified[$0.frameID]?.contains($0.y*widths[$0.frameID]!+$0.x)==true}) {
+                excluded.append(.init(sourceGroupID:group.id,sourceVoxel:group.sourceVoxel,originalBounds:group.bounds,contributors:points))
+            } else {retained.append(group)}
+        }
+        guard !retained.isEmpty else{throw reject("the entire external scene cannot be labelled robot by this commissioning recognizer")}
+        let audit=Audit(label:"llm_visual_review_experimental_fresh_pixel_match_not_registration",templateReviewSHA256:template.reviewSHA256,
+            reviewID:template.document.reviewID,reviewedAtMilliseconds:template.document.reviewedAtMilliseconds,historical:template.archive.binding,current:b,
+            physicalLeftBaseline:left,physicalRightBaseline:right,frames:frameAudits,completeSourceGroupCount:current.groups.count,
+            completeSourceGroupsSHA256:hash(try encode(current.groups)),excludedGroups:excluded,retainedGroupCount:retained.count,acceptedReturnCount:current.acceptedCount,
+            maximumRGBChannelDifference:20,maximumDepthDifferenceMillimeters:10,maskErosionPixels:2,minimumAnchorCorrelation:0.95,minimumAnchorStandardDeviation:10,
+            rawMapModified:false,unknownPromotedToFree:false,measuredRegistration:false,motionAuthority:false)
+        return try View(audit:audit,retained:retained)
+#else
+        throw reject("source-pixel commissioning is DEBUG only")
+#endif
     }
 }
