@@ -20,6 +20,8 @@ FOUNDATION_EXPORT NSString * _Nonnull const ROBSpeechAcknowledgementPhraseDefaul
 FOUNDATION_EXPORT NSString * _Nonnull const ROBDefaultSpeechAcknowledgementPhrase;
 FOUNDATION_EXPORT NSArray<NSString *> * _Nonnull ROBResolvedSpeechAcknowledgementPhrases(void);
 FOUNDATION_EXPORT NSString * _Nonnull ROBResolvedSpeechAcknowledgementPhrase(void);
+/// Local interruption only; this predicate never grants positive authority.
+FOUNDATION_EXPORT BOOL ROBLocalSpeechContainsPriorityStop(NSString * _Nullable transcript);
 
 @protocol ROBSpeechDelegate <NSObject>
 
@@ -29,6 +31,7 @@ FOUNDATION_EXPORT NSString * _Nonnull ROBResolvedSpeechAcknowledgementPhrase(voi
 - (void)willSpeakWord:(NSRange)characterRange ofString:(NSString *)string;
 
 @optional
+- (void)didRecognizeLocalPriorityStop:(NSString *)transcript;
 - (BOOL)acceptLocalMicrophoneAuthorization:(NSString *)transcript;
 - (BOOL)shouldFinalizeLocalMicrophoneAuthorization:(NSString *)transcript;
 - (void)didCaptureAudioBuffer:(AVAudioPCMBuffer *)buffer;

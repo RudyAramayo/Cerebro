@@ -28,6 +28,19 @@ NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoi
 NSString * const ROBSpeechAcknowledgementPhraseDefaultsKey = @"ROBSpokenAcknowledgementPhrase";
 NSString * const ROBDefaultSpeechAcknowledgementPhrase = @"I hear you.";
 
+BOOL ROBLocalSpeechContainsPriorityStop(NSString *transcript)
+{
+    NSString *normalized = [[transcript lowercaseString] stringByReplacingOccurrencesOfString:@"’" withString:@"'"];
+    NSArray<NSString *> *parts = [normalized componentsSeparatedByCharactersInSet:
+        [[NSCharacterSet alphanumericCharacterSet] invertedSet]];
+    NSMutableArray<NSString *> *tokens = [NSMutableArray array];
+    for (NSString *part in parts) { if (part.length > 0) { [tokens addObject:part]; } }
+    if ([tokens containsObject:@"stop"] || [tokens containsObject:@"wait"]) { return YES; }
+    NSString *words = [NSString stringWithFormat:@" %@ ", [tokens componentsJoinedByString:@" "]];
+    return [words containsString:@" do not move "] || [words containsString:@" don t move "] ||
+        [words containsString:@" dont move "];
+}
+
 NSArray<NSString *> *ROBResolvedSpeechAcknowledgementPhrases(void)
 {
     id storedValue = [[NSUserDefaults standardUserDefaults]
@@ -110,9 +123,15 @@ NSString *ROBResolvedSpeechAcknowledgementPhrase(void)
 @property (nonatomic, assign) BOOL isShuttingDown;
 @property (nonatomic, assign) NSUInteger recognitionGeneration;
 @property (nonatomic, assign) BOOL hologramRecordingOwnsMicrophone;
+@property (nonatomic, assign) BOOL localPriorityStopConsumed;
+@property (nonatomic, assign) NSUInteger localPriorityStopRecognitionGeneration;
+@property (atomic, assign) BOOL recognitionContainsSpeechOutput;
 
 - (void)beginRecognitionSession;
 - (void)startAudioCapture;
+- (void)processCapturedMicrophoneBuffer:(AVAudioPCMBuffer *)buffer;
+- (void)processLocalRecognitionTranscript:(NSString *)transcription isFinal:(BOOL)isFinal generation:(NSUInteger)generation;
+- (BOOL)consumeLocalPriorityStop:(NSString *)transcription generation:(NSUInteger)generation;
 - (void)scheduleRecognizerRestart;
 - (void)teardownSpeechRecognition;
 - (void)teardownAudioCapture;
@@ -480,6 +499,8 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
         __strong typeof(weakSelf) self = weakSelf;
         if (self != nil && !self.isShuttingDown) { [self startRecognizer]; }
     }];
+    // The prompt can be interrupted too; its audio cannot grant approval.
+    [self startRecognizer];
 }
 
 
@@ -661,6 +682,13 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
     // Gemini Live consumes the raw buffers from this same tap.
     [self startAudioCapture];
 
+    // The local recognizer listens through TTS only for negative interruption.
+    // Discard that utterance before resuming positive/conversational input.
+    if (!self.isSpeaking && self.recognitionContainsSpeechOutput && self.task != nil) {
+        [self scheduleRecognizerRestart];
+        return;
+    }
+
     if (self.localRecognitionUnavailable || self.recognizerStartInProgress || self.task != nil) {
         return;
     }
@@ -700,6 +728,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 
     [self teardownSpeechRecognition];
     NSUInteger generation = self.recognitionGeneration;
+    self.recognitionContainsSpeechOutput = self.isSpeaking;
 
     NSString *locale = [self.localeArray[self.selectedLocaleIndex] valueForKey:@"locale_id"];
     self.currentTextInput = @"";
@@ -724,32 +753,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 
             BOOL isFinal = result.isFinal;
             NSString *transcription = result.bestTranscription.formattedString;
-            // Approval is accepted only from a FINAL local microphone result.
-            // A partial "yes" must not authorize before "but don't move" arrives.
-            BOOL authorizationConsumed = isFinal && !self.isSpeaking && transcription.length > 0 &&
-                [self.delegate respondsToSelector:@selector(acceptLocalMicrophoneAuthorization:)] &&
-                [self.delegate acceptLocalMicrophoneAuthorization:transcription];
-            if (authorizationConsumed) {
-                [self.debounceSpeechInputTimer invalidate];
-                self.currentTextInput = transcription;
-            }
-            if (!authorizationConsumed && transcription.length > 0 && ![transcription isEqualToString:self.currentTextInput]) {
-                self.currentTextInput = transcription;
-                if (!self.isSpeaking) {
-                    [self.debounceSpeechInputTimer invalidate];
-                    self.debounceSpeechInputTimer = [NSTimer scheduledTimerWithTimeInterval:0.75 repeats:NO block:^(NSTimer *timer) {
-                        if (!self.isSpeaking && generation == self.recognitionGeneration &&
-                            [self.delegate respondsToSelector:@selector(shouldFinalizeLocalMicrophoneAuthorization:)] &&
-                            [self.delegate shouldFinalizeLocalMicrophoneAuthorization:transcription]) {
-                            // Closing this utterance yields a final local result;
-                            // only the final-result delegate can grant approval.
-                            [self.speechRequest endAudio];
-                            return;
-                        }
-                        [self.delegate inputText:transcription];
-                    }];
-                }
-            }
+            [self processLocalRecognitionTranscript:transcription isFinal:isFinal generation:generation];
 
             if (error || isFinal) {
                 if (error) {
@@ -778,6 +782,75 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
     NSLog(@"Starting speech recognizer with locale %@", locale);
 }
 
+- (BOOL)consumeLocalPriorityStop:(NSString *)transcription generation:(NSUInteger)generation
+{
+    if (!ROBLocalSpeechContainsPriorityStop(transcription)) { return NO; }
+    [self.debounceSpeechInputTimer invalidate];
+    self.debounceSpeechInputTimer = nil;
+    self.currentTextInput = transcription;
+    // Partial/final revisions of one ASR utterance must not repeat the hold
+    // or its acknowledgement. A later recognition session can interrupt anew.
+    if (self.localPriorityStopConsumed && self.localPriorityStopRecognitionGeneration == generation) { return YES; }
+    self.localPriorityStopConsumed = YES;
+    self.localPriorityStopRecognitionGeneration = generation;
+    [self.speechRequest endAudio];
+    if ([self.delegate respondsToSelector:@selector(didRecognizeLocalPriorityStop:)]) {
+        [self.delegate didRecognizeLocalPriorityStop:transcription];
+    } else {
+        [self.delegate inputText:transcription];
+    }
+    return YES;
+}
+
+- (void)processLocalRecognitionTranscript:(NSString *)transcription isFinal:(BOOL)isFinal generation:(NSUInteger)generation
+{
+    if (self.isShuttingDown || generation != self.recognitionGeneration) { return; }
+    if (self.localPriorityStopConsumed && self.localPriorityStopRecognitionGeneration == generation) { return; }
+    // Negative interruption bypasses speech output, wake words, finalization,
+    // authorization and conversational debounce. Nothing positive uses it.
+    if ([self consumeLocalPriorityStop:transcription generation:generation]) { return; }
+    if (self.isSpeaking || self.recognitionContainsSpeechOutput) { return; }
+    // Approval is accepted only from a FINAL local microphone result.
+    // A partial "yes" must not authorize before "but don't move" arrives.
+    BOOL authorizationConsumed = isFinal && !self.isSpeaking && transcription.length > 0 &&
+        [self.delegate respondsToSelector:@selector(acceptLocalMicrophoneAuthorization:)] &&
+        [self.delegate acceptLocalMicrophoneAuthorization:transcription];
+    if (authorizationConsumed) {
+        [self.debounceSpeechInputTimer invalidate];
+        self.currentTextInput = transcription;
+    }
+    if (!authorizationConsumed && transcription.length > 0 && ![transcription isEqualToString:self.currentTextInput]) {
+        self.currentTextInput = transcription;
+        if (!self.isSpeaking) {
+            [self.debounceSpeechInputTimer invalidate];
+            self.debounceSpeechInputTimer = [NSTimer scheduledTimerWithTimeInterval:0.75 repeats:NO block:^(NSTimer *timer) {
+                if (self.isShuttingDown || self.isSpeaking || self.recognitionContainsSpeechOutput || generation != self.recognitionGeneration) { return; }
+                if (!self.isSpeaking && generation == self.recognitionGeneration &&
+                    [self.delegate respondsToSelector:@selector(shouldFinalizeLocalMicrophoneAuthorization:)] &&
+                    [self.delegate shouldFinalizeLocalMicrophoneAuthorization:transcription]) {
+                    // Closing this utterance yields a final local result;
+                    // only the final-result delegate can grant approval.
+                    [self.speechRequest endAudio];
+                    return;
+                }
+                [self.delegate inputText:transcription];
+            }];
+        }
+    }
+}
+
+- (void)processCapturedMicrophoneBuffer:(AVAudioPCMBuffer *)buffer
+{
+    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone) { return; }
+    // Keep on-device interruption listening during TTS. Cloud conversation
+    // remains muted so ROB's speaker output is not streamed back as a turn.
+    if (self.isSpeaking) { self.recognitionContainsSpeechOutput = YES; }
+    [self.speechRequest appendAudioPCMBuffer:buffer];
+    if (!self.isSpeaking && [self.delegate respondsToSelector:@selector(didCaptureAudioBuffer:)]) {
+        [self.delegate didCaptureAudioBuffer:buffer];
+    }
+}
+
 - (void)startAudioCapture
 {
     if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone) {
@@ -792,13 +865,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
         __weak typeof(self) weakSelf = self;
         [inputNode installTapOnBus:0 bufferSize:1024 format:[inputNode outputFormatForBus:0] block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
             __strong typeof(weakSelf) self = weakSelf;
-            if (!self || self.isShuttingDown || self.isSpeaking) {
-                return;
-            }
-            [self.speechRequest appendAudioPCMBuffer:buffer];
-            if ([self.delegate respondsToSelector:@selector(didCaptureAudioBuffer:)]) {
-                [self.delegate didCaptureAudioBuffer:buffer];
-            }
+            [self processCapturedMicrophoneBuffer:buffer];
         }];
         self.microphoneTapInstalled = YES;
     }

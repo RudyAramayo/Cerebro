@@ -528,6 +528,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                             detail:(NSString *)detail;
 - (void)stageShowStateDidChange:(NSNotification *)notification;
 - (void)headlessLiveStartupStopRequested:(NSNotification *)notification;
+- (void)controllerOperatorPriorityStopRequested:(NSNotification *)notification;
 - (void)updateGeminiCameraDemand;
 - (void)faceIdentityConversationCue:(NSNotification *)notification;
 - (void)faceIdentityTrackingDidUpdate:(NSNotification *)notification;
@@ -2742,8 +2743,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void) didFinishProcessingSpeech
 {
     NSLog(@"didFinishProcessingSpeech ROBMainViewController");
-    // Every ROB response suppresses microphone buffers to avoid
-    // feeding the speaker output back to Gemini. Explicitly restore capture
+    // Every ROB response suppresses cloud-conversation microphone buffers to
+    // avoid feeding the speaker output back to Gemini. Local Stop keeps
+    // listening during TTS. Explicitly restore conversational capture
     // after the final queued utterance instead of only resetting the text gate.
     [self startListeningAgain];
 }
@@ -2761,6 +2763,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     textInput = [[textInput stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
     NSLog(@"Apple Speech heard: %@", textInput);
+    // Interrupt before wake-word, local arm-command and online turn routing.
+    if (ROBLocalSpeechContainsPriorityStop(textInput)) {
+        [self performOperatorPriorityStopWithReason:@"Local Stop request"];
+        return;
+    }
     // Only suppress duplicate local transcript turns while the raw-audio Live
     // session is actually ready. During reconnects, realtime text remains a
     // useful bounded fallback and is queued by ROBAI until setup completes.
@@ -2781,33 +2788,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         }
     }
 
-    // Safety phrases stay local and effective even when Gemini is unavailable
-    // or intentionally turned off.
-    if ([textInput containsString:@"stop"] || [textInput containsString:@"wait"] || [textInput containsString:@"don't move"] || [textInput containsString:@"do not move"])
-    {
-        [self.robAI cancelDualDialogue];
-        [self.speechBox stopIt:nil];
-        if (self.stageShowCoordinator.isRunning) {
-            [self.stageShowCoordinator cancelWithReason:@"Local spoken stop"];
-        } else {
-            [self applyPrioritySoftwareStopWithReason:@"Local spoken stop"];
-        }
-        (void)[[ROBAmberGestureExecutor shared]
-            cancelCurrentGestureWithReason:@"Local spoken stop"];
-        NSDictionary *armResult = [[ROBAmberGestureExecutor shared] requestPriorityHold];
-        NSString *armStatus = [armResult[@"arm_status"] isKindOfClass:[NSString class]]
-            ? armResult[@"arm_status"] : @"unavailable";
-        NSString *stopResponse = [armStatus isEqualToString:@"hold_requested"]
-            ? @"Base motion stopped. I requested an arm hold; use the physical emergency stop if needed."
-            : @"Base motion stopped. No verified position-mode arm hold was available.";
-        [self.speechBox sayIt:stopResponse];
-        // Also honor a spoken enrollment stop after acknowledging the motion
-        // stop. Other motion-only phrases must not become enrollment replies.
-        if ([textInput containsString:@"stop"]) {
-            (void)[[ROBFaceRecognitionService shared] noteConversationTranscript:textInput];
-        }
-        return;
-    }
 
     if ([[ROBFaceRecognitionService shared] noteConversationTranscript:textInput]) {
         [self appendConversationText:textInput fromUser:YES];
@@ -2879,6 +2859,45 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
     
     self.audioInputTaskController.textView.string = [self.audioInputTaskController.textView.string stringByAppendingString:[NSString stringWithFormat:@"\n%@\n",textInput]];
+}
+
+- (void)performOperatorPriorityStopWithReason:(NSString *)reason
+{
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self performOperatorPriorityStopWithReason:reason]; });
+        return;
+    }
+    [self.robAI cancelDualDialogue];
+    if (self.stageShowCoordinator.isRunning) {
+        [self.stageShowCoordinator cancelWithReason:reason];
+    }
+    // Always cancel the native routines/broker, including queued startup and
+    // standing-campaign retries; stage cancellation is not a substitute.
+    [self applyPrioritySoftwareStopWithReason:reason];
+    (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:reason];
+    (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
+    // Hold only: no lowering, gripper command or automatic return is scheduled.
+    // The acknowledgement contains no token that can trigger local Stop.
+    [self.speechBox sayIt:@"Hold requested."];
+}
+
+- (void)didRecognizeLocalPriorityStop:(NSString *)transcript
+{
+    // Only the on-device microphone callback enters this spoken-provenance lane.
+    [self performOperatorPriorityStopWithReason:@"Local spoken Stop"];
+    if ([transcript.lowercaseString containsString:@"stop"]) {
+        (void)[[ROBFaceRecognitionService shared] noteConversationTranscript:transcript];
+    }
+}
+
+- (void)controllerOperatorPriorityStopRequested:(NSNotification *)notification
+{
+    // The broker emits this only after authenticated transport/peer checks and
+    // synchronous permission revocation. Never turn it into a spoken approval.
+    if (notification.object != [ROBControllerArmApproval shared]) { return; }
+    NSString *reason = [notification.userInfo[@"reason"] isKindOfClass:NSString.class]
+        ? notification.userInfo[@"reason"] : @"Controller Stop";
+    [self performOperatorPriorityStopWithReason:reason];
 }
 
 - (BOOL)acceptLocalMicrophoneAuthorization:(NSString *)transcript
@@ -2977,6 +2996,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                              selector:@selector(headlessLiveStartupStopRequested:)
                                                  name:ROBHeadlessLiveStartupStopRequestedNotification
                                                object:[ROBHeadlessLiveStartupAuthorization shared]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(controllerOperatorPriorityStopRequested:)
+                                                 name:@"ROBControllerOperatorPriorityStop"
+                                               object:[ROBControllerArmApproval shared]];
     // Register before ROBSerialBox begins discovery so the first successful
     // connection and every later reconnect can establish the approved pose.
     [[NSNotificationCenter defaultCenter] addObserver:self
