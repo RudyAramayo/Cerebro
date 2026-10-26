@@ -167,6 +167,63 @@ extension ROBNeckRGBPoseDisplayFixture {
         var repeated=evidence;var duplicated=captures;duplicated[3]=duplicated[0];repeated["captures"]=duplicated
         try install(repeated);rejects("Repeated training source accepted as held-out")
         try install(evidence);precondition(current() != nil)
+        // Independent optional two-parameter upper-angle refinement. It does
+        // not fit held-out data or change either arm's mapping or image-right.
+        let affineReference=5650,affineIntercept = -0.11,affineSlope=0.00007
+        var affineDocuments=documents,affineCaptures=captures
+        for i in targets.indices {
+            let pitch=affineIntercept+affineSlope*Double(targets[i].2-affineReference)
+            let turn=simd_double4x4(simd_quatd(angle:pitch,axis:SIMD3(1,0,0)))
+            let g=simd_inverse(baseline[i].provisionalCameraToModel*turn)*SIMD4<Double>(0,0,9.81,0)
+            var frames=affineDocuments[i]["frames"]as![[String:Any]]
+            for j in frames.indices {var imu=frames[j]["imu"]as![String:Any];imu["gravity_mps2"]=[g.x,g.y,g.z];frames[j]["imu"]=imu}
+            affineDocuments[i]["frames"]=frames;try write(affineDocuments[i],to:paths[i])
+            affineCaptures[i]["captureInputSHA256"]=hash(try Data(contentsOf:paths[i]))
+        }
+        var affine=evidence;affine["method"]="affine_training_upper_post_optical_x_preserve_origin_image_right_v1"
+        affine.removeValue(forKey:"deltaRadians");affine["referenceUpperTarget"]=affineReference
+        affine["interceptRadians"]=affineIntercept;affine["slopeRadiansPerRawUnit"]=affineSlope;affine["captures"]=affineCaptures
+        try install(affine)
+        let affineID=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!
+        precondition(affineID != refinedID && ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:otherSide)==affineID)
+        for (i,target) in targets.enumerated() {
+            let pose=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:target.0,lowerTarget:target.1,upperTarget:target.2)!
+            let pitch=affineIntercept+affineSlope*Double(target.2-affineReference)
+            let expected=baseline[i].provisionalCameraToModel*simd_double4x4(simd_quatd(angle:pitch,axis:SIMD3(1,0,0)))
+            precondition(pose.provisionalCameraToModel.columns.0==baseline[i].provisionalCameraToModel.columns.0 &&
+                pose.provisionalCameraToModel.columns.3==baseline[i].provisionalCameraToModel.columns.3)
+            for k in 0..<4 {precondition(close(pose.provisionalCameraToModel[k],expected[k]))}
+            precondition(pose.frozenOpticalPitchRefinementRadians==pitch && !pose.hasDepthProjectionAuthority)
+        }
+        for (key,value) in [("referenceUpperTarget",2000 as Any),("referenceUpperTarget",6000 as Any),
+            ("interceptRadians",affineIntercept+0.001 as Any),("slopeRadiansPerRawUnit",affineSlope+0.000001 as Any),
+            ("slopeRadiansPerRawUnit",0.001 as Any),("deltaRadians",affineIntercept as Any)] {
+            var bad=affine;bad[key]=value;try install(bad);rejects("Invalid affine coefficient/range/mixed method: "+key)
+        }
+        var wrongMethod=affine;wrongMethod["method"]="mean_training_post_optical_x_preserve_origin_image_right_v1"
+        try install(wrongMethod);rejects("Affine parameters silently interpreted as legacy constant")
+        // Keep all other source data intact while making the upper design too
+        // narrow; even a numerical fit must reject a 499-unit training span.
+        var narrow=affineDocuments[0],narrowScope=narrow["scope"]as![String:Any]
+        narrowScope["upperTarget"]=5301;narrow["scope"]=narrowScope;try write(narrow,to:paths[0])
+        var narrowCaptures=affineCaptures;narrowCaptures[0]["captureInputSHA256"]=hash(try Data(contentsOf:paths[0]))
+        var narrowProof=affine;narrowProof["captures"]=narrowCaptures;try install(narrowProof);rejects("Affine training span below500 accepted")
+        try write(affineDocuments[0],to:paths[0]);try install(affine)
+        // A held-out correction cannot be absorbed by changing the training
+        // intercept/slope. Its source is still original and internally stable.
+        var affineHeld=affineDocuments[3],affineHeldFrames=affineHeld["frames"]as![[String:Any]]
+        for i in affineHeldFrames.indices {
+            var imu=affineHeldFrames[i]["imu"]as![String:Any];let g=imu["gravity_mps2"]as![Double]
+            let moved=heldTurn*SIMD3(g[0],g[1],g[2]);imu["gravity_mps2"]=[moved.x,moved.y,moved.z];affineHeldFrames[i]["imu"]=imu
+        }
+        affineHeld["frames"]=affineHeldFrames;try write(affineHeld,to:paths[3])
+        var affineHeldSources=affineCaptures;affineHeldSources[3]["captureInputSHA256"]=hash(try Data(contentsOf:paths[3]))
+        var affineHeldProof=affine;affineHeldProof["captures"]=affineHeldSources;try install(affineHeldProof)
+        rejects("Affine method fit or ignored failed held-out gravity")
+        for i in documents.indices {try write(documents[i],to:paths[i])}
+        try install(evidence)
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==refinedID,"Legacy constant method changed after affine refinement")
+        print("PASS synthetic affine upper pitch: training-only centered rank2 fit,500-unit span, independently held-out full3Dgravity, coefficient and globalangle bounds, exact optical origin/image-right, shared both-arm head, constant method retained; no registration or motion authority")
         _=ROBFixedHeadBodyMotionIdentity.invalidate();rejects("Body change silently rebound old capture evidence")
         a.removeValue(forKey:"estimatedGravityPitchRefinement");try write(a,to:activation)
         precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==oldPID)

@@ -49,6 +49,19 @@ The private evidence JSON has this exact structure. Replace placeholders with th
 }
 ```
 
+The original constant method remains supported unchanged. An optional two-parameter upper-target method uses the same evidence kind, source records, body/runtime bindings and actual-frame guard. Replace the method and parameter fields as follows; omit `deltaRadians`:
+
+```json
+{
+  "method": "affine_training_upper_post_optical_x_preserve_origin_image_right_v1",
+  "referenceUpperTarget": 5650,
+  "interceptRadians": -0.1,
+  "slopeRadiansPerRawUnit": 0.00006
+}
+```
+
+Its post-optical-X correction at actual raw upper target `U` is `interceptRadians + slopeRadiansPerRawUnit * (U - referenceUpperTarget)`. These example numbers are placeholders. The loader independently recomputes both coefficients by centered ordinary least squares from the **training captures only**, with each capture receiving one vote. It requires at least a 500-unit training upper-target span, a finite rank-two design, and the reference target inside the training range. The submitted intercept must match the recomputed value within `1e-9` rad and slope within `1e-12` rad/raw unit. The whole linear correction must remain within ±20° across the existing raw target domain 3000–10000; this does not expand any mechanical command limit. Every training and independently held-out capture must still pass the same full three-dimensional 1° gravity test. Roll is not fitted. No lower-target term or held-out fitting is introduced.
+
 Write the evidence privately (mode `0600`) and hash its final exact bytes. Do not copy private camera captures, evidence, user observations or their paths into the repository.
 
 For each source, the loader verifies its pinned manifest, exact model/geometry/mapping/body scope, original advancing frame sequences/timestamps, camera generation, runtime provenance and actual raw depth hashes. The evidence mapping is the original capture UI's arm mapping. It must be one of the two actual legal mappings for that same canonical model, and every captured scope must retain that exact mapping. Either arm may use the resulting shared head-camera estimate only after the source and caller models' head reference frames and articulated camera chains are proven identical. The loader does not relabel captures, mirror arm FK, measure another arm, or change either arm's own mapping/collision checks; both callers receive the same camera projection identity. Source `frame-i.depth-u16le` files must remain beside their original capture manifest. The calculation consumes IMU observations, not RGB semantics or manufactured CAD landmarks. JPEGs do not contribute to this pitch measurement.
@@ -61,10 +74,10 @@ To derive `deltaRadians`, first compute the existing unrefined rotation `R` for 
 atan2(s.z * g.y - s.y * g.z, s.y * g.y + s.z * g.z)
 ```
 
-Use the arithmetic mean of the **training capture** requirements, giving each capture one vote. The loader independently recomputes this mean (agreement within `1e-9` rad), caps its magnitude at 20°, and requires every training and held-out capture's corrected gravity direction to agree with assumed model up within 1°. Held-out poses cannot duplicate training poses. These are consistency limits for an estimated mounting refinement, not a measured global hand-eye error bound.
+For the constant method, use the arithmetic mean of the **training capture** requirements, giving each capture one vote. The loader independently recomputes this mean (agreement within `1e-9` rad), caps its magnitude at 20°, and requires every training and held-out capture's corrected gravity direction to agree with assumed model up within 1°. Held-out poses cannot duplicate training poses. These are consistency limits for an estimated mounting refinement, not a measured global hand-eye error bound.
 The frozen mount estimate is applied by the articulated prior at other raw neck poses; the 1° agreement is established only for the listed sources. Include the poses used by a wider search in new training/held-out captures before claiming their alignment. This option does not measure servo scales, servo zeros or generalize a verified calibration to unsampled angles.
 
-The central `Pose.provisionalCameraToModel` applies the frozen post-X rotation once, preserving its optical-origin and image-right columns exactly. Its estimated projection identity includes the old identity, exact evidence hash, delta, body, active camera generation, runtime identity and service hash. An absent optional field preserves prior matrices and identities. Invalid or mismatched requested evidence returns no refined profile or estimated identity; it never keeps a corrected identity with an uncorrected fallback.
+The central `Pose.provisionalCameraToModel` evaluates the frozen constant or upper-target affine model and applies its post-X rotation once, preserving its optical-origin and image-right columns exactly. Its estimated projection identity includes the old identity, exact evidence hash, frozen parameter values, body, active camera generation, runtime identity and service hash. An absent optional field preserves prior matrices and identities. Invalid or mismatched requested evidence returns no refined profile or estimated identity; it never keeps a corrected identity with an uncorrected fallback.
 
 Actual-frame callers must additionally require:
 

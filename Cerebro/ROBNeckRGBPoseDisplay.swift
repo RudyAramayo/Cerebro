@@ -110,7 +110,8 @@ enum ROBNeckRGBPoseDisplay {
         let oldEstimatedCameraProjectionIdentity:String,bodyMotionIdentity:String
         let activeCameraGeneration:String,cameraRole:String,actualDeviceMXID:String
         let runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
-        let deltaRadians:Double
+        let deltaRadians:Double?
+        let referenceUpperTarget:Int?,interceptRadians:Double?,slopeRadiansPerRawUnit:Double?
         let registrationVerified:Bool,armMotionAuthority:Bool,rawDepthCorrected:Bool
         let modelBaseUpAssumed:Bool,opticalOriginPriorUnchanged:Bool,imageRightHeadingPriorUnchanged:Bool
         let captures:[Capture]
@@ -130,8 +131,13 @@ enum ROBNeckRGBPoseDisplay {
     }
     private struct GravityPitch {
         let reference:GravityPitchReference,deltaRadians:Double,bodyMotionIdentity:String
+        let referenceUpperTarget:Int?,slopeRadiansPerRawUnit:Double
         let cameraGeneration:UUID,runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
         let sources:[PinnedGravitySource]
+        func angle(upperTarget:Int)->Double {
+            guard let referenceUpperTarget else{return deltaRadians}
+            return deltaRadians+slopeRadiansPerRawUnit*Double(upperTarget-referenceUpperTarget)
+        }
     }
     /// A measured operator angle and a provisional forward reference refine
     /// the estimated pan mapping. They never authorize a servo command.
@@ -227,16 +233,24 @@ enum ROBNeckRGBPoseDisplay {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
         guard bytes.count<100_000 else{throw Failure.invalid}
         let e=try JSONDecoder().decode(GravityPitchEvidence.self,from:bytes)
+        let affine=e.method=="affine_training_upper_post_optical_x_preserve_origin_image_right_v1"
+        if affine {
+            guard e.deltaRadians==nil,let upper=e.referenceUpperTarget,(3000...10000).contains(upper),
+                  let a=e.interceptRadians,a.isFinite,let b=e.slopeRadiansPerRawUnit,b.isFinite,
+                  [3000,10000].allSatisfy({abs(a+b*Double($0-upper))<=20 * .pi/180}) else{throw Failure.invalid}
+        } else {
+            guard e.method=="mean_training_post_optical_x_preserve_origin_image_right_v1",
+                  let delta=e.deltaRadians,delta.isFinite,abs(delta)<=20 * .pi/180,
+                  e.referenceUpperTarget==nil,e.interceptRadians==nil,e.slopeRadiansPerRawUnit==nil else{throw Failure.invalid}
+        }
         func hash(_ x:String)->Bool{x.count==64 && x.allSatisfy(\.isHexDigit)}
         guard e.schemaVersion==1,e.kind=="estimated_stationary_imu_optical_x_pitch_refinement",
-              e.method=="mean_training_post_optical_x_preserve_origin_image_right_v1",
               e.modelID==model.modelID,e.referenceID==model.referenceID,e.geometryID==model.geometryID,
               e.oldEstimatedCameraProjectionIdentity==oldProjectionIdentity,
               e.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,UUID(uuidString:e.bodyMotionIdentity) != nil,
               let activeGeneration=UUID(uuidString:e.activeCameraGeneration),e.cameraRole=="face",
               !e.actualDeviceMXID.isEmpty,e.actualDeviceMXID.count<=128,
               hash(e.runtimeCalibrationIdentity),hash(e.cameraServiceSourceSHA256),
-              e.deltaRadians.isFinite,abs(e.deltaRadians)<=20 * .pi/180,
               !e.registrationVerified,!e.armMotionAuthority,!e.rawDepthCorrected,
               e.modelBaseUpAssumed,e.opticalOriginPriorUnchanged,e.imageRightHeadingPriorUnchanged,
               (4...16).contains(e.captures.count),Set(e.captures.map(\.captureInputPath)).count==e.captures.count,
@@ -257,7 +271,7 @@ enum ROBNeckRGBPoseDisplay {
             }) else{throw Failure.invalid}
             sourceModel=other
         }
-        struct Row {let role:String,pose:String,requiredPitch:Double,gravity:SIMD3<Double>,camera:simd_double4x4}
+        struct Row {let role:String,pose:String,upperTarget:Int,requiredPitch:Double,gravity:SIMD3<Double>,camera:simd_double4x4}
         var rows:[Row]=[],sources:[PinnedGravitySource]=[],totalRawBytes=0,heldGenerationSeen=false
         var commonSensor:String?,commonIMURotation:[Double]?
         func numbers(_ x:Any?,count:Int)throws->[Double] {
@@ -340,19 +354,39 @@ enum ROBNeckRGBPoseDisplay {
             let s=SIMD3(camera.columns.0.z,camera.columns.1.z,camera.columns.2.z)
             guard hypot(g.y,g.z)>0.1,hypot(s.y,s.z)>0.1 else{throw Failure.invalid}
             let angle=atan2(s.z*g.y-s.y*g.z,s.y*g.y+s.z*g.z)
-            rows.append(Row(role:capture.role,pose:"\(scope.panTarget):\(scope.lowerTarget):\(scope.upperTarget)",requiredPitch:angle,gravity:g,camera:camera))
+            rows.append(Row(role:capture.role,pose:"\(scope.panTarget):\(scope.lowerTarget):\(scope.upperTarget)",upperTarget:scope.upperTarget,
+                requiredPitch:angle,gravity:g,camera:camera))
             if capture.role=="held_out",scope.cameraGeneration==activeGeneration {heldGenerationSeen=true}
         }
         let training=rows.filter{$0.role=="training"},held=rows.filter{$0.role=="held_out"},poses=Set(training.map(\.pose))
         guard training.count>=3,poses.count==training.count,!held.isEmpty,Set(held.map(\.pose)).count==held.count,
-              held.allSatisfy({!poses.contains($0.pose)}),heldGenerationSeen,
-              abs(training.map(\.requiredPitch).reduce(0,+)/Double(training.count)-e.deltaRadians)<=1e-9 else{throw Failure.invalid}
-        let correction=rotated(SIMD3(e.deltaRadians,0,0))
+              held.allSatisfy({!poses.contains($0.pose)}),heldGenerationSeen else{throw Failure.invalid}
+        let intercept:Double,slope:Double
+        if affine {
+            let upper=e.referenceUpperTarget!,low=training.map(\.upperTarget).min()!,high=training.map(\.upperTarget).max()!
+            guard high-low>=500,(low...high).contains(upper) else{throw Failure.invalid}
+            let xs=training.map{Double($0.upperTarget-upper)},ys=training.map(\.requiredPitch)
+            let meanX=xs.reduce(0,+)/Double(xs.count),meanY=ys.reduce(0,+)/Double(ys.count)
+            let variance=xs.reduce(0){$0+($1-meanX)*($1-meanX)}
+            guard variance.isFinite,variance>0 else{throw Failure.invalid}
+            let fittedSlope=zip(xs,ys).reduce(0){$0+($1.0-meanX)*($1.1-meanY)}/variance
+            let fittedIntercept=meanY-fittedSlope*meanX
+            guard fittedSlope.isFinite,fittedIntercept.isFinite,abs(fittedSlope-e.slopeRadiansPerRawUnit!)<=1e-12,
+                  abs(fittedIntercept-e.interceptRadians!)<=1e-9 else{throw Failure.invalid}
+            intercept=e.interceptRadians!;slope=e.slopeRadiansPerRawUnit!
+        } else {
+            let mean=training.map(\.requiredPitch).reduce(0,+)/Double(training.count)
+            guard abs(mean-e.deltaRadians!)<=1e-9 else{throw Failure.invalid}
+            intercept=e.deltaRadians!;slope=0
+        }
         guard rows.allSatisfy({row in
+            let delta=intercept+slope*Double(row.upperTarget-(e.referenceUpperTarget ?? row.upperTarget))
+            let correction=rotated(SIMD3(delta,0,0))
             let projected=row.camera*correction*SIMD4(row.gravity,0)
             return acos(min(1,max(-1,projected.z)))<=Double.pi/180
         }) else{throw Failure.invalid}
-        return GravityPitch(reference:reference,deltaRadians:e.deltaRadians,bodyMotionIdentity:e.bodyMotionIdentity,
+        return GravityPitch(reference:reference,deltaRadians:intercept,bodyMotionIdentity:e.bodyMotionIdentity,
+            referenceUpperTarget:e.referenceUpperTarget,slopeRadiansPerRawUnit:slope,
             cameraGeneration:activeGeneration,runtimeCalibrationIdentity:e.runtimeCalibrationIdentity,
             cameraServiceSourceSHA256:e.cameraServiceSourceSHA256,sources:sources)
     }
@@ -501,12 +535,17 @@ enum ROBNeckRGBPoseDisplay {
             if let reference=a.estimatedGravityPitchRefinement {
                 guard a.usePhotoHardwareOpticalOrigin==true,let old=estimatedIdentity else{throw Failure.invalid}
                 gravityPitch=try gravityPitchEvidence(reference,model:model,parameters:p,operatorPan:a.operatorPanCalibration,oldProjectionIdentity:old)
-                finalEstimatedIdentity=sha(try JSONSerialization.data(withJSONObject:["kind":"estimated_post_optical_x_pitch_v1",
+                var identity:[String:Any]=["kind":"estimated_post_optical_x_pitch_v1",
                     "oldEstimatedCameraProjectionIdentity":old,"evidenceSHA256":reference.evidenceSHA256,
                     "deltaRadians":gravityPitch!.deltaRadians,"bodyMotionIdentity":gravityPitch!.bodyMotionIdentity,
                     "activeCameraGeneration":gravityPitch!.cameraGeneration.uuidString,
                     "runtimeCalibrationIdentity":gravityPitch!.runtimeCalibrationIdentity,
-                    "cameraServiceSourceSHA256":gravityPitch!.cameraServiceSourceSHA256],options:[.sortedKeys]))
+                    "cameraServiceSourceSHA256":gravityPitch!.cameraServiceSourceSHA256]
+                if let upper=gravityPitch!.referenceUpperTarget {
+                    identity["kind"]="estimated_affine_upper_post_optical_x_pitch_v1"
+                    identity["referenceUpperTarget"]=upper;identity["slopeRadiansPerRawUnit"]=gravityPitch!.slopeRadiansPerRawUnit
+                }
+                finalEstimatedIdentity=sha(try JSONSerialization.data(withJSONObject:identity,options:[.sortedKeys]))
             }else{gravityPitch=nil;finalEstimatedIdentity=estimatedIdentity}
             cachedProfile=Profile(id:sha(bytes+fitData+referenceData+(bellyEvidence?.0 ?? Data())+(panEvidence ?? Data())),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
                 robotModelDisplayLiftMeters:modelLift,
@@ -696,7 +735,7 @@ enum ROBNeckRGBPoseDisplay {
             bellyFloorDisplayReferenceID:profile.bellyFloorDisplayReferenceID,
             usesPhotoHardwareOpticalOrigin:profile.usePhotoHardwareOpticalOrigin,
             operatorPanCalibrationDescription:profile.operatorPanCalibration?.shortDescription,
-            frozenOpticalPitchRefinementRadians:profile.gravityPitch?.deltaRadians)
+            frozenOpticalPitchRefinementRadians:profile.gravityPitch?.angle(upperTarget:upperTarget))
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget)?.cameraToModel
