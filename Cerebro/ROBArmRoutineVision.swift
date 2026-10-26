@@ -1679,6 +1679,56 @@ struct ROBWorkspaceCanSelection {
         }
     }
 
+    /// Keep the existing settle interval and deadline for both initial neck
+    /// staging and captured views. Readiness remains the native raw-pose gate.
+    @MainActor @nonobjc private func settleCollisionScanView(_ view:ROBWorkspaceView,check:()throws->Void,
+        status:(ROBWorkspaceView,Bool,Bool)->Void) async throws {
+        let deadline=ProcessInfo.processInfo.systemUptime+8
+        var settledSince:TimeInterval?
+        while true {
+            try check();try Task.checkCancellation()
+            let prepared=prepareView?(view.panDegrees,view.upperTarget)==true
+            let ready=viewReady?(view.panDegrees,view.upperTarget)==true
+            status(view,prepared,ready)
+            if prepared && ready {
+                settledSince=settledSince ?? ProcessInfo.processInfo.systemUptime
+                if ProcessInfo.processInfo.systemUptime-settledSince!>=1.5 {return}
+            } else {settledSince=nil}
+            guard ProcessInfo.processInfo.systemUptime<deadline else {
+                throw ROBWorkspaceDepthMapError.acquisition("neck did not maintain its 1.5 s settled interval within 8 s (prepareAccepted=\(prepared), viewReady=\(ready), settledFor=\(settledSince.map {ProcessInfo.processInfo.systemUptime-$0} ?? 0) s)")
+            }
+            try await Task.sleep(nanoseconds:100_000_000)
+        }
+    }
+
+    /// Preparing the first allowed view can restore lower6011 and its native
+    /// pan envelope. Do that BEFORE clamping the full scan, so a restricted
+    /// startup envelope does not silently collapse all later upright views.
+    @MainActor @nonobjc private func preparedCollisionScanViews(check:()throws->Void,
+        status:(ROBWorkspaceView,Bool,Bool)->Void) async throws->[ROBWorkspaceView] {
+        let stage=ROBWorkspaceView(panDegrees:boundedPan?(0) ?? 0,upperTarget:5650)
+        guard stage.panDegrees.isFinite,canUseView?(stage.panDegrees,stage.upperTarget) != false else {
+            throw ROBWorkspaceDepthMapError.acquisition("No native-allowed neck view is available to stage the workspace scan.")
+        }
+        try await settleCollisionScanView(stage,check:check,status:status)
+        try check();try Task.checkCancellation()
+        let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+        guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,neck["lower"]as?Int==6011 else {
+            throw ROBWorkspaceDepthMapError.acquisition("Workspace scan staging did not establish the unchanged upright lower-neck hold.")
+        }
+        let requested = [-45.0,-15,15,45].map {ROBWorkspaceView(panDegrees:$0,upperTarget:5650)}
+            + [30.0,0,-30].map {ROBWorkspaceView(panDegrees:$0,upperTarget:6306)}
+        var views:[ROBWorkspaceView]=[]
+        for request in requested {
+            let pan=boundedPan?(request.panDegrees) ?? request.panDegrees
+            guard pan.isFinite else {throw ROBWorkspaceDepthMapError.invalidFrame}
+            let view=ROBWorkspaceView(panDegrees:pan,upperTarget:request.upperTarget)
+            if canUseView?(pan,view.upperTarget) != false,!views.contains(view) {views.append(view)}
+        }
+        guard !views.isEmpty else {throw ROBWorkspaceDepthMapError.acquisition("No scan views remain within the freshly settled native neck bounds.")}
+        return views
+    }
+
     /// Start every scene from current pixels while the arms remain held. A
     /// previous route, object location or map never authorizes parking first.
     @MainActor @nonobjc func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
@@ -1696,12 +1746,6 @@ struct ROBWorkspaceCanSelection {
         let scanBodyIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity
         var captureAnchor = ROBWorkspaceCaptureAnchor()
         var map:ROBWorkspaceDepthMap?
-        let requestedViews = [-45.0,-15,15,45].map { ROBWorkspaceView(panDegrees:$0,upperTarget:5650) }
-            + [30.0,0,-30].map { ROBWorkspaceView(panDegrees:$0,upperTarget:6306) }
-        var views = requestedViews.map { ROBWorkspaceView(panDegrees:boundedPan?($0.panDegrees) ?? $0.panDegrees,upperTarget:$0.upperTarget) }
-            .reduce(into:[ROBWorkspaceView]()) { if !$0.contains($1) { $0.append($1) } }
-        // A local fixed-pose proof cannot be stretched across an unmeasured sweep.
-        if let fixed = registeredCurrentView(model:model) { views = [fixed] }
         let scanStarted = Date().timeIntervalSince1970*1000
         var scanPhase = "initializing", currentView:ROBWorkspaceView?, failureDetail:String?
         var framesProjected = 0, frameSequence:UInt64 = 0, frameCapturedAt:Double?
@@ -1728,6 +1772,21 @@ struct ROBWorkspaceCanSelection {
             }
             vision.endCollisionRegistrationProbe(); finishView?()
         }
+        scanPhase="staging upright neck before selecting scan views"
+        let stagingCheck:()throws->Void = {
+            try check();try self.requireEstimatedProjectionIdentity(estimatedProjectionIdentity,model:model)
+            guard ROBFixedHeadBodyMotionIdentity.currentIdentity==scanBodyIdentity,
+                  captureAnchor.permitsCurrent(vision.cameraGeneration),
+                  (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==generation else {
+                throw ROBWorkspaceDepthMapError.invalidFrame
+            }
+        }
+        let settleStatus:(ROBWorkspaceView,Bool,Bool)->Void = {view,prepared,ready in
+            currentView=view;lastPrepareAccepted=prepared;lastViewReady=ready
+        }
+        var views=try await preparedCollisionScanViews(check:stagingCheck,status:settleStatus)
+        // A local fixed-pose proof cannot be stretched across an unmeasured sweep.
+        if let fixed=registeredCurrentView(model:model) {views=[fixed]}
         for (index,view) in views.enumerated() {
             currentView = view; scanPhase = "checking scene identity"
             try check()
@@ -1741,21 +1800,8 @@ struct ROBWorkspaceCanSelection {
             if canUseView?(view.panDegrees,view.upperTarget) == false { continue }
             progress("Scanning held-arm clearance: view \(index + 1) of \(views.count)")
             scanPhase = "settling neck view"
-            let deadline = ProcessInfo.processInfo.systemUptime + 8
-            var settledSince: TimeInterval?
-            while true {
-                try check()
-                lastPrepareAccepted = prepareView?(view.panDegrees,view.upperTarget) == true
-                lastViewReady = viewReady?(view.panDegrees,view.upperTarget) == true
-                if lastPrepareAccepted && lastViewReady {
-                    settledSince = settledSince ?? ProcessInfo.processInfo.systemUptime
-                    if ProcessInfo.processInfo.systemUptime - settledSince! >= 1.5 { break }
-                } else { settledSince = nil }
-                guard ProcessInfo.processInfo.systemUptime < deadline else {
-                    throw acquisitionFailure("neck did not maintain its 1.5 s settled interval within 8 s (prepareAccepted=\(lastPrepareAccepted), viewReady=\(lastViewReady), settledFor=\(settledSince.map { ProcessInfo.processInfo.systemUptime-$0 } ?? 0) s)")
-                }
-                try await Task.sleep(nanoseconds: 100_000_000)
-            }
+            do {try await settleCollisionScanView(view,check:stagingCheck,status:settleStatus)}
+            catch {throw acquisitionFailure(error.localizedDescription)}
             var projectionBudget=ROBWorkspaceProjectionRetryBudget(startedAtUptime:ProcessInfo.processInfo.systemUptime)
             var projectedInView=0,lastAttemptSequence:UInt64=0,lastAttemptCapture=0.0
             var heldScope:ROBFixedHeadRegistrationScope?,heldServiceSHA:String?,heldUndistorted:Bool?
