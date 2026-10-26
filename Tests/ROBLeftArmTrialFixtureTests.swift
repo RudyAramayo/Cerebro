@@ -452,7 +452,7 @@ final class ROBArmRoutineVision {
         func isValid(forWidth:Int,height:Int)->Bool {forWidth==24 && height==24 && fx>0 && fy>0}
     }
     struct Depth {var width=24,height=24;var millimetersLittleEndian:Data {Data(repeating:0,count:width*height*2)};func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
-    struct Frame {var image=CIImage(color:CIColor(red:0,green:0,blue:0)).cropped(to:CGRect(x:0,y:0,width:24,height:24));let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true}
+    struct Frame {var image=CIImage(color:CIColor(red:0,green:0,blue:0)).cropped(to:CGRect(x:0,y:0,width:24,height:24));let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true;var depthCoverage=1.0}
     var frameSequence:UInt64=10,captureFocalLength=24.0
     var captureWidth=24,captureHeight=24
     func snapshot()->[String:Frame] {

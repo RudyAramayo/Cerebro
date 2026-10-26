@@ -3,6 +3,16 @@ import AVFoundation
 import Vision
 import simd
 
+/// Perception stage budgets, not motion permission. Leave 150 ms for analysis
+/// within the existing 700 ms final exposure-age limit; never refresh a stamp.
+struct ROBVisionFrameAgeBudget {
+    static func acceptsIngress(ageMilliseconds:Double)->Bool {(0...550).contains(ageMilliseconds)}
+    static func acceptsPublication(ageMilliseconds:Double)->Bool {(0...700).contains(ageMilliseconds)}
+    static func acceptsAnalysisOpportunity(active:Bool,busy:Bool,elapsedSeconds:Double)->Bool {
+        active && !busy && elapsedSeconds >= 0.1
+    }
+}
+
 /// Capture provenance is independent of whether a perception consumer is on.
 /// Restarting an inspection must not erase a completed scene preview, while a
 /// real stream/source/calibration restart must invalidate its coordinate frame.
@@ -191,9 +201,10 @@ final class ROBArmRoutineVision {
             lastIncomingCapture = frame.capturedAtMilliseconds.flatMap { $0.isFinite ? $0 : nil }
             lastIncomingSequence = frame.sequence
         }
-        guard active, !busy.contains(key), now - (lastOffer[key] ?? 0) >= 0.2 else { lock.unlock(); return }
+        guard ROBVisionFrameAgeBudget.acceptsAnalysisOpportunity(active:active,busy:busy.contains(key),
+            elapsedSeconds:now-(lastOffer[key] ?? 0)) else { lock.unlock(); return }
         // Only admitted work spends the sampling interval. A stale or invalid
-        // input must not suppress the next fresh RGB-D frame for another 200 ms.
+        // input must not suppress the next fresh RGB-D frame for another 100 ms.
         guard frame.source == .depthAIService, let depth = frame.alignedDepth else {
             inputNotes[key] = "synchronized depth is unavailable"; lock.unlock(); return
         }
@@ -201,7 +212,7 @@ final class ROBArmRoutineVision {
             inputNotes[key] = "capture time is unavailable"; lock.unlock(); return
         }
         let age = Date().timeIntervalSince1970 * 1000 - captured
-        guard (0 ... 400).contains(age) else {
+        guard ROBVisionFrameAgeBudget.acceptsIngress(ageMilliseconds:age) else {
             inputNotes[key] = "incoming frame is \(String(format: "%.0f", age)) ms old"; lock.unlock(); return
         }
         guard let pixels = CMSampleBufferGetImageBuffer(frame.rgbSampleBuffer) else {
@@ -315,6 +326,11 @@ final class ROBArmRoutineVision {
             thumbnail.withUnsafeMutableBytes { bytes in
                 self.context.render(small, toBitmap: bytes.baseAddress!, rowBytes: 64 * 4,
                     bounds: CGRect(x: 0, y: 0, width: 64, height: 48), format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+            }
+            let publicationAge=Date().timeIntervalSince1970*1000-captured
+            guard ROBVisionFrameAgeBudget.acceptsPublication(ageMilliseconds:publicationAge) else {
+                self.inputNotes[key]="analysis exposure is \(String(format:"%.0f",publicationAge)) ms old; not published"
+                return
             }
             self.frames[key] = Frame(image: CIImage(cgImage: immutable), capturedAt: captured,
                                      sequence: frame.sequence, handsClear: clear,
