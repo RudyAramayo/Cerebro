@@ -293,6 +293,7 @@ protocol ROBWorkspaceCollisionMap {
     func state(inBoundsLow low: SIMD3<Double>, high: SIMD3<Double>) -> ROBWorkspaceVoxelState
     func containsTargetObservation(sequence: UInt64, capturedAtMilliseconds: Double) -> Bool
     func occupiedSampleBounds(at point:SIMD3<Double>) -> (low:SIMD3<Double>,high:SIMD3<Double>)?
+    func occupiedSampleSubBounds(at point:SIMD3<Double>) -> [ROBWorkspaceOccupiedReturnBounds]?
 }
 
 extension ROBWorkspaceCollisionMap {
@@ -300,6 +301,7 @@ extension ROBWorkspaceCollisionMap {
     var originalOccupiedReturnBounds:[ROBWorkspaceOccupiedReturnBounds]? {nil}
     func containsTargetObservation(sequence:UInt64,capturedAtMilliseconds:Double) -> Bool { false }
     func occupiedSampleBounds(at point:SIMD3<Double>) -> (low:SIMD3<Double>,high:SIMD3<Double>)? { nil }
+    func occupiedSampleSubBounds(at point:SIMD3<Double>) -> [ROBWorkspaceOccupiedReturnBounds]? { nil }
     /// An implementation may accelerate this with an octree/bitset, but must
     /// preserve the requirement that every intersecting voxel is known free.
     func state(inBoundsLow low: SIMD3<Double>, high: SIMD3<Double>) -> ROBWorkspaceVoxelState {
@@ -541,6 +543,35 @@ struct ROBWorkspaceInitialEmptyRetreat: Codable, Equatable {
     }
 }
 
+/// Bounded model-estimated endpoints; each still needs the complete initial
+/// empty-retreat proof and an independent fresh dispatch-start reproof.
+struct ROBWorkspaceInitialRetreatCandidate:Codable {
+    let name:String,offset:[Double],goal:[Double],estimatedToolDeltaMeters:[Double]
+    let estimatedOutwardForearmDeltaMeters:Double
+}
+
+struct ROBWorkspaceInitialRetreatAttempt:Codable {
+    let name:String,offset:[Double],goal:[Double],estimatedToolDeltaMeters:[Double]
+    let estimatedOutwardForearmDeltaMeters:Double
+    let admitted:Bool,detail:String
+    let maximumHullTravelMeters:Double?,checkedPoseCount:Int?
+}
+
+struct ROBWorkspaceInitialRetreatSelection:Codable {
+    let proof:ROBWorkspaceInitialEmptyRetreat?
+    let attempts:[ROBWorkspaceInitialRetreatAttempt]
+    let rejectionDetail:String
+    let representativeRejectedGoal:[Double]?
+    let budgetExhausted:Bool
+    static func representativeRejection(_ attempts:[ROBWorkspaceInitialRetreatAttempt])->ROBWorkspaceInitialRetreatAttempt? {
+        // An occupied corridor must not hide an alternate corridor that only
+        // needs more observation. Its precise native diagnostic remains tied
+        // to that same attempted goal for the next targeted depth view.
+        attempts.first{$0.detail.contains("enters unobserved space.")} ??
+            attempts.first{$0.detail.contains("would intersect an observed workspace obstacle.")} ?? attempts.last
+    }
+}
+
 /// Full-arm planning/checking against a fresh, registered RGB-D map. The
 /// registered hanging/front corridor gets exactly the same checks as a new
 /// connector. All output remains a proposal until the normal runtime grant.
@@ -681,6 +712,108 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         return try reviewUsingContext(baseline:baseline,steps:steps,map:map,model:model,context:context,
             nowMilliseconds:nowMilliseconds,payload:payload,intentionalContact:intentionalContact,
             contactStepIndex:contactStepIndex,carryingAtStart:carryingAtStart)
+    }
+
+    /// Candidate endpoints only. Their names/deltas are model estimates, not
+    /// clearance or actuator authority. Actual URDF FK chooses each side's
+    /// rearward/outward/forward signs, rather than mirroring motor commands.
+    static func initialEmptyRetreatCandidates(from start:[Double],model:ROBGhostRobotModel)->[ROBWorkspaceInitialRetreatCandidate] {
+        guard model.physicalSide=="right",start.count==7,start.allSatisfy(\.isFinite),
+              ROBArmRoutinePlan.near(start,Array(repeating:0,count:7)),
+              (1...3).allSatisfy({index in model.joints.contains{$0.name==model.armJointPrefix+String(index)}}) else {return []}
+        let pose=model.positions(vendorLeft:start),bounds=model.worldCollisionBounds(positions:pose)
+        let links=["four","five","six","seven"].map{model.physicalSide+"_"+$0+"_Link"}+[model.toolLink]
+        func meanY(_ boxes:[String:(low:SIMD3<Double>,high:SIMD3<Double>)])->Double? {
+            let values=links.compactMap{boxes[$0].map{($0.low.y+$0.high.y)/2}}
+            return values.count==links.count ? values.reduce(0,+)/Double(values.count):nil
+        }
+        guard let origin=model.toolPosition(pose),let initialY=meanY(bounds) else {return []}
+        let rearward=ROBCanGrabPreview.rearwardJoint1Direction(model:model,baseline:pose,side:model.physicalSide)
+        let outward=ROBCanGrabPreview.outwardJoint2Direction(model:model,baseline:pose,side:model.physicalSide)
+        let forward=ROBCanGrabPreview.forwardJoint3Direction(model:model,baseline:pose,side:model.physicalSide)
+        let limits=jointBounds(model:model)
+        func candidate(_ name:String,_ three:[Double])->ROBWorkspaceInitialRetreatCandidate? {
+            let offset=three+[0,0,0,0],goal=zip(start,offset).map(+)
+            guard offset.count==7,offset.allSatisfy({$0.isFinite && abs($0)<=0.20}),
+                  zip(goal,limits).allSatisfy({$0.isFinite && $1.contains($0)}) else {return nil}
+            let target=model.positions(vendorLeft:goal)
+            guard let end=model.toolPosition(target),let y=meanY(model.worldCollisionBounds(positions:target)) else {return nil}
+            let delta=end-origin,outwardDelta = -(y-initialY)
+            guard [delta.x,delta.y,delta.z,outwardDelta].allSatisfy(\.isFinite) else {return nil}
+            return .init(name:name,offset:offset,goal:goal,estimatedToolDeltaMeters:[delta.x,delta.y,delta.z],
+                estimatedOutwardForearmDeltaMeters:outwardDelta)
+        }
+        var coupled:[ROBWorkspaceInitialRetreatCandidate]=[]
+        for magnitude in [0.02,0.04] {for shoulder in [1.0,-1.0] {for roll in [1.0,-1.0] {
+            let j2=magnitude==0.02 ? 0.060:0.055
+            if let value=candidate("coupled_\(coupled.count+1)",[rearward*shoulder*magnitude,outward*j2,forward*roll*0.02]) {coupled.append(value)}
+        }}}
+        // Prefer an actual FK-predicted rise and outward motion where one
+        // exists. A useful empty escape is still eligible for full review
+        // even when its tool does not rise. Ties retain stable names/order.
+        coupled.sort {
+            let a=$0.estimatedToolDeltaMeters[2]>0 && $0.estimatedOutwardForearmDeltaMeters>0
+            let b=$1.estimatedToolDeltaMeters[2]>0 && $1.estimatedOutwardForearmDeltaMeters>0
+            if a != b {return a}
+            if abs($0.estimatedToolDeltaMeters[2]-$1.estimatedToolDeltaMeters[2])>1e-9 {
+                return $0.estimatedToolDeltaMeters[2]>$1.estimatedToolDeltaMeters[2]
+            }
+            return $0.name<$1.name
+        }
+        let pure=[0.060,0.071,0.075,0.045].enumerated().compactMap { index,amount in
+            candidate("outward_\(index+1)",[0,outward*amount,0])
+        }
+        return Array((coupled+pure).prefix(12))
+    }
+
+    /// Try distinct bounded initial corridors through the SAME complete proof.
+    /// Unknown cells, original returns, self pairs, jaw inflation and margins
+    /// are unchanged. A collision at their common start rejects every route.
+    static func selectInitialEmptyVisualCalibrationRetreat(from start:[Double],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
+        trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
+        emptyTrialEligibility:Bool,emptyStateEvidenceSource:String)throws->ROBWorkspaceInitialRetreatSelection {
+        _=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
+        let generated=initialEmptyRetreatCandidates(from:start,model:model)
+        guard !generated.isEmpty else {throw ROBGhostMotionError.blocked("Initial retreat candidate generation requires the physical RIGHT arm at a finite hanging pose.")}
+        // Reserve an early attempt for a useful outward fallback; exhausting
+        // the budget on coupled endpoints must not starve that corridor. All
+        // candidates still pass the identical complete sampled proof below.
+        var candidates:[ROBWorkspaceInitialRetreatCandidate]=[]
+        if let first=generated.first {candidates.append(first)}
+        for name in ["outward_2","outward_3","outward_1"] {
+            if let candidate=generated.first(where:{$0.name==name}) {candidates.append(candidate)}
+        }
+        candidates += generated.filter {candidate in !candidates.contains(where:{$0.name==candidate.name})}
+        let began=ProcessInfo.processInfo.systemUptime
+        var attempts:[ROBWorkspaceInitialRetreatAttempt]=[],budgetExhausted=false
+        for candidate in candidates {
+            try Task.checkCancellation()
+            guard ProcessInfo.processInfo.systemUptime-began<8 else {budgetExhausted=true;break}
+            do {
+                let proof=try reviewInitialEmptyVisualCalibrationRetreat(from:start,to:candidate.goal,map:map,model:model,
+                    generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,
+                    trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,emptyTrialEligibility:emptyTrialEligibility,
+                    emptyStateEvidenceSource:emptyStateEvidenceSource)
+                attempts.append(.init(name:candidate.name,offset:candidate.offset,goal:candidate.goal,
+                    estimatedToolDeltaMeters:candidate.estimatedToolDeltaMeters,
+                    estimatedOutwardForearmDeltaMeters:candidate.estimatedOutwardForearmDeltaMeters,
+                    admitted:true,detail:"Complete initial empty-retreat proof passed; dispatch still requires fresh reproof of this exact offset.",
+                    maximumHullTravelMeters:proof.maximumHullTravelMeters,checkedPoseCount:proof.checkedPoseCount))
+                return .init(proof:proof,attempts:attempts,rejectionDetail:"",representativeRejectedGoal:nil,budgetExhausted:false)
+            } catch is CancellationError {throw CancellationError()}
+            catch {
+                attempts.append(.init(name:candidate.name,offset:candidate.offset,goal:candidate.goal,
+                    estimatedToolDeltaMeters:candidate.estimatedToolDeltaMeters,
+                    estimatedOutwardForearmDeltaMeters:candidate.estimatedOutwardForearmDeltaMeters,
+                    admitted:false,detail:error.localizedDescription,maximumHullTravelMeters:nil,checkedPoseCount:nil))
+            }
+        }
+        let representative=ROBWorkspaceInitialRetreatSelection.representativeRejection(attempts)
+        return .init(proof:nil,attempts:attempts,
+            rejectionDetail:representative?.detail ?? "Initial retreat candidate review reached its bounded planning deadline before a route was admitted.",
+            representativeRejectedGoal:representative?.goal,budgetExhausted:budgetExhausted)
     }
 
     /// Distinct start-only admission for a fresh EMPTY hanging arm. Existing
@@ -1128,8 +1261,10 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         }
         /// AABB is broad phase only. Unknown remains unknown wherever the
         /// WHOLE voxel intersects the protected verified convex envelope.
-        /// Occupied cells use EVERY retained source endpoint's union bounds;
-        /// this removes dilation/AABB corner artifacts without deleting data.
+        /// Fresh occupied detail retains complete endpoint groups within each
+        /// original25mm source voxel. Every conservative group is checked;
+        /// unavailable/incomplete detail retains the legacy aggregate union.
+        /// Groups still enclose unmeasured corners within their source voxel.
         func narrowVolume(shape:ROBNominalWorldShape,low:SIMD3<Double>,high:SIMD3<Double>,margin:Double,
             label:String,payload:ROBWorkspaceCarriedObject?,invariantStaticBase:Bool)->String? {
             if map.state(inBoundsLow:low,high:high) == .free {return nil}
@@ -1142,17 +1277,36 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                 if state == .free || (state == .unknown && invariantStaticBase) {continue}
                 let whole=ROBNominalRawBox(low:center-SIMD3(repeating:size/2),high:center+SIMD3(repeating:size/2),key:"\(x),\(y),\(z)")
                 let raw=state == .occupied ? map.occupiedSampleBounds(at:center):nil
-                let query=raw.map{ROBNominalRawBox(low:$0.low,high:$0.high,key:whole.key)} ?? whole
-                guard (0..<3).allSatisfy({query.low[$0].isFinite && query.high[$0].isFinite && query.low[$0]<=query.high[$0]}) else{return "An original occupied-return envelope is invalid."}
-                if shape.separationLowerBound(query)>margin+0.000001 {continue}
-                let distance:Double
-                do {distance=try shape.distance(query,stopAtDistance:margin)}catch{return error.localizedDescription}
-                if distance>margin+0.000001 {continue}
-                if state == .occupied,let contact=intentionalContact,contact.permits(label:label,payload:payload,stepIndex:contactStepIndex),
-                   (raw != nil ? contact.containsMeasuredBounds(low:query.low,high:query.high):contact.containsWholeVoxel(center:center,size:size)) {continue}
-                let detail=String(format:" Convex distance upper bound %.3f mm; retained envelope margin %.3f mm; voxel [%d,%d,%d]; representation %@.",distance*1000,margin*1000,x,y,z,raw == nil ? "whole_voxel":"all_original_return_bounds")
-                if state == .occupied {return "\(label) would intersect an observed workspace obstacle."+detail}
-                return "\(label) enters unobserved space. Scan the whole arm route before moving."+detail
+                let aggregate=raw.map{ROBNominalRawBox(low:$0.low,high:$0.high,key:whole.key)} ?? whole
+                guard (0..<3).allSatisfy({aggregate.low[$0].isFinite && aggregate.high[$0].isFinite && aggregate.low[$0]<=aggregate.high[$0]}) else{return "An original occupied-return envelope is invalid."}
+                var queries=[aggregate],representation=raw == nil ? "whole_voxel":"all_original_return_bounds"
+                if let raw,let groups=map.occupiedSampleSubBounds(at:center),!groups.isEmpty,groups.count<=27 {
+                    var refined:[ROBNominalRawBox]=[],low=SIMD3<Double>(repeating:.infinity),high=SIMD3<Double>(repeating:-.infinity)
+                    for group in groups {
+                        guard group.lowMeters.count==3,group.highMeters.count==3,
+                              (0..<3).allSatisfy({group.lowMeters[$0].isFinite && group.highMeters[$0].isFinite &&
+                                  abs(group.lowMeters[$0])<=20 && abs(group.highMeters[$0])<=20 && group.lowMeters[$0]<=group.highMeters[$0]}) else {refined=[];break}
+                        let a=SIMD3(group.lowMeters[0],group.lowMeters[1],group.lowMeters[2]),b=SIMD3(group.highMeters[0],group.highMeters[1],group.highMeters[2])
+                        low=simd_min(low,a);high=simd_max(high,b)
+                        refined.append(ROBNominalRawBox(low:a,high:b,key:whole.key))
+                    }
+                    // A partial provider never weakens the retained legacy
+                    // union. Every group's aggregate must match it exactly.
+                    if refined.count==groups.count,(0..<3).allSatisfy({abs(low[$0]-raw.low[$0])<=1e-12 && abs(high[$0]-raw.high[$0])<=1e-12}) {
+                        queries=refined;representation="all_original_source_voxel_bounds"
+                    }
+                }
+                for query in queries {
+                    if shape.separationLowerBound(query)>margin+0.000001 {continue}
+                    let distance:Double
+                    do {distance=try shape.distance(query,stopAtDistance:margin)}catch{return error.localizedDescription}
+                    if distance>margin+0.000001 {continue}
+                    if state == .occupied,let contact=intentionalContact,contact.permits(label:label,payload:payload,stepIndex:contactStepIndex),
+                       (raw != nil ? contact.containsMeasuredBounds(low:query.low,high:query.high):contact.containsWholeVoxel(center:center,size:size)) {continue}
+                    let detail=String(format:" Convex distance upper bound %.3f mm; retained envelope margin %.3f mm; voxel [%d,%d,%d]; representation %@.",distance*1000,margin*1000,x,y,z,representation)
+                    if state == .occupied {return "\(label) would intersect an observed workspace obstacle."+detail}
+                    return "\(label) enters unobserved space. Scan the whole arm route before moving."+detail
+                }
             }}}
             return nil
         }

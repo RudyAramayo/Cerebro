@@ -2358,11 +2358,14 @@ enum ROBArmCurrentSpikeRecording {
             throw ROBArmRoutineError.blocked("Initial self-proxy clearance needs a distinct declared-empty first-attempt retreat; no general overlap exemption is available.")
         }
         let emptySource="local_first_attempt_no_arm_travel_or_task_grip"
-        let offset=[0,-0.075,0,0,0,0,0]
+        let preferredOffset=[0,-0.075,0,0,0,0,0]
         let session=generation
-        let coverageReview=try await reviewInitialRetreatWithCoverage(map:map,model:model,initialBaseline:start,offset:offset,emptySource:emptySource)
+        let coverageReview=try await reviewInitialRetreatWithCoverage(map:map,model:model,initialBaseline:start,offset:preferredOffset,emptySource:emptySource)
         map=coverageReview.map
         let trial=coverageReview.trial,initialProof=coverageReview.proof,camera=vision.cameraGeneration
+        // Freeze the selected retreat, rather than silently restoring
+        // the old pure-J2 offset when position mode supplies a fresh baseline.
+        let offset=zip(initialProof.baseline,initialProof.goal).map{$1-$0}
         try requireLiveVisualTrial(trial,map:map,model:model)
         let initialPath=ROBLeftGestureProposal(id:UUID(),name:"Initial declared-empty visual calibration retreat",kind:"initial_empty_visual_retreat",
             modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
@@ -2424,19 +2427,43 @@ enum ROBArmCurrentSpikeRecording {
     @MainActor private func reviewInitialLocalRetreat(map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
         baseline:[Double],goal:[Double],trial:ROBWorkspaceVisualCalibrationTrial,generation:UInt64,camera:UUID,
         now:Double,measuredAt:Double,sequence:UInt64,emptySource:String,stage:String) async throws ->ROBWorkspaceInitialEmptyRetreat {
+        var reviewedGoal=goal
         do {
+            if stage=="before_stationary_mode_preparation" {
+                let selection=try await Task.detached(priority:.userInitiated){
+                    try ROBWorkspaceCollisionPlan.selectInitialEmptyVisualCalibrationRetreat(from:baseline,map:map,model:model,
+                        generation:generation,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial,
+                        measuredAtMilliseconds:measuredAt,emptyTrialEligibility:true,emptyStateEvidenceSource:emptySource)
+                }.value
+                reviewedGoal=selection.proof?.goal ?? selection.representativeRejectedGoal ?? goal
+                if !lastRecordingPath.isEmpty {
+                    let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys,.prettyPrinted]
+                    let path=URL(fileURLWithPath:lastRecordingPath).deletingPathExtension()
+                        .appendingPathExtension("initial-retreat-candidates-"+UUID().uuidString+".json")
+                    try encoder.encode(selection).write(to:path,options:.atomic)
+                    try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:path.path)
+                    var status=collisionReviewStatus as? [String:Any] ?? [:]
+                    status["initial_retreat_candidates_evidence_path"]=path.path
+                    status["initial_retreat_candidate_count"]=selection.attempts.count
+                    collisionReviewStatus=status as NSDictionary
+                }
+                if let selected=selection.proof {return selected}
+                throw ROBArmRoutineError.blocked(selection.rejectionDetail)
+            }
+            // Dispatch rechecks exactly the selected offset. It cannot choose
+            // another route after the camera/mode and measured start freeze.
             return try await Task.detached(priority:.userInitiated){
                 try ROBWorkspaceCollisionPlan.reviewInitialEmptyVisualCalibrationRetreat(from:baseline,to:goal,map:map,model:model,
                     generation:generation,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial,
                     measuredAtMilliseconds:measuredAt,emptyTrialEligibility:true,emptyStateEvidenceSource:emptySource)
             }.value
         } catch {
-            let original=error,detail=error.localizedDescription,recording=lastRecordingPath
+            let original=error,detail=error.localizedDescription,recording=lastRecordingPath,rejectedGoal=reviewedGoal
             do {
                 guard !recording.isEmpty else {throw ROBArmRoutineError.blocked("No task recording path is available for the rejection export.")}
                 let evidence=try await Task.detached(priority:.utility){
                     try ROBInitialRetreatFailureExport.write(recording:URL(fileURLWithPath:recording),map:map,model:model,
-                        baseline:baseline,goal:goal,trial:trial,stage:stage,reviewTimeMilliseconds:now,
+                        baseline:baseline,goal:rejectedGoal,trial:trial,stage:stage,reviewTimeMilliseconds:now,
                         measuredAtMilliseconds:measuredAt,sequence:sequence,detail:detail)
                 }.value
                 var status=collisionReviewStatus as? [String:Any] ?? [:]

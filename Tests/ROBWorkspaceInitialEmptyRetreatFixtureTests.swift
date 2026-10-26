@@ -73,6 +73,61 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
         var notHanging=hanging;notHanging[0]=0.026
         blocked("fresh measured hanging") {_=try review(notHanging,start:notHanging)}
         blocked("nonworsening retreat") {_=try review(hanging)}
+        let generated=ROBWorkspaceCollisionPlan.initialEmptyRetreatCandidates(from:hanging,model:model)
+        precondition(generated.count==12 && Set(generated.map(\.goal)).count==12)
+        let deterministicEncoder=JSONEncoder();deterministicEncoder.outputFormatting=[.sortedKeys]
+        let serialized=try deterministicEncoder.encode(generated)
+        let repeatedSerialized=try deterministicEncoder.encode(ROBWorkspaceCollisionPlan.initialEmptyRetreatCandidates(from:hanging,model:model))
+        precondition(serialized==repeatedSerialized,
+            "Candidate order was not deterministic")
+        precondition(generated.prefix(8).allSatisfy{$0.offset.prefix(3).allSatisfy{$0 != 0}} &&
+            generated.suffix(4).allSatisfy{$0.offset[0]==0 && $0.offset[2]==0 && $0.offset[1]<0},
+            "Coupled alternatives or outward-only fallbacks are missing")
+        for candidate in generated {
+            precondition(candidate.offset.count==7 && candidate.goal==zip(hanging,candidate.offset).map(+) &&
+                candidate.offset.allSatisfy{abs($0)<=0.20} && candidate.offset.suffix(4).allSatisfy{$0==0})
+            let before=model.toolPosition(model.positions(vendorLeft:hanging))!,after=model.toolPosition(model.positions(vendorLeft:candidate.goal))!
+            precondition(simd_distance(after-before,SIMD3(candidate.estimatedToolDeltaMeters[0],candidate.estimatedToolDeltaMeters[1],candidate.estimatedToolDeltaMeters[2]))<1e-10,
+                "Candidate lift metric does not come from actual URDF FK")
+            precondition(candidate.estimatedOutwardForearmDeltaMeters>0,"RIGHT outward sign did not follow current model FK")
+        }
+        precondition(ROBWorkspaceCollisionPlan.initialEmptyRetreatCandidates(from:[.nan,0,0,0,0,0,0],model:model).isEmpty)
+        func select(_ source:SyntheticMap)throws->ROBWorkspaceInitialRetreatSelection {
+            try ROBWorkspaceCollisionPlan.selectInitialEmptyVisualCalibrationRetreat(from:hanging,map:source,model:model,
+                generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(source),
+                measuredAtMilliseconds:1000,emptyTrialEligibility:true,emptyStateEvidenceSource:"local_first_attempt_no_arm_travel_or_task_grip")
+        }
+        let chosen=try select(map)
+        guard let selected=chosen.proof else {
+            let report=try JSONEncoder().encode(chosen)
+            try FileHandle.standardError.write(contentsOf:report)
+            preconditionFailure(chosen.rejectionDetail)
+        }
+        precondition(chosen.attempts.count<=12 && chosen.attempts.last?.admitted==true && chosen.rejectionDetail.isEmpty &&
+            selected.maximumHullTravelMeters<=0.06 && selected.step.seconds==4 && selected.step.jawAction==nil &&
+            selected.endpointProxyClearancesMeters.values.allSatisfy{$0>=0.03})
+        let rechecked=try review(selected.goal)
+        precondition(rechecked.goal==selected.goal && rechecked.baseline==selected.baseline,
+            "Selected route could not pass the unchanged complete initial proof")
+        let encodedSelection=try JSONEncoder().encode(chosen)
+        let decodedSelection=try JSONDecoder().decode(ROBWorkspaceInitialRetreatSelection.self,from:encodedSelection)
+        precondition(decodedSelection.proof?.goal==selected.goal)
+        var unknownCandidates=map;unknownCandidates.observed=false
+        let unknownSelection=try select(unknownCandidates)
+        precondition(unknownSelection.proof==nil && unknownSelection.attempts.count>1 && unknownSelection.attempts.count<=12 &&
+            unknownSelection.attempts.allSatisfy{!$0.admitted} && unknownSelection.rejectionDetail.contains("unobserved") &&
+            unknownSelection.attempts.contains{$0.goal==unknownSelection.representativeRejectedGoal && $0.detail==unknownSelection.rejectionDetail},
+            "An unobserved common baseline was excused by an alternate endpoint")
+        let knownAttempt=ROBWorkspaceInitialRetreatAttempt(name:"occupied_route",offset:generated[0].offset,goal:generated[0].goal,
+            estimatedToolDeltaMeters:generated[0].estimatedToolDeltaMeters,estimatedOutwardForearmDeltaMeters:generated[0].estimatedOutwardForearmDeltaMeters,
+            admitted:false,detail:"right_five_Link would intersect an observed workspace obstacle.",maximumHullTravelMeters:nil,checkedPoseCount:nil)
+        let unknownAttempt=ROBWorkspaceInitialRetreatAttempt(name:"unknown_alternate",offset:generated[1].offset,goal:generated[1].goal,
+            estimatedToolDeltaMeters:generated[1].estimatedToolDeltaMeters,estimatedOutwardForearmDeltaMeters:generated[1].estimatedOutwardForearmDeltaMeters,
+            admitted:false,detail:"right_five_Link enters unobserved space.",maximumHullTravelMeters:nil,checkedPoseCount:nil)
+        let representative=ROBWorkspaceInitialRetreatSelection.representativeRejection([knownAttempt,unknownAttempt])
+        precondition(representative?.goal==unknownAttempt.goal && representative?.detail==unknownAttempt.detail,
+            "An occupied route hid a distinct unknown alternate's targeted-coverage diagnostic")
+        print("Initial corridor selector:12deterministic actual-FK coupled/outward endpoints; selected full4s/60mm/0.20rad proof; exact selected route reproof; unknown common start remains blocked; Codable attempt evidence, no dispatch")
         var candidates:[ROBWorkspaceInitialEmptyRetreat]=[]
         for goal in [[0.0,-0.075,0,0,0,0,0],[0.0,-0.071,0,0,0,0,0],[-0.04,-0.06,0.02,0,0,0,0]] {
             let delta=goal[1]

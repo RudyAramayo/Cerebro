@@ -58,6 +58,10 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
     fileprivate let occupied: Set<ROBWorkspaceVoxel>
     fileprivate let free: Set<ROBWorkspaceVoxel>
     fileprivate let occupiedSamples: [ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds]
+    // Optional for legacy snapshots: missing source correlation can never be
+    // reconstructed by splitting their already-merged occupied bounds.
+    fileprivate let occupiedSourceSamples: [ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds]?
+    fileprivate let sourceSamplesAreComplete: Bool
     let fingerprint: String
     var occupiedVoxels: [ROBWorkspaceVoxel] { Array(occupied) }
     var freeVoxels: [ROBWorkspaceVoxel] { Array(free) }
@@ -92,7 +96,8 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
         registrationID: String?, registrationUncertaintyMeters: Double?,bodyMotionIdentity:String,
         occupied: Set<ROBWorkspaceVoxel>, free: Set<ROBWorkspaceVoxel>,
         occupiedSamples:[ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds], observations:[ROBWorkspaceDepthObservation],
-        estimatedCameraProjectionIdentity:String? = nil) {
+        estimatedCameraProjectionIdentity:String? = nil,
+        occupiedSourceSamples:[ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds]? = nil) {
         self.sceneID = sceneID; self.modelID = modelID; self.geometryID = geometryID; self.mappingID = mappingID
         self.sessionGeneration = sessionGeneration; self.cameraGeneration = cameraGeneration
         self.createdAtMilliseconds = createdAtMilliseconds
@@ -101,6 +106,9 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
         self.voxelSizeMeters = voxelSizeMeters; self.observedFrameCount = observedFrameCount
         self.isTruncated = isTruncated; self.occupied = occupied; self.free = free.subtracting(occupied)
         self.occupiedSamples = occupiedSamples
+        self.occupiedSourceSamples = occupiedSourceSamples
+        sourceSamplesAreComplete = !isTruncated && Self.sourceCoverageIsComplete(occupiedSourceSamples,
+            occupied:occupied,unions:occupiedSamples,size:voxelSizeMeters)
         self.observations = observations
         self.capturedRegistrationID = registrationID; self.registrationUncertaintyMeters = registrationUncertaintyMeters
         self.bodyMotionIdentity=bodyMotionIdentity
@@ -136,12 +144,111 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
             "registrationUncertaintyMeters": registrationUncertaintyMeters as Any? ?? NSNull(),
             "occupied": ordered(occupied), "free": ordered(self.free),
             "occupiedSampleBounds": sampleRecords]
+        if let occupiedSourceSamples {
+            var records:[[Double]]=[]
+            for (cell,bounds) in occupiedSourceSamples {
+                records.append([Double(cell.x),Double(cell.y),Double(cell.z),bounds.low.x,bounds.low.y,bounds.low.z,
+                    bounds.high.x,bounds.high.y,bounds.high.z])
+            }
+            records.sort {a,b in a[0] != b[0] ? a[0]<b[0] : a[1] != b[1] ? a[1]<b[1] : a[2]<b[2]}
+            identity["occupiedSourceSampleBounds"]=records
+        }
         // Preserve legacy/frozen-context fingerprints when this is absent.
         if let estimatedCameraProjectionIdentity {identity["estimatedCameraProjectionIdentity"]=estimatedCameraProjectionIdentity}
         var bytes = (try? JSONSerialization.data(withJSONObject: identity, options: [.sortedKeys])) ?? Data()
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         bytes.append((try? encoder.encode(observations)) ?? Data())
         fingerprint = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private enum CodingKeys:String,CodingKey {
+        case sceneID,modelID,geometryID,mappingID,sessionGeneration,cameraGeneration,createdAtMilliseconds
+        case oldestCapturedAtMilliseconds,lastCapturedAtMilliseconds,voxelSizeMeters,capturedRegistrationID
+        case bodyMotionIdentity,estimatedCameraProjectionIdentity,registrationUncertaintyMeters,observedFrameCount
+        case isTruncated,registrationDetail,observations,occupied,free,occupiedSamples,occupiedSourceSamples,fingerprint
+    }
+
+    init(from decoder:Decoder)throws {
+        let c=try decoder.container(keyedBy:CodingKeys.self)
+        sceneID=try c.decode(UUID.self,forKey:.sceneID)
+        modelID=try c.decode(String.self,forKey:.modelID);geometryID=try c.decode(String.self,forKey:.geometryID)
+        mappingID=try c.decode(String.self,forKey:.mappingID)
+        sessionGeneration=try c.decode(UInt64.self,forKey:.sessionGeneration)
+        cameraGeneration=try c.decode(UUID.self,forKey:.cameraGeneration)
+        createdAtMilliseconds=try c.decode(Double.self,forKey:.createdAtMilliseconds)
+        oldestCapturedAtMilliseconds=try c.decode(Double.self,forKey:.oldestCapturedAtMilliseconds)
+        lastCapturedAtMilliseconds=try c.decode(Double.self,forKey:.lastCapturedAtMilliseconds)
+        voxelSizeMeters=try c.decode(Double.self,forKey:.voxelSizeMeters)
+        capturedRegistrationID=try c.decodeIfPresent(String.self,forKey:.capturedRegistrationID)
+        bodyMotionIdentity=try c.decode(String.self,forKey:.bodyMotionIdentity)
+        estimatedCameraProjectionIdentity=try c.decodeIfPresent(String.self,forKey:.estimatedCameraProjectionIdentity)
+        registrationUncertaintyMeters=try c.decodeIfPresent(Double.self,forKey:.registrationUncertaintyMeters)
+        observedFrameCount=try c.decode(Int.self,forKey:.observedFrameCount)
+        isTruncated=try c.decode(Bool.self,forKey:.isTruncated)
+        registrationDetail=try c.decode(String.self,forKey:.registrationDetail)
+        observations=try c.decode([ROBWorkspaceDepthObservation].self,forKey:.observations)
+        occupied=try c.decode(Set<ROBWorkspaceVoxel>.self,forKey:.occupied)
+        free=try c.decode(Set<ROBWorkspaceVoxel>.self,forKey:.free)
+        occupiedSamples=try c.decode([ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds].self,forKey:.occupiedSamples)
+        occupiedSourceSamples=try c.decodeIfPresent([ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds].self,forKey:.occupiedSourceSamples)
+        fingerprint=try c.decode(String.self,forKey:.fingerprint)
+        sourceSamplesAreComplete = !isTruncated && Self.sourceCoverageIsComplete(occupiedSourceSamples,
+            occupied:occupied,unions:occupiedSamples,size:voxelSizeMeters)
+    }
+
+    fileprivate func canonicalFingerprint(withSourceSamples source:[ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds]?)->String {
+        Self(sceneID:sceneID,modelID:modelID,geometryID:geometryID,mappingID:mappingID,sessionGeneration:sessionGeneration,
+            cameraGeneration:cameraGeneration,createdAtMilliseconds:createdAtMilliseconds,
+            oldestCapturedAtMilliseconds:oldestCapturedAtMilliseconds,lastCapturedAtMilliseconds:lastCapturedAtMilliseconds,
+            voxelSizeMeters:voxelSizeMeters,observedFrameCount:observedFrameCount,isTruncated:isTruncated,
+            registrationID:capturedRegistrationID,registrationUncertaintyMeters:registrationUncertaintyMeters,
+            bodyMotionIdentity:bodyMotionIdentity,occupied:occupied,free:free,occupiedSamples:occupiedSamples,
+            observations:observations,estimatedCameraProjectionIdentity:estimatedCameraProjectionIdentity,
+            occupiedSourceSamples:source).fingerprint
+    }
+
+    /// Validate the complete correlation table, not just a caller's selected
+    /// cell. Every original source voxel contributes to all27 dilated cells,
+    /// and the aggregate must reproduce every retained legacy union exactly.
+    private static func sourceCoverageIsComplete(_ source:[ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds]?,
+        occupied:Set<ROBWorkspaceVoxel>,unions:[ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds],size:Double)->Bool {
+        guard let source,size==0.025,source.count<=400_000,occupied.count<=400_000,
+              source.count<=occupied.count,unions.count==occupied.count else {return false}
+        var derived:[ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds]=[:]
+        derived.reserveCapacity(occupied.count)
+        for (key,bounds) in source {
+            guard [key.x,key.y,key.z].allSatisfy({abs(Double($0)*size)<10}),
+                  (0..<3).allSatisfy({bounds.low[$0].isFinite && bounds.high[$0].isFinite && bounds.low[$0]<=bounds.high[$0]}) else {return false}
+            let low=SIMD3(Double(key.x),Double(key.y),Double(key.z))*size,high=low+SIMD3(repeating:size)
+            guard (0..<3).allSatisfy({bounds.low[$0]>=low[$0]-1e-12 && bounds.high[$0]<=high[$0]+1e-12}) else {return false}
+            for x in -1...1 {for y in -1...1 {for z in -1...1 {
+                let cell=ROBWorkspaceVoxel(x:key.x+x,y:key.y+y,z:key.z+z)
+                guard occupied.contains(cell) else {return false}
+                if var aggregate=derived[cell] {
+                    aggregate.low=simd_min(aggregate.low,bounds.low);aggregate.high=simd_max(aggregate.high,bounds.high)
+                    derived[cell]=aggregate
+                } else {derived[cell]=bounds}
+            }}}
+        }
+        guard derived.count==occupied.count else {return false}
+        return occupied.allSatisfy {cell in
+            guard let a=derived[cell],let b=unions[cell] else {return false}
+            return (0..<3).allSatisfy {abs(a.low[$0]-b.low[$0])<=1e-12 && abs(a.high[$0]-b.high[$0])<=1e-12}
+        }
+    }
+
+    func occupiedSampleSubBounds(at point:SIMD3<Double>)->[ROBWorkspaceOccupiedReturnBounds]? {
+        guard sourceSamplesAreComplete,let source=occupiedSourceSamples,
+              [point.x,point.y,point.z].allSatisfy(\.isFinite),simd_length(point)<10 else {return nil}
+        let cell=ROBWorkspaceVoxel(x:Int(floor(point.x/voxelSizeMeters)),y:Int(floor(point.y/voxelSizeMeters)),z:Int(floor(point.z/voxelSizeMeters)))
+        guard occupied.contains(cell) else {return nil}
+        var result:[ROBWorkspaceOccupiedReturnBounds]=[]
+        for x in -1...1 {for y in -1...1 {for z in -1...1 {
+            if let b=source[.init(x:cell.x+x,y:cell.y+y,z:cell.z+z)] {
+                result.append(.init(lowMeters:[b.low.x,b.low.y,b.low.z],highMeters:[b.high.x,b.high.y,b.high.z]))
+            }
+        }}}
+        return result.isEmpty ? nil:result
     }
 
     var originalOccupiedReturnBounds:[ROBWorkspaceOccupiedReturnBounds]? {
@@ -204,6 +311,7 @@ struct ROBWorkspaceDepthMap {
     private var occupied = Set<ROBWorkspaceVoxel>()
     private var free = Set<ROBWorkspaceVoxel>()
     private var occupiedSamples: [ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds] = [:]
+    private var occupiedSourceSamples: [ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds]? = [:]
     private var oldestCapture: Double?
     private var latestCapture = 0.0
     private var lastSequence: UInt64 = 0
@@ -276,10 +384,19 @@ struct ROBWorkspaceDepthMap {
         self.estimatedCameraProjectionIdentity=estimatedCameraProjectionIdentity
         storageBudget = .standard
         occupied=snapshot.occupied;free=snapshot.free;occupiedSamples=snapshot.occupiedSamples
+        occupiedSourceSamples=snapshot.sourceSamplesAreComplete ? snapshot.occupiedSourceSamples:nil
         oldestCapture=snapshot.oldestCapturedAtMilliseconds;latestCapture=snapshot.lastCapturedAtMilliseconds
         lastSequence=snapshot.observations.last!.sequence;frameCount=snapshot.observedFrameCount
         truncated=false;observations=snapshot.observations;allFramesRegistered=false;registrationProofs=[:]
-        guard self.snapshot(nowMilliseconds:snapshot.createdAtMilliseconds)?.fingerprint==snapshot.fingerprint else {throw reject()}
+        let expectedFingerprint:String
+        if snapshot.occupiedSourceSamples != nil && !snapshot.sourceSamplesAreComplete {
+            // Invalid correlation data never becomes complete after later
+            // pixels. Verify the original frozen data before dropping only
+            // that optional detail; all legacy unions and observations stay.
+            guard snapshot.canonicalFingerprint(withSourceSamples:snapshot.occupiedSourceSamples)==snapshot.fingerprint else {throw reject()}
+            expectedFingerprint=snapshot.canonicalFingerprint(withSourceSamples:nil)
+        } else {expectedFingerprint=snapshot.fingerprint}
+        guard self.snapshot(nowMilliseconds:snapshot.createdAtMilliseconds)?.fingerprint==expectedFingerprint else {throw reject()}
     }
 
     mutating func append(width: Int, height: Int, fx: Double, fy: Double, cx: Double, cy: Double,
@@ -465,7 +582,7 @@ struct ROBWorkspaceDepthMap {
             observedFrameCount: frameCount, isTruncated: truncated,
             registrationID:registrationID,registrationUncertaintyMeters:uncertainty,bodyMotionIdentity:bodyMotionIdentity,
             occupied: occupied, free: free, occupiedSamples:occupiedSamples, observations:observations,
-            estimatedCameraProjectionIdentity:estimatedCameraProjectionIdentity)
+            estimatedCameraProjectionIdentity:estimatedCameraProjectionIdentity,occupiedSourceSamples:occupiedSourceSamples)
     }
 
     private func voxel(_ point: SIMD3<Double>) -> ROBWorkspaceVoxel {
@@ -476,6 +593,14 @@ struct ROBWorkspaceDepthMap {
     }
     private mutating func markOccupied(_ point: SIMD3<Double>) {
         let center = voxel(point)
+        if occupiedSourceSamples != nil {
+            if var bounds=occupiedSourceSamples?[center] {
+                bounds.low=simd_min(bounds.low,point);bounds.high=simd_max(bounds.high,point)
+                occupiedSourceSamples?[center]=bounds
+            } else if occupiedSourceSamples!.count<storageBudget.occupiedVoxels {
+                occupiedSourceSamples?[center] = .init(low:point,high:point)
+            } else {truncated=true}
+        }
         for x in -1...1 { for y in -1...1 { for z in -1...1 {
             let cell=ROBWorkspaceVoxel(x:center.x+x,y:center.y+y,z:center.z+z)
             // Re-observing an existing cell consumes no capacity. Continue
