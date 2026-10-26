@@ -31,9 +31,9 @@ final class Vision {
  var cameraGeneration=UUID(),next:UInt64=2
  var mode="normal"
  func settledDepthFrame(deadlineUptime:Double?)async throws->Frame {
-  precondition(deadlineUptime==114.0)
+  precondition(deadlineUptime==120.0)
   if mode=="frame_unavailable" {throw ROBWorkspaceDepthMapError.acquisition}
-  if mode=="deadline" {ProcessInfo.processInfo.systemUptime=115}
+  if mode=="deadline" {ProcessInfo.processInfo.systemUptime=121}
   if mode=="source_changed" {cameraGeneration=UUID()}
   let frame=Frame(sequence:next,capturedAt:1000+Double(next)*100);next+=1
   return frame
@@ -56,7 +56,7 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
  func requireSceneProjectionIdentity()throws {}
  func progress(_ value:String) {}
  func moveView(_ view:ROBWorkspaceView,deadlineUptime:Double?)async throws->Bool {
-  precondition(deadlineUptime==114.0);views.append(view)
+  precondition(deadlineUptime==120.0);views.append(view)
   return mode != "view_unavailable"
  }
  func accumulateCollisionDepth(_ view:ROBWorkspaceView,capturedFrame:Frame?,preservingSceneID:UUID?)async throws {
@@ -72,29 +72,29 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
 @main struct CoverageFixtures {
  @MainActor static func main()async throws {
   let right=try await exercise()
-  precondition(right.views==[.init(panDegrees:-35,upperTarget:5650),.init(panDegrees:-55,upperTarget:5650)])
-  precondition(right.captured.map(\.sequence)==[2,3] && right.captured.map(\.capturedAt)==[1200,1300])
-  precondition(right.evidence.filter{$0["depth_only_arm_coverage"] as? Bool==true}.count==2)
+  precondition(right.views==[.init(panDegrees:-35,upperTarget:5650),.init(panDegrees:-55,upperTarget:5650),.init(panDegrees:-45,upperTarget:5300)])
+  precondition(right.captured.map(\.sequence)==[2,3,4] && right.captured.map(\.capturedAt)==[1200,1300,1400])
+  precondition(right.evidence.filter{$0["depth_only_arm_coverage"] as? Bool==true}.count==3)
   precondition(right.evidence.allSatisfy{$0["detector_invoked"] as? Bool != true && $0["free_space_inferred"] as? Bool != true})
-  let summary=right.evidence.last!;precondition(summary["captured_views"] as! Int==2 && summary["budget_seconds"] as! Double==14.0)
+  let summary=right.evidence.last!;precondition(summary["captured_views"] as! Int==3 && summary["maximum_views"] as! Int==3 && summary["budget_seconds"] as! Double==20.0)
   precondition(summary["scene_id"] as! String==right.map!.sceneID.uuidString)
-  let left=try await exercise(side:"left");precondition(left.views==[.init(panDegrees:35,upperTarget:5650),.init(panDegrees:55,upperTarget:5650)])
+  let left=try await exercise(side:"left");precondition(left.views==[.init(panDegrees:35,upperTarget:5650),.init(panDegrees:55,upperTarget:5650),.init(panDegrees:45,upperTarget:5300)])
   let firstGrasp=try await exercise(objects:false,canOnly:true)
-  precondition(firstGrasp.views.count==2 && firstGrasp.captured.count==2,"Can-only grasp must retain whole-arm coverage without finding a bucket first")
+  precondition(firstGrasp.views.count==3 && firstGrasp.captured.count==3,"Can-only grasp must retain whole-arm coverage without finding a bucket first")
   for mode in 0..<3 {
    let x=try await exercise(permit:mode != 0,fixed:mode==1,objects:mode != 2)
    precondition(x.views.isEmpty && x.captured.isEmpty && x.evidence.isEmpty)
   }
   let unavailable=try await exercise(mode:"frame_unavailable")
-  precondition(unavailable.views.count==2 && unavailable.captured.isEmpty)
-  precondition(unavailable.evidence.filter{$0["status"] as? String=="unavailable"}.count==2)
+  precondition(unavailable.views.count==3 && unavailable.captured.isEmpty)
+  precondition(unavailable.evidence.filter{$0["status"] as? String=="unavailable"}.count==3)
   let expired=try await exercise(mode:"deadline")
   precondition(expired.views.count==1 && expired.captured.isEmpty,"A budget-expired frame enrolled or extra view started")
   for mode in ["source_changed","map_replaced","body_moved"] {
    do {_=try await exercise(mode:mode);preconditionFailure("Changed context published coverage")}
    catch ROBWorkspaceDepthMapError.invalidFrame {}
   }
-  print("PASS actual selected-arm depth-only coverage: local-only/defaultclosed/fixed-head untouched, two mirrored views/shared14sdeadline, exact original timestamps/same scene enrollment, no detector or free-space invention, source/body/map changes reject")
+  print("PASS actual selected-arm depth-only coverage: local-only/defaultclosed/fixed-head untouched, three distinct mirrored views/shared20sdeadline, exact original timestamps/same scene enrollment, no detector or free-space invention, source/body/map changes reject")
  }
 }
 '''

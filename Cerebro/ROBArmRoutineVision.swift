@@ -2386,20 +2386,21 @@ struct ROBWorkspaceCanSelection {
             }
         }
         // The fast object search need not see the selected hanging arm. Add
-        // only two bounded depth views for this explicit local trial; detector
+        // only three bounded depth views for this explicit local trial; detector
         // inference, self masks, occupied returns and free-space gates are unchanged.
         // Use lateral parallax: tilting at one pan kept the hanging forearm
         // behind the same shoulder in the recorded failed entry scans.
         if requireDepth,collectCollisionDepth,fixedRegisteredView==nil,
            found[.can] != nil,(found[.orangeBucket] != nil || targets == [.can]),try permitsLocalCanShapePrior(),
            let originalMap=collisionMap,originalMap.estimatedCameraProjectionIdentity != nil {
-            let started=ProcessInfo.processInfo.systemUptime,deadline=started+14
+            let started=ProcessInfo.processInfo.systemUptime,deadline=started+20
             let sceneID=originalMap.sceneID,camera=vision.cameraGeneration,body=originalMap.bodyMotionIdentity
             let desiredPan=model.physicalSide=="right" ? -55.0 : 55.0
             let alternatePan=model.physicalSide=="right" ? -35.0 : 35.0
+            let uprightPan=model.physicalSide=="right" ? -45.0 : 45.0
             let coverageViews=[alternatePan,desiredPan].map {
                 ROBWorkspaceView(panDegrees:boundedPan?($0) ?? $0,upperTarget:5650)
-            }
+            } + [ROBWorkspaceView(panDegrees:boundedPan?(uprightPan) ?? uprightPan,upperTarget:5300)]
             var capturedViews=0
             func requireCoverageContext() throws {
                 try check();try Task.checkCancellation();try requireSceneProjectionIdentity()
@@ -2437,8 +2438,8 @@ struct ROBWorkspaceCanSelection {
                 }
             }
             try requireCoverageContext()
-            evidence.append(["depth_only_arm_coverage_summary":true,"captured_views":capturedViews,"maximum_views":2,
-                "elapsed_seconds":ProcessInfo.processInfo.systemUptime-started,"budget_seconds":14.0,
+            evidence.append(["depth_only_arm_coverage_summary":true,"captured_views":capturedViews,"maximum_views":3,
+                "elapsed_seconds":ProcessInfo.processInfo.systemUptime-started,"budget_seconds":20.0,
                 "scene_id":sceneID.uuidString,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true])
         }
         if localReachSelectionRequired {found[.can]=localReachSelection?.object}
