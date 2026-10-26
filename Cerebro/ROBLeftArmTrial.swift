@@ -209,6 +209,28 @@ private struct ROBSourcePixelArchiveInputs {
     }
 }
 
+/// Value-only diagnostics for the unchanged250ms/3mm stationary hold guard.
+private enum ROBHeldArmFeedbackGuard {
+    static func failures(present:Bool,motorAge:Double,gripperAge:Double,q:[Double],expectedQ:[Double],
+        gatewayModes:[Int],reportedModes:[Int],expectedModes:[Int])->[String] {
+        var fields:[String]=[]
+        if !present {fields.append("telemetry_missing")}
+        if !(motorAge<=250) {fields.append("motor_age_ms")}
+        if !(gripperAge<=250) {fields.append("gripper_age_ms")}
+        if q.count != 7 || expectedQ.count != 7 || !q.allSatisfy(\.isFinite) {fields.append("joint_positions")}
+        if gatewayModes != expectedModes {fields.append("gateway_modes")}
+        if reportedModes != expectedModes {fields.append("reported_modes")}
+        if q.count==7,expectedQ.count==7,
+           !(1.5*zip(q,expectedQ).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003) {fields.append("position_drift_m")}
+        return fields
+    }
+    static func agesOnly(_ fields:[String])->Bool {!fields.isEmpty && fields.allSatisfy{["motor_age_ms","gripper_age_ms"].contains($0)}}
+}
+private struct ROBPassiveFeedbackPause:LocalizedError {
+    let detail:String
+    var errorDescription:String? {detail}
+}
+
 @objcMembers final class ROBLeftArmTrial: NSObject {
     static let shared = ROBLeftArmTrial()
     static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax", "left_object_cycle",
@@ -245,6 +267,9 @@ private struct ROBSourcePixelArchiveInputs {
     private var localReceiptEvidence: NSDictionary?
     private var localReceiptHeldNeckIdentity: String?
     private var localReceiptPerceptionFailure = false
+    private var passiveFeedbackPauseStarted:Double?
+    private var lastHeldFeedbackDiagnostic:String?
+    private var localCameraPreparationTask:Task<Void,Never>?
     @nonobjc private var localReceiptContextComponents: [String:String]?
     @nonobjc private(set) var localRecyclingContextDiagnostics: NSDictionary = [:]
     @nonobjc private var localReceiptModel: ROBGhostRobotModel?
@@ -861,7 +886,23 @@ private struct ROBSourcePixelArchiveInputs {
             }
             return
         }
-        performImpl(command,target:target,localReceiptOnly:true,completion:completion)
+        guard localCameraPreparationTask==nil,!isRunning,!broker.isPending else {completion(["status":"busy","detail":"A task is already preparing or running."]);return}
+        localReceiptCameraTimer?.invalidate();localReceiptCameraTimer=nil
+        let previous=vision.snapshot()["face"]?.sequence ?? 0
+        vision.ensureActiveForTaskObservation();ROBArmRoutineCoordinator.shared.cameraDemand?(true)
+        if vision.fresh {performImpl(command,target:target,localReceiptOnly:true,completion:completion);return}
+        localCameraPreparationTask=Task { @MainActor [weak self] in
+            guard let self else{return};defer {self.localCameraPreparationTask=nil}
+            let end=ProcessInfo.processInfo.systemUptime+12
+            while !Task.isCancelled,!self.isRunning,!broker.isPending,ProcessInfo.processInfo.systemUptime<end {
+                if self.vision.fresh,let frame=self.vision.snapshot()["face"],frame.sequence>previous,frame.depth != nil {
+                    self.performImpl(command,target:target,localReceiptOnly:true,completion:completion);return
+                }
+                try?await Task.sleep(nanoseconds:50_000_000)
+            }
+            if !Task.isCancelled {completion(["status":"blocked","arm_motion_sent":false,"jaw_command_sent":false,
+                "detail":"The task camera did not provide a newly enrolled fresh RGB-D frame within12seconds; no arm command sent."])}
+        }
     }
 
     private func performImpl(_ requestedCommand:String,target:String,localReceiptOnly:Bool,completion:@escaping(NSDictionary)->Void) {
@@ -1028,7 +1069,7 @@ private struct ROBSourcePixelArchiveInputs {
 
     func cancel(reason: String) {
         sourcePixelCurrentView=nil;sourcePixelCurrentEvidenceSHA256=nil;sourcePixelCurrentMapFingerprint=nil;sourcePixelCurrentSourceMapJSON=nil
-        sourcePixelPreparationTask?.cancel();sourcePixelPreparationTask=nil;sourcePixelPreparationID=nil;localCampaignRecoveryTask?.cancel();localCampaignRecoveryTask=nil;standingPreparationTask?.cancel();standingPreparationTask=nil;localCampaignRecoveryReason=nil
+        localCameraPreparationTask?.cancel();localCameraPreparationTask=nil;sourcePixelPreparationTask?.cancel();sourcePixelPreparationTask=nil;sourcePixelPreparationID=nil;localCampaignRecoveryTask?.cancel();localCampaignRecoveryTask=nil;standingPreparationTask?.cancel();standingPreparationTask=nil;localCampaignRecoveryReason=nil
         abort(reason)
     }
 
@@ -1494,6 +1535,7 @@ private struct ROBSourcePixelArchiveInputs {
         sceneCapturedForThisTask = command == "left_estimated_calibration"; reviewedDispatchStart = nil
         armTravelDispatched = false; jawCommandDispatched=false;jawSetupDispatchUncertain=false;servoPossiblePayloadUncertain=false;recyclingReachDispatched=false
         localReceiptHeldNeckIdentity=nil;localReceiptPerceptionFailure=false;sceneHold = [:];localCampaignRecoveryReason=nil
+        passiveFeedbackPauseStarted=nil;lastHeldFeedbackDiagnostic=nil
         activeCommand = command;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=1; recyclingGripDispatched=false; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0;servoTelemetryHistory=[];servoEvidenceWriteError=nil;taskOpeningCommandAtMilliseconds=nil
         currentSpikeCompletionTask?.cancel();currentSpikeCompletionTask=nil
@@ -1537,14 +1579,42 @@ private struct ROBSourcePixelArchiveInputs {
             captureActualCampaignInterruption()
             do {_ = try requireLocalReceipt()} catch {captureActualCampaignInterruption();throw error}
         }
-        if localReceiptCommand != nil,let held=sceneHold[arm == "left" ? "right" : "left"] {
-            let other=arm == "left" ? "right" : "left"
-            guard let sample=gateway.telemetry(forArm:other),sample.effectiveSampleAgeMilliseconds<=250,
-                  sample.effectiveGripperFeedbackAgeMilliseconds<=250,sample.positionsRadians.count==7,
-                  gateway.modes(forArm:other).map(\.intValue)==held.modes,sample.statuses.map(\.intValue)==held.modes,
-                  1.5*zip(sample.positionsRadians.map(\.doubleValue),held.positions).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
-                throw ROBArmRoutineError.blocked("The other arm changed during the local recycling job.")
+        let passive=inactiveWorkspaceSearch && sceneHold.count==2 && sceneHold.values.allSatisfy{$0.modes==Array(repeating:0,count:7)} &&
+            !leased && !positionReady && !armTravelDispatched && !jawCommandDispatched && !jawSetupDispatchUncertain && !recyclingGripDispatched
+        if localReceiptCommand != nil {
+            let sides=passive ? ["left","right"]:[arm == "left" ? "right":"left"]
+            var ageFailures:[String]=[]
+            for side in sides {if let held=sceneHold[side] {
+                let sample=gateway.telemetry(forArm:side),q=sample?.positionsRadians.map(\.doubleValue) ?? []
+                let motor=sample?.effectiveSampleAgeMilliseconds ?? .infinity,gripper=sample?.effectiveGripperFeedbackAgeMilliseconds ?? .infinity
+                let modes=gateway.modes(forArm:side).map(\.intValue),reported=sample?.statuses.map(\.intValue) ?? []
+                let fields=ROBHeldArmFeedbackGuard.failures(present:sample != nil,motorAge:motor,gripperAge:gripper,q:q,expectedQ:held.positions,
+                    gatewayModes:modes,reportedModes:reported,expectedModes:held.modes)
+                if !fields.isEmpty {
+                    let delivery=sample.map{max(0,ProcessInfo.processInfo.systemUptime-$0.receivedAtUptime)*1000} ?? .infinity
+                    let drift=q.count==7 ? 1.5*zip(q,held.positions).reduce(0.0,{$0+abs($1.0-$1.1)}):Double.infinity
+                    let detail="Stationary arm guard failed: gateway=\(side), physical=\(side=="left" ? "right":"left"), fields=\(fields), motor_age_ms=\(motor), gripper_age_ms=\(gripper), delivery_elapsed_ms=\(delivery), drift_m=\(drift), sequence=\(sample?.sequence ?? 0), expected_modes=\(held.modes), gateway_modes=\(modes), reported_modes=\(reported), expected_q=\(held.positions), current_q=\(q)."
+                    if lastHeldFeedbackDiagnostic==nil {
+                        lastHeldFeedbackDiagnostic=detail
+                        if !lastRecordingPath.isEmpty {
+                            let url=URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension("held-feedback-diagnostic.json")
+                            if let bytes=try?JSONSerialization.data(withJSONObject:["kind":"stationary_arm_guard_diagnostic","detail":detail,"phase":phase,
+                                "checkedAtMilliseconds":Date().timeIntervalSince1970*1000,"motionAuthority":false],options:.sortedKeys) {
+                                try?bytes.write(to:url,options:.atomic);try?FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+                            }
+                        }
+                    }
+                    if passive,ROBHeldArmFeedbackGuard.agesOnly(fields) {ageFailures.append(detail)}
+                    else {throw ROBArmRoutineError.blocked(detail)}
+                }
+            }}
+            if !ageFailures.isEmpty {
+                let now=ProcessInfo.processInfo.systemUptime,detail=ageFailures.joined(separator:" ")
+                if passiveFeedbackPauseStarted==nil {passiveFeedbackPauseStarted=now}
+                guard now-passiveFeedbackPauseStarted!<=2 else {throw ROBArmRoutineError.blocked(detail+" Passive same-pose feedback did not recover within2seconds.")}
+                throw ROBPassiveFeedbackPause(detail:detail+" Pausing nonactuating search for fresh unchanged feedback; no command admitted.")
             }
+            passiveFeedbackPauseStarted=nil
         }
         if localReceiptCommand != nil,sourcePixelSelfReviewEnabled {
             guard let view=sourcePixelCurrentView,let sample=gateway.telemetry(forArm:"right"),sample.effectiveSampleAgeMilliseconds<=150,
@@ -1686,18 +1756,26 @@ private struct ROBSourcePixelArchiveInputs {
         return sample
     }
 
+    @MainActor private func passiveFeedbackCheckpoint() async throws {
+        while true {
+            do {try check();return}
+            catch is ROBPassiveFeedbackPause {try Task.checkCancellation();try await Task.sleep(nanoseconds:20_000_000)}
+        }
+    }
+
     @MainActor private func wait(_ seconds: Double, until condition: () -> Bool) async throws {
         let end = ProcessInfo.processInfo.systemUptime + seconds
         while !condition() {
-            try check()
+            try await passiveFeedbackCheckpoint()
             guard ProcessInfo.processInfo.systemUptime < end else { throw ROBArmRoutineError.blocked("Timed out during \(phase).") }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        try check()
+        try await passiveFeedbackCheckpoint()
     }
 
     @MainActor private func accepted(requiresConfirmedHold: Bool = false, _ dispatch: () -> UInt64) async throws {
-        try check()
+        try await passiveFeedbackCheckpoint()
+        try check() // Never dispatch on a stale/passively paused packet.
         let id = dispatch()
         guard id != 0 else { throw ROBArmRoutineError.blocked("Gateway refused left-arm command during \(phase), before submission.") }
         waiting.insert(id)
@@ -2358,6 +2436,7 @@ private struct ROBSourcePixelArchiveInputs {
                     _ = try self.requireLocalReceipt()
                     return true
                 },canReachBaseline:localReceiptCommand != nil ? model.positions(vendorLeft:searchBaseline):nil,
+                passiveFeedbackCheckpoint:{try await self.passiveFeedbackCheckpoint()},
                 check: { try self.check() }, progress: { self.update($0) })
             sceneCapturedForThisTask = true
             if let map = ROBWorkspaceSearch.shared.collisionSnapshot {
@@ -3966,7 +4045,7 @@ private struct ROBSourcePixelArchiveInputs {
                 guard id != 0 else { throw ROBArmRoutineError.blocked("Left-arm motion lease refused.") }
                 leaseRenewals[id] = now
             }
-        } catch { abort(error.localizedDescription) }
+        } catch is ROBPassiveFeedbackPause { return } catch { abort(error.localizedDescription) }
     }
 
     private func writeVisualGraspEvidence(_ evidence: ROBVisualGraspVerifier.Evidence) throws {
@@ -4141,6 +4220,7 @@ private struct ROBSourcePixelArchiveInputs {
         }
         var output = result as! [String: Any]
         output["physical_arm"]=physicalSide
+        if let lastHeldFeedbackDiagnostic {output["held_feedback_diagnostic"]=lastHeldFeedbackDiagnostic}
         output["arm_motion_sent"]=armTravelDispatched
         output["reach_sent"]=recyclingReachDispatched
         output["jaw_command_sent"] = jawSetupDispatchUncertain && !jawCommandDispatched ? NSNull() : jawCommandDispatched as Any

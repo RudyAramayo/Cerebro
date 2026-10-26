@@ -412,6 +412,7 @@ final class ROBWorkspaceSearch {
     var afterInspect: (() -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
         permitsLocalCanShapePrior:() throws ->Bool={false},canReachBaseline:[String:Double]?=nil,
+        passiveFeedbackCheckpoint:(() async throws->Void)?=nil,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
         localCanShapePriorPermissions.append(try permitsLocalCanShapePrior())
@@ -422,7 +423,7 @@ final class ROBWorkspaceSearch {
             _ = try await scanCollisionScene(model: model, generation: ROBAmberGatewayClient.shared.generation,
                 check: check, progress: progress)
         }
-        try check(); afterInspect?(); return objects
+        try await passiveFeedbackCheckpoint?();try check(); afterInspect?(); return objects
     }
 }
 
