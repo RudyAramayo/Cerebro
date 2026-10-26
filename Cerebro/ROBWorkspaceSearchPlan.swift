@@ -603,6 +603,15 @@ enum ROBRecyclingBatchRequest {
     static let maximumCount = 8
     static let configuredCommands = ["left_recycle_cans", "right_recycle_cans"]
 
+    /// The authorization keeps its exact target count; a resumed campaign job
+    /// executes only its frozen remaining transfers. No grasp/hold earns credit.
+    static func executionCount(requestedCount:Int,standingRemainingTransfers:Int?=nil)->Int? {
+        guard (1...maximumCount).contains(requestedCount) else{return nil}
+        guard let remaining=standingRemainingTransfers else{return requestedCount}
+        guard (1...requestedCount).contains(remaining) else{return nil}
+        return remaining
+    }
+
     static func requestedCount(command: String, target: String) throws -> Int? {
         if configuredCommands.contains(command) {
             let text = target.trimmingCharacters(in: .whitespacesAndNewlines)

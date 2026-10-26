@@ -599,11 +599,17 @@ enum ROBArmCurrentSpikeRecording {
     /// Dedicated local Sandbox action; ordinary model/controller commands do
     /// not enter this lane by naming a task or by decoding a saved proposal.
     @nonobjc func performUsingLocalRecyclingReceipt(_ command:String,target:String,completion:@escaping(NSDictionary)->Void) {
-        guard ["left_recycle_cans","right_recycle_cans"].contains(command),target.trimmingCharacters(in:.whitespacesAndNewlines)=="4" else {
-            completion(["status":"rejected","detail":"The local session receipt is only for this exact four-can recycling job."]);return
+        guard ["left_recycle_cans","right_recycle_cans"].contains(command),
+              let canCount=try? ROBRecyclingBatchRequest.requestedCount(command:command,target:target) else {
+            completion(["status":"rejected","detail":"Choose an exact local recycling count from1 through8."]);return
         }
         let broker=ROBControllerArmApproval.shared
         if broker.standingLocalCanCampaignActive,!nominalEmptyCommissioningStepEnabled,!oneDegreeEmptyCalibrationStepEnabled {
+            let state=broker.standingLocalCanCampaignState
+            let targetCount=(state?["targetCanCount"]as?NSNumber)?.intValue ?? (state?["canCount"]as?NSNumber)?.intValue ?? 4
+            guard canCount==targetCount else {
+                completion(["status":"rejected","detail":"The requested can count differs from this standing campaign's exact target."]);return
+            }
             guard standingPreparationTask==nil,!isRunning,!broker.isPending,
                   let campaign=broker.standingLocalCanCampaignState?["campaignID"] as? String else {
                 completion(["status":"busy","detail":"The standing can task is already preparing or running."]);return
@@ -713,10 +719,10 @@ enum ROBArmCurrentSpikeRecording {
         let batch = requestedCanCount > 1 && command == "left_recycle_can"
             ? " \(requestedCanCount) empty cans, sequentially: fresh perception, collision review and visual grasp check for each. A failed or uncertain grasp stops the batch in a hold; no blind next-can retry. One approval covers all \(requestedCanCount) complete transfers." : ""
         let recyclingSummary = localReceiptOnly
-            ? "Tonight's four empty Coke cans to the orange bucket, physical \(physicalSide.uppercased()) arm. Use best-available unmeasured alignment as an operator visual-calibration trial, with assumed spatial allowance \(localVisualTrialAssumedSpatialErrorMeters*1000) mm. Find the nearest reachable confirmed can first; open before approach, close gently and validate the short lift in fresh camera frames before carrying or gravity release. Check the entire arm, open jaws and payload against observed obstacles/free space; unknown space and initial model overlaps may still block. Both arms may hold their current positions. No blind parking, treads, torso, encoder reset, force escalation or blind retries. One exact local user-session receipt covers four transfers within600seconds. Stop/fresh feedback/ownership/limits remain active. No measured registration, grasp or landing success is implied."
+            ? "Tonight's \(requestedCanCount) empty Coke cans to the orange bucket, physical \(physicalSide.uppercased()) arm. Use best-available unmeasured alignment as an operator visual-calibration trial, with assumed spatial allowance \(localVisualTrialAssumedSpatialErrorMeters*1000) mm. Find the nearest reachable confirmed can first; open before approach, close gently and validate the short lift in fresh camera frames before carrying or gravity release. Check the entire arm, open jaws and payload against observed obstacles/free space; unknown space and initial model overlaps may still block. Both arms may hold their current positions. No blind parking, treads, torso, encoder reset, force escalation or blind retries. One exact local user-session receipt covers \(requestedCanCount) transfers within600seconds. Stop/fresh feedback/ownership/limits remain active. No measured registration, grasp or landing success is implied."
             : action + batch + notice + bothHolds + current + (workspace ? " Maximum 600 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
         let nominalSummary=localReceiptOnly && nominalEmptyCommissioningStepEnabled
-            ? "ONE NOMINAL EMPTY physical RIGHT-arm commissioning experiment only: fresh measured q0 to J2 minus0.075rad over4seconds, at most6cm full-hull travel and0.20rad per joint. No jaw command, grasp, payload, carry, release, automatic return or chained can attempt. Both arms may hold their measured positions. Watch the arm in the actual recorded RIGHT camera view. Exact raw-return bounds are checked for nominal no-contact; unknown space is admitted ONLY in the recorded local swept regions. Current robot occupancy is assumed from the model; this is a geometric assumption, not sensor classification or removal of raw returns. Modeled millimeter-scale gaps are much smaller than the explicitly ASSUMED35mm camera uncertainty: this is NOT certified collision protection and physical contact remains possible. Stop, ownership, current limits, fresh motor/gripper feedback, source/body/profile identity and exact receipt remain required. After this ONE step, measure the endpoint and hold, report partial with ZERO recycled cans; the four-can job remains unfinished. Empty state is assumed from startup/task history, not sensed possession."
+            ? "ONE NOMINAL EMPTY physical RIGHT-arm commissioning experiment only: fresh measured q0 to J2 minus0.075rad over4seconds, at most6cm full-hull travel and0.20rad per joint. No jaw command, grasp, payload, carry, release, automatic return or chained can attempt. Both arms may hold their measured positions. Watch the arm in the actual recorded RIGHT camera view. Exact raw-return bounds are checked for nominal no-contact; unknown space is admitted ONLY in the recorded local swept regions. Current robot occupancy is assumed from the model; this is a geometric assumption, not sensor classification or removal of raw returns. Modeled millimeter-scale gaps are much smaller than the explicitly ASSUMED35mm camera uncertainty: this is NOT certified collision protection and physical contact remains possible. Stop, ownership, current limits, fresh motor/gripper feedback, source/body/profile identity and exact receipt remain required. After this ONE step, measure the endpoint and hold, report partial with ZERO recycled cans; the \(requestedCanCount)-can job remains unfinished. Empty state is assumed from startup/task history, not sensed possession."
             : recyclingSummary
         let approvedSummary=localReceiptOnly && oneDegreeEmptyCalibrationStepEnabled
             ? "ONE EMPTY physical RIGHT-arm actuator/geometry calibration experiment only: fresh measured q0 to J2 minus0.02rad (about one degree) over4seconds, at most2cm modeled full-hull travel. No jaw command, payload, grasp, carry, release, automatic return or chained can attempt. Both arms remain stationary except this ONE selected-joint step. Watch the actual RIGHT arm in the recorded camera view. Best-available camera/model alignment has explicitly ASSUMED35mm error; raw contact predictions and unknown regions are recorded as diagnostics and are NOT verified motion clearance or a collision certificate. Physical contact and calibration mistakes are accepted for this bounded experiment. Stop, ownership, current limits, fresh motor/gripper feedback, source/body/profile identity, q0, joint bounds and a tight measured motion corridor remain required. After the ONE step, measure the endpoint and hold, report partial with ZERO recycled cans. Empty state is assumed from startup/task history, not sensed possession."
@@ -726,7 +732,7 @@ enum ROBArmCurrentSpikeRecording {
             start(command, summary: action, limit: limit, completion: completion)
             return
         }
-        update(localReceiptOnly ? "Awaiting the exact local four-can session receipt" : "Awaiting spoken or controller authorization: \(action)")
+        update(localReceiptOnly ? "Awaiting the exact local \(canCount)-can session receipt" : "Awaiting spoken or controller authorization: \(action)")
         let execute: (@escaping (NSDictionary) -> Void) -> Void = { [weak self] done in
             self?.localReceiptCommand = localReceiptOnly ? requestedCommand : nil
             self?.localReceiptEvidence = localReceiptOnly ? ROBControllerArmApproval.shared.activeLocalRecyclingApprovalEvidence : nil
@@ -834,7 +840,8 @@ enum ROBArmCurrentSpikeRecording {
         // Vision's generation enrolls the actual source, stream, dimensions
         // and K; the runtime policy binds actual HOST stereo mode/normalization.
         // A transient age/depth-coverage lapse is readiness, not a new identity.
-        let value:[String:Any] = ["kind":"local_four_can_visual_trial_context_v1","physicalSide":physicalSide,
+        guard (1...ROBRecyclingBatchRequest.maximumCount).contains(requestedCanCount) else{return unavailable("job_can_count_invalid")}
+        let value:[String:Any] = ["kind":"local_can_visual_trial_context_v2","physicalSide":physicalSide,"canCount":requestedCanCount,
             "cameraGeneration":vision.cameraGeneration.uuidString,"runtimeCalibrationIdentity":calibration.identity,
             "stereoPolicySHA256":calibration.stereoPolicySHA256,
             "gatewayGeneration":NSNumber(value:session),"bodyMotionIdentity":ROBFixedHeadBodyMotionIdentity.currentIdentity,
@@ -862,12 +869,12 @@ enum ROBArmCurrentSpikeRecording {
     }
 
     private func requireLocalReceipt() throws -> NSDictionary {
-        guard let command=localReceiptCommand,command==physicalSide+"_recycle_cans",requestedCanCount==4,
+        guard let command=localReceiptCommand,command==physicalSide+"_recycle_cans",(1...ROBRecyclingBatchRequest.maximumCount).contains(requestedCanCount),
               ROBControllerArmApproval.shared.authorizesLocalRecyclingVisualCalibrationTrial(summary:summary,arm:physicalSide),
               let frozen=localReceiptEvidence,let current=ROBControllerArmApproval.shared.activeLocalRecyclingApprovalEvidence,
               let identity=localReceiptContextIdentity,identity==currentLocalRecyclingContextIdentity(),
               current["command"] as? String==command,current["arm"] as? String==physicalSide,
-              (current["canCount"] as? NSNumber)?.intValue==4,current["summary"] as? String==summary,
+              (current["canCount"] as? NSNumber)?.intValue==requestedCanCount,current["summary"] as? String==summary,
               current["summarySHA256"] as? String==ROBGhostRobotModel.hash(Data(summary.utf8)),
               current["contextIdentity"] as? String==identity,
               current["permitsUnmeasuredVisualCalibrationTrial"] as? Bool==true,
@@ -875,7 +882,7 @@ enum ROBArmCurrentSpikeRecording {
               (current["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled,
               let until=(current["executingUntilMilliseconds"] as? NSNumber)?.doubleValue,
               until>Date().timeIntervalSince1970*1000 else {
-            throw ROBArmRoutineError.blocked("The exact local four-can receipt, current camera/body/profile context or expiry changed; hold requested.")
+            throw ROBArmRoutineError.blocked("The exact local recycling-count receipt, current camera/body/profile context or expiry changed; hold requested.")
         }
         guard (frozen["nominalEmptyCommissioningStepEnabled"] as? Bool ?? false)==nominalEmptyCommissioningStepEnabled,
               (frozen["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled else {
@@ -908,7 +915,7 @@ enum ROBArmCurrentSpikeRecording {
         let now=Date().timeIntervalSince1970*1000
         let value=ROBWorkspaceVisualCalibrationTrial(receiptID:receipt["receiptID"] as? String ?? "",
             receiptSHA256:receipt["receiptSHA256"] as? String ?? "",appSessionID:receipt["appSessionID"] as? String ?? "",
-            command:receipt["command"] as? String ?? "",canCount:4,summarySHA256:receipt["summarySHA256"] as? String ?? "",
+            command:receipt["command"] as? String ?? "",canCount:requestedCanCount,summarySHA256:receipt["summarySHA256"] as? String ?? "",
             authorizationContextIdentity:receipt["contextIdentity"] as? String ?? "",sessionGeneration:generation,
             sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,modelID:model.modelID,geometryID:model.geometryID,
             mappingID:model.selectedMappingID,mapFingerprint:map.fingerprint,bodyMotionIdentity:scope.bodyMotionIdentity,
@@ -1368,7 +1375,10 @@ enum ROBArmCurrentSpikeRecording {
                             guard current() else{return}
                             self.localReceiptModel=nil;self.localReceiptContextComponents=nil
                             self.update("Connection recovered with fresh stationary feedback; rebuilding the can task from a NEW scene and measured pose")
-                            self.performUsingLocalRecyclingReceipt(command,target:"4") { _ in }
+                            let state=broker.standingLocalCanCampaignState
+                            let count=(state?["targetCanCount"]as?NSNumber)?.intValue ?? (state?["canCount"]as?NSNumber)?.intValue ?? 4
+                            guard (1...ROBRecyclingBatchRequest.maximumCount).contains(count) else{return}
+                            self.performUsingLocalRecyclingReceipt(command,target:String(count)) { _ in }
                             return
                         }
                     }else{stableSince=nil;advances=0;previous=[:];last=[:]}
@@ -1426,17 +1436,20 @@ enum ROBArmCurrentSpikeRecording {
         if localReceiptCommand != nil,oneDegreeEmptyCalibrationStepEnabled {
             let result=try await executeOneDegreeEmptyCalibration()
             var output=result as! [String:Any]
-            output["batch_requested"]=4;output["batch_completed"]=0;output["transfer_completed"]=false
+            output["batch_requested"]=requestedCanCount;output["batch_completed"]=0;output["transfer_completed"]=false
             return output as NSDictionary
         }
         if localReceiptCommand != nil,nominalEmptyCommissioningStepEnabled {
             let result=try await executeNominalEmptyCommissioning()
             var output=result as! [String:Any]
-            output["batch_requested"]=4;output["batch_completed"]=0;output["transfer_completed"]=false
+            output["batch_requested"]=requestedCanCount;output["batch_completed"]=0;output["transfer_completed"]=false
             return output as NSDictionary
         }
-        guard command == "left_recycle_can", requestedCanCount > 1 else { return try await executeSingle(command) }
-        let count = requestedCanCount
+        guard command == "left_recycle_can",requestedCanCount>1 || localReceiptCommand != nil else {return try await executeSingle(command)}
+        let remaining=(localReceiptEvidence?["standingRemainingTransfers"]as?NSNumber)?.intValue
+        guard let count=ROBRecyclingBatchRequest.executionCount(requestedCount:requestedCanCount,standingRemainingTransfers:remaining) else {
+            throw ROBArmRoutineError.blocked("The exact recycling target or remaining-transfer count is invalid.")
+        }
         var results:[[String:Any]]=[]
         for index in 0..<count {
             try check()
@@ -1520,7 +1533,7 @@ enum ROBArmCurrentSpikeRecording {
     }
 
     @MainActor private func executeNominalEmptyCommissioning() async throws ->NSDictionary {
-        guard nominalEmptyCommissioningStepEnabled,physicalSide=="right",requestedCanCount==4,
+        guard nominalEmptyCommissioningStepEnabled,physicalSide=="right",(1...ROBRecyclingBatchRequest.maximumCount).contains(requestedCanCount),
               ROBControllerArmApproval.shared.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:physicalSide),
               !armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched else {
             throw ROBArmRoutineError.blocked("No exact separate nominal EMPTY commissioning permission is active.")
@@ -1613,7 +1626,7 @@ enum ROBArmCurrentSpikeRecording {
     }
 
     @MainActor private func executeOneDegreeEmptyCalibration() async throws ->NSDictionary {
-        guard oneDegreeEmptyCalibrationStepEnabled,physicalSide=="right",requestedCanCount==4,
+        guard oneDegreeEmptyCalibrationStepEnabled,physicalSide=="right",(1...ROBRecyclingBatchRequest.maximumCount).contains(requestedCanCount),
               ROBControllerArmApproval.shared.authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary:summary,arm:physicalSide),
               !armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched else {
             throw ROBArmRoutineError.blocked("No exact separate one-degree EMPTY commissioning permission is active.")
@@ -3289,6 +3302,7 @@ enum ROBArmCurrentSpikeRecording {
             output["terminal_grasp_hold"]=true;output["placement_verified"]=false
         }
         if localJob {
+            output["authorized_can_count"]=requestedCanCount
             output["requires_new_plan"]=canAutoRecover
             output["interruption_reason"]=recoveryReason?.rawValue as Any? ?? NSNull()
             output["automatic_recovery_eligible"]=canAutoRecover

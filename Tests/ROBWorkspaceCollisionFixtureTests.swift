@@ -202,9 +202,9 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
         unregistered.visualCalibrationScope = .init(bodyMotionIdentity:"fixture body",bodyContextIsCurrent:true,
             estimatedCameraProjectionIdentity:fixtureHash,observationPoseIdentity:fixtureHash,observedFrameCount:2)
         func trial(_ source:SyntheticMap,baseline:[Double] = front,receipt:String = fixtureHash,command:String = "left_recycle_cans",
-                   expiry:Double = 2_000,allowance:Double = 0.05) -> ROBWorkspaceVisualCalibrationTrial {
+                   expiry:Double = 2_000,allowance:Double = 0.05,count:Int = 4) -> ROBWorkspaceVisualCalibrationTrial {
             .init(receiptID:"isolated local receipt",receiptSHA256:receipt,appSessionID:"isolated app session",
-                command:command,canCount:4,summarySHA256:fixtureHash,authorizationContextIdentity:"isolated broker scope",
+                command:command,canCount:count,summarySHA256:fixtureHash,authorizationContextIdentity:"isolated broker scope",
                 sessionGeneration:generation,sceneID:scene,cameraGeneration:camera,modelID:model.modelID,
                 geometryID:model.geometryID,mappingID:model.selectedMappingID,mapFingerprint:source.fingerprint,
                 bodyMotionIdentity:"fixture body",estimatedCameraProjectionIdentity:fixtureHash,observationPoseIdentity:fixtureHash,
@@ -247,6 +247,28 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
             blocked("scope") { _ = try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(unregistered,model:model,
                 generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:bad) }
         }
+        for count in [1,5,8] {
+            let counted=trial(unregistered,count:count)
+            let context=try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(unregistered,model:model,
+                generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:counted)
+            precondition(context.visualTrial?.canCount==count && context.registrationID==nil)
+            let decoded=try JSONDecoder().decode(ROBWorkspaceVisualCalibrationTrial.self,from:JSONEncoder().encode(counted))
+            precondition(decoded.canCount==count && decoded.valid)
+            blocked("changed") {try estimated.validateVisualCalibrationTrial(map:unregistered,model:model,generation:generation,
+                sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:counted)}
+        }
+        for count in [0,9] {
+            let invalid=trial(unregistered,count:count);precondition(!invalid.valid)
+            blocked("scope") {_ = try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(unregistered,model:model,
+                generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:invalid)}
+        }
+        precondition(ROBRecyclingBatchRequest.executionCount(requestedCount:1)==1)
+        precondition(ROBRecyclingBatchRequest.executionCount(requestedCount:5)==5)
+        precondition(ROBRecyclingBatchRequest.executionCount(requestedCount:8)==8)
+        precondition(ROBRecyclingBatchRequest.executionCount(requestedCount:5,standingRemainingTransfers:2)==2)
+        precondition(ROBRecyclingBatchRequest.executionCount(requestedCount:0)==nil && ROBRecyclingBatchRequest.executionCount(requestedCount:9)==nil)
+        precondition(ROBRecyclingBatchRequest.executionCount(requestedCount:5,standingRemainingTransfers:0)==nil)
+        precondition(ROBRecyclingBatchRequest.executionCount(requestedCount:5,standingRemainingTransfers:6)==nil)
         let otherReceipt = trial(unregistered,receipt:ROBGhostRobotModel.hash(Data("different receipt".utf8)))
         blocked("changed") { try estimated.validateVisualCalibrationTrial(map:unregistered,model:model,generation:generation,
             sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:otherReceipt) }

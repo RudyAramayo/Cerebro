@@ -29,6 +29,8 @@ speech_methods = "\n".join(declaration(speech, marker) for marker in [
 stop_method = declaration(main, "- (void)didRecognizeLocalPriorityStop:(NSString *)transcript\n{")
 operator_stop_method = declaration(main, "- (void)performOperatorPriorityStopWithReason:(NSString *)reason\n{")
 controller_stop_method = declaration(main, "- (void)controllerOperatorPriorityStopRequested:(NSNotification *)notification\n{")
+accept_method = declaration(main, "- (BOOL)acceptLocalMicrophoneAuthorization:(NSString *)transcript\n{")
+finalize_method = declaration(main, "- (BOOL)shouldFinalizeLocalMicrophoneAuthorization:(NSString *)transcript\n{")
 observer_selector = main.index("selector:@selector(controllerOperatorPriorityStopRequested:)", main.index("- (void)viewDidLoad"))
 observer_start = main.rindex("    [[NSNotificationCenter defaultCenter] addObserver:self", 0, observer_selector)
 observer_registration = main[observer_start:main.index("];", observer_selector) + 2]
@@ -68,15 +70,20 @@ __MATCHER__
 @property Request *speechRequest;
 @property NSTimer *debounceSpeechInputTimer;
 @property NSString *currentTextInput,*lastSpoken;
+@property(copy) void (^pendingCompletion)(BOOL);
 - (void)processLocalRecognitionTranscript:(NSString *)text isFinal:(BOOL)final generation:(NSUInteger)generation;
 - (void)processCapturedMicrophoneBuffer:(AVAudioPCMBuffer *)buffer;
 - (void)stopIt:(id)sender;
 - (void)sayIt:(NSString *)text;
+- (void)sayIt:(NSString *)text completion:(void(^)(BOOL))completion;
+- (void)finishAcknowledgement:(BOOL)finished;
 @end
 @implementation ROBSpeechBox
 __SPEECH_METHODS__
 - (void)stopIt:(id)sender{self.speechCancellations+=1;self.isSpeaking=NO;}
 - (void)sayIt:(NSString *)text{self.lastSpoken=text;self.acknowledgements+=1;self.isSpeaking=YES;}
+- (void)sayIt:(NSString *)text completion:(void(^)(BOOL))completion{[self sayIt:text];self.pendingCompletion=completion;}
+- (void)finishAcknowledgement:(BOOL)finished{self.isSpeaking=NO;void(^completion)(BOOL)=self.pendingCompletion;self.pendingCompletion=nil;if(completion){completion(finished);}}
 @end
 @interface ROBShowMotionCoordinator:NSObject
 @property NSUInteger cancellations;
@@ -97,10 +104,42 @@ __SPEECH_METHODS__
 - (void)cancelWithReason:(NSString *)reason{self.cancellations+=1;}
 @end
 @interface ROBControllerArmApproval:NSObject
+@property NSUInteger approvals,restartCalls;
+@property BOOL standingLocalCanCampaignActive,restartAllowed;
+@property NSInteger spokenCanCampaignRestartTargetCanCount;
+@property NSString *spokenCanCampaignRestartStatus;
+@property NSDictionary *standingLocalCanCampaignState;
 + (instancetype)shared;
+- (BOOL)isSpokenCanCampaignRestartCandidate:(NSString *)text;
+- (BOOL)receiveSpokenCanCampaignRestart:(NSString *)text targetCanCount:(NSInteger)count;
+- (BOOL)receiveSpokenAuthorization:(NSString *)text;
+- (BOOL)isSpokenAuthorizationCandidate:(NSString *)text;
 @end
 @implementation ROBControllerArmApproval
 + (instancetype)shared{static id value;return value?: (value=[self new]);}
+- (BOOL)isSpokenCanCampaignRestartCandidate:(NSString *)text{return [text isEqual:@"proceed with protections"];}
+- (BOOL)receiveSpokenCanCampaignRestart:(NSString *)text targetCanCount:(NSInteger)count{
+ self.restartCalls+=1;
+ if(!self.restartAllowed||count<1||count>8){self.spokenCanCampaignRestartStatus=@"No stopped can task is available.";return NO;}
+ self.restartAllowed=NO;self.standingLocalCanCampaignActive=YES;
+ self.standingLocalCanCampaignState=@{@"campaignID":NSUUID.UUID.UUIDString,@"targetCanCount":@(count)};
+ self.spokenCanCampaignRestartStatus=@"New protected campaign accepted.";return YES;
+}
+- (BOOL)receiveSpokenAuthorization:(NSString *)text{self.approvals+=1;return YES;}
+- (BOOL)isSpokenAuthorizationCandidate:(NSString *)text{return [text isEqual:@"yes proceed"];}
+@end
+@interface ROBTestingSandboxWindowController:NSObject
+@property NSUInteger runs;
+@property NSInteger lastCount;
+@property NSString *resumeStatus;
++ (instancetype)shared;
+- (void)showStandingCanCampaignResumeStatus:(NSString *)detail;
+- (void)resumeAuthorizedStandingCanCampaignWithTargetCanCount:(NSInteger)count;
+@end
+@implementation ROBTestingSandboxWindowController
++ (instancetype)shared{static id value;return value?: (value=[self new]);}
+- (void)showStandingCanCampaignResumeStatus:(NSString *)detail{self.resumeStatus=detail;}
+- (void)resumeAuthorizedStandingCanCampaignWithTargetCanCount:(NSInteger)count{self.lastCount=count;self.runs+=1;}
 @end
 @interface ROBAmberGestureExecutor:NSObject
 @property NSUInteger cancellations,globalHolds;
@@ -154,7 +193,7 @@ __SPEECH_METHODS__
 @property Serial *serialBox;
 @property NSInteger currentPersonTrackingID;
 @property BOOL followingMode;
-@property NSUInteger approvals,cloudBuffers,ordinaryInputs;
+@property(nonatomic) NSUInteger approvals,cloudBuffers,ordinaryInputs;
 - (void)applyPrioritySoftwareStopWithReason:(NSString *)reason;
 - (void)performOperatorPriorityStopWithReason:(NSString *)reason;
 - (void)controllerOperatorPriorityStopRequested:(NSNotification *)notification;
@@ -168,8 +207,9 @@ __CONTROLLER_STOP_METHOD__
 __PRIORITY_METHOD__
 __INPUT_PREFIX__
 - (void)publishControlAuthorityState{}
-- (BOOL)acceptLocalMicrophoneAuthorization:(NSString *)text{self.approvals+=1;return YES;}
-- (BOOL)shouldFinalizeLocalMicrophoneAuthorization:(NSString *)text{return NO;}
+__ACCEPT_METHOD__
+__FINALIZE_METHOD__
+- (NSUInteger)approvals{return [ROBControllerArmApproval shared].approvals;}
 - (void)didCaptureAudioBuffer:(AVAudioPCMBuffer *)buffer{self.cloudBuffers+=1;}
 @end
 int main(void){@autoreleasepool{
@@ -242,6 +282,46 @@ int main(void){@autoreleasepool{
      @"Authenticated broker Stop did not synchronously reach native cancel/both-arm hold lane");
  CHECK(owner.approvals==1 && owner.ordinaryInputs==1,@"Controller Stop became a voice approval or conversation");
  [[NSNotificationCenter defaultCenter] removeObserver:owner];
+ ROBControllerArmApproval *approval=[ROBControllerArmApproval shared];
+ ROBTestingSandboxWindowController *sandbox=[ROBTestingSandboxWindowController shared];
+ approval.restartAllowed=YES;approval.spokenCanCampaignRestartTargetCanCount=5;
+ box.isShuttingDown=NO;box.isSpeaking=NO;box.recognitionContainsSpeechOutput=NO;box.recognitionGeneration=20;box.currentTextInput=@"";
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:NO generation:20];
+ CHECK(approval.restartCalls==0 && sandbox.runs==0,@"Partial restart phrase granted or ran a campaign");
+ NSUInteger ended=box.speechRequest.ended;[box.debounceSpeechInputTimer fire];
+ CHECK(box.speechRequest.ended==ended+1 && approval.restartCalls==0,@"Candidate endpoint did not remain non-authorizing");
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:YES generation:20];
+ CHECK(approval.restartCalls==1 && approval.standingLocalCanCampaignActive && sandbox.runs==0,@"Final clean microphone did not persist before any fresh run");
+ CHECK([box.lastSpoken isEqual:@"Approval received. Rechecking the scene."],@"Accepted phrase lacked immediate exact acknowledgement");
+ [box finishAcknowledgement:YES];
+ CHECK(sandbox.runs==1 && sandbox.lastCount==5,@"Acknowledged campaign did not route fresh explicit-count run");
+ box.recognitionGeneration=21;box.currentTextInput=@"";box.isSpeaking=NO;approval.restartAllowed=YES;approval.spokenCanCampaignRestartTargetCanCount=3;
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:YES generation:21];
+ approval.standingLocalCanCampaignActive=NO;[box finishAcknowledgement:YES];
+ CHECK(sandbox.runs==1,@"Stop during acknowledgement allowed a queued run");
+ box.recognitionGeneration=22;box.currentTextInput=@"";box.isSpeaking=NO;approval.restartAllowed=YES;
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:YES generation:22];
+ [box finishAcknowledgement:NO];
+ CHECK(sandbox.runs==1,@"Cancelled acknowledgement allowed a queued run");
+ box.recognitionGeneration=23;box.currentTextInput=@"";box.isSpeaking=NO;approval.restartAllowed=YES;
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:YES generation:23];
+ approval.standingLocalCanCampaignState=@{@"campaignID":@"different"};[box finishAcknowledgement:YES];
+ CHECK(sandbox.runs==1,@"Replaced campaign allowed an old queued run");
+ box.recognitionGeneration=24;box.currentTextInput=@"";box.isSpeaking=NO;approval.restartAllowed=YES;
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:YES generation:24];
+ [box finishAcknowledgement:YES];
+ CHECK(sandbox.runs==2 && sandbox.lastCount==3,@"Resume reset remaining count to the previous original target");
+ NSUInteger restartCalls=approval.restartCalls;box.recognitionGeneration=25;box.currentTextInput=@"";box.isSpeaking=YES;
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:YES generation:25];
+ CHECK(approval.restartCalls==restartCalls,@"TTS final granted a campaign restart");
+ box.isSpeaking=NO;box.recognitionContainsSpeechOutput=YES;
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:YES generation:25];
+ CHECK(approval.restartCalls==restartCalls,@"Contaminated TTS final granted after speaker stopped");
+ [owner inputText:@"proceed with protections"];
+ CHECK(approval.restartCalls==restartCalls && owner.ordinaryInputs==2,@"Typed/model text entered microphone-only restart authority");
+ box.recognitionGeneration=26;box.currentTextInput=@"";box.recognitionContainsSpeechOutput=NO;approval.restartAllowed=NO;
+ [box processLocalRecognitionTranscript:@"proceed with protections" isFinal:YES generation:26];
+ CHECK(approval.restartCalls==restartCalls+1 && sandbox.runs==2 && [box.lastSpoken isEqual:@"No stopped can task is available."],@"Unknown stopped intent was silently forwarded or started");
  NSLog(@"Speech priority Stop: %lu runtime checks PASS; actual policies/dispatch, stub microphone and actuator seams, no hardware",(unsigned long)checks);
  return 0;
 }}
@@ -249,6 +329,8 @@ int main(void){@autoreleasepool{
 for marker, value in {"__MATCHER__": matcher, "__SPEECH_METHODS__": speech_methods,
                       "__OPERATOR_STOP_METHOD__": operator_stop_method,
                       "__CONTROLLER_STOP_METHOD__": controller_stop_method,
+                      "__ACCEPT_METHOD__": accept_method,
+                      "__FINALIZE_METHOD__": finalize_method,
                       "__OBSERVER_REGISTRATION__": observer_registration,
                       "__STOP_METHOD__": stop_method, "__PRIORITY_METHOD__": priority_method,
                       "__INPUT_PREFIX__": input_prefix}.items():

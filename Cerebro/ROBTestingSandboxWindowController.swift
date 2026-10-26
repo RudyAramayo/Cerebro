@@ -50,10 +50,13 @@ import UniformTypeIdentifiers
     ]
 
     private static let recyclingCountKey = "ROBTestingSandboxRecyclingCanCount"
+    private static let recyclingArmKey = "ROBTestingSandboxRecyclingPhysicalArm"
     private static var recyclingCount: Int {
         let count = UserDefaults.standard.integer(forKey: recyclingCountKey)
         return (1...ROBRecyclingBatchRequest.maximumCount).contains(count) ? count : 1
     }
+    /// The final local-microphone delegate binds this saved bounded task count.
+    public var localRecyclingCampaignTargetCount: Int { Self.recyclingCount }
     private let table = NSTableView()
     private let detailStack = NSStackView()
     private let status = NSTextField(wrappingLabelWithString: "")
@@ -99,7 +102,9 @@ import UniformTypeIdentifiers
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .ROBGripperStartupCalibrationDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBNeckQRCalibrationDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: ROBBellyQRCalibrationWindowController.changed, object: nil)
-        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        let initialTrial = ROBLocalRecyclingSandboxRouting.resumeTrialID(selectedTrialID: "",
+            persistedArm: UserDefaults.standard.string(forKey: Self.recyclingArmKey))
+        table.selectRowIndexes(IndexSet(integer: Self.trials.firstIndex(where: { $0.id == initialTrial }) ?? 0), byExtendingSelection: false)
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, self.window?.isVisible == true else { return }
             if ROBLeftArmTrial.shared.isRunning || ROBControllerArmApproval.shared.isPending { self.refresh() }
@@ -191,7 +196,12 @@ import UniformTypeIdentifiers
                                      label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
         return cell
     }
-    public func tableViewSelectionDidChange(_ notification: Notification) { buildDetail(); refresh() }
+    public func tableViewSelectionDidChange(_ notification: Notification) {
+        if let arm = ROBLocalRecyclingSandboxRouting.physicalArm(trialID: selectedTrial.id) {
+            UserDefaults.standard.set(arm, forKey: Self.recyclingArmKey)
+        }
+        buildDetail(); refresh()
+    }
 
     private func buildDetail() {
         detailStack.arrangedSubviews.forEach { detailStack.removeArrangedSubview($0); $0.removeFromSuperview() }
@@ -225,7 +235,7 @@ import UniformTypeIdentifiers
             standingCampaignInfo.isSelectable = true
             detailStack.addArrangedSubview(standingCampaignInfo)
             standingCampaignInfo.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
-            addHelp("Import this campaign's standing authorization once, then Run. New plans bind fresh robot context without another approval. Connection recovery pauses motion and retries a new plan at most three times. Stop revokes the campaign; no old waypoint resumes after reconnection or relaunch.")
+            addHelp("Import this campaign's standing authorization once, then Run. New plans bind fresh robot context without another approval. After Stop, ‘proceed with protections’ starts a new authorization through the local microphone. Connection recovery retries a new plan at most three times. Stop holds the arms; no lowering or old waypoint resumes automatically.")
             addField("recyclingCount", "Number of cans", Double(Self.recyclingCount),
                 note: "1–\(ROBRecyclingBatchRequest.maximumCount) · each can is checked again")
             addField("localVisualAllowanceMillimeters", "Assumed visual error (mm)",
@@ -248,7 +258,7 @@ import UniformTypeIdentifiers
             localApprovalInfo.isSelectable = true
             detailStack.addArrangedSubview(localApprovalInfo)
             localApprovalInfo.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
-            addHelp("The local session job covers exactly four empty Coke cans and the orange bucket. Save a count of 4 first. Prepare freezes the selected arm and task; export a template, then import its private user-approval receipt. A retained identical job can continue without another prompt. Stop revokes it. The receipt does not verify camera alignment or remove motion checks.")
+            addHelp("The local session job covers the saved count of 1–8 empty Coke cans and the orange bucket. Prepare freezes the selected arm and count; export a template, then import its private user-approval receipt. A retained identical job can continue without another prompt. Stop revokes it. The receipt does not verify camera alignment or remove motion checks.")
         }
         if trial.parameters == .depthAlignment {
             let current = ROBWorkspaceDepthAlignment.snapshot()
@@ -475,7 +485,7 @@ import UniformTypeIdentifiers
     private func importStandingCanCampaign() {
         guard canEdit else { return }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]; panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false; panel.message = "Import the private standing authorization for this four-can campaign."
+        panel.allowsMultipleSelection = false; panel.message = "Import the private standing authorization for this can campaign."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try ROBControllerArmApproval.shared.importLocalCanCampaignAuthorization(fromReceiptURL: url)
@@ -486,19 +496,46 @@ import UniformTypeIdentifiers
     private func runStandingCanCampaign() {
         guard canEdit else { return }
         guard ROBControllerArmApproval.shared.standingLocalCanCampaignActive else {
-            parameterMessage = "No active standing authorization for this four-can campaign."; refresh(); return
+            parameterMessage = "No active standing authorization. After Stop, say ‘proceed with protections’ or import a fresh authorization."; refresh(); return
+        }
+        guard !ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload else {
+            parameterMessage = "A possible held object is still recorded. Holding; a new empty-can grasp cannot start."; refresh(); return
         }
         nominalEmptyCommissioningStep.state = .off; oneDegreeEmptyCalibrationStep.state = .off
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
         prepareLocalRecyclingSessionJob()
     }
+    /// Called only after a new authorization is accepted; performs fresh task
+    /// camera enrollment through the ordinary native standing-run entry.
+    @objc(resumeAuthorizedStandingCanCampaignWithTargetCanCount:)
+    public func resumeAuthorizedStandingCanCampaign(targetCanCount: Int) {
+        guard canEdit, (1...ROBRecyclingBatchRequest.maximumCount).contains(targetCanCount),
+              ROBControllerArmApproval.shared.standingLocalCanCampaignActive,
+              (ROBControllerArmApproval.shared.standingLocalCanCampaignState?["targetCanCount"] as? NSNumber)?.intValue == targetCanCount else {
+            parameterMessage = "The new campaign or its remaining can count changed; no old plan was resumed."; refresh(); return
+        }
+        let trialID = ROBLocalRecyclingSandboxRouting.resumeTrialID(selectedTrialID: selectedTrial.id,
+            persistedArm: UserDefaults.standard.string(forKey: Self.recyclingArmKey))
+        if trialID != selectedTrial.id, let row = Self.trials.firstIndex(where: { $0.id == trialID }) {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            // Explicitly rebuild before assigning the remaining count; selection
+            // notifications must not leave a QR/ghost panel's missing fields.
+            buildDetail()
+        }
+        UserDefaults.standard.set(targetCanCount, forKey: Self.recyclingCountKey)
+        fields["recyclingCount"]?.stringValue = String(targetCanCount)
+        runStandingCanCampaign()
+    }
+    public func showStandingCanCampaignResumeStatus(_ detail: String) {
+        parameterMessage = detail; refresh()
+    }
     private func prepareLocalRecyclingSessionJob() {
         guard canEdit else { return }
         let entered = fields["recyclingCount"].flatMap { Double($0.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) }
         guard let command = ROBLocalRecyclingSandboxRouting.preparationCommand(trialID: selectedTrial.id,
             savedCount: Self.recyclingCount, enteredCount: entered) else {
-            parameterMessage = "This local session approval covers exactly four empty Coke cans. Set Number of cans to 4 and save the test parameters first."
+            parameterMessage = "Choose a whole number of cans from 1 to 8 and save matching test parameters before preparing the exact job."
             refresh(); return
         }
         guard let spatial = ROBLocalRecyclingSandboxRouting.spatialAllowanceMeters(
@@ -515,7 +552,7 @@ import UniformTypeIdentifiers
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
         parameterMessage = ""; observingLeftOperation = true
-        ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: "4") { [weak self] result in
+        ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: String(Self.recyclingCount)) { [weak self] result in
             guard let self else { return }
             if !ROBLeftArmTrial.shared.isRunning, !ROBControllerArmApproval.shared.isPending,
                ["blocked", "rejected", "busy", "failed"].contains(result["status"] as? String ?? ""),
@@ -576,10 +613,10 @@ import UniformTypeIdentifiers
     }
     private func exportLocalRecyclingApprovalTemplate() {
         guard localReceiptFilesEnabled, let template = ROBControllerArmApproval.shared.localRecyclingReceiptTemplate else {
-            parameterMessage = "Prepare the exact four-can session job before exporting its approval template."; refresh(); return
+            parameterMessage = "Prepare the exact saved-count can job before exporting its approval template."; refresh(); return
         }
         let panel = NSSavePanel(); panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "rob-four-can-session-approval-template.json"
+        panel.nameFieldStringValue = "rob-can-session-approval-template.json"
         panel.title = "Export the pending job's approval template"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
@@ -593,7 +630,7 @@ import UniformTypeIdentifiers
     }
     private func importLocalRecyclingApprovalReceipt() {
         guard localReceiptFilesEnabled else {
-            parameterMessage = "Prepare the matching four-can session job before importing its local approval."; refresh(); return
+            parameterMessage = "Prepare the matching saved-count can job before importing its local approval."; refresh(); return
         }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
         panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
@@ -724,11 +761,12 @@ private final class ROBTestingSandboxDocumentView: NSView {
 /// Local UI routing only. No text or template produced here authorizes motion.
 enum ROBLocalRecyclingSandboxRouting {
     static func standingDescription(_ value: NSDictionary?) -> String {
-        guard let value else { return "Standing can campaign: no active authorization. Import once to authorize this four-can task." }
+        guard let value else { return "Standing can campaign: no active authorization. Import once, or after Stop say ‘proceed with protections’." }
         let state = value["state"] as? String ?? "unavailable"
         let transfers = (value["completedTransfers"] as? NSNumber)?.intValue ?? 0
         let landings = (value["verifiedLandings"] as? NSNumber)?.intValue ?? 0
-        return "Standing can campaign: \(state). Transfers reported \(transfers)/4; bucket landings camera-verified \(landings).\n"
+        let count = (value["targetCanCount"] as? NSNumber)?.intValue ?? (value["canCount"] as? NSNumber)?.intValue ?? 4
+        return "Standing can campaign: \(state). Transfers reported \(transfers)/\(count); bucket landings camera-verified \(landings).\n"
             + (value["detail"] as? String ?? "") + " Stop revokes this authorization."
     }
     static func activityStatus(trialRunning: Bool, trialStatus: String, approvalPending: Bool,
@@ -766,25 +804,31 @@ enum ROBLocalRecyclingSandboxRouting {
         default: return nil
         }
     }
+    static func resumeTrialID(selectedTrialID: String, persistedArm: String?) -> String {
+        if physicalArm(trialID: selectedTrialID) != nil { return selectedTrialID }
+        return persistedArm == "left" ? "recycling" : "right-recycling"
+    }
     static func preparationCommand(trialID: String, savedCount: Int, enteredCount: Double?) -> String? {
-        guard let arm = physicalArm(trialID: trialID), savedCount == 4,
-              let enteredCount, enteredCount.isFinite, enteredCount == 4 else { return nil }
+        guard let arm = physicalArm(trialID: trialID), (1...ROBRecyclingBatchRequest.maximumCount).contains(savedCount),
+              let enteredCount, enteredCount.isFinite, enteredCount == Double(savedCount) else { return nil }
         return arm + "_recycle_cans"
     }
     static func receiptFilesEnabled(trialID: String, pendingScope: NSDictionary?, operationRunning: Bool) -> Bool {
         guard !operationRunning, let arm = physicalArm(trialID: trialID), let scope = pendingScope,
               scope["arm"] as? String == arm, scope["command"] as? String == arm + "_recycle_cans",
-              (scope["canCount"] as? NSNumber)?.doubleValue == 4 else { return false }
+              let count = (scope["canCount"] as? NSNumber)?.doubleValue, count.isFinite,
+              (1...Double(ROBRecyclingBatchRequest.maximumCount)).contains(count), count.rounded()==count else { return false }
         return true
     }
     static func scopeDescription(pending: NSDictionary?, imported: NSDictionary?) -> String {
-        guard let scope = imported ?? pending else { return "Local session approval: no imported job is available or executing. Prepare a four-can job to review its exact scope." }
+        guard let scope = imported ?? pending else { return "Local session approval: no imported job is available or executing. Prepare a saved-count can job to review its exact scope." }
         let state = imported?["state"] as? String ?? "waiting for private receipt; no grant"
         let arm = scope["arm"] as? String ?? "unknown"
         let command = scope["command"] as? String ?? "unknown"
         let source = imported?["source"] as? String ?? "no local receipt imported"
+        let count = (scope["canCount"] as? NSNumber)?.intValue ?? 0
         var lines = ["Local session approval: " + state, "Source: " + source,
-            "Job: 4 empty Coke cans → orange bucket · physical " + arm.uppercased() + " arm",
+            "Job: \(count) empty Coke cans → orange bucket · physical " + arm.uppercased() + " arm",
             "Command: " + command,
             "Scope: " + (scope["summary"] as? String ?? "missing"),
             "Summary SHA-256: " + (scope["summarySHA256"] as? String ?? "missing"),

@@ -192,6 +192,20 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
         func begin()async throws->ROBRecyclingVisualInspection.Context {
             try await ROBRecyclingVisualInspection.beginVisualCalibrationTrial(model:model,can:can,map:map,trial:trial,gatewayArm:"right",check:{})
         }
+        for count in [1,5,8,0,9] {
+            let encoder=JSONEncoder(),decoder=JSONDecoder()
+            var object=try JSONSerialization.jsonObject(with:encoder.encode(trial))as![String:Any];object["canCount"]=count
+            let scoped=try decoder.decode(ROBWorkspaceVisualCalibrationTrial.self,from:JSONSerialization.data(withJSONObject:object))
+            let receipt=originalEvidence!.mutableCopy()as!NSMutableDictionary;receipt["canCount"]=count;b.evidence=receipt
+            do {
+                _=try await ROBRecyclingVisualInspection.beginVisualCalibrationTrial(model:model,can:can,map:map,trial:scoped,gatewayArm:"right",check:{})
+                precondition((1...8).contains(count),"Out-of-range inspection count accepted")
+            }catch {precondition(!(1...8).contains(count),"Bounded matching count rejected: \(count): \(error)")}
+        }
+        b.evidence=originalEvidence
+        let mismatched=originalEvidence!.mutableCopy()as!NSMutableDictionary;mismatched["canCount"]=5;b.evidence=mismatched
+        do {_=try await begin();preconditionFailure("Changed exact job count admitted") }catch{}
+        b.evidence=originalEvidence
         let first=try await begin()
         if case .registered = first.projection {preconditionFailure("Estimated inspection manufactured registration")}
         precondition(c.registrationCalls==0 && map.registrationID==nil)

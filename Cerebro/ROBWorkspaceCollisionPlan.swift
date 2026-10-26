@@ -360,7 +360,7 @@ struct ROBWorkspaceVisualCalibrationTrial: Codable, Equatable {
         func hash(_ value: String) -> Bool {value.count == 64 && value.allSatisfy(\.isHexDigit)}
         return !receiptID.isEmpty && receiptID.utf8.count <= 128 && !appSessionID.isEmpty &&
             appSessionID.utf8.count <= 128 && !authorizationContextIdentity.isEmpty &&
-            authorizationContextIdentity.utf8.count <= 256 && canCount == 4 &&
+            authorizationContextIdentity.utf8.count <= 256 && (1...8).contains(canCount) &&
             ["left_recycle_cans","right_recycle_cans"].contains(command) &&
             [receiptSHA256,summarySHA256,mapFingerprint,estimatedCameraProjectionIdentity,observationPoseIdentity,currentPoseIdentity].allSatisfy(hash) &&
             !bodyMotionIdentity.isEmpty && bodyMotionIdentity.utf8.count <= 128 && sessionGeneration > 0 &&

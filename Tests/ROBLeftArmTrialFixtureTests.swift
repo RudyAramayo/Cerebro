@@ -763,6 +763,59 @@ final class ROBArmRoutineCoordinator {
         let device = UUID(), session = UUID()
         let hello = ROBRobotActionMessage.controllerHello(senderID: "fixture-controller", acceptsActions: true, capabilities: ["arm_operation"])
         _ = broker.receive(hello, device: device, session: session)
+        if CommandLine.arguments.last=="local-counts" {
+            var requests=0,prompts=0
+            broker.send={message,_,_ in if message.kind == .actionRequest {requests+=1};return true}
+            broker.announceApproval={_ in prompts+=1}
+            ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64)
+            let vision=ROBArmRoutineVision.shared,search=ROBWorkspaceSearch.shared
+            vision.frameAvailable=true;vision.fresh=true;search.objects=[:]
+            g.ready=true;g.stale=false;g.mode=["left":0,"right":0];g.calibrated=["left","right"]
+            for count in [1,5,8] {
+                g.commands=[]
+                var result:NSDictionary?
+                Task { @MainActor in
+                    trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:String(count)){result=$0}
+                }
+                let pendingEnd=ProcessInfo.processInfo.systemUptime+2
+                while broker.pendingLocalRecyclingApprovalScope==nil && ProcessInfo.processInfo.systemUptime<pendingEnd {try await Task.sleep(nanoseconds:10_000_000)}
+                precondition((broker.pendingLocalRecyclingApprovalScope?["canCount"]as?NSNumber)?.intValue==count)
+                var receipt=broker.localRecyclingReceiptTemplate as! [String:Any]
+                receipt["sourceMessage"]="Synthetic count fixture only; no real operator authorization."
+                receipt["sourceMessageSHA256"]=ROBGhostRobotModel.hash(Data((receipt["sourceMessage"]as!String).utf8))
+                receipt["additionalUserInstruction"]="Synthetic exact bounded count and source-context test."
+                receipt["additionalUserInstructionSHA256"]=ROBGhostRobotModel.hash(Data((receipt["additionalUserInstruction"]as!String).utf8))
+                try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+                let url=folder.appendingPathComponent("synthetic-count-\(count).json")
+                var mismatch=receipt
+                var scope=mismatch["scope"]as![String:Any];scope["canCount"]=count==8 ? 1:count+1;mismatch["scope"]=scope
+                try JSONSerialization.data(withJSONObject:mismatch,options:.sortedKeys).write(to:url)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+                do {try broker.importLocalRecyclingSessionApproval(fromReceiptURL:url);preconditionFailure("Mismatched exact count imported")}catch{}
+                try JSONSerialization.data(withJSONObject:receipt,options:.sortedKeys).write(to:url)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+                try broker.importLocalRecyclingSessionApproval(fromReceiptURL:url)
+                let end=ProcessInfo.processInfo.systemUptime+12
+                while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
+                guard let result else{fatalError("Bounded local count did not finish")}
+                precondition(result["status"]as?String=="not_found",result.description)
+                precondition((result["authorized_can_count"]as?NSNumber)?.intValue==count)
+                precondition((result["batch_requested"]as?NSNumber)?.intValue==count && (result["batch_completed"]as?NSNumber)?.intValue==0)
+                precondition(result["arm_motion_sent"]as?Bool==false && result["jaw_command_sent"]as?Bool==false)
+                precondition(result["perception_only_rejection"]as?Bool==true && broker.localRecyclingApprovalState != nil)
+                broker.cancel(reason:"Synthetic bounded-count scenario complete")
+                precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
+            }
+            for (command,target) in [("right_recycle_cans","0"),("right_recycle_cans","9"),("right_recycle_cans",""),
+                ("left_wave","5"),("right_scan_clearance","5"),("right_recycle_can","1")] {
+                g.commands=[]
+                let result:NSDictionary=await withCheckedContinuation{done in trial.performUsingLocalRecyclingReceipt(command,target:target){done.resume(returning:$0)}}
+                precondition(result["status"]as?String=="rejected" && g.commands.isEmpty && broker.pendingLocalRecyclingApprovalScope==nil)
+            }
+            precondition(requests==0 && prompts==0)
+            print("PASS actual local1/5/8 exact scope/import/context/task counts;0/9/empty and non-can commands rejected, count mismatch rejected, partial holds/not-found earn0, no hardware motion or extra spoken grant")
+            return
+        }
         if ["standing-camera-start","standing-auto-recovery"].contains(CommandLine.arguments.last ?? "") {
             let recovering=CommandLine.arguments.last=="standing-auto-recovery"
             broker.standingCanCampaignDirectory=folder.appendingPathComponent("standing-camera-campaign")

@@ -615,13 +615,13 @@ final class ROBAmberGatewayClient: NSObject {
             check(executed == 1, "Crash replay never dispatches")
             restarted.cancel(reason: "Fixture cleanup")
         }
-        for (command, arm, count) in [("left_wave", "left", 4), ("left_recycle_cans", "left", 3), ("right_recycle_cans", "both", 4)] {
+        for (command, arm, count) in [("left_wave", "left", 4), ("left_recycle_cans", "left", 0), ("left_recycle_cans", "left", 9), ("right_recycle_cans", "both", 4)] {
             let b = localBroker(); var rejected = false
             b.requestRecyclingWorkspaceTask(command: command, arm: arm, canCount: count,
                 summary: "Invalid local scope", contextIdentity: { "context" }, receiptOnly: true,
                 execute: { _ in check(false, "Invalid local scope executed") }, cancel: {},
                 completion: { rejected = $0["status"] as? String == "rejected" })
-            check(rejected && !b.isPending, "Local receipts cannot broaden to another count, gesture or unspecified arm")
+            check(rejected && !b.isPending, "Local receipts reject unbounded counts, another gesture or an unspecified arm")
         }
         func standingFile(_ b: ROBControllerArmApproval, mutate: (inout [String: Any]) -> Void = { _ in }) throws -> URL {
             let source = "Synthetic actual user task: remove these four empty Coke cans into the orange bucket."
@@ -835,6 +835,143 @@ final class ROBAmberGatewayClient: NSObject {
             try Data("orphaned authorization after interrupted persistence".utf8).write(to:orphan)
             check(b.standingCanCampaignMayHoldPayload,"Missing state with prior campaign history cannot silently imply EMPTY")
         }
+        // Schema2 has an explicit bounded target; legacy schema1 remains four.
+        func boundedStandingFile(_ b: ROBControllerArmApproval, count: Int) throws -> URL {
+            try standingFile(b) { value in
+                value["schemaVersion"] = 2
+                var scope = value["scope"] as! [String: Any]
+                scope["canCount"] = count; scope["validUntil"] = "target_transfers_or_user_intervention"
+                value["scope"] = scope
+            }
+        }
+        for count in [1, 5, 8] {
+            let b = localBroker(); b.standingCanCampaignDirectory = localDirectory.appendingPathComponent("bounded-standing-" + String(count))
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL: boundedStandingFile(b, count: count))
+            var executed = 0; var done: ((NSDictionary) -> Void)?
+            check((b.standingLocalCanCampaignState?["targetCanCount"] as? NSNumber)?.intValue == count &&
+                (b.standingLocalCanCampaignState?["remainingTransfers"] as? NSNumber)?.intValue == count,
+                "Schema2 imports the exact bounded campaign target")
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: count,
+                summary: "Exact bounded can job", contextIdentity: { "fresh" }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true, execute: { executed += 1; done = $0 }, cancel: {}, completion: { _ in })
+            check(executed == 1 && (b.activeLocalRecyclingApprovalEvidence?["canCount"] as? NSNumber)?.intValue == count,
+                "Fresh derived receipt binds the exact target, not a hardcoded four")
+            done?(["status": "accepted_unverified", "transfer_completed": true, "batch_completed": count])
+            check(!b.standingLocalCanCampaignActive && (b.standingLocalCanCampaignState?["completedTransfers"] as? NSNumber)?.intValue == count,
+                "Only the exact bounded target consumes the campaign")
+            check(!b.receiveSpokenCanCampaignRestart("proceed with protections", targetCanCount: count),
+                "A consumed campaign is not a stopped intent to reopen")
+        }
+        for count in [0, 9] {
+            let b = localBroker()
+            do { try b.importLocalCanCampaignAuthorization(fromReceiptURL: boundedStandingFile(b, count: count)); check(false, "Unbounded standing count imported") }
+            catch { check(!b.standingLocalCanCampaignActive, "Invalid standing count grants nothing") }
+        }
+        do {
+            let b = localBroker(); try b.importLocalCanCampaignAuthorization(fromReceiptURL: standingFile(b))
+            let stateURL = b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var state = try JSONSerialization.jsonObject(with: Data(contentsOf: stateURL)) as! [String: Any]
+            state["schemaVersion"] = 1; state.removeValue(forKey: "targetCanCount"); state.removeValue(forKey: "authorizationSource")
+            try JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]).write(to: stateURL)
+            check((b.standingLocalCanCampaignState?["targetCanCount"] as? NSNumber)?.intValue == 4,
+                "Legacy state with no target field defaults to its original four-can authorization")
+            b.cancel(reason: "Fixture cleanup")
+        }
+        do {
+            let b = localBroker(); try b.importLocalCanCampaignAuthorization(fromReceiptURL: boundedStandingFile(b, count: 5))
+            var executed = 0, outcome: NSDictionary = [:]
+            b.requestRecyclingWorkspaceTask(command: "left_recycle_cans", arm: "left", canCount: 4,
+                summary: "Mismatched standing count", contextIdentity: { "fresh" }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true, execute: { _ in executed += 1 }, cancel: {}, completion: { outcome = $0 })
+            check(executed == 0 && !b.isPending && outcome["status"] as? String == "blocked" && b.standingLocalCanCampaignActive &&
+                (b.standingLocalCanCampaignState?["targetCanCount"] as? NSNumber)?.intValue == 5,
+                "A standing grant cannot silently authorize a differently counted job")
+            b.cancel(reason: "Fixture cleanup")
+        }
+        do {
+            let b = localBroker(); b.standingCanCampaignDirectory = localDirectory.appendingPathComponent("spoken-restart-positive")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL: boundedStandingFile(b, count: 5))
+            var executed = 0, cancelled = 0
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 5,
+                summary: "Five-can initial job", contextIdentity: { "old-context" }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true, execute: { _ in executed += 1 }, cancel: { cancelled += 1 }, completion: { _ in })
+            try b.recordLocalCanCampaignTransferProgress(2, bucketLandingVerified: true)
+            let oldID = b.standingLocalCanCampaignState?["campaignID"] as! String
+            b.cancel(reason: "Operator Stop after two transfers")
+            let terminalURL = b.standingCanCampaignDirectory.appendingPathComponent("terminal-" + oldID + ".json")
+            let authorizationURL = b.standingCanCampaignDirectory.appendingPathComponent("authorization-" + oldID + ".json")
+            let oldTerminal = try Data(contentsOf: terminalURL), oldAuthorization = try Data(contentsOf: authorizationURL)
+            check(b.spokenCanCampaignRestartTargetCanCount == 3 && !b.isPending && cancelled == 1,
+                "Stopped intent retains only remaining transfers, never an old execution")
+            for text in ["proceed with", "say proceed with protections", "proceed with protections but don't move", "no proceed with protections", "\"proceed with protections\""] {
+                check(!b.isSpokenCanCampaignRestartCandidate(text) && !b.receiveSpokenCanCampaignRestart(text, targetCanCount: 3),
+                    "Incomplete, quoted, negative or instructional speech cannot restart")
+            }
+            check(b.isSpokenCanCampaignRestartCandidate("ROB, proceed with protections!") && !b.standingLocalCanCampaignActive && executed == 1,
+                "Candidate/partial endpointing alone grants nothing")
+            check(!b.receiveSpokenAuthorization("proceed with protections"), "Ordinary spoken-approval API cannot restart a revoked local grant")
+            for wrong in [0, 5, 9] {
+                check(!b.receiveSpokenCanCampaignRestart("proceed with protections", targetCanCount: wrong) &&
+                    b.standingLocalCanCampaignState?["campaignID"] as? String == oldID,
+                    "Restart cannot broaden or replace the inherited remaining count")
+            }
+            check(b.receiveSpokenCanCampaignRestart("ROB, proceed with protections!", targetCanCount: 3),
+                "Dedicated final-mic entry records a new protected restart authorization")
+            let newID = b.standingLocalCanCampaignState?["campaignID"] as! String
+            let newState = try JSONSerialization.jsonObject(with: Data(contentsOf: b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json"))) as! [String: Any]
+            let newAuthorization = try JSONSerialization.jsonObject(with: Data(contentsOf: b.standingCanCampaignDirectory.appendingPathComponent("authorization-" + newID + ".json"))) as! [String: Any]
+            let restart = newAuthorization["restart"] as! [String: Any]
+            check(newID != oldID && executed == 1 && !b.isPending &&
+                (b.standingLocalCanCampaignState?["targetCanCount"] as? NSNumber)?.intValue == 3 &&
+                (b.standingLocalCanCampaignState?["completedTransfers"] as? NSNumber)?.intValue == 0 &&
+                newState["lastJobID"] == nil && (newState["creditedJobCounts"] as? [String: Int])?.isEmpty == true,
+                "Restart creates a fresh remaining-only campaign, never a saved job/waypoint")
+            check(newAuthorization["source"] as? String == "final_clean_local_microphone" &&
+                newAuthorization["sourceMessage"] as? String == "ROB, proceed with protections!" &&
+                restart["previousCampaignID"] as? String == oldID &&
+                (restart["previousCompletedTransfers"] as? NSNumber)?.intValue == 2 &&
+                restart["previousTerminalSHA256"] as? String == SHA256.hash(data: oldTerminal).map { String(format: "%02x", $0) }.joined(),
+                "New private provenance references the exact old terminal and truthful local microphone text")
+            let unchangedTerminal = try Data(contentsOf: terminalURL), unchangedAuthorization = try Data(contentsOf: authorizationURL)
+            check(unchangedTerminal == oldTerminal && unchangedAuthorization == oldAuthorization,
+                "Restart never rewrites the old revoked terminal or source authorization")
+            check(!b.receiveSpokenCanCampaignRestart("proceed with protections", targetCanCount: 3) &&
+                b.standingLocalCanCampaignState?["campaignID"] as? String == newID && executed == 1,
+                "Duplicate final callbacks cannot replace an already-active campaign or execute twice")
+            let restarted = localBroker(); restarted.standingCanCampaignDirectory = b.standingCanCampaignDirectory
+            check(restarted.standingLocalCanCampaignActive && !restarted.isPending,
+                "New spoken campaign reloads as authority only, with no implicit execution")
+            b.cancel(reason: "Stop during acknowledgement/preparation")
+            do { try restarted.importLocalCanCampaignAuthorization(fromReceiptURL: b.standingCanCampaignDirectory.appendingPathComponent("authorization-" + newID + ".json")); check(false, "Microphone source imported as a written receipt") }
+            catch { check(true, "File import cannot impersonate a final microphone event") }
+            check(!b.standingLocalCanCampaignActive && !b.isPending && executed == 1,
+                "Stop before the fresh-run hook revokes new authority without motion")
+        }
+        do {
+            let b = localBroker()
+            check(b.isSpokenCanCampaignRestartCandidate("proceed with protections") && b.spokenCanCampaignRestartTargetCanCount == 0 &&
+                !b.receiveSpokenCanCampaignRestart("proceed with protections", targetCanCount: 5) && !b.standingLocalCanCampaignActive,
+                "Unknown restart phrase is acknowledged as unavailable and creates no grant")
+            check(b.spokenCanCampaignRestartStatus.contains("No stopped can task"), "Unavailable restart has an explicit native no-motion explanation")
+        }
+        do {
+            let b = localBroker(); try b.importLocalCanCampaignAuthorization(fromReceiptURL: boundedStandingFile(b, count: 5))
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 5,
+                summary: "Potential payload", contextIdentity: { "old" }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true, execute: { _ in }, cancel: {}, completion: { _ in })
+            try b.markLocalCanCampaignPossiblePayloadHeld(); b.cancel(reason: "Stop with uncertain possession")
+            check(b.receiveSpokenCanCampaignRestart("proceed with protections", targetCanCount: 5) && b.standingCanCampaignMayHoldPayload,
+                "New authorization cannot reset possible held payload into EMPTY")
+            var executed = false
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 5,
+                summary: "Fresh empty job", contextIdentity: { "new" }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true, execute: { _ in executed = true }, cancel: {}, completion: { _ in })
+            check(!executed && !b.isPending && b.standingLocalCanCampaignActive &&
+                b.spokenCanCampaignRestartStatus.contains("Possible payload"),
+                "Protected restart visibly retains object-state veto on a fresh empty grasp")
+            b.cancel(reason: "Fixture cleanup")
+        }
+
         // Global typed Stop is authenticated independently of a task/card ID.
         // The notification consumer owns physical both-arm hold; this broker can
         // truthfully report only that Stop was requested and authority revoked.

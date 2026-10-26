@@ -2906,13 +2906,36 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     // recognition. Typed/controller text and serial/model transcripts use the
     // ordinary inputText path and cannot authorize a pending operation.
     if (self.speechBox.isSpeaking || self.stageShowCoordinator.isRunning) { return NO; }
-    return [[ROBControllerArmApproval shared] receiveSpokenAuthorization:transcript];
+    ROBControllerArmApproval *approval = [ROBControllerArmApproval shared];
+    if ([approval isSpokenCanCampaignRestartCandidate:transcript]) {
+        NSInteger count = approval.spokenCanCampaignRestartTargetCanCount;
+        BOOL accepted = [approval receiveSpokenCanCampaignRestart:transcript targetCanCount:count];
+        ROBTestingSandboxWindowController *sandbox = [ROBTestingSandboxWindowController shared];
+        [sandbox showStandingCanCampaignResumeStatus:approval.spokenCanCampaignRestartStatus];
+        if (accepted) {
+            NSString *campaignID = [approval.standingLocalCanCampaignState[@"campaignID"] copy];
+            __weak typeof(self) weakSelf = self;
+            [self.speechBox sayIt:@"Approval received. Rechecking the scene." completion:^(BOOL finished) {
+                __strong typeof(weakSelf) self = weakSelf;
+                // Stop, a cancelled acknowledgement or a replacement campaign
+                // cannot start this queued fresh run. No waypoint is resumed.
+                if (!self || !finished || !approval.standingLocalCanCampaignActive ||
+                    ![approval.standingLocalCanCampaignState[@"campaignID"] isEqual:campaignID]) { return; }
+                [sandbox resumeAuthorizedStandingCanCampaignWithTargetCanCount:count];
+            }];
+        } else {
+            [self.speechBox sayIt:approval.spokenCanCampaignRestartStatus];
+        }
+        return YES; // Recognized locally; a rejection must not become an LLM approval.
+    }
+    return [approval receiveSpokenAuthorization:transcript];
 }
 
 - (BOOL)shouldFinalizeLocalMicrophoneAuthorization:(NSString *)transcript
 {
     return !self.speechBox.isSpeaking && !self.stageShowCoordinator.isRunning &&
-        [[ROBControllerArmApproval shared] isSpokenAuthorizationCandidate:transcript];
+        ([[ROBControllerArmApproval shared] isSpokenAuthorizationCandidate:transcript] ||
+         [[ROBControllerArmApproval shared] isSpokenCanCampaignRestartCandidate:transcript]);
 }
 
 - (void) resetSpeechResponseAttentionTimer {

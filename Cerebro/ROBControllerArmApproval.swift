@@ -25,18 +25,27 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     }
     @nonobjc var now: () -> Date = Date.init
 
-    // This is a separate, explicitly imported local-user approval. No ordinary
-    // chat, model tool, microphone candidate or controller packet enters it.
+    // Imported local-user approval and the separate clean-final-microphone
+    // restart below are distinct from ordinary chat/model/controller text.
     private let localSessionID = UUID()
     var localRecyclingApprovalSessionID: String { localSessionID.uuidString }
     @nonobjc var localRecyclingApprovalAuditDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cerebro/LocalSessionApprovals", isDirectory: true)
     @nonobjc var standingCanCampaignDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cerebro/LocalSessionApprovals/StandingCanCampaign", isDirectory: true)
+    private struct StandingAuthorizationScope: Decodable { let canCount: Int }
+    private struct SpokenCampaignRestart: Codable {
+        let schemaVersion: Int, eventID: UUID, appSessionID: UUID
+        let previousCampaignID: UUID, previousAuthorizationSHA256: String, previousTerminalSHA256: String
+        let previousCompletedTransfers: Int, previousTargetCanCount: Int
+        let previousPossiblePayloadHeld: Bool
+    }
     private struct StandingAuthorization: Decodable {
         let schemaVersion: Int, kind: String, campaignID: UUID, issuedAtMilliseconds: Double
         let source: String, sourceMessage: String, sourceMessageSHA256: String
         let additionalUserInstruction: String, additionalUserInstructionSHA256: String
+        let scope: StandingAuthorizationScope
+        let restart: SpokenCampaignRestart?
     }
     private struct StandingState: Codable {
         let schemaVersion: Int, campaignID: UUID, authorizationSHA256: String
@@ -44,14 +53,18 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         var detail: String, lastJobID: String?, lastJobAppSessionID: UUID?
         var creditedJobCounts: [String: Int]
         var possiblePayloadHeld: Bool? = nil
+        var targetCanCount: Int? = nil
+        var authorizationSource: String? = nil
+        var canCount: Int { targetCanCount ?? 4 }
     }
     private var standingRecovery: DispatchWorkItem?
     private var standingRecoveryToken = UUID()
     private var standingIOFailure: String?
-    private static var standingScope: [String: Any] {
-        ["canCount": 4, "targetObject": "empty_coke_can", "destination": "orange_bucket", "arms": ["left", "right"],
+    private static func standingScope(canCount: Int, legacy: Bool) -> [String: Any] {
+        ["canCount": canCount, "targetObject": "empty_coke_can", "destination": "orange_bucket", "arms": ["left", "right"],
          "treads": false, "torso": false, "manualGestures": false, "permitsUnmeasuredVisualCalibrationTrial": true,
-         "automaticConnectionRecovery": true, "validUntil": "four_transfers_or_user_intervention"]
+         "automaticConnectionRecovery": true,
+         "validUntil": legacy ? "four_transfers_or_user_intervention" : "target_transfers_or_user_intervention"]
     }
     private var standingStateURL: URL { standingCanCampaignDirectory.appendingPathComponent("active-campaign.json") }
     private func standingAuthorizationURL(_ id: UUID) -> URL {
@@ -60,24 +73,63 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     private func standingTerminalURL(_ id: UUID) -> URL {
         standingCanCampaignDirectory.appendingPathComponent("terminal-" + id.uuidString + ".json")
     }
-    private func validateStandingAuthorization(_ data: Data) throws -> StandingAuthorization {
+    private func validateStandingAuthorization(_ data: Data, validateRestartParent: Bool = true) throws -> StandingAuthorization {
         let value = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let keys: Set<String> = ["schemaVersion", "kind", "campaignID", "issuedAtMilliseconds", "source", "sourceMessage",
-            "sourceMessageSHA256", "additionalUserInstruction", "additionalUserInstructionSHA256", "scope"]
-        guard let value, Set(value.keys) == keys, let scope = value["scope"] as? [String: Any],
-              try localCanonical(scope) == localCanonical(Self.standingScope) else {
-            throw localApprovalError("Standing authorization must cover exactly four empty Coke cans, the orange bucket and arms only.")
-        }
         let a = try JSONDecoder().decode(StandingAuthorization.self, from: data)
-        guard a.schemaVersion == 1, a.kind == "local_user_standing_can_campaign_authorization",
-              a.source == "explicit_user_session_instruction", a.issuedAtMilliseconds.isFinite,
-              a.issuedAtMilliseconds > 0, a.issuedAtMilliseconds <= now().timeIntervalSince1970 * 1000,
+        let spoken = a.source == "final_clean_local_microphone"
+        var keys: Set<String> = ["schemaVersion", "kind", "campaignID", "issuedAtMilliseconds", "source", "sourceMessage",
+            "sourceMessageSHA256", "additionalUserInstruction", "additionalUserInstructionSHA256", "scope"]
+        if spoken { keys.insert("restart") }
+        guard let value, Set(value.keys) == keys, let scope = value["scope"] as? [String: Any],
+              [1, 2].contains(a.schemaVersion), (1...8).contains(a.scope.canCount),
+              a.schemaVersion != 1 || a.scope.canCount == 4,
+              try localCanonical(scope) == localCanonical(Self.standingScope(canCount: a.scope.canCount, legacy: a.schemaVersion == 1)),
+              a.kind == "local_user_standing_can_campaign_authorization",
+              (a.source == "explicit_user_session_instruction" || spoken && a.schemaVersion == 2),
+              a.issuedAtMilliseconds.isFinite, a.issuedAtMilliseconds > 0,
+              a.issuedAtMilliseconds <= now().timeIntervalSince1970 * 1000,
               !a.sourceMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, a.sourceMessage.utf8.count <= 8192,
               a.sourceMessageSHA256 == Self.localHash(Data(a.sourceMessage.utf8)),
               !a.additionalUserInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               a.additionalUserInstruction.utf8.count <= 8192,
               a.additionalUserInstructionSHA256 == Self.localHash(Data(a.additionalUserInstruction.utf8)) else {
-            throw localApprovalError("Standing authorization needs the actual private user instructions and matching hashes.")
+            throw localApprovalError("Standing authorization needs an exact bounded can count, arms-only scope and matching private user evidence.")
+        }
+        if spoken {
+            let restartKeys: Set<String> = ["schemaVersion", "eventID", "appSessionID", "previousCampaignID",
+                "previousAuthorizationSHA256", "previousTerminalSHA256", "previousCompletedTransfers", "previousTargetCanCount", "previousPossiblePayloadHeld"]
+            guard let restart = a.restart, restart.schemaVersion == 1, restart.previousCampaignID != a.campaignID,
+                  let object = value["restart"] as? [String: Any], Set(object.keys) == restartKeys,
+                  (1...8).contains(restart.previousTargetCanCount),
+                  (0..<restart.previousTargetCanCount).contains(restart.previousCompletedTransfers),
+                  a.scope.canCount == restart.previousTargetCanCount - restart.previousCompletedTransfers,
+                  Self.isSpokenCanCampaignRestartPhrase(a.sourceMessage) else {
+                throw localApprovalError("A spoken restart needs a new campaign linked to the stopped job's remaining scope.")
+            }
+            if validateRestartParent {
+                let terminalData = try readPrivateLocalReceipt(standingTerminalURL(restart.previousCampaignID))
+                let previous = try JSONDecoder().decode(StandingState.self, from: terminalData)
+                let previousData = try readPrivateLocalReceipt(standingAuthorizationURL(restart.previousCampaignID))
+                let previousAuthorization = try validateStandingAuthorization(previousData, validateRestartParent: false)
+                guard Self.localHash(terminalData) == restart.previousTerminalSHA256,
+                      Self.localHash(previousData) == restart.previousAuthorizationSHA256,
+                      previous.state == "revoked", previous.campaignID == restart.previousCampaignID,
+                      [1, 2].contains(previous.schemaVersion),
+                      previous.schemaVersion != 1 || previous.canCount == 4,
+                      previous.schemaVersion != 2 || previous.targetCanCount != nil,
+                      previous.authorizationSHA256 == restart.previousAuthorizationSHA256,
+                      previousAuthorization.campaignID == previous.campaignID,
+                      previousAuthorization.scope.canCount == previous.canCount,
+                      previous.canCount == restart.previousTargetCanCount,
+                      previous.completedTransfers == restart.previousCompletedTransfers,
+                      standingMayHoldPayload(previous) == restart.previousPossiblePayloadHeld,
+                      a.additionalUserInstruction == previousAuthorization.additionalUserInstruction,
+                      a.additionalUserInstructionSHA256 == previousAuthorization.additionalUserInstructionSHA256 else {
+                    throw localApprovalError("The spoken restart's prior revoked evidence changed or cannot be verified.")
+                }
+            }
+        } else if a.restart != nil {
+            throw localApprovalError("Written authorization cannot claim a microphone restart.")
         }
         return a
     }
@@ -115,17 +167,23 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
                 guard terminal.campaignID == s.campaignID, terminal.authorizationSHA256 == s.authorizationSHA256 else { return nil }
                 s = terminal
             }
-            guard s.schemaVersion == 1, (0...4).contains(s.completedTransfers), (0...s.completedTransfers).contains(s.verifiedLandings),
+            guard [1, 2].contains(s.schemaVersion), (1...8).contains(s.canCount),
+                  s.schemaVersion != 1 || s.canCount == 4,
+                  s.schemaVersion != 2 || s.targetCanCount != nil,
+                  s.schemaVersion != 2 || s.authorizationSource != nil,
+                  (0...s.canCount).contains(s.completedTransfers), (0...s.completedTransfers).contains(s.verifiedLandings),
                   (0...3).contains(s.recoveryAttempts),
                   (["active", "paused", "recovering", "executing", "waiting_for_intervention"].contains(s.state)
                     || includeTerminal && ["revoked", "consumed"].contains(s.state)) else { return nil }
             let data = try readPrivateLocalReceipt(standingAuthorizationURL(s.campaignID))
+            let authorization = try validateStandingAuthorization(data)
             guard Self.localHash(data) == s.authorizationSHA256,
-                  try validateStandingAuthorization(data).campaignID == s.campaignID else { return nil }
+                  authorization.campaignID == s.campaignID, authorization.scope.canCount == s.canCount,
+                  s.authorizationSource == nil || s.authorizationSource == authorization.source else { return nil }
             return s
         } catch { return nil }
     }
-    var standingLocalCanCampaignActive: Bool { standingRecord().map { $0.completedTransfers < 4 } ?? false }
+    var standingLocalCanCampaignActive: Bool { standingRecord().map { $0.completedTransfers < $0.canCount } ?? false }
     /// Object state is independent of permission. Startup jaw preparation and
     /// new campaign imports must not assume EMPTY after a crash or I/O loss.
     var standingCanCampaignMayHoldPayload: Bool {
@@ -144,26 +202,30 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         guard let s = standingRecord(includeTerminal: true) else { return standingIOFailure.map { ["state": "blocked", "detail": $0] as NSDictionary } }
         let state = s.state == "executing" && s.lastJobAppSessionID != localSessionID ? "paused" : s.state
         return ["campaignID": s.campaignID.uuidString, "state": state, "completedTransfers": s.completedTransfers,
-            "remainingTransfers": 4 - s.completedTransfers, "verifiedLandings": s.verifiedLandings,
+            "targetCanCount": s.canCount, "canCount": s.canCount, "remainingTransfers": s.canCount - s.completedTransfers, "verifiedLandings": s.verifiedLandings,
             "possiblePayloadHeld": standingMayHoldPayload(s),
             "recoveryAttempts": s.recoveryAttempts, "detail": state == "paused" && s.state == "executing"
                 ? "App restarted; a new plan and fresh possession/scene checks are required. No old waypoint resumes." : s.detail,
-            "source": "explicit_private_local_standing_authorization", "authorizationSHA256": s.authorizationSHA256] as NSDictionary
+            "source": s.authorizationSource ?? "explicit_user_session_instruction", "authorizationSHA256": s.authorizationSHA256] as NSDictionary
     }
     @nonobjc func importLocalCanCampaignAuthorization(fromReceiptURL url: URL) throws {
         precondition(Thread.isMainThread)
         guard pending == nil, standingRecord() == nil else { throw localApprovalError("Finish or stop the current job/campaign before importing another campaign.") }
         let data = try readPrivateLocalReceipt(url), a = try validateStandingAuthorization(data)
+        guard a.source == "explicit_user_session_instruction", a.restart == nil else {
+            throw localApprovalError("File import is written-user authority; it cannot claim a microphone event.")
+        }
         guard !FileManager.default.fileExists(atPath: standingTerminalURL(a.campaignID).path) else {
             throw localApprovalError("This campaign was stopped or consumed; its authorization cannot replay.")
         }
         let priorPayloadMayBeHeld = standingCanCampaignMayHoldPayload
         try writeStandingExclusive(data, to: standingAuthorizationURL(a.campaignID))
-        try saveStanding(.init(schemaVersion: 1, campaignID: a.campaignID, authorizationSHA256: Self.localHash(data),
+        try saveStanding(.init(schemaVersion: 2, campaignID: a.campaignID, authorizationSHA256: Self.localHash(data),
             state: "active", completedTransfers: 0, verifiedLandings: 0, recoveryAttempts: 0,
-            detail: "Standing four-can authorization ready. Run starts a fresh plan; import does not move the arms.",
-            lastJobID: nil, lastJobAppSessionID: nil, creditedJobCounts: [:], possiblePayloadHeld: priorPayloadMayBeHeld))
-        update("Standing four-can authorization imported. Run uses fresh context; Stop revokes it.")
+            detail: "Standing \(a.scope.canCount)-can authorization ready. Run starts a fresh plan; import does not move the arms.",
+            lastJobID: nil, lastJobAppSessionID: nil, creditedJobCounts: [:], possiblePayloadHeld: priorPayloadMayBeHeld,
+            targetCanCount: a.scope.canCount, authorizationSource: a.source))
+        update("Standing \(a.scope.canCount)-can authorization imported. Run uses fresh context; Stop revokes it.")
     }
     private func endStandingCampaign(_ reason: String, consumed: Bool = false) {
         standingRecovery?.cancel(); standingRecovery = nil; standingRecoveryToken = UUID()
@@ -197,7 +259,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     @nonobjc func scheduleStandingLocalCanCampaignRecovery(reason: ROBStandingCanCampaignRecoveryReason,
         restart: @escaping () -> Void) -> Bool {
         precondition(Thread.isMainThread)
-        guard pending == nil, var s = standingRecord(), s.completedTransfers < 4,
+        guard pending == nil, var s = standingRecord(), s.completedTransfers < s.canCount,
               s.state != "waiting_for_intervention", !standingMayHoldPayload(s) else { return false }
         guard s.recoveryAttempts < 3 else {
             s.state = "waiting_for_intervention"; s.detail = "Automatic recovery reached its three-attempt limit; intervention is required."
@@ -219,7 +281,10 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     }
     private func bindStandingCampaign(scope: LocalRecyclingScope, context: @escaping () -> String?) throws -> Bool {
         guard scope.permitsUnmeasuredVisualCalibrationTrial, !scope.nominalEmptyCommissioningStepEnabled,
-              !scope.oneDegreeEmptyCalibrationStepEnabled, let p = pending, var s = standingRecord(), s.completedTransfers < 4 else { return false }
+              !scope.oneDegreeEmptyCalibrationStepEnabled, let p = pending, var s = standingRecord(), s.completedTransfers < s.canCount else { return false }
+        guard scope.canCount == s.canCount else {
+            throw localApprovalError("The requested count differs from this standing campaign's exact target count.")
+        }
         guard !standingMayHoldPayload(s) else {
             throw localApprovalError("A possible payload is held or its state is unknown. Standing authorization remains active; no new empty-can grasp, jaw calibration or parking is admitted without supported release/object-clear evidence.")
         }
@@ -228,7 +293,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             "campaignID": s.campaignID.uuidString, "standingAuthorizationSHA256": s.authorizationSHA256,
             "receiptID": id.uuidString, "appSessionID": localSessionID.uuidString, "pendingID": p.id,
             "scope": scope.object, "boundAtMilliseconds": now().timeIntervalSince1970 * 1000,
-            "remainingTransfers": 4 - s.completedTransfers, "registrationVerifiedByApproval": false]
+            "targetCanCount": s.canCount, "canCount": s.canCount, "remainingTransfers": s.canCount - s.completedTransfers, "registrationVerifiedByApproval": false]
         let bytes = try localCanonical(derived)
         try writeLocalApprovalAudit(derived, name: "standing-job-" + id.uuidString + ".json")
         s.state = "executing"; s.lastJobID = p.id; s.lastJobAppSessionID = localSessionID
@@ -244,9 +309,9 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         precondition(Thread.isMainThread)
         guard let p = pending, let approval = localRecyclingApproval, let id = approval.standingCampaignID,
               authorizationIsLive(p), var s = standingRecord(), s.campaignID == id,
-              (0...4).contains(completedInCurrentJob) else { throw localApprovalError("No live standing job for transfer progress.") }
+              (0...approval.scope.canCount).contains(completedInCurrentJob) else { throw localApprovalError("No live standing job for transfer progress.") }
         let prior = s.creditedJobCounts[p.id] ?? 0, delta = completedInCurrentJob - prior
-        guard delta >= 0, s.completedTransfers + delta <= 4 else { throw localApprovalError("Transfer progress exceeds this four-can campaign.") }
+        guard delta >= 0, s.completedTransfers + delta <= s.canCount else { throw localApprovalError("Transfer progress exceeds this campaign's exact target count.") }
         s.completedTransfers += delta; s.creditedJobCounts[p.id] = completedInCurrentJob
         if bucketLandingVerified { s.verifiedLandings = min(s.completedTransfers, s.verifiedLandings + delta) }
         try saveStanding(s)
@@ -276,13 +341,14 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     private struct LocalRecyclingScope: Equatable {
         let command: String
         let arm: String
+        let canCount: Int
         let summary: String
         let contextIdentity: String
         let permitsUnmeasuredVisualCalibrationTrial: Bool
         let nominalEmptyCommissioningStepEnabled: Bool
         let oneDegreeEmptyCalibrationStepEnabled: Bool
         var object: [String: Any] {
-            ["command": command, "arm": arm, "canCount": 4, "summary": summary,
+            ["command": command, "arm": arm, "canCount": canCount, "summary": summary,
              "summarySHA256": ROBControllerArmApproval.localHash(Data(summary.utf8)),
              "contextIdentity": contextIdentity, "targetObject": "empty_coke_can",
              "destination": "orange_bucket", "bothArmsStationaryHolds": true,
@@ -338,7 +404,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             "scope": scope.object]
     }
 
-    /// Dedicated Testing Sandbox callers only. A typed four-can request does
+    /// Dedicated native callers only. A typed bounded can request does
     /// not create a grant; its exact immutable scope must match a local receipt.
     @nonobjc func requestRecyclingWorkspaceTask(command: String, arm: String, canCount: Int,
         summary: String, contextIdentity: @escaping () -> String?, receiptOnly: Bool,
@@ -348,16 +414,16 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
         cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
-        guard canCount == 4, ["left", "right"].contains(arm), command == arm + "_recycle_cans",
+        guard (1...8).contains(canCount), ["left", "right"].contains(arm), command == arm + "_recycle_cans",
               !nominalEmptyCommissioningStepEnabled || (receiptOnly && permitsUnmeasuredVisualCalibrationTrial),
               !oneDegreeEmptyCalibrationStepEnabled || (arm == "right" && receiptOnly && permitsUnmeasuredVisualCalibrationTrial),
               !(nominalEmptyCommissioningStepEnabled && oneDegreeEmptyCalibrationStepEnabled),
               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, summary.count <= 2048,
               let identity = contextIdentity(), !identity.isEmpty, identity.utf8.count <= 8192 else {
-            completion(["status": "rejected", "detail": "A local session approval requires the exact four-can recycling task and a current camera/body/arm context."])
+            completion(["status": "rejected", "detail": "A local session approval requires an exact 1...8 can task and a current camera/body/arm context."])
             return
         }
-        let scope = LocalRecyclingScope(command: command, arm: arm, summary: summary, contextIdentity: identity,
+        let scope = LocalRecyclingScope(command: command, arm: arm, canCount: canCount, summary: summary, contextIdentity: identity,
             permitsUnmeasuredVisualCalibrationTrial: permitsUnmeasuredVisualCalibrationTrial,
             nominalEmptyCommissioningStepEnabled: nominalEmptyCommissioningStepEnabled,
             oneDegreeEmptyCalibrationStepEnabled: oneDegreeEmptyCalibrationStepEnabled)
@@ -466,9 +532,10 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         if let id = approval.standingCampaignID, let s = standingRecord(), s.campaignID == id {
             value["standingCampaignID"] = id.uuidString
             value["standingAuthorizationSHA256"] = s.authorizationSHA256
-            value["standingRemainingTransfers"] = 4 - s.completedTransfers
+            value["standingRemainingTransfers"] = s.canCount - s.completedTransfers
+            value["standingTargetCanCount"] = s.canCount
             value["possiblePayloadHeld"] = standingMayHoldPayload(s)
-            value["authorizationSource"] = "explicit_private_local_standing_authorization"
+            value["authorizationSource"] = s.authorizationSource ?? "explicit_user_session_instruction"
         }
         return value as NSDictionary
     }
@@ -672,6 +739,90 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         return p.voiceAuthorized || p.peer.map(peerIsFresh) == true
     }
 
+    private(set) var spokenCanCampaignRestartStatus = "No new can-campaign restart requested."
+
+    private static func isSpokenCanCampaignRestartPhrase(_ text: String) -> Bool {
+        let value = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "^(?:(?:hey )?(?:rob|robbie|robot)[, ]+)?"
+        return value.range(of: prefix + "proceed with protections[.!?]*$", options: .regularExpression) != nil
+    }
+
+    /// A lexical endpointing hint only, never a grant. Even an unavailable or
+    /// consumed intent receives a native no-motion acknowledgement on FINAL.
+    func isSpokenCanCampaignRestartCandidate(_ text: String) -> Bool {
+        Self.isSpokenCanCampaignRestartPhrase(text)
+    }
+
+    private func stoppedCanCampaignRestartIntent() -> StandingState? {
+        guard pending == nil, localRecyclingApproval == nil, !armSessionActive,
+              let previous = standingRecord(includeTerminal: true), previous.state == "revoked",
+              previous.completedTransfers < previous.canCount,
+              FileManager.default.fileExists(atPath: standingTerminalURL(previous.campaignID).path) else { return nil }
+        return previous
+    }
+
+    /// Explicit remaining scope for the new job. A voice restart cannot turn
+    /// two delivered cans out of five into permission for five more transfers.
+    var spokenCanCampaignRestartTargetCanCount: Int {
+        stoppedCanCampaignRestartIntent().map { $0.canCount - $0.completedTransfers } ?? 0
+    }
+
+    /// ONLY the clean FINAL on-device microphone delegate may call this. It
+    /// records new authority and no motion; Main separately starts a fresh task.
+    /// Ordinary spoken approval, model/chat text and private-file import do not
+    /// enter this path. The caller must consume each recognition event once.
+    func receiveSpokenCanCampaignRestart(_ text: String, targetCanCount: Int) -> Bool {
+        precondition(Thread.isMainThread)
+        guard Self.isSpokenCanCampaignRestartPhrase(text) else { return false }
+        guard let previous = stoppedCanCampaignRestartIntent() else {
+            spokenCanCampaignRestartStatus = "No stopped can task is available to restart. No new motion authorized."
+            update(spokenCanCampaignRestartStatus); return false
+        }
+        let remaining = previous.canCount - previous.completedTransfers
+        guard (1...8).contains(targetCanCount), targetCanCount == remaining else {
+            spokenCanCampaignRestartStatus = "The stopped task has \(remaining) remaining cans. A changed count needs new explicit authorization."
+            update(spokenCanCampaignRestartStatus); return false
+        }
+        do {
+            let terminalData = try readPrivateLocalReceipt(standingTerminalURL(previous.campaignID))
+            let previousData = try readPrivateLocalReceipt(standingAuthorizationURL(previous.campaignID))
+            let oldAuthorization = try validateStandingAuthorization(previousData)
+            let id = UUID()
+            let restart = SpokenCampaignRestart(schemaVersion: 1, eventID: UUID(), appSessionID: localSessionID,
+                previousCampaignID: previous.campaignID, previousAuthorizationSHA256: previous.authorizationSHA256,
+                previousTerminalSHA256: Self.localHash(terminalData), previousCompletedTransfers: previous.completedTransfers,
+                previousTargetCanCount: previous.canCount, previousPossiblePayloadHeld: standingMayHoldPayload(previous))
+            let restartObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(restart))
+            let value: [String: Any] = ["schemaVersion": 2, "kind": "local_user_standing_can_campaign_authorization",
+                "campaignID": id.uuidString, "issuedAtMilliseconds": now().timeIntervalSince1970 * 1000,
+                "source": "final_clean_local_microphone", "sourceMessage": text,
+                "sourceMessageSHA256": Self.localHash(Data(text.utf8)),
+                "additionalUserInstruction": oldAuthorization.additionalUserInstruction,
+                "additionalUserInstructionSHA256": oldAuthorization.additionalUserInstructionSHA256,
+                "scope": Self.standingScope(canCount: remaining, legacy: false), "restart": restartObject]
+            let data = try localCanonical(value)
+            _ = try validateStandingAuthorization(data)
+            // Never replace/reopen the old authorization or terminal record.
+            try writeStandingExclusive(data, to: standingAuthorizationURL(id))
+            try saveStanding(.init(schemaVersion: 2, campaignID: id, authorizationSHA256: Self.localHash(data),
+                state: "active", completedTransfers: 0, verifiedLandings: 0, recoveryAttempts: 0,
+                detail: "New spoken authorization; fresh camera, feedback and plan required. No previous waypoint retained.",
+                lastJobID: nil, lastJobAppSessionID: nil, creditedJobCounts: [:],
+                possiblePayloadHeld: standingMayHoldPayload(previous), targetCanCount: remaining,
+                authorizationSource: "final_clean_local_microphone"))
+            standingRecovery?.cancel(); standingRecovery = nil; standingRecoveryToken = UUID()
+            spokenCanCampaignRestartStatus = standingMayHoldPayload(previous)
+                ? "Approval received for \(remaining) remaining cans. Possible payload remains held or unknown; no new empty grasp until supported object-clear evidence."
+                : "Approval received for \(remaining) remaining cans. Fresh scene and a new plan are required."
+            update(spokenCanCampaignRestartStatus)
+            return true
+        } catch {
+            spokenCanCampaignRestartStatus = "Can-task restart could not be recorded; no new motion authorized: " + error.localizedDescription
+            update(spokenCanCampaignRestartStatus)
+            return false
+        }
+    }
+
     /// Call only from the live local microphone transcript path, after echo
     /// suppression. Camera text, typed chat and model tool calls never enter it.
     func receiveSpokenAuthorization(_ text: String) -> Bool {
@@ -741,7 +892,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
                     catch { self.standingIOFailure = error.localizedDescription }
                 }
                 if var s = self.standingRecord(), s.campaignID == campaign {
-                    if s.completedTransfers == 4 { self.endStandingCampaign("Four native transfers reported; bucket landing remains separately verified.", consumed: true) }
+                    if s.completedTransfers == s.canCount { self.endStandingCampaign("All \(s.canCount) native transfers reported; bucket landing remains separately verified.", consumed: true) }
                     else {
                         s.state = self.standingMayHoldPayload(s) || result["requires_intervention"] as? Bool == true ? "waiting_for_intervention" : "paused"
                         s.detail = self.standingMayHoldPayload(s)
@@ -851,7 +1002,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             revokeLocalApproval(reason: "A different operation or context replaced the exact recycling job.")
         }
         if receiptOnly {
-            update("Awaiting local user-session receipt for the exact four-can recycling job: \(summary)")
+            update("Awaiting local user-session receipt for the exact recycling job: \(summary)")
             startTimer(); return
         }
         if allowArmSession, let session = armSession, sessionIsFresh(session) {

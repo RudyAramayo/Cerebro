@@ -71,7 +71,7 @@ import CoreImage
     }
 
     /// Explicitly unmeasured camera geometry, scoped to the caller's active
-    /// four-can receipt. This inspection never creates registration or motion.
+    /// exact bounded can-job receipt. This never creates registration or motion.
     static func beginVisualCalibrationTrial(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
         map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
         feedbackForFrame:((ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?)?=nil,
@@ -434,7 +434,7 @@ import CoreImage
         let current=try controller.scope(model:model,frame:frame)
         let neck=controller.readNeck?() ?? [:],now=ProcessInfo.processInfo.systemUptime
         let captured=now-(Date().timeIntervalSince1970*1000-frame.capturedAt)/1000
-        guard let receipt=broker.activeLocalRecyclingApprovalEvidence,
+        guard trial.valid,let receipt=broker.activeLocalRecyclingApprovalEvidence,
               let summary=receipt["summary"] as? String,
               broker.authorizesLocalRecyclingVisualCalibrationTrial(summary:summary,arm:model.physicalSide),
               receipt["receiptID"] as? String==trial.receiptID,receipt["receiptSHA256"] as? String==trial.receiptSHA256,
@@ -442,7 +442,7 @@ import CoreImage
               receipt["pendingID"] as? String==value.pendingID,
               receipt["summarySHA256"] as? String==trial.summarySHA256,
               receipt["contextIdentity"] as? String==trial.authorizationContextIdentity,
-              (receipt["canCount"] as? NSNumber)?.intValue==4,
+              (receipt["canCount"] as? NSNumber)?.intValue==trial.canCount,
               ((receipt["executingUntilMilliseconds"] as? NSNumber)?.doubleValue ?? 0) >= trial.expiresAtMilliseconds,
               current==scope,scope.cameraGeneration==trial.cameraGeneration,
               scope.gatewaySessionGeneration==trial.sessionGeneration,frame.cameraGeneration==trial.cameraGeneration,

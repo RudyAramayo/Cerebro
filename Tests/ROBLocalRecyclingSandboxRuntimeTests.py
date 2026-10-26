@@ -14,6 +14,8 @@ prepare = braced_declaration(source, '    private func prepareLocalRecyclingSess
 nominal_change = braced_declaration(source, '    @objc private func changeNominalEmptyCommissioningStep()').replace('@objc ', '')
 degree_change = braced_declaration(source, '    @objc private func changeOneDegreeEmptyCalibrationStep()').replace('@objc ', '')
 standing_run = braced_declaration(source, '    private func runStandingCanCampaign()')
+resume = braced_declaration(source, '    public func resumeAuthorizedStandingCanCampaign(targetCanCount:').replace('public ', '')
+selection = braced_declaration(source, '    public func tableViewSelectionDidChange(').replace('public ', '')
 standing_import = braced_declaration(source, '    private func importStandingCanCampaign()')
 route = braced_declaration(source, '    @objc private func performTrialAction(')
 refresh = braced_declaration(source, '    @objc private func refresh()')
@@ -26,7 +28,7 @@ for command in ('local-recycling:export', 'local-recycling:import'):
     assert route.index(command) < route.index('guard canEdit'), command
 assert route.index('local-recycling:prepare') < route.index('guard canEdit')
 assert 'guard canEdit' in prepare
-assert 'performUsingLocalRecyclingReceipt(command, target: "4")' in prepare
+assert 'performUsingLocalRecyclingReceipt(command, target: String(Self.recyclingCount))' in prepare
 assert prepare.index('localVisualTrialAssumedSpatialErrorMeters = spatial') < prepare.index('performUsingLocalRecyclingReceipt')
 assert prepare.index('nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on') < prepare.index('performUsingLocalRecyclingReceipt')
 assert 'sandbox-nominal-empty-commissioning-step' in source
@@ -68,6 +70,18 @@ for name in ('Cerebro/ROBAI.swift', 'Cerebro/ROBArmRoutineCoordinator.swift'):
 
 fixture = r'''
 import Foundation
+enum ROBRecyclingBatchRequest {static let maximumCount=8}
+enum UserDefaults {static let standard=FixtureDefaults()}
+final class FixtureDefaults {
+    var storedArm:String?
+    func set(_ count:Int,forKey:String){Sandbox.recyclingCount=count}
+    func set(_ arm:String,forKey:String){storedArm=arm}
+    func string(forKey:String)->String?{storedArm}
+}
+final class FixtureTable {
+    var onSelect:((Int)->Void)?
+    func selectRowIndexes(_ rows:IndexSet,byExtendingSelection:Bool){onSelect?(rows.first!)}
+}
 /* HELPER */
 final class ROBLeftArmTrial {
     static let shared = ROBLeftArmTrial()
@@ -86,6 +100,8 @@ final class ROBControllerArmApproval {
     var localRecyclingApprovalState:NSDictionary?,pendingLocalRecyclingApprovalScope:NSDictionary?
     var isPending = false
     var standingLocalCanCampaignActive = false
+    var standingCanCampaignMayHoldPayload = false
+    var standingLocalCanCampaignState:NSDictionary?
     var cancellations=0,ticks=0
     func cancel(reason:String){cancellations+=1;localRecyclingApprovalState=nil;pendingLocalRecyclingApprovalScope=nil}
     func tick(){ticks+=1}
@@ -95,17 +111,25 @@ final class Sandbox {
     struct Trial { var id:String }
     struct Field { var stringValue:String }
     static var recyclingCount = 4
+    static let recyclingCountKey="isolated-fixture-count"
+    static let recyclingArmKey="isolated-fixture-arm"
+    static let trials=[Trial(id:"right-recycling"),Trial(id:"recycling")]
+    let table=FixtureTable()
     var selectedTrial = Trial(id:"right-recycling")
     var fields = ["recyclingCount":Field(stringValue:"4"),"localVisualAllowanceMillimeters":Field(stringValue:"50")]
-    var canEdit = true, observingLeftOperation = false, refreshes = 0
+    var canEdit = true, observingLeftOperation = false, refreshes = 0,rebuilds=0
     var parameterMessage = "old"
     var nominalEmptyCommissioningStep = Toggle()
     var oneDegreeEmptyCalibrationStep = Toggle()
+    init(){table.onSelect={[weak self] row in self?.selectedTrial=Self.trials[row]}}
+    func buildDetail(){rebuilds+=1;fields=["recyclingCount":Field(stringValue:String(Self.recyclingCount)),"localVisualAllowanceMillimeters":Field(stringValue:"50")]}
     func refresh(){refreshes += 1}
     /* PREPARE */
     /* NOMINAL_CHANGE */
     /* DEGREE_CHANGE */
     /* STANDING_RUN */
+    /* RESUME */
+    /* SELECTION */
     func prepare(){prepareLocalRecyclingSessionJob()}
     func toggleNominal(){changeNominalEmptyCommissioningStep()}
     func toggleDegree(){changeOneDegreeEmptyCalibrationStep()}
@@ -114,17 +138,20 @@ final class Sandbox {
 @main enum Test {
     static func main() {
         let trial = ROBLeftArmTrial.shared
-        for (row,expected) in [("right-recycling","right_recycle_cans"),("recycling","left_recycle_cans")] {
-            let ui=Sandbox(); ui.selectedTrial.id=row; ui.prepare()
-            precondition(trial.calls.last!.0==expected && trial.calls.last!.1=="4")
-            precondition(ui.observingLeftOperation && ui.parameterMessage.isEmpty)
+        for count in [1,4,5,8] {
+            for (row,expected) in [("right-recycling","right_recycle_cans"),("recycling","left_recycle_cans")] {
+                Sandbox.recyclingCount=count
+                let ui=Sandbox();ui.fields["recyclingCount"] = .init(stringValue:String(count));ui.selectedTrial.id=row;ui.prepare()
+                precondition(trial.calls.last!.0==expected && trial.calls.last!.1==String(count))
+                precondition(ui.observingLeftOperation && ui.parameterMessage.isEmpty)
+            }
         }
         for (row,saved,entered) in [("right-recycling",3,"4"),("recycling",4,"3"),
-            ("recycling",4,"4.5"),("recycling",4,"nan"),("ghost",4,"4")] {
+            ("recycling",4,"4.5"),("recycling",4,"nan"),("ghost",4,"4"),("recycling",0,"0"),("recycling",9,"9")] {
             let ui=Sandbox(); ui.selectedTrial.id=row; Sandbox.recyclingCount=saved
             ui.fields["recyclingCount"] = .init(stringValue:entered)
             let before=trial.calls.count;ui.prepare()
-            precondition(trial.calls.count==before && ui.parameterMessage.contains("exactly four"))
+            precondition(trial.calls.count==before && ui.parameterMessage.contains("whole number"))
         }
         Sandbox.recyclingCount=4
         let commissioning=Sandbox(); commissioning.nominalEmptyCommissioningStep.state = .on; commissioning.prepare()
@@ -152,9 +179,49 @@ final class Sandbox {
         standing.runStanding()
         precondition(trial.calls.count==beforeStanding+1 && !trial.nominalEmptyCommissioningStepEnabled &&
             !trial.oneDegreeEmptyCalibrationStepEnabled,"Standing Run inherited an old tiny calibration mode")
+        standingBroker.standingCanCampaignMayHoldPayload=true
+        let beforeHeld=trial.calls.count;standing.runStanding()
+        precondition(trial.calls.count==beforeHeld && standing.parameterMessage.contains("possible held object"))
+        standingBroker.standingCanCampaignMayHoldPayload=false
+        standingBroker.standingLocalCanCampaignState=["targetCanCount":3]
+        let resumed=Sandbox();resumed.resumeAuthorizedStandingCanCampaign(targetCanCount:3)
+        precondition(Sandbox.recyclingCount==3 && resumed.fields["recyclingCount"]?.stringValue=="3" && trial.calls.last?.1=="3",
+            "Fresh voice resume did not bind the prior remaining count")
+        standingBroker.standingCanCampaignMayHoldPayload=true
+        let beforeResumeHeld=trial.calls.count;resumed.resumeAuthorizedStandingCanCampaign(targetCanCount:3)
+        precondition(trial.calls.count==beforeResumeHeld && resumed.parameterMessage.contains("possible held object"),
+            "A new voice authorization reset the possible-payload hold")
+        standingBroker.standingCanCampaignMayHoldPayload=false
+        let beforeMismatch=trial.calls.count;resumed.resumeAuthorizedStandingCanCampaign(targetCanCount:5)
+        precondition(trial.calls.count==beforeMismatch && Sandbox.recyclingCount==3,"New authorization count was broadened by the UI hook")
+        standingBroker.standingLocalCanCampaignActive=false;resumed.resumeAuthorizedStandingCanCampaign(targetCanCount:3)
+        precondition(trial.calls.count==beforeMismatch,"Stop allowed a queued resume")
+        standingBroker.standingLocalCanCampaignActive=true;Sandbox.recyclingCount=4
+        for row in ["fixed-head-registration","neck-qr-calibration","preparation","ghost"] {
+            for savedArm in [nil,"left","right","invalid"] as [String?] {
+                UserDefaults.standard.storedArm=savedArm
+                let ui=Sandbox();ui.selectedTrial.id=row;ui.fields=[:]
+                let before=trial.calls.count;ui.resumeAuthorizedStandingCanCampaign(targetCanCount:3)
+                let expected=savedArm=="left" ? "left_recycle_cans":"right_recycle_cans"
+                precondition(trial.calls.count==before+1 && trial.calls.last!.0==expected && trial.calls.last!.1=="3" && ui.rebuilds>0,
+                    "Resume from a non-can panel acknowledged without rebuilding and routing the can task")
+                precondition(ui.fields["recyclingCount"]?.stringValue=="3" && ui.fields["localVisualAllowanceMillimeters"] != nil)
+            }
+        }
+        for (current,saved,expected) in [("recycling","right","left_recycle_cans"),("right-recycling","left","right_recycle_cans")] {
+            UserDefaults.standard.storedArm=saved
+            let ui=Sandbox();ui.selectedTrial.id=current;ui.resumeAuthorizedStandingCanCampaign(targetCanCount:3)
+            precondition(trial.calls.last?.0==expected && ui.rebuilds==0,"Resume replaced an explicitly selected recycling arm")
+        }
+        let remembered=Sandbox();remembered.selectedTrial.id="recycling"
+        remembered.tableViewSelectionDidChange(Notification(name:Notification.Name("fixture selection")))
+        precondition(UserDefaults.standard.storedArm=="left","Selected recycling side was not persisted")
+        remembered.selectedTrial.id="ghost";remembered.tableViewSelectionDidChange(Notification(name:Notification.Name("fixture selection")))
+        precondition(UserDefaults.standard.storedArm=="left","Inspecting another test replaced the saved recycling side")
+        UserDefaults.standard.storedArm=nil;Sandbox.recyclingCount=4
         let standingStatus=ROBLocalRecyclingSandboxRouting.standingDescription(["state":"recovering","completedTransfers":1,
-            "verifiedLandings":0,"detail":"Fresh CAN and camera revalidation","sourceMessage":"PRIVATE USER TEXT"])
-        precondition(standingStatus.contains("recovering") && standingStatus.contains("Transfers reported 1/4") &&
+            "verifiedLandings":0,"targetCanCount":5,"detail":"Fresh CAN and camera revalidation","sourceMessage":"PRIVATE USER TEXT"])
+        precondition(standingStatus.contains("recovering") && standingStatus.contains("Transfers reported 1/5") &&
             standingStatus.contains("camera-verified 0") && !standingStatus.contains("PRIVATE"))
         let degree=Sandbox();degree.oneDegreeEmptyCalibrationStep.state = .on;degree.prepare()
         precondition(trial.oneDegreeEmptyCalibrationStepEnabled && !trial.nominalEmptyCommissioningStepEnabled)
@@ -189,7 +256,12 @@ final class Sandbox {
         precondition(!ROBLocalRecyclingSandboxRouting.receiptFilesEnabled(trialID:"recycling",pendingScope:scope,operationRunning:false))
         precondition(!ROBLocalRecyclingSandboxRouting.receiptFilesEnabled(trialID:"right-recycling",pendingScope:scope,operationRunning:true))
         precondition(!ROBLocalRecyclingSandboxRouting.receiptFilesEnabled(trialID:"right-recycling",pendingScope:nil,operationRunning:false))
-        for (key,value) in [("canCount",3 as Any),("canCount",4.5 as Any),("command","right_wave" as Any),("arm","left" as Any)] {
+        for count in [1,5,8] {
+            let changed=scope.mutableCopy() as! NSMutableDictionary;changed["canCount"]=count
+            precondition(ROBLocalRecyclingSandboxRouting.receiptFilesEnabled(trialID:"right-recycling",pendingScope:changed,operationRunning:false))
+            precondition(ROBLocalRecyclingSandboxRouting.scopeDescription(pending:changed,imported:nil).contains("Job: \(count) empty Coke cans"))
+        }
+        for (key,value) in [("canCount",0 as Any),("canCount",9 as Any),("canCount",4.5 as Any),("command","right_wave" as Any),("arm","left" as Any)] {
             let changed=scope.mutableCopy() as! NSMutableDictionary;changed[key]=value
             precondition(!ROBLocalRecyclingSandboxRouting.receiptFilesEnabled(trialID:"right-recycling",pendingScope:changed,operationRunning:false))
         }
@@ -240,11 +312,11 @@ final class Sandbox {
             applicationSupport:support)?.standardizedFileURL.path==new.standardizedFileURL.path,"Right calibration did not find the newest matching recording")
         precondition(ROBLocalRecyclingSandboxRouting.latestRecordingURL(trialID:"recycling",lastRecordingPath:other.path,
             applicationSupport:support)?.standardizedFileURL.path==other.standardizedFileURL.path,"Selected left recycling must preserve its own recording")
-        print("PASS local recycling sandbox: exact saved four-can/side routing, immutable pending file controls, executing/mismatched scopes disabled, private source text excluded, dedicated local-only OS import/export and unconditional Stop revocation")
+        print("PASS local recycling sandbox: exact saved1...8 count/side routing, fresh remaining-count resume, payload/Stop guard, immutable pending file controls and private source text excluded")
         print("PASS live sandbox status: active phase precedes broker scope, common-mode progress fallback; selected RIGHT recording cannot open latest LEFT evidence")
     }
 }
-'''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare).replace('/* NOMINAL_CHANGE */', nominal_change).replace('/* DEGREE_CHANGE */', degree_change).replace('/* STANDING_RUN */', standing_run)
+'''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare).replace('/* NOMINAL_CHANGE */', nominal_change).replace('/* DEGREE_CHANGE */', degree_change).replace('/* STANDING_RUN */', standing_run).replace('/* RESUME */', resume).replace('/* SELECTION */', selection)
 
 with tempfile.TemporaryDirectory(prefix='rob-local-recycling-sandbox-', dir='/private/tmp') as folder:
     root = Path(folder); path = root / 'Fixture.swift'; path.write_text(fixture)
