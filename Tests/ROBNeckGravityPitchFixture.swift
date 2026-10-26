@@ -107,6 +107,8 @@ extension ROBNeckRGBPoseDisplayFixture {
                 pose.provisionalCameraToModel.columns.3==before.provisionalCameraToModel.columns.3,"Gravity changed image-right/yaw heading or origin")
             let expected=before.provisionalCameraToModel*rotation
             for column in 0..<4 {precondition(close(pose.provisionalCameraToModel[column],expected[column]))}
+            precondition(pose.unrefinedProvisionalCameraToModel==before.provisionalCameraToModel,
+                "Capture initializer already contains the active constant gravity correction")
             precondition(pose.cameraToModel==before.cameraToModel && pose.headFrames==before.headFrames && pose.hardwareFrames==before.hardwareFrames &&
                 pose.modelToDisplay==before.modelToDisplay && pose.headDepthDisplayLiftMeters==before.headDepthDisplayLiftMeters &&
                 pose.robotModelDisplayLiftMeters==before.robotModelDisplayLiftMeters && !pose.hasDepthProjectionAuthority)
@@ -193,6 +195,8 @@ extension ROBNeckRGBPoseDisplayFixture {
             precondition(pose.provisionalCameraToModel.columns.0==baseline[i].provisionalCameraToModel.columns.0 &&
                 pose.provisionalCameraToModel.columns.3==baseline[i].provisionalCameraToModel.columns.3)
             for k in 0..<4 {precondition(close(pose.provisionalCameraToModel[k],expected[k]))}
+            precondition(pose.unrefinedProvisionalCameraToModel==baseline[i].provisionalCameraToModel,
+                "Capture initializer already contains the active affine gravity correction")
             precondition(pose.frozenOpticalPitchRefinementRadians==pitch && !pose.hasDepthProjectionAuthority)
         }
         for (key,value) in [("referenceUpperTarget",2000 as Any),("referenceUpperTarget",6000 as Any),

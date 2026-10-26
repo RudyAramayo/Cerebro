@@ -9,6 +9,12 @@ ROOT=Path(__file__).resolve().parents[1]
 manager=(ROOT/'Cerebro/CameraManager.swift').read_text()
 controller=(ROOT/'Cerebro/ROBFixedHeadCalibrationWindowController.swift').read_text()
 view=(ROOT/'Cerebro/CameraViewController.swift').read_text()
+capture=braced_declaration(controller,'    private func captureAndFit(')
+assert 'let preservedSource=try preservedCaptureSource(' in capture
+assert 'preservedSource:preservedSource)' in capture
+assert 'initial = fitted.unrefinedProvisionalCameraToModel' in capture
+assert 'initial = fitted.provisionalCameraToModel' not in capture
+assert 'photo_mount_origin_unrefined_rgb_orientation_initializer_only' in capture
 # The protocol declarations have no body: select the real manager methods.
 manager_body=manager[manager.index('final class CameraManager:'):]
 manager_methods='\n'.join(braced_declaration(manager_body,s) for s in (
@@ -50,7 +56,10 @@ enum ROBGhostRobotModel {
 }
 enum ROBArmRoutineVision {
     struct Depth {var width=640,height=400}
-    struct Frame {var depth:Depth?=Depth();var intrinsics:CameraIntrinsics?}
+    struct Frame {
+        var depth:Depth?=Depth();var intrinsics:CameraIntrinsics?
+        var cameraGeneration=UUID(),sequence:UInt64=100,capturedAt:Double=10_000
+    }
 }
 final class Identity {
     /* IDENTITY */
@@ -81,10 +90,16 @@ final class Identity {
     let holdCameraMode=Switch()
     var task:Task<Void,Never>?,process:Process?,armOwner:UUID?
     var activeCaptureID:UUID?,cameraDemandCaptureID:UUID?
-    var captureBodyIdentity:String?,isRunning=false,status="ready",diagnosticFailure=false
+    var cameraDemandResolution:String?,cameraDemandStereoMode:String?
+    var nextResolution="640x400",nextStereoMode="near_field"
+    var captureBodyIdentity:String?,isRunning=false,status="ready",diagnosticFailure=false,beginFailure=false
     func display(_ value:String){status=value}
     func captureAndFit(token:UUID)async throws {
+        if beginFailure {throw Failure.diagnostic}
         cameraDemandCaptureID=token;armOwner=UUID();captureBodyIdentity="body";isRunning=true
+        cameraDemandResolution=nextResolution;cameraDemandStereoMode=nextStereoMode
+        NotificationCenter.default.post(name:Self.cameraDemandChanged,object:self,userInfo:[
+            "active":true,"captureID":token.uuidString,"resolution":nextResolution,"stereoMode":nextStereoMode])
         if diagnosticFailure {throw Failure.diagnostic}
         display("measured evidence saved")
     }
@@ -171,7 +186,46 @@ final class Identity {
         let fullIdentity=try Identity.intrinsicsIdentity(.init(depth:.init(width:640,height:480),intrinsics:k))
         precondition(fullIdentity != nearIdentity,"Different image dimensions reused a registration scope")
 
+        let runtimeJSON:[String:Any]=["schemaVersion":1,"actualDeviceMXID":"fixture-device","cameraRole":"face","sdkVersion":"fixture-1",
+            "factoryEEPROMSHA256":String(repeating:"1",count:64),"effectiveRuntimeCalibrationSHA256":String(repeating:"2",count:64),
+            "stereoPolicySHA256":String(repeating:"3",count:64),"candidateSHA256":NSNull(),"profileSHA256":NSNull()]
+        var native=k
+        native.runtimeCalibration=try JSONDecoder().decode(CameraRuntimeCalibration.self,from:JSONSerialization.data(withJSONObject:runtimeJSON))
+        native.cameraServiceSourceSHA256=String(repeating:"4",count:64)
+        let pinned=ROBFixedHeadCaptureFrameGate.PreservedSource(cameraGeneration:old,afterSequence:100,afterCapturedAtMilliseconds:9_900,
+            runtimeCalibrationIdentity:native.runtimeCalibration!.identity,cameraServiceSourceSHA256:native.cameraServiceSourceSHA256!)
+        var heldGate=ROBFixedHeadCaptureFrameGate(requestedAtMilliseconds:10_000,previousCameraGeneration:old,
+            stereoMode:"near_field",preservedSource:pinned)
+        func heldOffer(_ gen:UUID,_ seq:UInt64,_ at:Double,_ intrinsics:CameraIntrinsics?=nil,_ now:Double?=nil)->Bool {
+            heldGate.accepts(cameraGeneration:gen,sequence:seq,capturedAt:at,nowMilliseconds:now ?? at+100,
+                width:640,height:400,intrinsics:intrinsics ?? native)
+        }
+        precondition(!heldOffer(old,100,10_100),"A cached held frame satisfied a new request")
+        precondition(!heldOffer(old,101,9_999),"A pre-request capture satisfied a held-mode recapture")
+        precondition(!heldOffer(fresh,101,10_100),"Preserved source silently enrolled a restarted camera")
+        precondition(!heldOffer(old,101,10_100,k),"Missing runtime/source provenance satisfied held-mode capture")
+        var wrongRuntime=native
+        var otherRuntime=runtimeJSON;otherRuntime["effectiveRuntimeCalibrationSHA256"]=String(repeating:"5",count:64)
+        wrongRuntime.runtimeCalibration=try JSONDecoder().decode(CameraRuntimeCalibration.self,from:JSONSerialization.data(withJSONObject:otherRuntime))
+        precondition(!heldOffer(old,101,10_100,wrongRuntime),"A changed runtime reused the held source")
+        var wrongService=native;wrongService.cameraServiceSourceSHA256=String(repeating:"6",count:64)
+        precondition(!heldOffer(old,101,10_100,wrongService),"A changed service reused the held source")
+        precondition(!heldOffer(old,101,10_100,nil,10_601),"A stale held frame was accepted")
+        precondition(!heldOffer(old,101,10_100) && !heldOffer(old,102,12_099),"Same-source recapture skipped its new settling interval")
+        precondition(heldOffer(old,103,12_100),"Fresh advancing same-source frames never completed settling")
+        precondition(!heldOffer(old,103,12_100),"A repeated held capture was accepted")
+
         let review=Review()
+        let reviewDemand=Demand()
+        var reviewEvents:[Bool]=[]
+        let observer=NotificationCenter.default.addObserver(forName:Review.cameraDemandChanged,object:review,queue:nil) { note in
+            MainActor.assumeIsolated {
+                let values=note.userInfo!,active=values["active"]as!Bool,token=UUID(uuidString:values["captureID"]as!String)!
+                reviewEvents.append(active)
+                reviewDemand.deliver(active,token,values["stereoMode"]as?String ?? "near_field",values["resolution"]as?String ?? "640x400")
+            }
+        }
+        defer {NotificationCenter.default.removeObserver(observer)}
         review.captureCurrentView()
         while review.task != nil {await Task.yield()}
         precondition(review.cameraDemandCaptureID==nil && review.armOwner==nil && !review.isRunning,
@@ -189,16 +243,40 @@ final class Identity {
         review.diagnosticFailure=false;review.captureCurrentView()
         while review.task != nil {await Task.yield()}
         let older=review.cameraDemandCaptureID!
+        let beforeSameMode=reviewDemand.cameraManager.generationChanges,beforeEvents=reviewEvents.count
         review.captureCurrentView()
         while review.task != nil {await Task.yield()}
         let newer=review.cameraDemandCaptureID!
         precondition(older != newer)
+        precondition(reviewDemand.cameraManager.generationChanges==beforeSameMode,
+            "Hold-for-review recapture restarted the identical native pipeline")
+        precondition(Array(reviewEvents.dropFirst(beforeEvents))==[true],"Same-mode token handoff emitted an intermediate OFF")
+        let beforeFailedBegin=reviewEvents.count,releasesBeforeFailedBegin=ROBAmberArmMotionArbiter.shared.releases
+        review.beginFailure=true;review.captureCurrentView()
+        while review.task != nil {await Task.yield()}
+        precondition(review.cameraDemandCaptureID==newer && reviewEvents.count==beforeFailedBegin &&
+            ROBAmberArmMotionArbiter.shared.releases==releasesBeforeFailedBegin && review.status.contains("Camera mode held for review"),
+            "A rejected begin lost the prior held source or claimed a new one")
+        review.beginFailure=false
+        let source=try review.preservedCaptureSource(frame:.init(intrinsics:native,cameraGeneration:old,sequence:100,capturedAt:9_900),
+            resolution:"640x400",stereoMode:"near_field")
+        precondition(source?.cameraGeneration==old && source?.afterSequence==100 && source?.runtimeCalibrationIdentity==native.runtimeCalibration!.identity,
+            "Held native source was not pinned from actual readback")
+        let changedResolutionSource=try review.preservedCaptureSource(frame:nil,resolution:"640x480",stereoMode:"near_field")
+        precondition(changedResolutionSource==nil,
+            "A changed resolution claimed the old held source")
+        do {_ = try review.preservedCaptureSource(frame:.init(intrinsics:k),resolution:"640x400",stereoMode:"near_field");preconditionFailure("Anonymous held source accepted")}
+        catch {}
         review.releaseCameraDemand(token:older)
         review.finishCapture(token:older,holdModeForReview:false)
         precondition(review.cameraDemandCaptureID==newer,"Stale completion released newer held camera demand")
+        let beforeModeChange=reviewDemand.cameraManager.generationChanges
+        review.nextStereoMode="standard";review.captureCurrentView()
+        while review.task != nil {await Task.yield()}
+        precondition(reviewDemand.cameraManager.generationChanges==beforeModeChange+1,"A real mode change did not create exactly one new native source")
         review.windowWillClose(Notification(name:Notification.Name("closed")))
-        precondition(review.cameraDemandCaptureID==nil && ROBAmberArmMotionArbiter.shared.releases==10)
-        print("PASS fixed-head capture: crop/full-height dimensions, token restoration/stale cleanup, face-only override, SDK readback, source settling/restarts and mode/dimension-bound registration identity")
+        precondition(review.cameraDemandCaptureID==nil && review.cameraDemandResolution==nil && review.cameraDemandStereoMode==nil && ROBAmberArmMotionArbiter.shared.releases==12)
+        print("PASS fixed-head capture: held identical pipeline preserved, new genuine advancing settled source frames/runtime/service pinning, real mode changes restart, crop/full-height dimensions, token restoration/stale cleanup and registration identity")
     }
 }
 '''
@@ -212,6 +290,7 @@ harness=harness.replace('/* IDENTITY */',braced_declaration(controller,'    @non
 harness=harness.replace('/* DEMAND */',braced_declaration(view,'    @objc private func fixedHeadCalibrationDemandDidChange(').replace('cameraManager?.','cameraManager.'))
 harness=harness.replace('/* REVIEW */','\n'.join(braced_declaration(controller,s) for s in (
     '    @objc func captureCurrentView()', '    private func releaseCameraDemand(', '    private func finishCapture(',
+    '    private func preservedCaptureSource(',
     '    @objc func stop()', '    func windowWillClose(')).replace('private func ','func '))
 with tempfile.TemporaryDirectory(prefix='rob-fixed-near-field-',dir='/private/tmp') as directory:
     folder=Path(directory);swift=folder/'Fixture.swift';swift.write_text(harness)

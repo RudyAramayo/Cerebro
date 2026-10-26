@@ -25,9 +25,14 @@ enum ROBNeckRGBPoseDisplay {
         let frozenOpticalPitchRefinementRadians:Double?
         /// An opt-in estimated origin, not registration. Keep the pinned RGB
         /// rotation while drawing/projecting from the measured hardware glass.
-        var provisionalCameraToModel: simd_double4x4 {
+        var unrefinedProvisionalCameraToModel: simd_double4x4 {
             guard usesPhotoHardwareOpticalOrigin,let glass=hardwareFrames?["rgb_glass_frame"] else{return cameraToModel}
             var result=cameraToModel;result.columns.3=glass.columns.3
+            return result
+        }
+        var provisionalCameraToModel: simd_double4x4 {
+            var result=unrefinedProvisionalCameraToModel
+            guard usesPhotoHardwareOpticalOrigin,hardwareFrames?["rgb_glass_frame"] != nil else{return result}
             if let angle=frozenOpticalPitchRefinementRadians {
                 // Post-optical-X: image-right and the optical origin stay
                 // exactly unchanged. This is an estimated mounting refinement.

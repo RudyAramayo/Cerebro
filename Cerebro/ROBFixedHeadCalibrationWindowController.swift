@@ -6,31 +6,46 @@ import UniformTypeIdentifiers
 
 /// Source-clock settling for a hardware mode change, without issuing motion.
 struct ROBFixedHeadCaptureFrameGate {
+    struct PreservedSource {
+        let cameraGeneration:UUID,afterSequence:UInt64,afterCapturedAtMilliseconds:Double
+        let runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
+    }
     let requestedAtMilliseconds: Double
     let previousCameraGeneration: UUID?
     let stereoMode: String
     let expectedHeight: Int
+    let preservedSource:PreservedSource?
     private var generation: UUID?
     private var lastSequence: UInt64 = 0
     private var lastCapturedAt = 0.0
     private var firstEligible: Double?
 
-    init(requestedAtMilliseconds: Double, previousCameraGeneration: UUID?, stereoMode: String, fullHeight: Bool = false) {
+    init(requestedAtMilliseconds: Double, previousCameraGeneration: UUID?, stereoMode: String, fullHeight: Bool = false,
+         preservedSource:PreservedSource? = nil) {
         self.requestedAtMilliseconds = requestedAtMilliseconds
         self.previousCameraGeneration = previousCameraGeneration
         self.stereoMode = stereoMode
         expectedHeight = fullHeight ? 480 : 400
+        self.preservedSource=preservedSource
     }
 
     mutating func accepts(cameraGeneration: UUID, sequence: UInt64, capturedAt: Double,
         nowMilliseconds: Double, width: Int, height: Int, intrinsics: CameraIntrinsics) -> Bool {
         guard capturedAt.isFinite, nowMilliseconds.isFinite,
               (0...500).contains(nowMilliseconds-capturedAt), capturedAt >= requestedAtMilliseconds,
-              previousCameraGeneration.map({ cameraGeneration != $0 }) ?? true, width == 640, height == expectedHeight,
+              width == 640, height == expectedHeight,
               intrinsics.stereoMode == stereoMode, intrinsics.stereoModeSource == "sdk_initial_config_readback",
               intrinsics.stereoExtendedDisparity == (stereoMode == "near_field"),
               intrinsics.stereoSubpixel == (stereoMode == "standard"),
               intrinsics.isValid(forWidth: width, height: height) else { return false }
+        if let preservedSource {
+            guard cameraGeneration==preservedSource.cameraGeneration,
+                  previousCameraGeneration==preservedSource.cameraGeneration,
+                  sequence>preservedSource.afterSequence,capturedAt>preservedSource.afterCapturedAtMilliseconds,
+                  intrinsics.runtimeCalibration?.cameraRole=="face",
+                  intrinsics.runtimeCalibration?.identity==preservedSource.runtimeCalibrationIdentity,
+                  intrinsics.cameraServiceSourceSHA256==preservedSource.cameraServiceSourceSHA256 else{return false}
+        } else if previousCameraGeneration.map({cameraGeneration == $0}) ?? false {return false}
         if generation != cameraGeneration {
             generation = cameraGeneration; lastSequence = 0; lastCapturedAt = 0; firstEligible = nil
         }
@@ -68,6 +83,8 @@ struct ROBFixedHeadCaptureFrameGate {
     private var captureBodyIdentity: String?
     private var activeCaptureID: UUID?
     private var cameraDemandCaptureID: UUID?
+    private var cameraDemandResolution:String?
+    private var cameraDemandStereoMode:String?
     @nonobjc private(set) var selectedEstimatedContext: ROBEstimatedFixedHeadCapture.Context?
 
     @nonobjc func currentEstimatedContext(model:ROBGhostRobotModel,frame:ROBArmRoutineVision.Frame) throws -> ROBEstimatedFixedHeadCapture.Context {
@@ -199,7 +216,8 @@ struct ROBFixedHeadCaptureFrameGate {
 
     @objc func captureCurrentView() {
         guard !isRunning, task == nil else { return }
-        if let previous = cameraDemandCaptureID { releaseCameraDemand(token: previous) }
+        // A held camera override is replaced atomically by beginCapture. An
+        // OFF/ON roundtrip would unnecessarily restart the identical pipeline.
         let token = UUID(); activeCaptureID = token
         let keepModeForReview = holdCameraMode.state == .on
         task = Task { @MainActor [weak self] in
@@ -224,6 +242,7 @@ struct ROBFixedHeadCaptureFrameGate {
         armOwner = id; captureBodyIdentity = ROBFixedHeadBodyMotionIdentity.currentIdentity; isRunning = true
         ROBArmRoutineVision.shared.setActive(true)
         cameraDemandCaptureID = token
+        cameraDemandResolution=resolution;cameraDemandStereoMode=stereoMode
         NotificationCenter.default.post(name: Self.cameraDemandChanged, object: self,
             userInfo: ["active": true, "captureID": token.uuidString, "resolution": resolution, "stereoMode": stereoMode])
         display("Starting the RGB-D camera; waiting for fresh fixed-pose frames…")
@@ -231,13 +250,16 @@ struct ROBFixedHeadCaptureFrameGate {
     private func releaseCameraDemand(token: UUID) {
         guard cameraDemandCaptureID == token else { return }
         cameraDemandCaptureID = nil
+        cameraDemandResolution=nil;cameraDemandStereoMode=nil
         NotificationCenter.default.post(name: Self.cameraDemandChanged, object: self,
             userInfo: ["active": false, "captureID": token.uuidString])
     }
     private func finishCapture(token: UUID, holdModeForReview: Bool) {
         guard activeCaptureID == token else { return }
-        let heldForReview = holdModeForReview && cameraDemandCaptureID == token
-        if !heldForReview { releaseCameraDemand(token: token) }
+        // A rejected begin may still own the previous held review demand.
+        // activeCaptureID above prevents stale tasks from clearing a newer one.
+        let heldForReview = holdModeForReview && cameraDemandCaptureID != nil
+        if !heldForReview,let demandToken=cameraDemandCaptureID {releaseCameraDemand(token:demandToken)}
         if let armOwner {
             ROBAmberArmMotionArbiter.shared.release(.left, owner: armOwner)
             ROBAmberArmMotionArbiter.shared.release(.right, owner: armOwner)
@@ -257,6 +279,21 @@ struct ROBFixedHeadCaptureFrameGate {
             throw ROBGhostMotionError.blocked("The head or base changed during fixed-view capture. Saved evidence was not installed.")
         }
     }
+    private func preservedCaptureSource(frame:ROBArmRoutineVision.Frame?,resolution:String,stereoMode:String)
+        throws->ROBFixedHeadCaptureFrameGate.PreservedSource? {
+        guard cameraDemandCaptureID != nil,cameraDemandResolution==resolution,cameraDemandStereoMode==stereoMode else{return nil}
+        guard let frame,let depth=frame.depth,let k=frame.intrinsics,
+              depth.width==640,depth.height==(resolution=="640x480" ? 480:400),
+              k.isValid(forWidth:depth.width,height:depth.height),k.stereoMode==stereoMode,
+              k.stereoModeSource=="sdk_initial_config_readback",k.stereoExtendedDisparity==(stereoMode=="near_field"),
+              k.stereoSubpixel==(stereoMode=="standard"),let runtime=k.runtimeCalibration,runtime.cameraRole=="face",
+              let service=k.cameraServiceSourceSHA256,service.count==64,service.allSatisfy(\.isHexDigit),
+              frame.sequence>0,frame.capturedAt.isFinite else {
+            throw ROBGhostMotionError.blocked("The held camera mode lacks its actual source/runtime readback. Wait for current native RGB-D frames; no pipeline reset was requested.")
+        }
+        return .init(cameraGeneration:frame.cameraGeneration,afterSequence:frame.sequence,afterCapturedAtMilliseconds:frame.capturedAt,
+            runtimeCalibrationIdentity:runtime.identity,cameraServiceSourceSHA256:service)
+    }
     private func captureAndFit(token: UUID) async throws {
         guard let uncertainty = Double(referenceError.stringValue), (5...40).contains(uncertainty),
               let resources = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
@@ -266,7 +303,9 @@ struct ROBFixedHeadCaptureFrameGate {
         let stereoMode = nearFieldDepth.state == .on ? "near_field" : "standard"
         let fullHeight = fullCameraHeight.state == .on
         let resolution = fullHeight ? "640x480" : "640x400"
-        let previousCameraGeneration = ROBArmRoutineVision.shared.snapshot()["face"]?.cameraGeneration
+        let previousFrame=ROBArmRoutineVision.shared.snapshot()["face"]
+        let previousCameraGeneration = previousFrame?.cameraGeneration
+        let preservedSource=try preservedCaptureSource(frame:previousFrame,resolution:resolution,stereoMode:stereoMode)
         let requestedAtMilliseconds = Date().timeIntervalSince1970 * 1000
         try beginCapture(token: token, stereoMode: stereoMode, resolution: resolution)
         let expected = readNeck?() ?? [:]
@@ -277,7 +316,7 @@ struct ROBFixedHeadCaptureFrameGate {
         var records: [[String: Any]] = [], firstScope: ROBFixedHeadRegistrationScope?
         let deadline = ProcessInfo.processInfo.systemUptime + 40
         var frameGate = ROBFixedHeadCaptureFrameGate(requestedAtMilliseconds: requestedAtMilliseconds,
-            previousCameraGeneration: previousCameraGeneration, stereoMode: stereoMode, fullHeight: fullHeight)
+            previousCameraGeneration: previousCameraGeneration, stereoMode: stereoMode, fullHeight: fullHeight,preservedSource:preservedSource)
         while records.count < 5 {
             try checkPose(expected)
             guard ProcessInfo.processInfo.systemUptime < deadline else {
@@ -365,9 +404,11 @@ struct ROBFixedHeadCaptureFrameGate {
             // A better optimizer seed is not registration evidence. The CAD,
             // held-out depth, observability and uncertainty checks below stay
             // unchanged, and consume the original captured depth values.
-            initial = fitted.provisionalCameraToModel
+            // The training initializer must never already contain the gravity
+            // correction it is intended to independently estimate/validate.
+            initial = fitted.unrefinedProvisionalCameraToModel
             initializerSource = fitted.usesPhotoHardwareOpticalOrigin
-                ? "photo_mount_origin_rgb_orientation_initializer_only" : "fitted_rgb_neck_candidate_initializer_only"
+                ? "photo_mount_origin_unrefined_rgb_orientation_initializer_only" : "fitted_rgb_neck_candidate_unrefined_initializer_only"
         } else {
             guard let pan = expected["pan_degrees"] as? Double,
                   let pose = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians:pan * .pi / 180,
