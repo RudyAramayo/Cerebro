@@ -1697,8 +1697,11 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             throw ROBArmRoutineError.blocked("No current workspace geometry is available.")
         }
         let baseline = try measured().positionsRadians.map(\.doubleValue), session = generation
-        let camera = vision.cameraGeneration, now = Date().timeIntervalSince1970*1000
+        let camera = vision.cameraGeneration
         let visual=try visualTrial(map:map,model:model,baseline:baseline)
+        // Validate at a time after this proof was issued, never a timestamp
+        // captured before visualTrial created its current receipt binding.
+        let now = Date().timeIntervalSince1970*1000
         let result = try await Task.detached(priority:.userInitiated) {
             let path:ROBWorkspaceCollisionPlan
             if let visual {
@@ -2840,8 +2843,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     throw ROBArmRoutineError.blocked("The arm joint reference must be verified before a dynamic approach from this held pose.")
                 }
                 let planningStart = q, session = generation, camera = vision.cameraGeneration
-                let baseline = model.positions(vendorLeft:planningStart), now = Date().timeIntervalSince1970*1000
+                let baseline = model.positions(vendorLeft:planningStart)
                 let visual=try visualTrial(map:map,model:model,baseline:planningStart)
+                let now = Date().timeIntervalSince1970*1000
                 guard !activeApproachCanThenHold || visual != nil else {throw ROBArmRoutineError.blocked("Open-jaw approach requires the native observed-jaw servo path; no alternate grasp route is permitted.")}
                 var destinationAdmissionFailure:String?
                 if let bucketPrior=bucket?.bucketShapePrior {
@@ -4532,8 +4536,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:observedFrame)==context.baseline.scope else{return false}
         let boxes=(observation.cans ?? [observation.can]).filter{$0.visuallyUsable}.map(\.box)
         guard !boxes.isEmpty,boxes.allSatisfy({box in u+0.22<box[0]-0.03 || u-0.22>box[2]+0.03 || v+0.22<box[1]-0.03 || v-0.22>box[3]+0.03}) else{return false}
-        let q=try measured().positionsRadians.map(\.doubleValue),now=Date().timeIntervalSince1970*1000,session=generation,camera=vision.cameraGeneration
+        let q=try measured().positionsRadians.map(\.doubleValue),session=generation,camera=vision.cameraGeneration
         guard let trial=try visualTrial(map:map,model:model,baseline:q) else{return false}
+        let now=Date().timeIntervalSince1970*1000
         _ = try await Task.detached(priority:.userInitiated){
             try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:q,steps:[.init(positions:q,seconds:0.8,stage:"Empty jaw identity hold")],
                 map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial)
