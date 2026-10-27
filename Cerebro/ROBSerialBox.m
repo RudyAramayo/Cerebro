@@ -5463,7 +5463,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
         unsigned long long generation = [gateway.connectionSnapshot[@"sessionGeneration"] unsignedLongLongValue];
         NSString *summary = [NSString stringWithFormat:@"Physical %@ arm: %@ (%@). Mode changes can remove torque; clear the workspace and support the arm as needed.",
             physicalArm, operation, [[capturedArguments subarrayWithRange:NSMakeRange(1, capturedArguments.count - 1)] componentsJoinedByString:@" "]];
-        [[ROBControllerArmApproval shared] requestWithOperation:@"manual" arm:physicalArm summary:summary
+        [[ROBControllerArmApproval shared] requestManualArmCommandWithOperation:operation arm:physicalArm summary:summary
             execute:^(void (^done)(NSDictionary *)) {
                 dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
                     NSMutableArray *immediate = [capturedArguments mutableCopy];

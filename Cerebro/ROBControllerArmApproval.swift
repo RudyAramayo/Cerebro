@@ -70,6 +70,12 @@ struct ROBTableRelayInitialEmptyEvidence {
     static let supervisedGreetingName = "Supervised greet: confirm hanging/clear route/empty jaws; watch despite poor view; neck scan, arms front, wave"
     private(set) var status = "Arm operations need spoken or controller authorization"
     var isPending: Bool { pending != nil }
+    var manualArmSessionActive: Bool { manualArmSession.map(manualSessionIsFresh) ?? false }
+    var manualArmSessionDetail: String {
+        guard manualArmSessionActive, let session = manualArmSession else { return "No active manual arm session" }
+        let remaining = max(0, Int(ceil(session.expires.timeIntervalSince(now()))))
+        return String(format: "Both-arm manual control: %d:%02d remaining. Mode and position buttons need no further approval. Stop ends this session.", remaining / 60, remaining % 60)
+    }
     var armSessionActive: Bool { armSession.map(sessionIsFresh) ?? false }
     var armSessionDetail: String {
         guard armSessionActive, let session = armSession else { return "No active arm rehearsal session" }
@@ -866,6 +872,7 @@ struct ROBTableRelayInitialEmptyEvidence {
         let executionLimit: TimeInterval
         var voiceAuthorized = false
         var armSessionID: String? = nil
+        var manualArmSessionID: String? = nil
         var attentionReminders = 0
         var localRecyclingScope: LocalRecyclingScope?
         var tableRelayScope:TableRelayScope?
@@ -880,6 +887,14 @@ struct ROBTableRelayInitialEmptyEvidence {
         let expires: Date
     }
     private var armSession: ArmSession?
+    private struct ManualArmSession {
+        let id: String
+        let peer: Peer?
+        let voiceAuthorized: Bool
+        let expires: Date
+        let gatewayGeneration: UInt64
+    }
+    private var manualArmSession: ManualArmSession?
     private var peers: [UUID: Peer] = [:]
     private struct ControllerStopReceipt {
         let device: UUID, session: UUID, messageID: String, callID: String
@@ -950,6 +965,59 @@ struct ROBTableRelayInitialEmptyEvidence {
         session.expires > now() && (session.voiceAuthorized || session.peer.map(peerIsFresh) == true)
     }
 
+    private func manualSessionIsFresh(_ session: ManualArmSession) -> Bool {
+        session.expires > now() && (session.voiceAuthorized || session.peer.map(peerIsFresh) == true) &&
+            ROBAmberGatewayClient.shared.isReady() &&
+            (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == session.gatewayGeneration
+    }
+
+    /// Explicit native manual controls only. No movement occurs when approved.
+    func beginManualArmSession(completion: @escaping (NSDictionary) -> Void) {
+        precondition(Thread.isMainThread)
+        if manualArmSessionActive {
+            completion(["status": "completed", "detail": manualArmSessionDetail]); return
+        }
+        let gateway = ROBAmberGatewayClient.shared
+        let generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
+        guard gateway.isReady(), generation != 0 else {
+            completion(["status": "blocked", "detail": "Connect Amber before starting manual arm control."]); return
+        }
+        let summary = "Authorize both arms' manual UI controls for 15 minutes: activate, deactivate holding torque, enter position mode and send joint or Cartesian position targets. Support an arm before removing holding torque. One spoken or controller approval covers subsequent manual button commands until the fixed deadline. Approval itself sends no movement. Stop, End session, sleep/restart or a changed gateway connection ends this permission. This does not authorize automatic pickup routines, grippers, encoder reset, current mode or CAN/core restart."
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": "both", "summary": summary],
+            summary: summary, execute: { [weak self] done in
+                guard let self, let p = self.pending else { return }
+                guard gateway.isReady(), (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation else {
+                    done(["status": "blocked", "detail": "The arm connection changed before approval. Request a new manual session."]); return
+                }
+                self.manualArmSession = ManualArmSession(id: p.id, peer: p.peer, voiceAuthorized: p.voiceAuthorized,
+                    expires: self.now().addingTimeInterval(900), gatewayGeneration: generation)
+                done(["status": "completed", "detail": "Both-arm manual control authorized for 15 minutes. Mode and position buttons are ready."])
+            }, cancel: {}, completion: completion)
+    }
+
+    /// The operation identifier comes from a native UI handler, never a model
+    /// string. Unlisted actions keep their existing separate approval.
+    func requestManualArmCommand(operation: String, arm: String, summary: String,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        let covered = ["activate", "position", "deactivate", "cmd_activate_mode_v2", "cmd_deactivate_mode_v2",
+                       "cmd_position_mode_v2", "cmd_position_input", "cmd_cartesian_input"].contains(operation)
+        guard ["left", "right", "both"].contains(arm) else {
+            completion(["status": "rejected", "detail": "Unknown manual arm selection."]); return
+        }
+        if covered && !manualArmSessionActive {
+            beginManualArmSession { [weak self] result in
+                guard result["status"] as? String == "completed", let self else { completion(result); return }
+                self.requestManualArmCommand(operation: operation, arm: arm, summary: summary,
+                    execute: execute, cancel: cancel, completion: completion)
+            }
+            return
+        }
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm, "summary": summary],
+            summary: summary, allowManualArmSession: covered,
+            execute: execute, cancel: cancel, completion: completion)
+    }
+
     private func authorizationIsLive(_ p: Pending) -> Bool {
         guard let started = p.started, (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
         if let scope=p.tableRelayScope {
@@ -970,6 +1038,9 @@ struct ROBTableRelayInitialEmptyEvidence {
         }
         if let id = p.armSessionID {
             return armSession.map { $0.id == id && sessionIsFresh($0) } == true
+        }
+        if let id = p.manualArmSessionID {
+            return manualArmSession.map { $0.id == id && manualSessionIsFresh($0) } == true
         }
         return p.voiceAuthorized || p.peer.map(peerIsFresh) == true
     }
@@ -1211,6 +1282,7 @@ struct ROBTableRelayInitialEmptyEvidence {
 
     private func request(action: String, arguments: NSDictionary, summary: String, executionLimit: TimeInterval = 120,
                          allowArmSession: Bool = false,
+                         allowManualArmSession: Bool = false,
                          localRecyclingScope: LocalRecyclingScope? = nil,
                          localContextIdentity: (() -> String?)? = nil, receiptOnly: Bool = false, tableRelayScope:TableRelayScope? = nil,
                          execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
@@ -1255,6 +1327,11 @@ struct ROBTableRelayInitialEmptyEvidence {
         if allowArmSession, let session = armSession, sessionIsFresh(session) {
             pending?.peer = session.peer; pending?.voiceAuthorized = session.voiceAuthorized
             pending?.armSessionID = session.id
+            startTimer(); beginAcceptedOperation(); return
+        }
+        if allowManualArmSession, let session = manualArmSession, manualSessionIsFresh(session) {
+            pending?.peer = session.peer; pending?.voiceAuthorized = session.voiceAuthorized
+            pending?.manualArmSessionID = session.id
             startTimer(); beginAcceptedOperation(); return
         }
         update("Awaiting spoken or controller authorization: \(summary)")
@@ -1380,6 +1457,10 @@ struct ROBTableRelayInitialEmptyEvidence {
         pendingEmptyObservation=nil
         revokeTableRelay(reason:reason)
         armSession = nil
+        if manualArmSession != nil {
+            manualArmSession = nil
+            for arm in ["left", "right"] { _ = ROBAmberGatewayClient.shared.priorityHold(forArm: arm) }
+        }
         revokeLocalApproval(reason: reason)
         guard let p = pending else {
             timer?.invalidate(); timer = nil; update(reason); return
@@ -1395,6 +1476,14 @@ struct ROBTableRelayInitialEmptyEvidence {
 
     @nonobjc func tick() {
         precondition(Thread.isMainThread)
+        if let session = manualArmSession, !manualSessionIsFresh(session) {
+            manualArmSession = nil
+            for arm in ["left", "right"] { _ = ROBAmberGatewayClient.shared.priorityHold(forArm: arm) }
+            if pending?.manualArmSessionID != nil {
+                cancel(reason: "Manual arm session expired or its connection ended; hold requested."); return
+            }
+            update("Manual arm session ended; hold requested. A new session needs one approval.")
+        }
         if let approval = localRecyclingApproval,
            approval.contextIdentity() != approval.scope.contextIdentity ||
             (approval.activePendingID == nil && approval.beginBefore <= now()) {
@@ -1403,7 +1492,7 @@ struct ROBTableRelayInitialEmptyEvidence {
             } else { cancel(reason: "Local recycling approval expired or its camera/body/arm context was lost; hold requested.") }
             return
         }
-        if armSession == nil && pending == nil && localRecyclingApproval == nil { timer?.invalidate(); timer = nil; return }
+        if armSession == nil && manualArmSession == nil && pending == nil && localRecyclingApproval == nil { timer?.invalidate(); timer = nil; return }
         if let session = armSession, !sessionIsFresh(session) {
             armSession = nil
             if pending?.armSessionID != nil { cancel(reason: "Arm rehearsal session ended; hold requested."); return }
@@ -1478,6 +1567,13 @@ struct ROBTableRelayInitialEmptyEvidence {
     /// Recheck feedback and the gateway generation after the operator decides.
     @nonobjc func requestGatewayCommand(operation: String, arm: String, summary: String,
         command: @escaping () -> UInt64, completion: @escaping (NSDictionary) -> Void) {
+        if ["activate", "position", "deactivate"].contains(operation), !manualArmSessionActive {
+            beginManualArmSession { [weak self] result in
+                guard result["status"] as? String == "completed", let self else { completion(result); return }
+                self.requestGatewayCommand(operation: operation, arm: arm, summary: summary, command: command, completion: completion)
+            }
+            return
+        }
         let gateway = ROBAmberGatewayClient.shared
         let gatewayArm = arm == "right" ? "left" : "right"
         let port = arm == "right" ? 26001 : 26002
@@ -1489,7 +1585,8 @@ struct ROBTableRelayInitialEmptyEvidence {
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil; timeout?.cancel(); timeout = nil
         }
-        request(operation: operation, arm: arm, summary: summary, execute: { done in
+        request(action: "arm_operation", arguments: ["operation": operation, "arm": arm, "summary": summary],
+            summary: summary, allowManualArmSession: ["activate", "position", "deactivate"].contains(operation), execute: { done in
             let readiness = gateway.manualArmControlReadiness(forUDPPort: port,
                 expectedSessionGeneration: generation)
             guard generation != 0, readiness["allowed"] as? Bool == true else {
@@ -1530,7 +1627,7 @@ struct ROBTableRelayInitialEmptyEvidence {
         guard let p = pending else { return }
         publish(state, detail: result["detail"] as? String ?? "Arm operation ended", result: result)
         pending = nil
-        if armSessionActive || localRecyclingApproval != nil { startTimer() } else { timer?.invalidate(); timer = nil }
+        if armSessionActive || manualArmSessionActive || localRecyclingApproval != nil { startTimer() } else { timer?.invalidate(); timer = nil }
         if cancelExecution { p.cancel() }
         update(result["detail"] as? String ?? "Arm operation ended")
         p.completion(result)

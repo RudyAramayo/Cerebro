@@ -13,6 +13,7 @@ final class ROBAmberGatewayClient: NSObject {
     var generation: UInt64 = 1
     var ready = true
     var holds: [String] = []
+    func isReady() -> Bool { ready }
     func connectionSnapshot() -> NSDictionary { ["sessionGeneration": NSNumber(value: generation)] }
     func manualArmControlReadiness(forUDPPort: Int, expectedSessionGeneration: UInt64) -> NSDictionary {
         ["allowed": ready && expectedSessionGeneration == generation, "reason": "Feedback/session changed"]
@@ -331,6 +332,86 @@ final class ROBAmberGatewayClient: NSObject {
             check(b.authorizesLeftArmTrial("Deliberate camera search and transfer"), "Camera settling must not exhaust the old short task window")
             clock.addTimeInterval(2); b.tick()
             check(stopped == 1 && !b.authorizesLeftArmTrial("Deliberate camera search and transfer"), "The complete search task remains bounded to ten minutes")
+        }
+
+        // One explicit approval covers native manual controls on both arms.
+        // This permission does not leak into ordinary model/routine requests.
+        do {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            gateway.ready = true; gateway.generation = 400
+            var clock = Date(), prompts = 0, commands: [String] = []
+            b.now = { clock }; b.announceApproval = { _ in prompts += 1 }
+            b.beginManualArmSession { _ in }
+            check(!b.manualArmSessionActive && prompts == 1 && commands.isEmpty, "Opening manual session cannot move or authorize")
+            check(b.receiveSpokenAuthorization("yes, proceed"), "One final spoken approval enables manual controls")
+            check(b.manualArmSessionActive && !b.armSessionActive && b.manualArmSessionDetail.contains("15:00"), "Both-arm manual scope has its own fixed deadline")
+            for arm in ["left", "right"] {
+                for op in ["activate", "position", "deactivate", "cmd_position_mode_v2", "cmd_position_input", "cmd_cartesian_input"] {
+                    b.requestManualArmCommand(operation: op, arm: arm, summary: "Native button \(op) \(arm)",
+                        execute: { done in commands.append(op + arm); done(["status": "accepted_unverified"]) }, cancel: {}, completion: { _ in })
+                }
+            }
+            check(commands.count == 12 && prompts == 1 && b.manualArmSessionActive, "Repeated controls on both arms must reuse one approval")
+            b.requestManualArmCommand(operation: "deactivate", arm: "right", summary: "Fresh-feedback rejection",
+                execute: { done in done(["status": "blocked", "detail": "Transient feedback stale"]) }, cancel: {}, completion: { _ in })
+            check(b.manualArmSessionActive && prompts == 1, "A rejected no-motion button command must not erase the operator's 15-minute permission")
+            var gatewayDispatches = 0
+            b.requestGatewayCommand(operation: "deactivate", arm: "left", summary: "Diagnostics native torque off",
+                command: { gatewayDispatches += 1; return 807 }, completion: { _ in })
+            check(gatewayDispatches == 1 && prompts == 1, "Diagnostics mode buttons must share the manual session")
+            NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                userInfo: ["commandID": NSNumber(value: 807), "accepted": true])
+            check(!b.isPending && b.manualArmSessionActive, "Acknowledged manual mode command keeps the session available")
+            var ordinaryRan = false
+            b.request(operation: "manual", arm: "right", summary: "Ordinary model request",
+                execute: { _ in ordinaryRan = true }, cancel: {}, completion: { _ in })
+            check(!ordinaryRan && prompts == 2, "Generic model requests cannot inherit manual UI permission")
+            b.cancel(reason: "Fixture Stop")
+            check(!b.manualArmSessionActive, "Stop must revoke manual permission")
+        }
+        for operation in ["zero_position_mode_v2", "cmd_current_mode_v2", "restart_stack", "close_gripper"] {
+            let b = broker(); var ran = false, prompts = 0
+            b.announceApproval = { _ in prompts += 1 }
+            b.beginManualArmSession { _ in }; _ = b.receiveSpokenAuthorization("yes")
+            b.requestManualArmCommand(operation: operation, arm: "left", summary: operation,
+                execute: { _ in ran = true }, cancel: {}, completion: { _ in })
+            check(!ran && prompts == 2, "Unrelated operation cannot inherit manual position/mode scope: \(operation)")
+            b.cancel(reason: "End fixture")
+        }
+        for ending in ["expiry", "connection", "disconnect", "stop"] {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            gateway.ready = true; gateway.generation = 500
+            var clock = Date(), cancelled = 0, prompts = 0
+            b.now = { clock }; b.announceApproval = { _ in prompts += 1 }
+            b.beginManualArmSession { _ in }; _ = b.receiveSpokenAuthorization("yes proceed")
+            clock.addTimeInterval(899)
+            check(b.manualArmSessionActive, "Manual control remains available through 899 seconds")
+            // Wire constructors use the wall clock, independently of the broker
+            // clock seam. Restore it before constructing the next wire request.
+            clock.addTimeInterval(-899)
+            var delayed: ((NSDictionary) -> Void)?
+            b.requestManualArmCommand(operation: "cmd_position_input", arm: "right", summary: "Delayed manual target",
+                execute: { delayed = $0 }, cancel: { cancelled += 1 }, completion: { _ in })
+            check(delayed != nil && prompts == 1, "Manual command must reuse the active scope")
+            if ending == "expiry" { clock.addTimeInterval(901) }
+            if ending == "connection" { gateway.generation += 1 }
+            if ending == "disconnect" { gateway.ready = false }
+            if ending == "stop" { b.cancel(reason: "Operator Stop") }
+            b.tick()
+            check(!b.manualArmSessionActive && !b.isPending && cancelled == 1, "\(ending) must end pending manual execution without extending the deadline")
+            delayed?(["status": "completed"])
+            check(!b.manualArmSessionActive, "Late acknowledgement cannot restore an ended manual session")
+            gateway.ready = true
+        }
+        do {
+            let b = broker(); var prompts = 0, commands = 0
+            b.announceApproval = { _ in prompts += 1 }
+            b.requestManualArmCommand(operation: "cmd_deactivate_mode_v2", arm: "right", summary: "First torso button",
+                execute: { done in commands += 1; done(["status": "completed"]) }, cancel: {}, completion: { _ in })
+            check(prompts == 1 && commands == 0, "First manual button requests the complete session")
+            _ = b.receiveSpokenAuthorization("yes proceed")
+            check(prompts == 1 && commands == 1 && b.manualArmSessionActive, "First manual button executes after one approval, not two")
+            b.cancel(reason: "End fixture")
         }
 
         // A local imported receipt is a distinct lane, never a microphone or

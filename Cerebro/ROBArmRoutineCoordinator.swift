@@ -86,6 +86,7 @@ enum ROBArmRoutineError: LocalizedError {
         guard value.range(of: "\\b(?:not|don't|don’t|stop|wait|never|unless|until|if|explain|quote|say)\\b", options: .regularExpression) == nil,
               !value.contains("\""), !value.contains("‘"), !value.contains("'") else { return nil }
         let prefix = "^(?:(?:rob|robbie|robot)[, ]+)?(?:(?:please|can you|could you|would you|i want you to) )?(?:please )?"
+        if value.range(of: prefix + "(?:start|begin|enable) (?:a |the )?(?:15[- ]minute |fifteen[- ]minute )?manual arm(?:s)? (?:control )?session[.!?]*$", options: .regularExpression) != nil { return "manual_arm_session" }
         if value.range(of: prefix + "(?:start|begin|enable|authorize) (?:the |a )?(?:autonomous |rehearsal )?arm(?:s)? session[.!?]*$", options: .regularExpression) != nil { return "arm_session" }
         if value.range(of: prefix + "(?:end|disable|cancel) (?:the |this )?arm(?:s)? session[.!?]*$", options: .regularExpression) != nil { return "end_arm_session" }
         if value.range(of: prefix + "(?:recycle|clean up) (?:this |that |the |an? |empty )*(?:coke |soda )?can(?: in(?:to)? (?:the )?(?:orange )?bucket)?[.!?]*$", options: .regularExpression) != nil ||
@@ -136,6 +137,17 @@ enum ROBArmRoutineError: LocalizedError {
 
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
+        if command == "manual_arm_session" {
+            cancel(reason: "Operator requested a manual arm session")
+            ROBShowMotionCoordinator.shared.stop()
+            _ = ROBAmberGestureExecutor.shared.cancelCurrentGesture(reason: "Operator requested manual arm control")
+            for arm in arms { _ = gateway.priorityHold(forArm: arm) }
+            ROBControllerArmApproval.shared.beginManualArmSession { [weak self] result in
+                self?.setStatus(result["detail"] as? String ?? "Manual session request ended")
+                completion(result)
+            }
+            return
+        }
         if command == "arm_session" {
             guard !ownsPhysicalMotion, !ROBControllerArmApproval.shared.isPending else {
                 completion(["status": "busy", "detail": "Finish or stop the active motion before beginning an arm session."]); return

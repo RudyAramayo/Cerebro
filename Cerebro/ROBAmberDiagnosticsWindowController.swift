@@ -689,6 +689,8 @@ private final class ROBAmberArmSchematicView: NSView {
     private let tunnelStateLabel = NSTextField(labelWithString: "Tunnel disconnected")
     private let credentialStatusLabel = NSTextField(labelWithString: "")
     private let authorityStatusLabel = NSTextField(labelWithString: "Debug authority is off")
+    private let manualSessionButton = NSButton(title: "Start 15-minute manual session", target: nil, action: nil)
+    private let endManualSessionButton = NSButton(title: "End manual session", target: nil, action: nil)
     private let tokenField = NSSecureTextField()
     private let passwordField = NSSecureTextField()
     private let hostField = NSTextField(string: ROBAmberGatewayConfiguration.shared.sshHost)
@@ -894,7 +896,8 @@ private final class ROBAmberArmSchematicView: NSView {
         authorityStatusLabel.textColor = .secondaryLabelColor
         authorityStatusLabel.lineBreakMode = .byTruncatingTail
         authorityStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let authorityRow = NSStackView(views: [authorityStatusLabel])
+        let authorityRow = NSStackView(views: [manualSessionButton, endManualSessionButton, authorityStatusLabel])
+        authorityRow.spacing = 8
         authorityRow.orientation = .horizontal
         authorityRow.alignment = .centerY
         authorityRow.spacing = 10
@@ -970,6 +973,11 @@ private final class ROBAmberArmSchematicView: NSView {
         commandRow.orientation = .horizontal
         commandRow.alignment = .centerY
         commandRow.spacing = 8
+        manualSessionButton.target = self
+        manualSessionButton.action = #selector(startManualSession(_:))
+        manualSessionButton.toolTip = "One spoken or controller approval enables both arms' mode and position controls for 15 minutes. Stops the active automatic routine first."
+        endManualSessionButton.target = self
+        endManualSessionButton.action = #selector(endManualSession(_:))
 
         let gripperRow = NSStackView(views: ROBAmberDiagnosticsArm.allCases.map(makeGripperPanel))
         gripperRow.orientation = .horizontal
@@ -1564,6 +1572,9 @@ private final class ROBAmberArmSchematicView: NSView {
 
     private func refreshDisplay() {
         let connection = connectionSnapshot()
+        manualSessionButton.isEnabled = connection.state == .ready && !stackMaintenance.isRunning && !stackRecoveryInProgress
+            && !ROBControllerArmApproval.shared.manualArmSessionActive
+        endManualSessionButton.isEnabled = ROBControllerArmApproval.shared.manualArmSessionActive
         synchronizeGatewayTargets()
         gatewayStateLabel.stringValue = gatewayStateText(connection)
         gatewayStateLabel.textColor = connection.state == .ready ? .systemGreen
@@ -1813,7 +1824,8 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     private func refreshAuthorityStatus() {
-        authorityStatusLabel.stringValue = ROBControllerArmApproval.shared.status
+        authorityStatusLabel.stringValue = ROBControllerArmApproval.shared.manualArmSessionActive
+            ? ROBControllerArmApproval.shared.manualArmSessionDetail : ROBControllerArmApproval.shared.status
         authorityStatusLabel.textColor = ROBControllerArmApproval.shared.isPending ? .systemOrange : .secondaryLabelColor
     }
 
@@ -2251,6 +2263,18 @@ private final class ROBAmberArmSchematicView: NSView {
         )
     }
 
+    @objc private func startManualSession(_ sender: Any?) {
+        ROBArmRoutineCoordinator.shared.performCommand("manual_arm_session", target: "") { [weak self] result in
+            self?.appendEvent(result["detail"] as? String ?? "Manual session request ended")
+            self?.refreshDisplay()
+        }
+    }
+
+    @objc private func endManualSession(_ sender: Any?) {
+        ROBArmRoutineCoordinator.shared.cancel(reason: "Operator ended manual arm session")
+        refreshDisplay()
+    }
+
     @objc private func activateSelectedArm(_ sender: Any?) {
         requestArmMode("activate", summary: "Activate the arm. Mode switching can briefly remove torque; support the arm.")
     }
@@ -2271,6 +2295,7 @@ private final class ROBAmberArmSchematicView: NSView {
 
     private func requestArmMode(_ operation: String, summary: String) {
         let arm = selectedCommandArm
+        var submittedID: UInt64 = 0
         ROBControllerArmApproval.shared.requestGatewayCommand(operation: operation, arm: arm.rawValue,
             summary: "Physical \(arm.rawValue) arm: \(summary)", command: { [weak self] in
                 guard let self, !ROBArmRoutineCoordinator.shared.isRunning,
@@ -2284,8 +2309,13 @@ private final class ROBAmberArmSchematicView: NSView {
                 default: id = self.gateway.deactivateArm(arm.amberGatewayArm)
                 }
                 self.recordSubmittedCommand(id, operation: operation, arm: arm)
+                submittedID = id
                 return id
-            }, completion: { [weak self] result in self?.appendEvent(result["detail"] as? String ?? "Arm operation ended") })
+            }, completion: { [weak self] result in
+                self?.pendingManualCommandIDs.remove(submittedID)
+                self?.appendEvent(result["detail"] as? String ?? "Arm operation ended")
+                self?.refreshDisplay()
+            })
     }
 
     private func recordSubmittedCommand(
@@ -2299,6 +2329,13 @@ private final class ROBAmberArmSchematicView: NSView {
             return
         }
         pendingManualCommandIDs.insert(commandID)
+        // A lost mode-query acknowledgement must not disable manual buttons
+        // forever. Execution still rechecks the live gateway and motor feedback.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self, self.pendingManualCommandIDs.remove(commandID) != nil else { return }
+            self.appendEvent("Command \(commandID) acknowledgement timed out; outcome unverified. Manual controls are available for a fresh request.")
+            self.refreshDisplay()
+        }
         appendEvent("Submitted \(arm.amberRoutingDescription) \(operation) command \(commandID)")
         refreshDisplay()
     }
