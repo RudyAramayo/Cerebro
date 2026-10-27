@@ -894,6 +894,7 @@ import UniformTypeIdentifiers
         if !parameterMessage.isEmpty {
             status.stringValue = left.isRunning ? status.stringValue + "\n" + parameterMessage : parameterMessage + "\n" + status.stringValue
         }
+        status.stringValue = ROBLocalRecyclingSandboxRouting.displayStatus(status.stringValue)
         session.stringValue = ROBControllerArmApproval.shared.armSessionDetail
         localApprovalInfo.stringValue = ROBLocalRecyclingSandboxRouting.scopeDescription(
             pending: ROBControllerArmApproval.shared.pendingLocalRecyclingApprovalScope,
@@ -952,6 +953,11 @@ private final class ROBTestingSandboxDocumentView: NSView {
 
 /// Local UI routing only. No text or template produced here authorizes motion.
 enum ROBLocalRecyclingSandboxRouting {
+    static func displayStatus(_ text:String)->String {
+        guard text.contains("Stationary arm guard failed:"),
+              text.contains("Pausing nonactuating search for fresh unchanged feedback; no command admitted.") else {return text}
+        return "Arm feedback was delayed during the stationary scan (limit 0.35 seconds). No arm motion was sent. Details are saved with the trial recording."
+    }
     static func standingDescription(_ value: NSDictionary?) -> String {
         guard let value else { return "Standing can campaign: no active authorization. Import once, or after Stop say ‘proceed with protections’." }
         let state = value["state"] as? String ?? "unavailable"
@@ -959,7 +965,7 @@ enum ROBLocalRecyclingSandboxRouting {
         let landings = (value["verifiedLandings"] as? NSNumber)?.intValue ?? 0
         let count = (value["targetCanCount"] as? NSNumber)?.intValue ?? (value["canCount"] as? NSNumber)?.intValue ?? 4
         return "Standing can campaign: \(state). Transfers reported \(transfers)/\(count); bucket landings camera-verified \(landings).\n"
-            + (value["detail"] as? String ?? "") + " Stop revokes this authorization."
+            + displayStatus(value["detail"] as? String ?? "") + " Stop revokes this authorization."
     }
     static func activityStatus(trialRunning: Bool, trialStatus: String, approvalPending: Bool,
         approvalStatus: String, localReceiptState: NSDictionary?) -> String? {

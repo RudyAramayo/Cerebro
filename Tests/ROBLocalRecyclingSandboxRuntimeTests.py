@@ -90,6 +90,8 @@ final class ROBLeftArmTrial {
     var nominalEmptyCommissioningStepEnabled = false
     var oneDegreeEmptyCalibrationStepEnabled = false
     var holdAfterInitialEmptyLiftEnabled = false
+    var approachCanThenHoldEnabled = false, approachUnknownAdvisoryEnabled = false
+    var nominalModelAssumedSelfEnabled = false, sourcePixelSelfReviewEnabled = false
     var isRunning = false
     var completionResult:NSDictionary = ["status":"prepared"]
     var calls:[(String,String)] = []
@@ -124,6 +126,8 @@ final class Sandbox {
     var nominalEmptyCommissioningStep = Toggle()
     var oneDegreeEmptyCalibrationStep = Toggle()
     var holdAfterInitialEmptyLift = Toggle()
+    var approachCanThenHold = Toggle(), approachUnknownAdvisory = Toggle()
+    var nominalModelAssumedSelf = Toggle(), sourcePixelSelfReview = Toggle()
     init(){table.onSelect={[weak self] row in self?.selectedTrial=Self.trials[row]}}
     func buildDetail(){rebuilds+=1;fields=["recyclingCount":Field(stringValue:String(Self.recyclingCount)),"localVisualAllowanceMillimeters":Field(stringValue:"50")]}
     func refresh(){refreshes += 1}

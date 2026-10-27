@@ -209,14 +209,18 @@ private struct ROBSourcePixelArchiveInputs {
     }
 }
 
-/// Value-only diagnostics for the unchanged250ms/3mm stationary hold guard.
+/// Inactive neck scans tolerate350ms delivery jitter; motion keeps250ms/3mm.
 private enum ROBHeldArmFeedbackGuard {
+    static let stationaryScanMaximumAgeMilliseconds = 350.0
+    static func scanMaximumAge(modes:[Int])->Double {
+        modes == Array(repeating:0,count:7) ? stationaryScanMaximumAgeMilliseconds : 250
+    }
     static func failures(present:Bool,motorAge:Double,gripperAge:Double,q:[Double],expectedQ:[Double],
-        gatewayModes:[Int],reportedModes:[Int],expectedModes:[Int])->[String] {
+        gatewayModes:[Int],reportedModes:[Int],expectedModes:[Int],maximumAgeMilliseconds:Double=250)->[String] {
         var fields:[String]=[]
         if !present {fields.append("telemetry_missing")}
-        if !(motorAge<=250) {fields.append("motor_age_ms")}
-        if !(gripperAge<=250) {fields.append("gripper_age_ms")}
+        if !(motorAge<=maximumAgeMilliseconds) {fields.append("motor_age_ms")}
+        if !(gripperAge<=maximumAgeMilliseconds) {fields.append("gripper_age_ms")}
         if q.count != 7 || expectedQ.count != 7 || !q.allSatisfy(\.isFinite) {fields.append("joint_positions")}
         if gatewayModes != expectedModes {fields.append("gateway_modes")}
         if reportedModes != expectedModes {fields.append("reported_modes")}
@@ -1400,7 +1404,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         var sequences: [String:UInt64] = [:]
         for side in ["left","right"] {
             let modes = gateway.modes(forArm:side).map(\.intValue)
-            guard let sample = gateway.telemetry(forArm:side), sample.effectiveSampleAgeMilliseconds <= 250,
+            guard let sample = gateway.telemetry(forArm:side), sample.effectiveSampleAgeMilliseconds <= ROBHeldArmFeedbackGuard.scanMaximumAge(modes:modes),
                   sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
                   modes.count == 7, ([0,2].contains(modes[0]) || allowActiveForPassiveCapture && modes[0]==1), modes.allSatisfy({ $0 == modes[0] }),
                   sample.statuses.map(\.intValue) == modes else {
@@ -1423,7 +1427,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             try await Task.sleep(nanoseconds:50_000_000)
             for side in ["left","right"] {
                 guard let sample = gateway.telemetry(forArm:side), let held = baseline[side],
-                      sample.effectiveSampleAgeMilliseconds <= 250,
+                      sample.effectiveSampleAgeMilliseconds <= ROBHeldArmFeedbackGuard.scanMaximumAge(modes:held.modes),
                       sample.positionsRadians.count == 7,
                       sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
                       gateway.modes(forArm:side).map(\.intValue) == held.modes,
@@ -1642,7 +1646,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 let motor=sample?.effectiveSampleAgeMilliseconds ?? .infinity,gripper=sample?.effectiveGripperFeedbackAgeMilliseconds ?? .infinity
                 let modes=gateway.modes(forArm:side).map(\.intValue),reported=sample?.statuses.map(\.intValue) ?? []
                 let fields=ROBHeldArmFeedbackGuard.failures(present:sample != nil,motorAge:motor,gripperAge:gripper,q:q,expectedQ:held.positions,
-                    gatewayModes:modes,reportedModes:reported,expectedModes:held.modes)
+                    gatewayModes:modes,reportedModes:reported,expectedModes:held.modes,
+                    maximumAgeMilliseconds:passive ? ROBHeldArmFeedbackGuard.stationaryScanMaximumAgeMilliseconds : 250)
                 if !fields.isEmpty {
                     let delivery=sample.map{max(0,ProcessInfo.processInfo.systemUptime-$0.receivedAtUptime)*1000} ?? .infinity
                     let drift=q.count==7 ? 1.5*zip(q,held.positions).reduce(0.0,{$0+abs($1.0-$1.1)}):Double.infinity
@@ -1690,7 +1695,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     throw ROBArmRoutineError.blocked("The stationary scene-scan hold is unavailable.")
                 }
                 for (side,baseline) in sceneHold where localReceiptCommand == nil || !passive {
-                    guard let sample = gateway.telemetry(forArm:side), sample.effectiveSampleAgeMilliseconds <= 250,
+                    guard let sample = gateway.telemetry(forArm:side), sample.effectiveSampleAgeMilliseconds <= ROBHeldArmFeedbackGuard.scanMaximumAge(modes:baseline.modes),
                           gateway.modes(forArm:side).map(\.intValue) == baseline.modes,
                           sample.statuses.map(\.intValue) == baseline.modes,
                           sample.positionsRadians.count == 7,

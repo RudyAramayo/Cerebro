@@ -95,13 +95,21 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
  @MainActor static func fatal(_ h:Hold,_ expected:String){do{try h.check();preconditionFailure("Unsafe hold admitted")}catch is ROBPassiveFeedbackPause {preconditionFailure("Unsafe mode/q/missing state incorrectly deferred")}catch{precondition(String(describing:error).contains(expected))}}
  @MainActor static func main()async throws {
   let changedPolicy=Hold();changedPolicy.approachUnknownAdvisoryEnabled=true;fatal(changedPolicy,"frozen UNKNOWN advisory")
-  let h=Hold();h.gateway.samples["right"]!.effectiveGripperFeedbackAgeMilliseconds=300
+  for age in [300.0,350.0] {
+   let within=Hold()
+   for side in ["left","right"] {within.gateway.samples[side]!.effectiveSampleAgeMilliseconds=age;within.gateway.samples[side]!.effectiveGripperFeedbackAgeMilliseconds=age}
+   try within.check()
+   precondition(within.lastHeldFeedbackDiagnostic==nil)
+  }
+  precondition(ROBHeldArmFeedbackGuard.scanMaximumAge(modes:Array(repeating:0,count:7))==350)
+  precondition(ROBHeldArmFeedbackGuard.scanMaximumAge(modes:Array(repeating:2,count:7))==250)
+  let h=Hold();h.gateway.samples["right"]!.effectiveGripperFeedbackAgeMilliseconds=351
   do{try h.check();preconditionFailure("Strict check soft-passed stale feedback")}catch is ROBPassiveFeedbackPause{}
   precondition(h.lastHeldFeedbackDiagnostic?.contains("gripper_age_ms")==true)
   let recover=Task{@MainActor in try await Task.sleep(nanoseconds:50_000_000);precondition(h.dispatches==0);h.gateway.samples["right"]!.effectiveGripperFeedbackAgeMilliseconds=10}
   try await h.accepted{h.dispatches+=1;h.acks[42]=true;return 42};try await recover.value
   precondition(h.dispatches==1 && h.passiveFeedbackPauseStarted==nil)
-  let timeout=Hold();timeout.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=300;timeout.passiveFeedbackPauseStarted=ProcessInfo.processInfo.systemUptime-2.01;fatal(timeout,"within2seconds")
+  let timeout=Hold();timeout.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=351;timeout.passiveFeedbackPauseStarted=ProcessInfo.processInfo.systemUptime-2.01;fatal(timeout,"within2seconds")
   let changed=Hold();changed.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=300;changed.gateway.mode["right"]=1;fatal(changed,"gateway_modes")
   let drift=Hold();drift.gateway.samples["right"]!.positionsRadians[0]=0.01;fatal(drift,"position_drift_m")
   let missing=Hold();missing.gateway.samples.removeValue(forKey:"right");fatal(missing,"telemetry_missing")
@@ -110,13 +118,13 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   precondition(active.dispatches==0)
   // Exercise the COMPLETE actual check, including authorization/session and old scan tail.
   let agedDuringAuthorization=Hold()
-  ROBControllerArmApproval.shared.onAuthorize={agedDuringAuthorization.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=300}
+  ROBControllerArmApproval.shared.onAuthorize={agedDuringAuthorization.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=351}
   try agedDuringAuthorization.check() // No duplicate age read after authority work in local passive mode.
   ROBControllerArmApproval.shared.onAuthorize=nil
   do{try agedDuringAuthorization.check();preconditionFailure("Next checkpoint must detect stale feedback")}catch is ROBPassiveFeedbackPause{}
   let nonlocal=Hold();nonlocal.localReceiptCommand=nil
-  ROBControllerArmApproval.shared.onAuthorize={nonlocal.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=300}
-  do{try nonlocal.check();preconditionFailure("Nonlocal scan lost legacy strict guard")}catch{precondition(String(describing:error).contains("stationary neck scan"))}
+  ROBControllerArmApproval.shared.onAuthorize={nonlocal.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=351}
+  do{try nonlocal.check();preconditionFailure("Nonlocal inactive scan lost350ms guard")}catch{precondition(String(describing:error).contains("stationary neck scan"))}
   ROBControllerArmApproval.shared.onAuthorize=nil
   let activeScan=Hold();activeScan.sceneHold=activeScan.sceneHold.mapValues{($0.positions,Array(repeating:2,count:7))}
   for side in ["left","right"]{activeScan.gateway.mode[side]=2;activeScan.gateway.samples[side]!.statuses=Array(repeating:2,count:7)}
@@ -129,7 +137,7 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   try await Task.sleep(nanoseconds:50_000_000);camera.vision.available=true;camera.vision.sequence=2
   for _ in 0..<20 {if completed{break};try await Task.sleep(nanoseconds:20_000_000)}
   precondition(completed && camera.prepared==1 && camera.vision.ensureCalls==1)
-  print("PASS COMPLETE actual check incl authorization-aged local/nonlocal/active scan tails; strict passive guard: age-only same-q/mode defers≤2s without softpass; activation/dispatch waits fresh; q/mode/missing/active/timeout fatal; direct local Prepare enrolls then waits fresh; source projection expiry capped2 and no timestamp rewrite; no hardware")
+  print("PASS inactive scan accepts300/350ms and pauses above350ms; active checks keep250ms; complete actual local/nonlocal/active check; age-only same-q/mode defers≤2s; q/mode/missing/active/timeout fatal; direct local Prepare enrolls then waits fresh; source expiry capped2; no hardware")
  }
 }
 '''.replace('/* GUARD */',guard).replace('/* PAUSE */',pause).replace('/* BATCH */',batch).replace('/* FULL CHECK */',fullCheck).replace('/* METHODS */',methods).replace('/* ENROLL */',enroll)
