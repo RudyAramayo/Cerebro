@@ -2303,6 +2303,14 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         guard !jawCommandDispatched,!armTravelDispatched,let trial=try visualTrial(map:map,model:model,baseline:q) else {
             throw ROBArmRoutineError.blocked("One-degree experiment lost its fresh q0, no-jaw state or explicit trial scope.")
         }
+        guard let sourceFrame=vision.snapshot()["face"] else {
+            throw ROBArmRoutineError.blocked("The one-degree preflight source frame is unavailable.")
+        }
+        let reference=try initialEmptyViewReference(sourceFrame)
+        // Geometry and evidence serialization may outlive an exposure while
+        // the arm is held. Require a NEW same-source frame after that work;
+        // never carry an old camera-ready result into the actual dispatch.
+        cameraReady=false
         let now=Date().timeIntervalSince1970*1000,measuredAt=now-sample.effectiveSampleAgeMilliseconds
         let emptySource="local_first_attempt_no_arm_travel_or_task_grip"
         let proof:ROBWorkspaceOneDegreeEmptyCalibrationStep
@@ -2338,6 +2346,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
             }
         }.value
+        try await refreshInitialEmptyDispatchView(map:map,model:model,trial:trial,baseline:q,reference:reference)
+        cameraReady=true
         try check();try checkCollisionContext();try requireLiveVisualTrial(trial,map:map,model:model)
         let current=try measured(),admissionTime=Date().timeIntervalSince1970*1000
         try proof.validateContext(map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,
