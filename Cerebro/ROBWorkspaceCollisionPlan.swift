@@ -867,6 +867,7 @@ struct ROBWorkspaceStagedEmptyLift:Codable,Equatable {
     let emptyStateEvidenceSource:String
     var initialSelfHypothesis:ROBWorkspaceInitialLiftSelfHypothesis? = nil
     var initialMarginRetreats:[ROBWorkspaceInitialMarginRetreat] = []
+    var operatorReadyPoseRevision:String? = nil
 }
 
 struct ROBWorkspaceInitialMarginRetreat:Codable,Equatable {
@@ -1091,7 +1092,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     static func reviewStagedEmptyLift(from baseline:[Double],map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
         trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,emptyTrialEligibility:Bool,
-        emptyStateEvidenceSource:String)throws->ROBWorkspaceStagedEmptyLift {
+        emptyStateEvidenceSource:String,operatorReadyPose:Bool=false)throws->ROBWorkspaceStagedEmptyLift {
         var context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
         guard model.physicalSide=="right",baseline==trial.baseline,
@@ -1102,18 +1103,22 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
               !trial.usesOperatorClearedUnknownApproach else {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift requires fresh measured hanging, current can-task scope and empty-state evidence.")
         }
-        let geometry=try ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline)
+        guard !operatorReadyPose || trial.usesOperatorClearedCameraCollisionAdvisory else {
+            throw ROBGhostMotionError.blocked("The taught ready entry needs its operator-cleared can campaign.")
+        }
+        let steps=try operatorReadyPose ? ROBCanRecyclingReadyPose.steps(model:model,baseline:baseline):ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline).steps
         var proxy=ROBWorkspaceSelfProxyClearance(model:model)
         let initial=try proxy.separations(vendorLeft:baseline)
         let selfHypothesis=try initialLiftSelfHypothesis(baseline:baseline,map:map,model:model,context:context)
-        let result=try reviewEmptyLiftHullPath(baseline:baseline,steps:geometry.steps,initialPairs:initial,
+        let result=try reviewEmptyLiftHullPath(baseline:baseline,steps:steps,initialPairs:initial,
             requireFinalClearance:true,map:map,model:model,context:context,selfHypothesis:selfHypothesis,originalBaseline:baseline)
         context.skippedStaticRobotLinks=result.staticLinks
         context.unknownSpaceAdvisory=result.unknownAdvisory
         context.cameraCollisionAdvisory=result.cameraAdvisory
-        return .init(context:context,baseline:baseline,steps:geometry.steps,checkedPoseCount:result.checked,
+        return .init(context:context,baseline:baseline,steps:steps,checkedPoseCount:result.checked,
             initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:result.endpoint,
-            emptyStateEvidenceSource:emptyStateEvidenceSource,initialSelfHypothesis:selfHypothesis,initialMarginRetreats:result.marginRetreats)
+            emptyStateEvidenceSource:emptyStateEvidenceSource,initialSelfHypothesis:selfHypothesis,initialMarginRetreats:result.marginRetreats,
+            operatorReadyPoseRevision:operatorReadyPose ? ROBCanRecyclingReadyPose.revision:nil)
     }
 
     /// Recheck the exact next segment from ACTUAL feedback. This cannot admit
@@ -1129,7 +1134,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
               proof.context.modelID==model.modelID,proof.context.geometryID==model.geometryID,
               proof.context.mappingID==model.selectedMappingID,proof.context.visualTrial != nil,
               proof.context.visualTrial?.operatorClearedCameraCollisionAdvisory == trial.operatorClearedCameraCollisionAdvisory,
-              proof.steps == (try ROBEmptyArmLiftGeometry.make(model:model,baseline:proof.baseline)).steps,
+              proof.operatorReadyPoseRevision==nil || proof.operatorReadyPoseRevision==ROBCanRecyclingReadyPose.revision && trial.usesOperatorClearedCameraCollisionAdvisory,
+              proof.steps == (try proof.operatorReadyPoseRevision != nil ? ROBCanRecyclingReadyPose.steps(model:model,baseline:proof.baseline):ROBEmptyArmLiftGeometry.make(model:model,baseline:proof.baseline).steps),
               measuredAtMilliseconds.isFinite,(0...250).contains(nowMilliseconds-measuredAtMilliseconds) else {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift segment lost its frozen route or fresh context.")
         }

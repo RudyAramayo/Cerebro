@@ -1047,7 +1047,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ? "DEBUG operator-cleared UNKNOWN-advisory EMPTY physical RIGHT open-jaw approach: search the can and workspace, perform any needed occupied/full-arm/self-checked initial empty lift, reobserve, then execute the complete checked dynamic entry and bounded observed-jaw alignment. Unobserved cells remain UNKNOWN and are recorded as advisory; they do not veto this approach and are never relabeled free or observed. ALL occupied returns, self-collision, person/Stop, joints/rates/current/fresh feedback and exact camera/body/standing-receipt checks remain enforced. Stop at actual ready-to-grip alignment BEFORE closing. Opening/startup empty-jaw readiness is permitted; no close, verification lift, payload, carry, release, automatic recovery or next attempt. Hold the measured endpoint, ZERO transfers. Assumed visual uncertainty remains \(localVisualTrialAssumedSpatialErrorMeters*1000)mm. This accepted uncertainty is NOT certified collision clearance or measured registration. No other route receives this UNKNOWN policy."
             : approachSummary
         let cameraAdvisorySummary=localReceiptOnly && standingCameraCollisionAdvisoryEligible
-            ? "Policy \(Self.cameraAdvisoryPolicyRevision). Operator confirms the initial RIGHT arm is unblocked and authorizes the fixed J2/J4 vertical lift, rearward J1 and raised approach. Camera occupied/UNKNOWN/J5 and hand/person collision predictions are advisory throughout this current \(requestedCanCount)-can campaign. Keep their raw observations and label all predictions unverified; no observed-free or measured-registration claim. Initial EMPTY lift uses model geometry, joint limits, nonworsening self clearance, fresh motor feedback and current-spike hold; defer camera inspection until the arm is raised. Then acquire fresh can/bucket positions and visual possession/drop evidence. Current-spike hold, Stop, ownership, joint/rate limits and modeled self collision remain active. Both arms may hold; only physical RIGHT travels. No torso/treads/encoder reset or force escalation. \(holdAfterInitialEmptyLiftEnabled ? "Lift and measured hold ONLY: no jaws, grasp, carry or release; ZERO transfers." : "Open, approach and grip gently, verify the short lift, carry to the bucket and release; reobserve each can.") The frozen local receipt covers this bounded600second execution; interruption ends the current path. Camera alignment remains assumed \(localVisualTrialAssumedSpatialErrorMeters*1000)mm and collision clearance is not certified."
+            ? "Policy \(Self.cameraAdvisoryPolicyRevision). Operator confirms the initial RIGHT arm is unblocked and authorizes the taught recycling ready pose (\(ROBCanRecyclingReadyPose.revision)), reached by slow coordinated segments from fresh measured hanging feedback. Camera occupied/UNKNOWN/J5 and hand/person collision predictions are advisory throughout this current \(requestedCanCount)-can campaign. Keep their raw observations and label all predictions unverified; no observed-free or measured-registration claim. Initial EMPTY lift uses model geometry, joint limits, nonworsening self clearance, fresh motor feedback and current-spike hold; defer camera inspection until the arm is raised. Then acquire fresh can/bucket positions and visual possession/drop evidence. Current-spike hold, Stop, ownership, joint/rate limits and modeled self collision remain active. Both arms may hold; only physical RIGHT travels. No torso/treads/encoder reset or force escalation. \(holdAfterInitialEmptyLiftEnabled ? "Lift and measured hold ONLY: no jaws, grasp, carry or release; ZERO transfers." : "Open, approach and grip gently, verify the short lift, carry to the bucket and release; reobserve each can.") The frozen local receipt covers this bounded600second execution; interruption ends the current path. Camera alignment remains assumed \(localVisualTrialAssumedSpatialErrorMeters*1000)mm and collision clearance is not certified."
             : approvedSummary
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
@@ -3005,7 +3005,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             throw ROBArmRoutineError.blocked("Empty preparation needs the current joint reference; no blind return or encoder reset.")
         }
         phase="empty preparation: workspace clearance"
-        update("Checking a J2/J4 empty lift from the current arm pose before searching for cans")
+        update(activeCameraCollisionAdvisory ? "Checking the taught ready pose from current measured hanging feedback" : "Checking a J2/J4 empty lift from the current arm pose before searching for cans")
         try await beginHeldSceneObservation()
         try await ensureCollisionScene(model:model,initialEmptyRightLift:true)
         guard let map=collisionMap else {throw ROBArmRoutineError.blocked("Empty preparation has no current workspace map.")}
@@ -3279,31 +3279,35 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let session=generation,camera=vision.cameraGeneration,now=Date().timeIntervalSince1970*1000
         let measuredAt=now-sample.effectiveSampleAgeMilliseconds,sequence=sample.sequence
         let reference=try initialEmptyViewReference(frame),recording=URL(fileURLWithPath:lastRecordingPath)
-        let geometry=try ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline)
-        let path=ROBLeftGestureProposal(id:UUID(),name:"J2/J4 lift, rearward J1, raised approach",kind:"staged_empty_lift",
+        let operatorReadyPose=activeCameraCollisionAdvisory
+        let steps=try operatorReadyPose ? ROBCanRecyclingReadyPose.steps(model:model,baseline:baseline)
+            : ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline).steps
+        let routeName=operatorReadyPose ? "Taught recycling ready pose" : "J2/J4 lift, rearward J1, raised approach"
+        let path=ROBLeftGestureProposal(id:UUID(),name:routeName,kind:"staged_empty_lift",
             modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
-            sessionGeneration:session,baseline:baseline,poses:[],steps:geometry.steps)
+            sessionGeneration:session,baseline:baseline,poses:[],steps:steps)
         collisionReviewProposal=path
         publishCollisionReview(map:map,detail:"Relative staged lift geometry is available for read-only preview; clearance review is pending.")
         let previewFile=recording.deletingPathExtension().appendingPathExtension("staged-empty-lift-preview.json")
         try path.encoded().write(to:previewFile,options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:previewFile.path)
-        phase="J2/J4 and rearward J1 lift review"
-        update("Checking the complete vertical J2/J4, rearward J1 and raised-gripper path")
+        phase="\(routeName) review"
+        update("Checking the complete empty-arm path: \(routeName)")
         let proof:ROBWorkspaceStagedEmptyLift
         do {
             proof=try await Task.detached(priority:.userInitiated) {
                 try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:baseline,map:map,model:model,generation:session,
                     sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial,measuredAtMilliseconds:measuredAt,
-                    emptyTrialEligibility:true,emptyStateEvidenceSource:"local_first_attempt_no_arm_travel_or_task_grip")
+                    emptyTrialEligibility:true,emptyStateEvidenceSource:"local_first_attempt_no_arm_travel_or_task_grip",
+                    operatorReadyPose:operatorReadyPose)
             }.value
         }catch {
             let detail=error.localizedDescription
             publishCollisionReview(map:map,detail:detail,blocked:true)
             _=try? await Task.detached(priority:.utility) {
-                let geometry=try ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline)
+                guard let goal=steps.last?.positions else {throw ROBArmRoutineError.blocked("The empty lift has no target.")}
                 return try ROBInitialRetreatFailureExport.write(recording:recording,map:map,model:model,baseline:baseline,
-                    goal:geometry.steps.last!.positions,trial:trial,stage:"staged_empty_lift_before_position_mode",
+                    goal:goal,trial:trial,stage:"staged_empty_lift_before_position_mode",
                     reviewTimeMilliseconds:now,measuredAtMilliseconds:measuredAt,sequence:sequence,detail:detail)
             }.value
             throw error

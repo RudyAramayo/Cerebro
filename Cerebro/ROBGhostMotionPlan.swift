@@ -309,6 +309,44 @@ final class ROBGhostRobotModel {
     }
 }
 
+/// Operator-taught can-recycling start, measured on 2026-10-27 at 17:04:11Z.
+/// These are physical-side Amber encoder radians, not mirrored URDF angles.
+/// Saving a target does not grant motion or certify camera registration.
+enum ROBCanRecyclingReadyPose {
+    static let revision = "operator_taught_ready_20261027_v1"
+    static func target(physicalSide:String)throws->[Double] {
+        switch physicalSide {
+        case "left": return [0.2564815877344792,1.6656986048720883,0,0.9825658273336827,-1.1095112596467078,-1.7111044361935033,-0.46278495947412146]
+        case "right": return [-0.2564815877344792,-1.6648804817852159,0,-0.9825658273336827,1.107465951929527,1.7111044361935033,0.46278495947412146]
+        default: throw ROBGhostMotionError.blocked("The recycling ready pose needs a physical left or right arm.")
+        }
+    }
+    static func matches(_ measured:[Double],physicalSide:String)->Bool {
+        guard measured.count==7,measured.allSatisfy(\.isFinite),let goal=try?target(physicalSide:physicalSide) else{return false}
+        return zip(measured,goal).allSatisfy{abs($0-$1)<=0.015}
+    }
+    /// A direct coordinated interpolation from fresh feedback. No old front
+    /// pose, hanging detour or J2/J4 inverse-kinematic entry is inserted.
+    static func steps(model:ROBGhostRobotModel,baseline:[Double])throws->[ROBLeftGestureProposal.Step] {
+        let goal=try target(physicalSide:model.physicalSide),bounds=ROBWorkspaceCollisionPlan.jointBounds(model:model)
+        guard baseline.count==7,(baseline+goal).allSatisfy(\.isFinite),
+              zip(baseline,bounds).allSatisfy({$1.contains($0)}),zip(goal,bounds).allSatisfy({$1.contains($0)}) else {
+            throw ROBGhostMotionError.blocked("The taught recycling entry exceeds the current model or motor bounds.")
+        }
+        if matches(baseline,physicalSide:model.physicalSide){return []}
+        let delta=zip(baseline,goal).map{$1-$0},count=max(1,Int(ceil((delta.map{abs($0)}.max() ?? 0)/0.30)))
+        var previous=baseline,result:[ROBLeftGestureProposal.Step]=[]
+        for index in 1...count {
+            let target=index==count ? goal:zip(baseline,delta).map{$0+$1*Double(index)/Double(count)}
+            guard let duration=ROBArmRoutinePlan.duration(from:previous,to:target),duration<=5 else {
+                throw ROBGhostMotionError.blocked("The taught recycling entry exceeds the trajectory timing bound.")
+            }
+            result.append(.init(positions:target,seconds:duration,stage:"Direct move to taught recycling ready pose"));previous=target
+        }
+        return result
+    }
+}
+
 /// Relative EMPTY preparation geometry. This has no scene-clearance or motion
 /// authority: the caller must review every full-arm segment against live depth.
 struct ROBEmptyArmLiftGeometry {

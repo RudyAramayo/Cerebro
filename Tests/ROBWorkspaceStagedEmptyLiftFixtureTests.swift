@@ -126,6 +126,39 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   obstacle.obstacleLow=endpoint.low;obstacle.obstacleHigh=endpoint.high
   blocked("obstacle") {_=try review(start,source:obstacle)}
   #if DEBUG
+  let readyGoal=try ROBCanRecyclingReadyPose.target(physicalSide:"right")
+  precondition(readyGoal == [-0.2564815877344792,-1.6648804817852159,0,-0.9825658273336827,1.107465951929527,1.7111044361935033,0.46278495947412146])
+  let readyProof=try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:start,map:map,model:model,generation:generation,
+    sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,start,cameraAdvisory:true),
+    measuredAtMilliseconds:1000,emptyTrialEligibility:true,emptyStateEvidenceSource:"operator_declared_empty",operatorReadyPose:true)
+  precondition(readyProof.steps.last!.positions==readyGoal && readyProof.operatorReadyPoseRevision==ROBCanRecyclingReadyPose.revision)
+  precondition(readyProof.endpointProxyClearancesMeters.values.allSatisfy{$0>=0.03})
+  var previousReady=start
+  for (index,step) in readyProof.steps.enumerated() {
+   precondition(step.jawAction==nil && step.seconds<=5 && step.seconds>=3.2)
+   precondition(zip(previousReady,step.positions).allSatisfy{abs($0-$1)<=0.30 && abs($0-$1)/step.seconds<=ROBArmRoutinePlan.maximumAverageSpeed})
+   try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(readyProof,index:index,from:previousReady,map:map,model:model,
+     generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,
+     trial:trial(map,previousReady,cameraAdvisory:true),measuredAtMilliseconds:1000)
+   previousReady=step.positions
+  }
+  blocked("operator-cleared can campaign") {
+   _=try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:start,map:map,model:model,generation:generation,
+     sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,start),measuredAtMilliseconds:1000,
+     emptyTrialEligibility:true,emptyStateEvidenceSource:"operator_declared_empty",operatorReadyPose:true)
+  }
+  var alteredReady=readyProof;alteredReady.operatorReadyPoseRevision="changed"
+  blocked("frozen route") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(alteredReady,index:0,from:start,map:map,
+    model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,
+    trial:trial(map,start,cameraAdvisory:true),measuredAtMilliseconds:1000)}
+  blocked("frozen route") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(readyProof,index:0,from:start,map:map,
+    model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1251,
+    trial:trial(map,start,cameraAdvisory:true),measuredAtMilliseconds:1000)}
+  var driftedReady=start;driftedReady[1]-=0.01
+  blocked("start corridor") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(readyProof,index:0,from:driftedReady,map:map,
+    model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,
+    trial:trial(map,driftedReady,cameraAdvisory:true),measuredAtMilliseconds:1000)}
+  print("PASS taught ready pose: complete modeled route and segment rechecks; stale feedback, drift and changed policy rejected; no jaws")
   let interruptedStart=[0.0,-0.03941,0,-0.03082,0,0,0]
   precondition(ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(interruptedStart))
   precondition(!ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart([0,-0.051,0,0,0,0,0]))
