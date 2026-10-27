@@ -17,18 +17,34 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
     var obstacleLow: SIMD3<Double>?
     var obstacleHigh: SIMD3<Double>?
     var observed = true
+    var sourceGroups:[ROBWorkspaceOccupiedSourceGroup]? = nil
+    var provideRefinement=true
     var visualCalibrationScope: ROBWorkspaceVisualCalibrationMapScope? = nil
     var fingerprint: String {
-        ROBGhostRobotModel.hash(Data("synthetic-map:\(obstacleLow.debugDescription):\(obstacleHigh.debugDescription):\(observed)".utf8))
+        ROBGhostRobotModel.hash(Data("synthetic-map:\(obstacleLow.debugDescription):\(obstacleHigh.debugDescription):\(observed):\(sourceGroups.debugDescription):\(provideRefinement)".utf8))
     }
+    var originalOccupiedSourceGroups:[ROBWorkspaceOccupiedSourceGroup]? {sourceGroups}
+    func groups(at p:SIMD3<Double>)->[ROBWorkspaceOccupiedReturnBounds] {
+        let cell=(0..<3).map{Int(floor(p[$0]/voxelSizeMeters))}
+        return (sourceGroups ?? []).filter{g in (0..<3).allSatisfy{abs(g.sourceVoxel[$0]-cell[$0])<=1}}.map(\.bounds)
+    }
+    func occupiedSampleBounds(at p:SIMD3<Double>)->(low:SIMD3<Double>,high:SIMD3<Double>)? {
+        let g=groups(at:p);guard !g.isEmpty else{return nil}
+        var lo=SIMD3<Double>(repeating:.infinity),hi=SIMD3<Double>(repeating:-.infinity)
+        for b in g {lo=simd_min(lo,SIMD3(b.lowMeters[0],b.lowMeters[1],b.lowMeters[2]));hi=simd_max(hi,SIMD3(b.highMeters[0],b.highMeters[1],b.highMeters[2]))}
+        return(lo,hi)
+    }
+    func occupiedSampleSubBounds(at p:SIMD3<Double>)->[ROBWorkspaceOccupiedReturnBounds]? {provideRefinement ? groups(at:p):nil}
     func state(at point: SIMD3<Double>) -> ROBWorkspaceVoxelState {
         guard (0..<3).allSatisfy({ abs(point[$0]) <= 3 }) else { return .unknown }
         if let low = obstacleLow, let high = obstacleHigh, (0..<3).allSatisfy({ (low[$0]...high[$0]).contains(point[$0]) }) { return .occupied }
+        if !groups(at:point).isEmpty {return .occupied}
         return observed ? .free:.unknown
     }
     func state(inBoundsLow low:SIMD3<Double>,high:SIMD3<Double>) -> ROBWorkspaceVoxelState {
         guard observed, (0..<3).allSatisfy({ low[$0] >= -3 && high[$0] <= 3 }) else { return .unknown }
         if let a = obstacleLow, let b = obstacleHigh, (0..<3).allSatisfy({ low[$0] <= b[$0] && high[$0] >= a[$0] }) { return .occupied }
+        if sourceGroups != nil {return .occupied}
         return .free
     }
 }
@@ -94,6 +110,28 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   blocked("obstacle") {_=try review(start,source:obstacle)}
   obstacle.observed=false
   blocked("obstacle") {_=try review(start,source:obstacle)}
+  func pointGroup(_ p:SIMD3<Double>)->ROBWorkspaceOccupiedSourceGroup {
+   .init(sourceVoxel:(0..<3).map{Int(floor(p[$0]/0.025))},bounds:.init(lowMeters:[p.x,p.y,p.z],highMeters:[p.x,p.y,p.z]))
+  }
+  let initialBox=model.worldCollisionBounds(positions:model.positions(vendorLeft:start))["right_four_Link"]!
+  var selfMap=map;selfMap.sourceGroups=[pointGroup((initialBox.low+initialBox.high)/2)]
+  let selfProof=try review(start,source:selfMap)
+  let hypothesis=selfProof.initialSelfHypothesis!
+  precondition(hypothesis.groups.count==1 && !hypothesis.measuredSelf && !hypothesis.rawMapModified && !hypothesis.collisionClearanceCertified)
+  precondition(hypothesis.assumedAlignmentAllowanceMeters==0.05 && hypothesis.baseline==start)
+  precondition(selfMap.originalOccupiedSourceGroups==selfMap.sourceGroups,"Raw self returns were erased")
+  try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(selfProof,index:15,from:selfProof.steps[14].positions,
+    map:selfMap,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,
+    trial:trial(selfMap,selfProof.steps[14].positions),measuredAtMilliseconds:1000)
+  var aggregateOnly=selfMap;aggregateOnly.provideRefinement=false
+  blocked("obstacle") {_=try review(start,source:aggregateOnly)}
+  var mixed=selfMap;mixed.obstacleLow=endpoint.low;mixed.obstacleHigh=endpoint.high
+  blocked("obstacle") {_=try review(start,source:mixed)}
+  var ordinary=map;ordinary.sourceGroups=[pointGroup((endpoint.low+endpoint.high)/2)]
+  blocked("obstacle") {_=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:raised,
+    steps:[.init(positions:raised,seconds:0.8)],map:ordinary,model:model,generation:generation,sceneID:scene,
+    cameraGeneration:camera,nowMilliseconds:1000,trial:trial(ordinary,raised))}
+  print("PASS frozen initial self hypothesis; raw returns retained; mixed external, aggregate-only and ordinary-route obstacles still veto")
   var wrong=start;wrong[0]+=0.005
   blocked("start corridor") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(proof,index:0,from:wrong,map:map,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,wrong),measuredAtMilliseconds:1000)}
   blocked("frozen route") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(proof,index:16,from:start,map:map,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,start),measuredAtMilliseconds:1000)}

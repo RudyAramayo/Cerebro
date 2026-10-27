@@ -836,6 +836,22 @@ struct ROBWorkspaceStagedEmptyLift:Codable,Equatable {
     let initialProxyClearancesMeters:[String:Double]
     let endpointProxyClearancesMeters:[String:Double]
     let emptyStateEvidenceSource:String
+    var initialSelfHypothesis:ROBWorkspaceInitialLiftSelfHypothesis? = nil
+}
+
+/// Operator-cleared initial EMPTY preparation only. Unregistered robot and
+/// attached-cable returns near the original arm are a model hypothesis, not
+/// measured self recognition. Freeze the source groups at the hanging pose;
+/// never grow this set around the arm as it moves into new space.
+struct ROBWorkspaceInitialLiftSelfHypothesis:Codable,Equatable {
+    struct Group:Codable,Equatable {
+        let sourceVoxel:[Int],originalBounds:ROBWorkspaceOccupiedReturnBounds
+        let baselineLink:String,maximumCornerDistanceMeters:Double
+    }
+    let kind:String,baseline:[Double],mapFingerprint:String
+    let completeSourceGroupCount:Int,completeSourceGroupsSHA256:String
+    let assumedAlignmentAllowanceMeters:Double,groups:[Group]
+    let measuredSelf:Bool,rawMapModified:Bool,collisionClearanceCertified:Bool
 }
 
 /// Bounded model-estimated endpoints; each still needs the complete initial
@@ -1052,13 +1068,14 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         let geometry=try ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline)
         var proxy=ROBWorkspaceSelfProxyClearance(model:model)
         let initial=try proxy.separations(vendorLeft:baseline)
+        let selfHypothesis=try initialLiftSelfHypothesis(baseline:baseline,map:map,model:model,context:context)
         let result=try reviewEmptyLiftHullPath(baseline:baseline,steps:geometry.steps,initialPairs:initial,
-            requireFinalClearance:true,map:map,model:model,context:context)
+            requireFinalClearance:true,map:map,model:model,context:context,selfHypothesis:selfHypothesis)
         context.skippedStaticRobotLinks=result.staticLinks
         context.unknownSpaceAdvisory=result.unknownAdvisory
         return .init(context:context,baseline:baseline,steps:geometry.steps,checkedPoseCount:result.checked,
             initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:result.endpoint,
-            emptyStateEvidenceSource:emptyStateEvidenceSource)
+            emptyStateEvidenceSource:emptyStateEvidenceSource,initialSelfHypothesis:selfHypothesis)
     }
 
     /// Recheck the exact next segment from ACTUAL feedback. This cannot admit
@@ -1081,13 +1098,62 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         guard 1.5*zip(actual,expected).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
             throw ROBGhostMotionError.blocked("The measured arm is outside the staged EMPTY lift start corridor.")
         }
+        let selfHypothesis=try initialLiftSelfHypothesis(baseline:proof.baseline,map:map,model:model,context:context)
+        guard selfHypothesis==proof.initialSelfHypothesis else {
+            throw ROBGhostMotionError.blocked("The initial arm self hypothesis changed; no next segment sent.")
+        }
         _=try reviewEmptyLiftHullPath(baseline:actual,steps:[proof.steps[index]],initialPairs:proof.initialProxyClearancesMeters,
-            requireFinalClearance:index==proof.steps.count-1,map:map,model:model,context:context)
+            requireFinalClearance:index==proof.steps.count-1,map:map,model:model,context:context,selfHypothesis:selfHypothesis)
+    }
+
+    private static func initialLiftSelfHypothesis(baseline:[Double],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext)throws->ROBWorkspaceInitialLiftSelfHypothesis? {
+        guard let groups=map.originalOccupiedSourceGroups else{return nil}
+        guard groups.count<=400_000,map.voxelSizeMeters==0.025 else {
+            throw ROBGhostMotionError.blocked("Initial arm source groups exceed their bounded original map.")
+        }
+        let allowance=min(0.05,context.spatialErrorAllowanceMeters)
+        let frames=model.frames(model.positions(vendorLeft:baseline))
+        let links=model.hulls.keys.filter{$0.hasPrefix("right_") && ($0.hasSuffix("_Link") || $0==model.toolLink)}.sorted()
+        let shapes=try links.map{link in (link,ROBNominalWorldShape(try ROBWorkspaceVerifiedConvexEnvelope.load(model:model,link:link),frames[link]!))}
+        var assumed:[ROBWorkspaceInitialLiftSelfHypothesis.Group]=[],seen=Set<String>()
+        let ordered=groups.sorted{$0.id<$1.id}
+        for group in ordered {
+            try Task.checkCancellation()
+            let low=group.bounds.lowMeters,high=group.bounds.highMeters
+            guard group.sourceVoxel.count==3,seen.insert(group.id).inserted,low.count==3,high.count==3,
+                  (low+high).allSatisfy({$0.isFinite && abs($0)<10}) else {
+                throw ROBGhostMotionError.blocked("An initial arm source group has invalid original bounds.")
+            }
+            for axis in 0..<3 {
+                let firstCell=Int(floor(low[axis]/0.025)),lastCell=Int(floor(high[axis]/0.025))
+                guard low[axis]<=high[axis],firstCell==group.sourceVoxel[axis],lastCell==group.sourceVoxel[axis] else {
+                    throw ROBGhostMotionError.blocked("An initial arm source group exceeds its original voxel.")
+                }
+            }
+            let box=ROBNominalRawBox(low:SIMD3(low[0],low[1],low[2]),high:SIMD3(high[0],high[1],high[2]),key:group.id)
+            for (link,shape) in shapes where shape.box.gap(to:box)<=allowance {
+                var farthest=0.0
+                corners: for x in [box.low.x,box.high.x] {for y in [box.low.y,box.high.y] {for z in [box.low.z,box.high.z] {
+                    farthest=max(farthest,try shape.point(SIMD3(x,y,z)))
+                    if farthest>allowance {break corners}
+                }}}
+                guard farthest<=allowance else{continue}
+                assumed.append(.init(sourceVoxel:group.sourceVoxel,originalBounds:group.bounds,baselineLink:link,maximumCornerDistanceMeters:farthest))
+                break
+            }
+        }
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        return .init(kind:"operator_cleared_initial_empty_arm_model_hypothesis_not_measured_self",baseline:baseline,
+            mapFingerprint:map.fingerprint,completeSourceGroupCount:groups.count,
+            completeSourceGroupsSHA256:ROBGhostRobotModel.hash(try encoder.encode(ordered)),
+            assumedAlignmentAllowanceMeters:allowance,groups:assumed,
+            measuredSelf:false,rawMapModified:false,collisionClearanceCertified:false)
     }
 
     private static func reviewEmptyLiftHullPath(baseline:[Double],steps:[ROBLeftGestureProposal.Step],
         initialPairs:[String:Double],requireFinalClearance:Bool,map:any ROBWorkspaceCollisionMap,
-        model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext)throws->
+        model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext,selfHypothesis:ROBWorkspaceInitialLiftSelfHypothesis?)throws->
         (checked:Int,endpoint:[String:Double],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]?,unknownAdvisory:ROBWorkspaceUnknownSpaceAdvisoryAudit?) {
         guard !steps.isEmpty,steps.count<=30,steps.allSatisfy({$0.jawAction==nil && (0.7...5).contains($0.seconds)}),
               steps.reduce(0,{$0+$1.seconds})<=60,!initialPairs.isEmpty else {
@@ -1103,6 +1169,9 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         // This checker is local to the fixed staged lift and its rechecks;
         // ordinary connectors, grasp and payload routes retain their policy.
         checker.initialEmptyLiftUnknownAdvisory=true
+        for group in selfHypothesis?.groups ?? [] {
+            checker.initialEmptyLiftSelfGroups[SIMD3(group.sourceVoxel[0],group.sourceVoxel[1],group.sourceVoxel[2])]=group.originalBounds
+        }
         for step in steps {
             try Task.checkCancellation()
             guard let minimum=ROBLeftArmInteractionPlan.duration(from:previous,to:step.positions),step.seconds>=minimum-1e-9 else {
@@ -1666,6 +1735,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         var advisoryUnknownVisits=0
         var advisoryUnknownExamples:[String]=[]
         var initialEmptyLiftUnknownAdvisory=false
+        var initialEmptyLiftSelfGroups:[SIMD3<Int>:ROBWorkspaceOccupiedReturnBounds]=[:]
         var unknownSpaceIsAdvisory:Bool {
             initialEmptyLiftUnknownAdvisory || context.visualTrial?.usesOperatorClearedUnknownApproach==true
         }
@@ -1675,7 +1745,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                 ? "operator_cleared_unknown_initial_empty_lift_not_observed_free"
                 : "operator_cleared_unknown_empty_approach_not_observed_free",
                 broadPhaseUnknownCellVisits:advisoryUnknownVisits,exampleQueries:advisoryUnknownExamples,
-                observedFreeInferred:false,occupiedFilteringChanged:false)
+                observedFreeInferred:false,occupiedFilteringChanged:!initialEmptyLiftSelfGroups.isEmpty)
         }
         mutating func recordAdvisoryUnknown(_ label:String,_ x:Int,_ y:Int,_ z:Int) {
             advisoryUnknownVisits+=1
@@ -1826,6 +1896,12 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                     }
                 }
                 for query in queries {
+                    // Only exact complete original groups frozen at the
+                    // operator-cleared hanging pose receive this hypothesis.
+                    // Legacy unions, mixed groups, UNKNOWN and later paths do not.
+                    if initialEmptyLiftUnknownAdvisory,state == .occupied,representation=="all_original_source_voxel_bounds",
+                       let assumed=initialEmptyLiftSelfGroups[SIMD3(Int(floor(query.low.x/size)),Int(floor(query.low.y/size)),Int(floor(query.low.z/size)))],
+                       assumed.lowMeters==[query.low.x,query.low.y,query.low.z],assumed.highMeters==[query.high.x,query.high.y,query.high.z] {continue}
                     if shape.separationLowerBound(query)>margin+0.000001 {continue}
                     let distance:Double
                     do {distance=try shape.distance(query,stopAtDistance:margin)}catch{return error.localizedDescription}
