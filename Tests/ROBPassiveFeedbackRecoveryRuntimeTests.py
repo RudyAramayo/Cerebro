@@ -102,9 +102,10 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
    precondition(within.lastHeldFeedbackDiagnostic==nil)
   }
   precondition(ROBHeldArmFeedbackGuard.scanMaximumAge(modes:Array(repeating:0,count:7))==350)
-  precondition(ROBHeldArmFeedbackGuard.scanMaximumAge(modes:Array(repeating:2,count:7))==250)
+  precondition(ROBHeldArmFeedbackGuard.scanMaximumAge(modes:Array(repeating:2,count:7))==350)
+  precondition(ROBHeldArmFeedbackGuard.scanMaximumAge(modes:Array(repeating:1,count:7))==250)
   // The unused inactive arm keeps350ms even after the selected arm enters
-  // position mode. Its pose/mode checks and the active arm's250ms stay strict.
+  // position mode. Its pose/mode checks and selected travel's250ms stay strict.
   for travelling in [false,true] {
    let other=Hold();other.inactiveWorkspaceSearch=false;other.positionReady=true;other.leased=travelling
    other.gateway.mode["left"]=2;other.gateway.samples["left"]!.statuses=Array(repeating:2,count:7)
@@ -123,10 +124,12 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   let changed=Hold();changed.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=300;changed.gateway.mode["right"]=1;fatal(changed,"gateway_modes")
   let drift=Hold();drift.gateway.samples["right"]!.positionsRadians[0]=0.01;fatal(drift,"position_drift_m")
   let missing=Hold();missing.gateway.samples.removeValue(forKey:"right");fatal(missing,"telemetry_missing")
-  let active=Hold();active.leased=true
+  let active=Hold();active.leased=true;active.inactiveWorkspaceSearch=false;active.positionReady=true
+  active.gateway.mode["left"]=2;active.gateway.samples["left"]!.statuses=Array(repeating:2,count:7)
   active.sceneHold["right"]!.modes=Array(repeating:2,count:7);active.gateway.mode["right"]=2
   active.gateway.samples["right"]!.statuses=Array(repeating:2,count:7)
-  active.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=300;fatal(active,"motor_age_ms")
+  active.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=350;try active.check()
+  active.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=351;fatal(active,"motor_age_ms")
   do{try await active.accepted{active.dispatches+=1;return 1};preconditionFailure("Active stale state dispatched")}catch{}
   precondition(active.dispatches==0)
   // Exercise the COMPLETE actual check, including authorization/session and old scan tail.
@@ -141,8 +144,12 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   ROBControllerArmApproval.shared.onAuthorize=nil
   let activeScan=Hold();activeScan.sceneHold=activeScan.sceneHold.mapValues{($0.positions,Array(repeating:2,count:7))}
   for side in ["left","right"]{activeScan.gateway.mode[side]=2;activeScan.gateway.samples[side]!.statuses=Array(repeating:2,count:7)}
-  ROBControllerArmApproval.shared.onAuthorize={activeScan.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=300}
-  do{try activeScan.check();preconditionFailure("Active-mode scan lost legacy strict guard")}catch{precondition(String(describing:error).contains("stationary neck scan"))}
+  ROBControllerArmApproval.shared.onAuthorize={activeScan.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=350}
+  try activeScan.check()
+  ROBControllerArmApproval.shared.onAuthorize={activeScan.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=351}
+  do{try activeScan.check();preconditionFailure("Position-mode scan lost350ms guard")}catch{
+   precondition(String(describing:error).contains("stationary neck scan") && String(describing:error).contains("motor_age_ms"))
+  }
   ROBControllerArmApproval.shared.onAuthorize=nil
   let camera=CameraPrepare();var completed=false
   camera.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){r in completed=r["status"]as?String=="prepared"}
@@ -150,7 +157,7 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   try await Task.sleep(nanoseconds:50_000_000);camera.vision.available=true;camera.vision.sequence=2
   for _ in 0..<20 {if completed{break};try await Task.sleep(nanoseconds:20_000_000)}
   precondition(completed && camera.prepared==1 && camera.vision.ensureCalls==1)
-  print("PASS inactive scan accepts300/350ms and pauses above350ms; active checks keep250ms; complete actual local/nonlocal/active check; age-only same-q/mode defers≤2s; q/mode/missing/active/timeout fatal; direct local Prepare enrolls then waits fresh; source expiry capped2; no hardware")
+  print("PASS stationary inactive/position holds accept350ms; complete actual local/nonlocal/active check; inactive age-only same-q/mode defers≤2s; q/mode/missing/active-age/timeout fatal; direct local Prepare enrolls then waits fresh; source expiry capped2; no hardware")
  }
 }
 '''.replace('/* GUARD */',guard).replace('/* PAUSE */',pause).replace('/* BATCH */',batch).replace('/* FULL CHECK */',fullCheck).replace('/* METHODS */',methods).replace('/* ENROLL */',enroll)

@@ -209,11 +209,11 @@ private struct ROBSourcePixelArchiveInputs {
     }
 }
 
-/// Inactive arms tolerate350ms delivery jitter; active feedback keeps250ms/3mm.
+/// Stationary inactive/position holds tolerate350ms; travel keeps250ms/3mm.
 private enum ROBHeldArmFeedbackGuard {
     static let stationaryScanMaximumAgeMilliseconds = 350.0
     static func scanMaximumAge(modes:[Int])->Double {
-        modes == Array(repeating:0,count:7) ? stationaryScanMaximumAgeMilliseconds : 250
+        [0,2].contains(where:{modes == Array(repeating:$0,count:7)}) ? stationaryScanMaximumAgeMilliseconds : 250
     }
     static func failures(present:Bool,motorAge:Double,gripperAge:Double,q:[Double],expectedQ:[Double],
         gatewayModes:[Int],reportedModes:[Int],expectedModes:[Int],maximumAgeMilliseconds:Double=250)->[String] {
@@ -1717,13 +1717,15 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     throw ROBArmRoutineError.blocked("The stationary scene-scan hold is unavailable.")
                 }
                 for (side,baseline) in sceneHold where localReceiptCommand == nil || !passive {
-                    guard let sample = gateway.telemetry(forArm:side), sample.effectiveSampleAgeMilliseconds <= ROBHeldArmFeedbackGuard.scanMaximumAge(modes:baseline.modes),
-                          gateway.modes(forArm:side).map(\.intValue) == baseline.modes,
-                          sample.statuses.map(\.intValue) == baseline.modes,
-                          sample.positionsRadians.count == 7,
-                          sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
-                          1.5*zip(sample.positionsRadians.map(\.doubleValue),baseline.positions).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= ROBWorkspaceCollisionPlan.sweptPointTravelMeters else {
-                        throw ROBArmRoutineError.blocked("An arm changed pose, mode or feedback freshness during the stationary neck scan.")
+                    let sample=gateway.telemetry(forArm:side),q=sample?.positionsRadians.map(\.doubleValue) ?? []
+                    let motor=sample?.effectiveSampleAgeMilliseconds ?? .infinity,gripper=sample?.effectiveGripperFeedbackAgeMilliseconds ?? .infinity
+                    let modes=gateway.modes(forArm:side).map(\.intValue),reported=sample?.statuses.map(\.intValue) ?? []
+                    let fields=ROBHeldArmFeedbackGuard.failures(present:sample != nil,motorAge:motor,gripperAge:gripper,
+                        q:q,expectedQ:baseline.positions,gatewayModes:modes,reportedModes:reported,expectedModes:baseline.modes,
+                        maximumAgeMilliseconds:ROBHeldArmFeedbackGuard.scanMaximumAge(modes:baseline.modes))
+                    if !fields.isEmpty {
+                        let drift=q.count==7 ? 1.5*zip(q,baseline.positions).reduce(0.0,{$0+abs($1.0-$1.1)}):Double.infinity
+                        throw ROBArmRoutineError.blocked("An arm changed pose, mode or feedback freshness during the stationary neck scan: gateway=\(side), fields=\(fields), motor_age_ms=\(motor), gripper_age_ms=\(gripper), drift_m=\(drift), expected_modes=\(baseline.modes), gateway_modes=\(modes), reported_modes=\(reported), expected_q=\(baseline.positions), current_q=\(q).")
                     }
                 }
             }
@@ -1816,19 +1818,21 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
-    /// Geometry review is nonactuating even after position mode is prepared.
-    /// Keep the requested350ms tolerance only while that empty held pose is
-    /// unchanged. Camera-ready dispatch and any travel/jaw/lease retain250ms.
+    /// Scanning/planning is nonactuating even in position mode. Keep350ms only
+    /// while the initial empty held pose is unchanged. Setting travel/jaw/lease
+    /// state before dispatch immediately restores the250ms motion requirement.
     private var selectedFeedbackMaximumAgeMilliseconds:Double {
-        guard localReceiptCommand != nil,!cameraReady,positionReady,!leased,leaseRenewals.isEmpty,
+        guard localReceiptCommand != nil,!leased,leaseRenewals.isEmpty,
               !armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,
               !recyclingGripDispatched,!servoPossiblePayloadUncertain,
               let held=sceneHold[arm],let sample=gateway.telemetry(forArm:arm) else {return 250}
+        let expectedModes=positionReady ? Array(repeating:2,count:7):held.modes
+        guard [0,2].contains(where:{expectedModes == Array(repeating:$0,count:7)}) else{return 250}
         let fields=ROBHeldArmFeedbackGuard.failures(present:true,
             motorAge:sample.effectiveSampleAgeMilliseconds,gripperAge:sample.effectiveGripperFeedbackAgeMilliseconds,
             q:sample.positionsRadians.map(\.doubleValue),expectedQ:held.positions,
             gatewayModes:gateway.modes(forArm:arm).map(\.intValue),reportedModes:sample.statuses.map(\.intValue),
-            expectedModes:Array(repeating:2,count:7),maximumAgeMilliseconds:ROBHeldArmFeedbackGuard.stationaryScanMaximumAgeMilliseconds)
+            expectedModes:expectedModes,maximumAgeMilliseconds:ROBHeldArmFeedbackGuard.stationaryScanMaximumAgeMilliseconds)
         return fields.isEmpty ? ROBHeldArmFeedbackGuard.stationaryScanMaximumAgeMilliseconds:250
     }
 

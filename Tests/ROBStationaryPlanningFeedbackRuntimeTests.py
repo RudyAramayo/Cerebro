@@ -62,7 +62,6 @@ final class Hold {
   rejected{$0.gateway.sample!.statuses[0]=0}
   rejected{$0.gateway.mode=1}
   rejected{$0.sceneHold=[:]}
-  rejected{$0.cameraReady=true}
   rejected{$0.positionReady=false}
   rejected{$0.leased=true}
   rejected{$0.leaseRenewals=[1:0]}
@@ -72,10 +71,19 @@ final class Hold {
   rejected{$0.recyclingGripDispatched=true}
   rejected{$0.servoPossiblePayloadUncertain=true}
   rejected{$0.localReceiptCommand=nil}
+  let ready=Hold();ready.cameraReady=true;_ = try ready.measured()
+  ready.armTravelDispatched=true
+  do{_ = try ready.measured();preconditionFailure("Dispatch used stationary age allowance")}catch{}
+  for mode in [0,2] {
+   let scan=Hold();scan.positionReady=false;scan.gateway.mode=mode
+   scan.gateway.sample!.statuses=Array(repeating:NSNumber(value:mode),count:7)
+   scan.sceneHold["left"]!.modes=Array(repeating:mode,count:7)
+   _ = try scan.measured();precondition(scan.selectedFeedbackMaximumAgeMilliseconds==350)
+  }
   let moving=Hold();moving.armTravelDispatched=true
   moving.gateway.sample!.effectiveSampleAgeMilliseconds=250;moving.gateway.sample!.effectiveGripperFeedbackAgeMilliseconds=250
   _ = try moving.measured();precondition(moving.selectedFeedbackMaximumAgeMilliseconds==250)
-  print("PASS actual selected-arm planning feedback: unchanged empty position hold accepts294/350ms;351ms/missing/invalid/drift/mode fail; camera-ready, travel, jaws, payload and leases retain250ms; raw receipt age unchanged; no hardware")
+  print("PASS actual selected-arm stationary feedback: inactive/position scans and empty planning accept294/350ms;351ms/missing/invalid/drift/mode fail; travel/jaw/payload/lease restores250ms before dispatch; raw receipt age unchanged; no hardware")
  }
 }
 '''.replace('/* GUARD */', guard).replace('/* POLICY */', policy).replace('/* MEASURED */', measured)
