@@ -16,16 +16,20 @@ plan = (root / 'Cerebro/ROBArmRoutinePlan.swift').read_text()
 settler = braced_declaration(plan, 'struct ROBArmRoutineSettler {')
 near = braced_declaration(plan, '    static func near(')
 tolerance = next(line for line in plan.splitlines() if 'static let tolerance =' in line)
+ready = (root / 'Cerebro/ROBGhostMotionPlan.swift').read_text()
+reached = braced_declaration(ready, '    static func reached(')
 fixture = r'''
 import Foundation
 enum ROBArmRoutinePlan { /* TOLERANCE */
 /* NEAR */ }
 /* SETTLER */
+enum ROBCanRecyclingReadyPose {static let jointTolerance=0.015
+/* REACHED */ }
 struct Step {let positions:[Double];let seconds:Double}
 struct Sample {let sequence:UInt64;let positionsRadians:[NSNumber];let time:Double}
 enum Failure:Error {case timeout}
 @MainActor final class Harness {
- var clock=0.0,index=0,feedback:[Sample]=[]
+ var clock=0.0,index=0,feedback:[Sample]=[],operatorReadyPose=false
  func measured()throws->Sample {feedback[index]}
  func wait(_ timeout:Double,_ body:()->Bool)async throws {
   for i in feedback.indices {index=i;clock=feedback[i].time;if clock>timeout{break};if body(){return}}
@@ -52,10 +56,17 @@ enum Failure:Error {case timeout}
   await rejected(samples([goal,goal,goal,goal,drift,goal,goal],times:[0,0.1,0.2,0.3,3.9,4,4.1]))
   let h=Harness();h.feedback=samples([q,q,goal,goal,goal,goal],times:[0,3.5,3.8,3.9,4,4.1])
   try await h.run(step);precondition(h.clock>=4)
+  let ready=Harness();ready.operatorReadyPose=true
+  var reachedWithLag=goal;reachedWithLag[0]=0.01;reachedWithLag[4]=0.01
+  ready.feedback=samples(Array(repeating:reachedWithLag,count:5),times:[0,1,2,3,4.1])
+  try await ready.run(step)
+  let notReached=Harness();notReached.operatorReadyPose=true
+  notReached.feedback=samples(Array(repeating:q,count:5),times:[0,1,2,3,4.1])
+  do {try await notReached.run(step);preconditionFailure("Unreached taught segment advanced")}catch{}
   print("PASS actual staged endpoint wait: untraveled, aggregate drift, unstable and early endpoints cannot advance; distinct stable reached endpoint passes; no hardware")
  }
 }
-'''.replace('/* TOLERANCE */', tolerance).replace('/* NEAR */', near).replace('/* SETTLER */', settler).replace('/* ACTUAL */', actual)
+'''.replace('/* TOLERANCE */', tolerance).replace('/* NEAR */', near).replace('/* SETTLER */', settler).replace('/* REACHED */', reached).replace('/* ACTUAL */', actual)
 with tempfile.TemporaryDirectory(prefix='rob-staged-settling-') as directory:
     path = Path(directory)
     (path / 'Fixture.swift').write_text(fixture)

@@ -281,6 +281,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     @nonobjc private var activeLocalRetreat: ROBWorkspaceInitialEmptyRetreat?
     @nonobjc private var activeStagedEmptyLift:ROBWorkspaceStagedEmptyLift?
     @nonobjc private var activeStagedEmptyLiftSegment=0
+    @nonobjc private var activeReadyPoseClearance:ROBWorkspaceSelfProxyClearance?
     @nonobjc private var activeNominalRetreat: ROBWorkspaceNominalEmptyCommissioningRetreat?
     @nonobjc var nominalEmptyCommissioningStepEnabled = false
     @nonobjc var nominalModelAssumedSelfEnabled = false
@@ -1540,6 +1541,13 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             try requireLiveVisualTrial(trial,map:map,model:model)
             let index=activeStagedEmptyLiftSegment,start=index==0 ? lift.baseline:lift.steps[index-1].positions
             let goal=lift.steps[index].positions,q=try measured().positionsRadians.map(\.doubleValue),delta=zip(start,goal).map{$1-$0}
+            if lift.operatorReadyPoseRevision != nil {
+                guard activeCameraCollisionAdvisory,activeReadyPoseClearance != nil else {
+                    throw ROBArmRoutineError.blocked("The taught ready tracking context is unavailable.")
+                }
+                try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(lift,index:index,actual:q,proxy:&activeReadyPoseClearance!)
+                return
+            }
             let length=delta.reduce(0.0){$0+$1*$1}
             let fraction=length>0 ? min(1,max(0,zip(zip(q,start),delta).reduce(0.0){$0+($1.0.0-$1.0.1)*$1.1}/length)):0
             let nearest=zip(start,delta).map{$0+fraction*$1}
@@ -3321,8 +3329,15 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             try await refreshInitialEmptyDispatchView(map:map,model:model,trial:trial,baseline:baseline,reference:reference)
         }
         guard path.steps==proof.steps else {throw ROBArmRoutineError.blocked("The staged lift changed during clearance review.")}
+        if operatorReadyPose {
+            activeReadyPoseClearance=try await Task.detached(priority:.userInitiated) {
+                var proxy=ROBWorkspaceSelfProxyClearance(model:model)
+                try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(proof,index:0,actual:baseline,proxy:&proxy)
+                return proxy
+            }.value
+        }
         activeStagedEmptyLift=proof;activeStagedEmptyLiftSegment=0;proposal=path;collisionReviewProposal=path
-        defer {activeStagedEmptyLift=nil;activeStagedEmptyLiftSegment=0;proposal=nil;proposalStep = -1;reviewedDispatchStart=nil}
+        defer {activeStagedEmptyLift=nil;activeStagedEmptyLiftSegment=0;activeReadyPoseClearance=nil;proposal=nil;proposalStep = -1;reviewedDispatchStart=nil}
         inactiveWorkspaceSearch=false
         try await prepareCameraAndMode(stationaryJaw:false)
         sentPath=[baseline]
@@ -3352,10 +3367,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             try await wait(step.seconds+3) {
                 guard let sample=try?self.measured() else{return false}
                 let positions=sample.positionsRadians.map(\.doubleValue)
-                // A small segment can fit entirely inside the ordinary
-                // settler tolerance. Reach the next segment's3mm start bound
-                // in distinct stable packets before advancing the route.
-                guard 1.5*zip(positions,step.positions).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+                // Require distinct stable reached packets and the full
+                // commanded duration. The taught pose uses joint accuracy,
+                // not the calibration route's Cartesian3mm corridor.
+                let reached=operatorReadyPose ? ROBCanRecyclingReadyPose.reached(positions,goal:step.positions)
+                    : 1.5*zip(positions,step.positions).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
+                guard reached else {
                     settler=ROBArmRoutineSettler();return false
                 }
                 return settler.observe(sequence:sample.sequence,positions:positions,target:step.positions,
@@ -3365,14 +3382,18 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         guard let endpoint=proof.steps.last?.positions else {throw ROBArmRoutineError.blocked("The staged lift has no endpoint.")}
         try await holdTaskPosition(endpoint)
         let endpointSample=try measured(),actual=endpointSample.positionsRadians.map(\.doubleValue)
-        guard 1.5*zip(actual,endpoint).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+        let endpointReached=operatorReadyPose ? ROBCanRecyclingReadyPose.reached(actual,goal:endpoint)
+            : 1.5*zip(actual,endpoint).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
+        guard endpointReached else {
             throw ROBArmRoutineError.blocked("The raised empty endpoint was not reached; holding.")
         }
         if activeHoldAfterInitialEmptyLift {
             let value:[String:Any]=["kind":"staged_initial_empty_lift_held","motionAuthority":false,
                 "proposalID":path.id.uuidString,"mapFingerprint":map.fingerprint,"modelID":model.modelID,
                 "geometryID":model.geometryID,"selectedBaseline":baseline,"selectedGoal":endpoint,
-                "actualMeasuredEndpoint":actual,"endpointWithin3mmOfGoal":true,
+                "actualMeasuredEndpoint":actual,"endpointWithin3mmOfGoal":1.5*zip(actual,endpoint).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003,
+                "endpointReached":endpointReached,"operatorReadyPoseRevision":proof.operatorReadyPoseRevision ?? "",
+                "maximumJointErrorRadians":zip(actual,endpoint).map{abs($0-$1)}.max() ?? 0,
                 "telemetrySequence":NSNumber(value:endpointSample.sequence),"gatewaySessionGeneration":NSNumber(value:session),
                 "recordedAtMilliseconds":Date().timeIntervalSince1970*1000,"proofFile":evidence.path,
                 "unknownSpaceAdvisory":true,"cameraCollisionAdvisory":activeCameraCollisionAdvisory,"observedFreeInferred":false,"jawCommandSent":false,"transfersCompleted":0,

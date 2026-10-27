@@ -313,7 +313,8 @@ final class ROBGhostRobotModel {
 /// These are physical-side Amber encoder radians, not mirrored URDF angles.
 /// Saving a target does not grant motion or certify camera registration.
 enum ROBCanRecyclingReadyPose {
-    static let revision = "operator_taught_ready_20261027_v1"
+    static let revision = "operator_taught_ready_20261027_v2"
+    static let jointTolerance = 0.015
     static func target(physicalSide:String)throws->[Double] {
         switch physicalSide {
         case "left": return [0.2564815877344792,1.6656986048720883,0,0.9825658273336827,-1.1095112596467078,-1.7111044361935033,-0.46278495947412146]
@@ -323,7 +324,20 @@ enum ROBCanRecyclingReadyPose {
     }
     static func matches(_ measured:[Double],physicalSide:String)->Bool {
         guard measured.count==7,measured.allSatisfy(\.isFinite),let goal=try?target(physicalSide:physicalSide) else{return false}
-        return zip(measured,goal).allSatisfy{abs($0-$1)<=0.015}
+        return reached(measured,goal:goal)
+    }
+    static func reached(_ measured:[Double],goal:[Double])->Bool {
+        ROBArmRoutinePlan.near(measured,goal,tolerance:jointTolerance)
+    }
+    /// Motors share a destination and duration, but their measured progress
+    /// need not be identical. Actual self geometry is checked separately.
+    static func containsFeedback(_ measured:[Double],from start:[Double],to goal:[Double])->Bool {
+        guard measured.count==7,start.count==7,goal.count==7,
+              (measured+start+goal).allSatisfy(\.isFinite) else{return false}
+        return (0..<7).allSatisfy { i in
+            measured[i]>=min(start[i],goal[i])-jointTolerance &&
+            measured[i]<=max(start[i],goal[i])+jointTolerance
+        }
     }
     /// A direct coordinated interpolation from fresh feedback. No old front
     /// pose, hanging detour or J2/J4 inverse-kinematic entry is inserted.
@@ -338,9 +352,12 @@ enum ROBCanRecyclingReadyPose {
         var previous=baseline,result:[ROBLeftGestureProposal.Step]=[]
         for index in 1...count {
             let target=index==count ? goal:zip(baseline,delta).map{$0+$1*Double(index)/Double(count)}
-            guard let duration=ROBArmRoutinePlan.duration(from:previous,to:target),duration<=5 else {
+            guard let minimum=ROBArmRoutinePlan.duration(from:previous,to:target) else {
                 throw ROBGhostMotionError.blocked("The taught recycling entry exceeds the trajectory timing bound.")
             }
+            let delta=zip(previous,target).map{abs($0-$1)}.max() ?? 0
+            let duration=max(minimum,(delta+jointTolerance)/ROBArmRoutinePlan.maximumAverageSpeed)
+            guard duration<=5 else {throw ROBGhostMotionError.blocked("The taught recycling entry exceeds the trajectory timing bound.")}
             result.append(.init(positions:target,seconds:duration,stage:"Direct move to taught recycling ready pose"));previous=target
         }
         return result

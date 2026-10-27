@@ -1140,7 +1140,9 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift segment lost its frozen route or fresh context.")
         }
         let expected=index==0 ? proof.baseline:proof.steps[index-1].positions
-        guard 1.5*zip(actual,expected).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+        let reached=proof.operatorReadyPoseRevision != nil ? ROBCanRecyclingReadyPose.reached(actual,goal:expected)
+            : 1.5*zip(actual,expected).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
+        guard reached else {
             throw ROBGhostMotionError.blocked("The measured arm is outside the staged EMPTY lift start corridor.")
         }
         let selfHypothesis=try initialLiftSelfHypothesis(baseline:proof.baseline,map:map,model:model,context:context)
@@ -1150,6 +1152,35 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         _=try reviewEmptyLiftHullPath(baseline:actual,steps:[proof.steps[index]],initialPairs:proof.initialProxyClearancesMeters,
             requireFinalClearance:index==proof.steps.count-1,map:map,model:model,context:context,selfHypothesis:selfHypothesis,
             originalBaseline:proof.baseline,measuredStartAllowance:0.003,priorRetreats:proof.initialMarginRetreats)
+    }
+
+    /// The operator-taught coordinated move has no Cartesian synchronization
+    /// corridor. Check each actual joint against the active segment and check
+    /// actual modeled self clearance against the reviewed original baseline.
+    static func checkReadyPoseFeedback(_ proof:ROBWorkspaceStagedEmptyLift,index:Int,actual:[Double],
+        proxy:inout ROBWorkspaceSelfProxyClearance)throws {
+        let model=proxy.model
+        guard proof.operatorReadyPoseRevision==ROBCanRecyclingReadyPose.revision,
+              proof.context.visualTrial?.usesOperatorClearedCameraCollisionAdvisory==true,
+              model.physicalSide=="right",proof.context.modelID==model.modelID,
+              proof.context.geometryID==model.geometryID,proof.context.mappingID==model.selectedMappingID,
+              proof.steps.indices.contains(index),proof.steps.allSatisfy({$0.jawAction==nil}),
+              proof.steps.last?.positions == (try ROBCanRecyclingReadyPose.target(physicalSide:"right")) else {
+            throw ROBGhostMotionError.blocked("The taught ready feedback check lost its exact empty-arm scope.")
+        }
+        let start=index==0 ? proof.baseline:proof.steps[index-1].positions,goal=proof.steps[index].positions
+        guard ROBCanRecyclingReadyPose.containsFeedback(actual,from:start,to:goal),
+              zip(actual,jointBounds(model:model)).allSatisfy({$1.contains($0)}) else {
+            throw ROBGhostMotionError.blocked("Measured joints left the taught ready segment or motor bounds.")
+        }
+        let original=proof.initialProxyClearancesMeters,deficits=Set(original.filter{$0.value<0.030}.keys)
+        let pairs=try proxy.separations(vendorLeft:actual,forceNarrowPairs:deficits,minimumRetreatBounds:original)
+        guard !original.isEmpty,Set(pairs.keys)==Set(original.keys) else {
+            throw ROBGhostMotionError.blocked("The taught ready self geometry changed.")
+        }
+        for (pair,initial) in original where pairs[pair]!+1e-9<min(0.030,initial) {
+            throw ROBGhostMotionError.blocked("The actual taught ready pose worsens modeled self clearance at \(pair).")
+        }
     }
 
     private static func initialLiftSelfHypothesis(baseline:[Double],map:any ROBWorkspaceCollisionMap,
