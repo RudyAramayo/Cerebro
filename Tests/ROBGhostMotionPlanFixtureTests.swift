@@ -639,19 +639,19 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
             precondition(completedViews == 2)
             // A preview survey must finish BOTH immediate table sides even
             // when the first frame pair confirms a remembered distant can.
-            for (side, pans) in [("right", [-30.0, 0, 30]), ("left", [30.0, 0, -30])] {
+            for (side, pans) in [("right", [-30.0, 0, 30, 15, -15]), ("left", [30.0, 0, -30, -15, 15])] {
                 var survey = ROBWorkspaceSearchSchedule(targets: [.can], recall: recall, now: now, frontTableSide: side)
-                precondition(survey.recallViews.isEmpty && survey.plannedViewCount == 3)
+                precondition(survey.recallViews.isEmpty && survey.plannedViewCount == 5)
                 var surveyed: [ROBWorkspaceView] = []
                 while let view = survey.next(confirmed: [.can]) { surveyed.append(view) }
-                precondition(surveyed.map(\.panDegrees) == pans && surveyed.allSatisfy { $0.upperTarget == 6306 },
+                precondition(surveyed.map(\.panDegrees) == pans && surveyed.map(\.upperTarget) == [6306,6306,6306,6000,6000],
                     "First detection or stale recall skipped the opposite front table corner")
             }
             var boundedSurvey = ROBWorkspaceSearchSchedule(targets: [.can], recall: recall, now: now,
                 frontTableSide: "right", boundedPan: { max(-15, min(15, $0)) })
             var boundedViews: [ROBWorkspaceView] = []
             while let view = boundedSurvey.next(confirmed: [.can]) { boundedViews.append(view) }
-            precondition(boundedViews.map(\.panDegrees) == [-15, 0, 15], "Survey bypassed the native neck envelope")
+            precondition(boundedViews.map(\.panDegrees) == [-15, 0, 15, 15, -15], "Survey bypassed the native neck envelope")
             let onlyCanRecall=ROBWorkspaceRecall(modelID:model.modelID,geometryID:model.geometryID,sightings:[canHint])
             var sideSearch=ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:onlyCanRecall,now:now,
                 boundedPan:{max(-60,min(60,$0))})

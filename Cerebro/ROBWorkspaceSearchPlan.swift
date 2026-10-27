@@ -1647,8 +1647,12 @@ struct ROBWorkspaceSearchSchedule {
             // Recall cannot jump this survey to an old across-table target.
             let sign = side == "right" ? -1.0 : 1.0
             recallViews = []
-            pending = [sign * 30, 0, -sign * 30].map {
-                Job(view: .init(panDegrees: boundedPan($0), upperTarget: 6306), target: nil)
+            // The near row falls at the bottom/inner edge of the broad views.
+            // Inspect it at both intermediate bearings and a lower tilt; end
+            // on the selected arm's side so its nearby cans remain fresh.
+            pending = [(sign * 30, 6306), (0.0, 6306), (-sign * 30, 6306),
+                       (-sign * 15, 6000), (sign * 15, 6000)].map { pan, upper in
+                Job(view: .init(panDegrees: boundedPan(pan), upperTarget: upper), target: nil)
             }
             plannedViewCount = pending.count
             return
