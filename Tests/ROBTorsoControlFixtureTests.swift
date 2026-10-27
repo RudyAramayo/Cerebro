@@ -85,8 +85,11 @@ import Foundation
         try expect(!p.armed, "Ambiguous yaw retained authority")
 
         let profile = ROBTicVelocityTransport.Profile()
-        try expect(profile.velocityUnits(360.0 / 36800) == 10000, "Tic velocity units are not pulses per 10,000 seconds")
-        try expect(profile.accelerationUnits == 81778, "Acceleration conversion is incorrect")
+        try expect(profile.pulsesPerTurn==35996 && ROBTicVelocityTransport.Profile.observedCenterCount==92,
+                   "Operator quarter-turn endpoints lost their scale/midpoint")
+        try expect(profile.velocityUnits(360.0 / 35996) == -10000 && profile.velocityUnits(-360.0 / 35996)==10000,
+                   "ROB left must decrease TIC counts; units are pulses per10,000seconds")
+        try expect(profile.accelerationUnits == 79991, "Acceleration must retain a positive magnitude with negative left polarity")
         try expect(profile.velocityUnits(.nan) == nil, "Non-finite velocity accepted")
         try ROBTicVelocityTransport.checkStatus(FakeTic.status(ready: true), starting: false)
         // Position uncertain is valid for camera-referenced velocity operation.
@@ -116,7 +119,7 @@ import Foundation
 
         try expect(fake.motionDispatchCount==0,"Idle arming/zero invalidated a measured body frame")
         transport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-        try wait { fake.currentVelocity > 0 }
+        try wait { fake.currentVelocity < 0 }
         try expect(fake.motionDispatchCount==1,"Actual nonzero Tic dispatch did not invalidate the measured body frame")
         let firstWake = fake.calls.firstIndex(where: { $0.contains("--energize") })!
         let firstMotion = fake.calls.firstIndex(where: { FakeTic.velocity($0).map { $0 != 0 } == true })!
@@ -128,7 +131,7 @@ import Foundation
         transport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2, releaseWhenStopped: false)
         try wait { fake.targetVelocity == 0 }
         transport.velocity(-1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-        try wait { fake.currentVelocity < 0 }
+        try wait { fake.currentVelocity > 0 }
         try expect(fake.energized && fake.calls.filter { $0.contains("--deenergize") }.count == releasedBeforeReversal,
                    "A transient reversal zero unnecessarily released motor power")
 
@@ -147,7 +150,7 @@ import Foundation
                    "Deceleration polling stopped renewing the independent watchdog")
 
         transport.velocity(2, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-        try wait { fake.currentVelocity > 0 }
+        try wait { fake.currentVelocity < 0 }
         try expect(fake.calls.filter { $0.contains("--energize") }.count == 2,
                    "A new turn did not re-energize after an ordinary idle release")
         transport.stop()
@@ -168,7 +171,7 @@ import Foundation
         faultTransport.onState = { faultReady = $0; faultDetail = $1 }
         faultTransport.arm(profile: profile); try wait { faultReady }
         faultTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-        try wait { faulted.currentVelocity > 0 }
+        try wait { faulted.currentVelocity < 0 }
         faulted.fault = true
         RunLoop.current.run(until: Date().addingTimeInterval(0.28))
         faultTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
@@ -228,7 +231,7 @@ import Foundation
         releaseTransport.onState = { releaseReady = $0; releaseDetail = $1 }
         releaseTransport.arm(profile: profile); try wait { releaseReady }
         releaseTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-        try wait { failedRelease.currentVelocity > 0 }
+        try wait { failedRelease.currentVelocity < 0 }
         failedRelease.failDeenergize = true
         releaseTransport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
         try wait { !releaseReady }
@@ -249,7 +252,7 @@ import Foundation
         shutdownTransport.onState = { value, _ in shutdownReady = value }
         shutdownTransport.arm(profile: profile); try wait { shutdownReady }
         shutdownTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-        try wait { shutdownMotor.currentVelocity > 0 }
+        try wait { shutdownMotor.currentVelocity < 0 }
         try expect(shutdownTransport.stopAndWait(timeout: 1), "Shutdown exited without confirmed motor power off")
         try expect(!shutdownMotor.energized && !shutdownMotor.releasedWhileMoving,
                    "Shutdown must wait for measured rest and power release without main callbacks")

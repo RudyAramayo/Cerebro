@@ -26,12 +26,15 @@ import Cocoa
     private var arming = false
     private let modelID: String?
     private let referenceID: String?
+    @nonobjc private let armClearance: () -> String?
 
     override convenience init() { self.init(transport: ROBTicVelocityTransport(), vision: ROBMarkerlessVisionService(workerName: "torso_markerless.py")) }
 
     @nonobjc init(transport: ROBTicVelocityTransport, vision: ROBMarkerlessVisionService,
-                 reference: [String: Any]? = nil) {
+                 reference: [String: Any]? = nil,
+                 armClearance: @escaping () -> String? = { ROBArmRoutineCoordinator.shared.torsoRotationBlockReason }) {
         self.transport = transport; self.vision = vision
+        self.armClearance = armClearance
         let path = Bundle.main.url(forResource: "reference", withExtension: "json", subdirectory: "ShadowPlanner")
         let manifest = reference ?? path.flatMap { try? Data(contentsOf: $0) }
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
@@ -45,7 +48,9 @@ import Cocoa
             self.hardwareDetail = self.usesLiveCamera ? detail : "Rehearsal — no motor output"
             if ready && self.arming {
                 self.arming = false
-                if !self.usesLiveCamera || !self.policy.arm(at: ProcessInfo.processInfo.systemUptime) { self.stop() }
+                if let reason = self.armClearance() {
+                    self.stop(); self.policy.invalidate(reason)
+                } else if !self.usesLiveCamera || !self.policy.arm(at: ProcessInfo.processInfo.systemUptime) { self.stop() }
             } else if self.usesLiveCamera && unexpectedLoss {
                 self.arming = false; self.policy.invalidate(detail)
             }
@@ -71,9 +76,12 @@ import Cocoa
     var targetHeading: Double { policy.targetHeading.map(ROBTorsoMotionPolicy.wrap) ?? .nan }
     var commandedVelocity: Double { policy.velocity }
     var isArmed: Bool { policy.armed }
-    var status: String { arming ? "Checking Tic settings and confirming motor power off at rest…" : policy.status }
+    var status: String {
+        if usesLiveCamera, let reason = armClearance() { return reason }
+        return arming ? "Checking Tic settings and confirming motor power off at rest…" : policy.status
+    }
     var maximumSpeed: Double { policy.maximumSpeed }
-    var canArm: Bool { !arming && policy.hasFreshObservation(at: ProcessInfo.processInfo.systemUptime) }
+    var canArm: Bool { !arming && policy.hasFreshObservation(at: ProcessInfo.processInfo.systemUptime) && (!usesLiveCamera || armClearance() == nil) }
 
     func showControls(_ sender: Any?) {
         precondition(Thread.isMainThread)
@@ -105,6 +113,9 @@ import Cocoa
         precondition(Thread.isMainThread)
         guard !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion else {
             stop(); policy.invalidate("Arm routine owns body clearance"); publish(); return
+        }
+        if usesLiveCamera, let reason = armClearance() {
+            stop(); policy.invalidate(reason); publish(); return
         }
         startTimer()
         let now = ProcessInfo.processInfo.systemUptime
@@ -204,6 +215,9 @@ import Cocoa
     }
 
     @nonobjc func advance(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        if usesLiveCamera && (policy.armed || arming), let reason = armClearance() {
+            stop(); policy.invalidate(reason); publish(); return
+        }
         let dt = min(0.1, max(0, now - lastTick)); lastTick = now
         if !usesLiveCamera {
             simulatedHeading += policy.velocity * dt

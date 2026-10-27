@@ -374,6 +374,7 @@ Brake
                         <outlet property="forwardButton" destination="2qg-8N-K1f" id="KPN-cE-rpT"/>
                         <outlet property="lactBackward" destination="7yy-OT-pR2" id="RLa-eV-hDr"/>
                         <outlet property="lactForward" destination="GbD-SW-0M1" id="NYx-8k-HGG"/>
+                        <outlet property="localTreadSpeedSlider" destination="BId-oe-CQf" id="ROB-speed-outlet"/>
                         <outlet property="leftButton" destination="VL9-5k-YtA" id="41A-QN-ghQ"/>
                         <outlet property="rightButton" destination="xT8-H2-5BM" id="y0e-0R-RIT"/>
                         <outlet property="waistRotationSlider" destination="vkg-Qr-cRZ" id="FbD-b1-7T6"/>

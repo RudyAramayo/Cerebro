@@ -230,12 +230,40 @@ import CoreImage
     }
 
 
+    private static func incrementalCanViewIdentity(scope:ROBFixedHeadRegistrationScope,
+        trial:ROBWorkspaceVisualCalibrationTrial,frame:ROBArmRoutineVision.Frame)throws->String {
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        return "observed-jaw-servo:"+trial.receiptID+":"+ROBGhostRobotModel.hash(try encoder.encode(scope))+":"+(try visualFrameContract(frame))
+    }
+
+    /// Capture pixels and their real held feedback BEFORE detector inference.
+    /// This retained appearance seed never serves as a live servo observation.
+    private static func captureIncrementalCanAppearance(frame:ROBArmRoutineVision.Frame,model:ROBGhostRobotModel,
+        trial:ROBWorkspaceVisualCalibrationTrial,
+        feedbackForFrame:(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,check:()throws->Void)throws->ROBGripperVisualServo.Frame {
+        try check()
+        guard let feedback=feedbackForFrame(frame),feedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds else {
+            throw ROBGhostMotionError.blocked("Pre-approach can appearance needs its actual exposure-matched held feedback.")
+        }
+        let scope=try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame)
+        let view=try incrementalCanViewIdentity(scope:scope,trial:trial,frame:frame)
+        let now=Date().timeIntervalSince1970*1000
+        return try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:frame,scopeIdentity:view,
+            jointPositions:feedback.positionsRadians.map(\.doubleValue),jointCapturedAtMilliseconds:now-feedback.effectiveSampleAgeMilliseconds,
+            poseHeldDuringCapture:true,openingCommandAtMilliseconds:nil,nowMilliseconds:now,
+            cameraCollisionAdvisoryTrial:trial.usesOperatorClearedCameraCollisionAdvisory ? trial:nil)
+    }
+
     static func beginIncrementalVisualServo(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
         map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
         feedbackForFrame:@escaping(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,
         check:() throws->Void) async throws->ServoContext {
         try check()
-        let(observation,reference)=try await ROBArmRoutineVision.shared.observeWorkspace()
+        var capturedAppearance:ROBGripperVisualServo.Frame?
+        let(observation,reference)=try await ROBArmRoutineVision.shared.observeWorkspace(onCaptured:{frame in
+            capturedAppearance=try captureIncrementalCanAppearance(frame:frame,model:model,trial:trial,
+                feedbackForFrame:feedbackForFrame,check:check)
+        })
         try check()
         let controller=ROBFixedHeadCalibrationWindowController.shared,scope=try controller.scope(model:model,frame:reference)
         let neck=controller.readNeck?() ?? [:]
@@ -260,19 +288,14 @@ import CoreImage
         guard detections.count==1 else {throw ROBGhostMotionError.blocked("The selected can was not uniquely reacquired for incremental servo.")}
         let projection=VisualProjection(trial:trial,map:map,cameraToModel:matrix,frameContractIdentity:try visualFrameContract(reference),pendingID:pending)
         try validateVisualProjection(projection,scope:scope,frame:reference,model:model)
-        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
-        let view="observed-jaw-servo:"+trial.receiptID+":"+ROBGhostRobotModel.hash(try encoder.encode(scope))+":"+projection.frameContractIdentity
+        let view=try incrementalCanViewIdentity(scope:scope,trial:trial,frame:reference)
         let baseline=ServoBaseline(projection:.visualTrial(projection),scope:scope,targetIdentity:"can-\(can.sequence)-\(trial.receiptID)",viewIdentity:view)
         let result=ServoContext(baseline:baseline,can:can,model:model,box:detections[0].box)
         result.cameraCollisionAdvisoryTrial=trial.usesOperatorClearedCameraCollisionAdvisory ? trial:nil
-        guard let seedFeedback=feedbackForFrame(reference),seedFeedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds else {
-            throw ROBGhostMotionError.blocked("Pre-approach can appearance needs its actual exposure-matched held feedback.")
+        guard let seedPixels=capturedAppearance,seedPixels.sequence==reference.sequence,
+              seedPixels.capturedAtMilliseconds==reference.capturedAt,seedPixels.scopeIdentity==view else {
+            throw ROBGhostMotionError.blocked("The detector result lost its exact originally captured can appearance and held feedback.")
         }
-        let seedNow=Date().timeIntervalSince1970*1000
-        let seedPixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:reference,scopeIdentity:view,
-            jointPositions:seedFeedback.positionsRadians.map(\.doubleValue),
-            jointCapturedAtMilliseconds:seedNow-seedFeedback.effectiveSampleAgeMilliseconds,
-            poseHeldDuringCapture:true,openingCommandAtMilliseconds:nil,nowMilliseconds:seedNow,cameraCollisionAdvisoryTrial:result.cameraCollisionAdvisoryTrial)
         // The seed retains only actual RGB appearance; its exposure-matched
         // feedback never substitutes for current observed finger evidence.
         let seedRGB=Array(seedPixels.rgb)

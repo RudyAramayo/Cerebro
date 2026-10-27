@@ -37,6 +37,21 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last == "torso-arm-clearance" {
+            for side in ["left", "right"] {
+                let arm = try ROBGhostRobotModel(directory: model.directory, physicalSide: side)
+                let hanging = arm.torsoTurnVerticalClearance(vendorJoints: Array(repeating: 0, count: 7))!
+                precondition(hanging < 0.03, "A hanging gripper was cleared for a torso turn")
+                let upright = side == "right" ? try ROBCanRecyclingReadyPose.target(physicalSide: side)
+                    : ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!
+                let raised = arm.torsoTurnVerticalClearance(vendorJoints: upright)!
+                precondition(raised >= 0.03, "The working hold lacks modeled vertical tread clearance: \(side) \(raised)")
+                precondition(arm.torsoTurnVerticalClearance(vendorJoints: []) == nil)
+                precondition(arm.torsoTurnVerticalClearance(vendorJoints: Array(repeating: .nan, count: 7)) == nil)
+                print("PASS \(side) hanging blocked, raised arm/gripper vertical clearance \(raised)m; model-only check")
+            }
+            return
+        }
         if CommandLine.arguments.last=="ready-horizontal" {
             let now=Date().timeIntervalSince1970*1000
             for side in ["right","left"] {

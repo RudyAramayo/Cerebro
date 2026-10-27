@@ -14,7 +14,9 @@ struct ROBChessPieceDetection {}
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temporary) }
         let script = #"""
-import sys,json,base64,struct
+import sys,json,base64,struct,time
+time.sleep(1.1) # Model startup exceeds the unchanged750ms pipe-write bound.
+print(json.dumps(dict(schemaVersion=1,source='markerless_ready')),flush=True)
 for line in sys.stdin:
     frame=json.loads(line)
     assert frame['camera']=='belly' and frame['streamID']=='fixture-stream'
@@ -44,6 +46,11 @@ for line in sys.stdin:
             capturedAtMilliseconds: Date().timeIntervalSince1970 * 1000 - 20)
         let service = ROBMarkerlessVisionService(resources: temporary, python: python)
         guard let path = service.start() else { throw CocoaError(.fileReadUnknown) }
+        var failed=false;service.onFailure={failed=true}
+        service.offer(frame,role:.belly,streamID:"fixture-stream")
+        RunLoop.current.run(until:Date().addingTimeInterval(1.35))
+        try expect(!failed && !FileManager.default.fileExists(atPath:path.path),
+                   "Cold worker input timed out or startup pixels became an observation")
         var delayed = frame; delayed.capturedAtMilliseconds = Date().timeIntervalSince1970 * 1000 - 2000
         service.offer(delayed, role: .belly, streamID: "fixture-stream")
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
@@ -69,12 +76,14 @@ for line in sys.stdin:
         // exact prior stream immediately and discard its late worker result.
         let delayedScript = #"""
 import sys,json,time
+print(json.dumps(dict(schemaVersion=1,source='markerless_ready')),flush=True)
 for line in sys.stdin:
     f=json.loads(line);time.sleep(.20)
     print(json.dumps(dict(schemaVersion=1,source='markerless_rgbd',camera=f['camera'],streamID=f['streamID'],capturedAtMilliseconds=f['capturedAtMilliseconds'],sequence=f['sequence'],status='unavailable')),flush=True)
 """#
         try delayedScript.write(to: temporary.appendingPathComponent("markerless.py"), atomically: true, encoding: .utf8)
         _ = service.start()
+        RunLoop.current.run(until:Date().addingTimeInterval(0.15))
         var invalidated = false
         service.onObservation = { value in
             if value["source"] as? String == "camera_context_invalidated",
@@ -89,7 +98,10 @@ for line in sys.stdin:
         service.offer(frame, role: .belly, streamID: "new-calibration")
         RunLoop.current.run(until: Date().addingTimeInterval(0.35))
         try expect(invalidated, "Known calibration change retained prior camera authority")
-        try expect(!FileManager.default.fileExists(atPath: path.path), "Late old-calibration fit was published")
+        if FileManager.default.fileExists(atPath:path.path) {
+            let current=try JSONSerialization.jsonObject(with:Data(contentsOf:path)) as! [String:Any]
+            try expect(current["streamID"] as? String=="new-calibration","Late old-calibration fit was published")
+        }
         service.stop()
 
         // A stalled reader must never leave the camera or main thread waiting
@@ -102,6 +114,6 @@ for line in sys.stdin:
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         service.stop()
         try expect(Date().timeIntervalSince(began) < 2, "Stalled vision stdin blocked shutdown")
-        print("Markerless camera service passed: capture age preserved, delayed/unknown-age frames rejected, depth/intrinsics packing, atomic cleanup, bounded stalled-worker shutdown")
+        print("Markerless camera service passed: cold startup handshake, no startup frame replay/authority, capture age preserved, delayed/unknown-age frames rejected, depth/intrinsics packing, atomic cleanup, bounded stalled-worker shutdown")
     }
 }

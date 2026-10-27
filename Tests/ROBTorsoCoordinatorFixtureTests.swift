@@ -5,6 +5,7 @@ struct ROBChessPieceDetection {}
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     var ownsPhysicalMotion = false
+    var torsoRotationBlockReason: String?
 }
 
 /// Compiles the real coordinator, views and camera service. The injected Tic
@@ -59,6 +60,11 @@ final class ROBArmRoutineCoordinator {
         center.acceptObservation(observation())
         try expect(center.canArm && abs(center.observedHeading - 180 / .pi) < 0.01,
                    "Camera yaw did not replace the debug reference")
+        ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = "Raise the hanging left arm first"
+        center.arm()
+        try expect(!center.canArm && !center.isArmed && fake.calls.isEmpty,
+                   "A hanging arm reached torso motor preflight")
+        ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = nil
         ROBArmRoutineCoordinator.shared.ownsPhysicalMotion = true
         center.arm()
         try expect(!center.isArmed && fake.calls.isEmpty, "Torso activated during arm clearance ownership")
@@ -72,7 +78,7 @@ final class ROBArmRoutineCoordinator {
         let remoteTarget = 180 / Double.pi + 18
         try expect(abs(center.targetHeading - remoteTarget) < 0.01,
                    "VR heading was not based on the camera angle")
-        try wait { fake.currentVelocity > 0 }
+        try wait { fake.currentVelocity < 0 }
         try expect(ROBFixedHeadBodyMotionIdentity.currentIdentity != originalBodyIdentity,"Physical torso dispatch retained old camera-to-base registration")
         RunLoop.current.run(until: Date().addingTimeInterval(0.02))
         try expect(center.isArmed && center.policy.mode == .heading && abs(center.targetHeading - remoteTarget) < 0.01,
@@ -86,13 +92,22 @@ final class ROBArmRoutineCoordinator {
         let wakeCount = fake.calls.filter { $0.contains("--energize") }.count
         center.acceptObservation(observation(sequence: 3))
         center.turnToHeading(180 / .pi + 5)
-        try wait { fake.currentVelocity > 0 }
+        try wait { fake.currentVelocity < 0 }
         try expect(fake.calls.filter { $0.contains("--energize") }.count == wakeCount + 1,
                    "The coordinator could not resume after an idle power release")
-        center.acceptObservation(observation(sequence: 4, camera: "belly", confirmed: false))
+        ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = "Arm clearance lost during turn"
+        center.advance()
+        try expect(!center.isArmed, "Torso kept turning after an arm left its raised hold")
+        try wait { !fake.energized }
+        ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = nil
+        center.acceptObservation(observation(sequence: 4))
+        center.arm(); try wait { center.isArmed && center.hardwareReady }
+        center.turnToHeading(180 / .pi + 5)
+        try wait { fake.currentVelocity < 0 }
+        center.acceptObservation(observation(sequence: 5, camera: "belly", confirmed: false))
         try expect(center.isArmed, "An unavailable alternate camera erased fresh accepted evidence")
         let stoppedAt = fake.calls.count
-        center.acceptObservation(observation(sequence: 4, confirmed: false))
+        center.acceptObservation(observation(sequence: 5, confirmed: false))
         try expect(!center.isArmed && !center.canArm, "Failed accepted camera retained authority")
         try wait { !fake.energized }
         try expect(fake.calls.dropFirst(stoppedAt).contains(where: { $0.contains("--enter-safe-start") }) &&

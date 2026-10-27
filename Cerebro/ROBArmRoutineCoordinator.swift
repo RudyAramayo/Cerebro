@@ -43,6 +43,37 @@ enum ROBArmRoutineError: LocalizedError {
     private var activeCommand = ""
     private var activeRendition: ROBArmRendition?
     private let arms = ["left", "right"] // gateway keys; physical sides convert at the boundary
+    private var torsoClearanceModels: [String: ROBGhostRobotModel] = [:]
+
+    /// A torso turn may not sweep either hanging gripper across a tread.
+    /// Use real motor feedback and each physical arm's own model mapping.
+    var torsoRotationBlockReason: String? {
+        if ownsPhysicalMotion { return "Finish the arm movement before turning the torso." }
+        for physical in ["left", "right"] {
+            let key = physical == "left" ? "right" : "left"
+            guard let sample = gateway.telemetry(forArm: key), sample.sequence > 0,
+                  sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                  sample.positionsRadians.count == 7 else {
+                return "Waiting for fresh \(physical)-arm feedback before torso rotation."
+            }
+            guard sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }),
+                  gateway.modes(forArm: key).count == 7, gateway.modes(forArm: key).allSatisfy({ $0.intValue == 2 }) else {
+                return "Raise and hold both arms upright before turning; the \(physical) arm is not holding position."
+            }
+            if torsoClearanceModels[physical] == nil,
+               let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) {
+                torsoClearanceModels[physical] = try? ROBGhostRobotModel(directory: directory, physicalSide: physical)
+            }
+            guard let model = torsoClearanceModels[physical],
+                  let clearance = model.torsoTurnVerticalClearance(vendorJoints: sample.positionsRadians.map(\.doubleValue)) else {
+                return "The \(physical)-arm model cannot establish tread clearance for a torso turn."
+            }
+            guard clearance >= 0.03 else {
+                return "Raise the \(physical) arm upright before turning; its arm/gripper envelope is below the tread clearance."
+            }
+        }
+        return nil
+    }
 
     func capabilitySnapshot() -> NSDictionary {
         ["status": isRunning || ROBLeftArmTrial.shared.isRunning ? "running" : "idle", "detail": status,

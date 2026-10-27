@@ -181,7 +181,7 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         velocity.stringValue = String(format: "%+.2f°/s", center.commandedVelocity)
         sourceDetail.stringValue = center.visionDetail
         status.stringValue = center.status
-        motor.stringValue = center.hardwareDetail + (center.usesLiveCamera ? " • 36,800 pulses/turn uses the existing ROB scale; validate before increasing speed." : " • Circular headings wrap through 360°. No homing move.")
+        motor.stringValue = center.hardwareDetail + (center.usesLiveCamera ? " • Operator estimate:35,996 counts/turn; left uses decreasing counts. Live base-relative vision confirms heading." : " • Circular headings wrap through 360°. No homing move.")
         armButton.title = center.isArmed ? "Disarm" : (center.usesLiveCamera ? "Arm torso" : "Arm rehearsal")
         armButton.isEnabled = center.isArmed || center.canArm
         turnButton.isEnabled = center.isArmed

@@ -15,7 +15,7 @@ import sys
 source = (Path(sys.argv[1]) / "Cerebro/CameraManager.swift").read_text()
 frames = source[source.index("enum CameraSource: String"):source.index("protocol CameraManagerDelegate:")]
 roles = source[source.index("enum CameraRole: String"):source.index("struct CameraDeviceOption:")]
-(Path(sys.argv[2]) / "CameraFrameTypes.swift").write_text("import Foundation\nimport CoreMedia\n" + frames + roles)
+(Path(sys.argv[2]) / "CameraFrameTypes.swift").write_text("import Foundation\nimport CoreMedia\nimport CryptoKit\n" + frames + roles)
 PY
 xcrun swiftc -swift-version 5 -warnings-as-errors \
   "$fixture_dir/CameraFrameTypes.swift" "$repo_dir/Cerebro/ROBMarkerlessVisionService.swift" \

@@ -178,6 +178,7 @@ class TorsoEstimator(MarkerlessEstimator):
 def main():
     from worker import ShadowPlanner
     estimator = TorsoEstimator(ShadowPlanner())
+    print(json.dumps(dict(schemaVersion=1, source="markerless_ready")), flush=True)
     for line in iter(lambda: sys.stdin.buffer.readline(2_000_001), b""):
         if len(line) > 2_000_000 or not line.endswith(b"\n"):
             raise ValueError("Oversized depth frame")

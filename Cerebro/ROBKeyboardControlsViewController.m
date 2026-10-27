@@ -12,8 +12,7 @@
 #import "Cerebro-Swift.h"
 
 static NSTimeInterval const kROBLocalTreadRampInterval = 0.03;
-static NSInteger const kROBLocalTreadMaximumCommand = 100;
-static NSInteger const kROBLocalTreadRampStep = 20;
+static NSInteger const kROBLocalTreadMaximumCommand = 255;
 
 @interface ROBMomentaryTreadButton : NSButton
 
@@ -60,6 +59,10 @@ static NSInteger const kROBLocalTreadRampStep = 20;
 
 @property (readwrite, retain) IBOutlet NSButton *lactForward;
 @property (readwrite, retain) IBOutlet NSButton *lactBackward;
+@property (readwrite, retain) IBOutlet NSSlider *localTreadSpeedSlider;
+@property (readwrite, retain) NSPopUpButton *localTreadAcceleration;
+@property (readwrite, retain) NSTextField *localTreadOutput;
+@property (readwrite, retain) ROBTreadMotionRamp *localTreadRamp;
 
 @property (readwrite, retain) IBOutlet NSSlider *waistRotationSlider;
 @property (readwrite, retain) IBOutlet NSButton *exitSafeStartWaistRotationButton;
@@ -85,6 +88,37 @@ static NSInteger const kROBLocalTreadRampStep = 20;
     [_flipperForward setPeriodicDelay:0.0 interval:interval];
     [_flipperBackward setPeriodicDelay:0.0 interval:interval];
     self.heldTreadKeyCodes = [NSMutableOrderedSet orderedSet];
+    self.localTreadRamp = [ROBTreadMotionRamp new];
+    self.localTreadSpeedSlider.maxValue = 100;
+    self.localTreadSpeedSlider.doubleValue = 40;
+    [self.localTreadSpeedSlider setAccessibilityLabel:@"Local tread speed percent"];
+    self.localTreadAcceleration = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(242, 145, 155, 28) pullsDown:NO];
+    [self.localTreadAcceleration addItemsWithTitles:ROBTreadMotionRamp.modeTitles];
+    [self.localTreadAcceleration selectItemAtIndex:ROBTreadMotionRamp.selectedMode];
+    self.localTreadAcceleration.target = self;
+    self.localTreadAcceleration.action = @selector(changeTreadAcceleration:);
+    [self.localTreadAcceleration setAccessibilityLabel:@"Local tread acceleration"];
+    [self.view addSubview:self.localTreadAcceleration];
+    NSTextField *accelerationLabel = [NSTextField labelWithString:@"Tread acceleration"];
+    accelerationLabel.frame = NSMakeRect(242, 175, 155, 20);
+    [self.view addSubview:accelerationLabel];
+    self.localTreadOutput = [NSTextField wrappingLabelWithString:@"Treads stopped · limit 40%"];
+    self.localTreadOutput.frame = NSMakeRect(242, 90, 160, 48);
+    [self.localTreadOutput setAccessibilityIdentifier:@"ROB.Treads.Output"];
+    [self.view addSubview:self.localTreadOutput];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refreshTreadAcceleration:)
+        name:ROBTreadMotionRamp.settingsChanged object:nil];
+    for (NSView *view in self.view.subviews) {
+        if (![view isKindOfClass:NSButton.class]) continue;
+        NSButton *button = (NSButton *)view;
+        if (button.action == @selector(tredBrakeLock:)) {
+            button.title = @"Stop treads";
+            [button setButtonType:NSButtonTypeMomentaryPushIn];
+        } else if (button.action == @selector(maxSpeedButton:) || button.action == @selector(speedIncrease:)
+            || button.action == @selector(speedDecrease:) || button.action == @selector(speedTenPercent:)) {
+            [button setButtonType:NSButtonTypeMomentaryPushIn];
+        }
+    }
 
     // Arrow keys are handled as true key-down/key-up events below. Clearing
     // the cell equivalents prevents an extra click-style action on key-down.
@@ -165,7 +199,8 @@ static NSInteger const kROBLocalTreadRampStep = 20;
 {
     if (button.isTreadPressed) {
         self.heldMouseTreadButton = button;
-        [self setLocalTreadTargetLeft:left right:right];
+        [self setLocalTreadTargetLeft:left * self.localTreadSpeedSlider.doubleValue / 100
+                              right:right * self.localTreadSpeedSlider.doubleValue / 100];
     } else if (self.heldMouseTreadButton == button) {
         self.heldMouseTreadButton = nil;
         [self refreshLocalTreadTargetFromHeldKeys];
@@ -232,32 +267,27 @@ static NSInteger const kROBLocalTreadRampStep = 20;
                               forMode:NSRunLoopCommonModes];
 }
 
-- (NSInteger)nextTreadCommandFrom:(NSInteger)current target:(NSInteger)target
-{
-    // A reversal always reaches zero before applying torque in the opposite
-    // direction. This avoids a single-frame forward/reverse shock.
-    NSInteger effectiveTarget = current * target < 0 ? 0 : target;
-    NSInteger delta = effectiveTarget - current;
-    if (labs(delta) <= kROBLocalTreadRampStep) return effectiveTarget;
-    return current + (delta > 0 ? kROBLocalTreadRampStep : -kROBLocalTreadRampStep);
-}
-
 - (void)updateLocalTreadRamp
 {
-    self.currentLeftTreadCommand = [self nextTreadCommandFrom:self.currentLeftTreadCommand
-                                                       target:self.targetLeftTreadCommand];
-    self.currentRightTreadCommand = [self nextTreadCommandFrom:self.currentRightTreadCommand
-                                                        target:self.targetRightTreadCommand];
+    if (![self.localTreadRamp advanceToLeft:self.targetLeftTreadCommand right:self.targetRightTreadCommand
+            mode:ROBTreadMotionRamp.selectedMode now:NSProcessInfo.processInfo.systemUptime]) {
+        [self stopLocalTreadsImmediately];
+        self.localTreadOutput.stringValue = @"Treads stopped — controller timing gap";
+        return;
+    }
+    self.currentLeftTreadCommand = self.localTreadRamp.leftCommand;
+    self.currentRightTreadCommand = self.localTreadRamp.rightCommand;
+    [self refreshTreadOutput];
 
-    BOOL stopped = self.currentLeftTreadCommand == 0
-        && self.currentRightTreadCommand == 0;
+    BOOL stopped = self.localTreadRamp.isStopped;
     if (stopped && self.targetLeftTreadCommand == 0
         && self.targetRightTreadCommand == 0) {
-        // Brake only after the short deceleration ramp reaches zero.
+        // Ordinary release decelerates with the selected profile; Stop is immediate.
         [self.robMainViewController.serialBox
             sendBaseCommand:@"~+0001,+0000,+0001,+0000,+0000,+0000,+0000"];
         [self.localTreadRampTimer invalidate];
         self.localTreadRampTimer = nil;
+        [self.localTreadRamp reset];
         return;
     }
 
@@ -285,8 +315,10 @@ static NSInteger const kROBLocalTreadRampStep = 20;
     self.targetRightTreadCommand = 0;
     self.currentLeftTreadCommand = 0;
     self.currentRightTreadCommand = 0;
+    [self.localTreadRamp reset];
     [self.localTreadRampTimer invalidate];
     self.localTreadRampTimer = nil;
+    [self refreshTreadOutput];
     if (hadLocalTreadActivity) {
         [self.robMainViewController.serialBox
             sendBaseCommand:@"~+0001,+0000,+0001,+0000,+0000,+0000,+0000"];
@@ -325,7 +357,12 @@ static NSInteger const kROBLocalTreadRampStep = 20;
     }
 
     NSNumber *keyCode = @(event.keyCode);
+    if (event.type == NSEventTypeKeyDown && event.keyCode == 53) {
+        [self stopLocalTreadsImmediately];
+        return nil;
+    }
     if (![self isTreadArrowKeyCode:keyCode]) return event;
+    if (event.type == NSEventTypeKeyDown && event.isARepeat) return nil;
 
     if (event.type == NSEventTypeKeyDown) {
         if (!event.isARepeat) {
@@ -349,23 +386,20 @@ static NSInteger const kROBLocalTreadRampStep = 20;
 
 - (void)refreshLocalTreadTargetFromHeldKeys
 {
+    NSInteger demand = lround(255 * self.localTreadSpeedSlider.doubleValue / 100);
     NSNumber *keyCode = self.heldTreadKeyCodes.lastObject;
     switch (keyCode.integerValue) {
         case 126:
-            [self setLocalTreadTargetLeft:kROBLocalTreadMaximumCommand
-                                    right:kROBLocalTreadMaximumCommand];
+            [self setLocalTreadTargetLeft:demand right:demand];
             break;
         case 125:
-            [self setLocalTreadTargetLeft:-kROBLocalTreadMaximumCommand
-                                    right:-kROBLocalTreadMaximumCommand];
+            [self setLocalTreadTargetLeft:-demand right:-demand];
             break;
         case 123:
-            [self setLocalTreadTargetLeft:-kROBLocalTreadMaximumCommand
-                                    right:kROBLocalTreadMaximumCommand];
+            [self setLocalTreadTargetLeft:-demand right:demand];
             break;
         case 124:
-            [self setLocalTreadTargetLeft:kROBLocalTreadMaximumCommand
-                                    right:-kROBLocalTreadMaximumCommand];
+            [self setLocalTreadTargetLeft:demand right:-demand];
             break;
         default:
             [self setLocalTreadTargetLeft:0 right:0];
@@ -400,7 +434,7 @@ static NSInteger const kROBLocalTreadRampStep = 20;
 
 - (IBAction)tredBrakeLock:(id)sender
 {
-    [self.robMainViewController.serialBox tredBrakeLock:sender];
+    [self stopLocalTreadsImmediately];
 }
 
 
@@ -441,31 +475,58 @@ static NSInteger const kROBLocalTreadRampStep = 20;
 
 - (IBAction)maxSpeedButton:(id)sender
 {
-    [self.robMainViewController.serialBox maxSpeedButton:sender];
+    self.localTreadSpeedSlider.doubleValue = 100;
+    [self speedSliderAction:self.localTreadSpeedSlider];
 }
 
 
 - (IBAction)speedIncrease:(id)sender
 {
-    [self.robMainViewController.serialBox speedIncrease:sender];
+    self.localTreadSpeedSlider.doubleValue = MIN(100, self.localTreadSpeedSlider.doubleValue + 10);
+    [self speedSliderAction:self.localTreadSpeedSlider];
 }
 
 
 - (IBAction)speedDecrease:(id)sender
 {
-    [self.robMainViewController.serialBox speedDecrease:sender];
+    self.localTreadSpeedSlider.doubleValue = MAX(0, self.localTreadSpeedSlider.doubleValue - 10);
+    [self speedSliderAction:self.localTreadSpeedSlider];
 }
 
 
 - (IBAction)speedTenPercent:(id)sender
 {
-    [self.robMainViewController.serialBox speedTenPercent:sender];
+    self.localTreadSpeedSlider.doubleValue = 10;
+    [self speedSliderAction:self.localTreadSpeedSlider];
 }
 
 
 - (IBAction)speedSliderAction:(id)sender
 {
-    [self.robMainViewController.serialBox speedSliderAction:sender];
+    if (self.heldMouseTreadButton != nil) {
+        [self.heldMouseTreadButton sendAction:self.heldMouseTreadButton.action to:self];
+    } else if (self.heldTreadKeyCodes.count > 0) {
+        [self refreshLocalTreadTargetFromHeldKeys];
+    }
+    [self refreshTreadOutput];
+}
+
+- (void)refreshTreadOutput
+{
+    NSString *motion = self.currentLeftTreadCommand == 0 && self.currentRightTreadCommand == 0
+        ? @"Treads stopped" : [NSString stringWithFormat:@"L %+.0f%% · R %+.0f%%",
+            100.0 * self.currentLeftTreadCommand / 255, 100.0 * self.currentRightTreadCommand / 255];
+    self.localTreadOutput.stringValue = [NSString stringWithFormat:@"%@ · limit %.0f%%", motion, self.localTreadSpeedSlider.doubleValue];
+}
+
+- (void)changeTreadAcceleration:(NSPopUpButton *)sender
+{
+    ROBTreadMotionRamp.selectedMode = sender.indexOfSelectedItem;
+}
+
+- (void)refreshTreadAcceleration:(NSNotification *)notification
+{
+    [self.localTreadAcceleration selectItemAtIndex:ROBTreadMotionRamp.selectedMode];
 }
 
 - (IBAction)waistRotationResetAction:(id)sender

@@ -290,6 +290,7 @@ class MarkerlessEstimator:
 def main():
     from worker import ShadowPlanner
     estimator = MarkerlessEstimator(ShadowPlanner())
+    print(json.dumps(dict(schemaVersion=1, source="markerless_ready")), flush=True)
     while True:
         line = sys.stdin.buffer.readline(2_000_001)
         if not line: return

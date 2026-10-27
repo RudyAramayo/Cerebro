@@ -341,6 +341,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private var activeHoldAfterInitialEmptyLift = false
     @nonobjc private var previewedCanGrasp: ROBWorkspaceLocatedObject?
     @nonobjc private var activePreviewedCanGrasp: ROBWorkspaceLocatedObject?
+    private var graspBeforeDestination = false
+    private var activeGraspBeforeDestination = false
+    private var activeCanGraspAndHold:Bool {activePreviewedCanGrasp != nil || activeGraspBeforeDestination}
     /// Neck-only preparation is part of this native user-started task. It
     /// reserves the camera view without granting any arm or jaw dispatch.
     var isPreparingPreviewedCanObservation:Bool {
@@ -929,6 +932,25 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
+    /// A native pickup phase for a destination revealed by a later body turn.
+    /// This phase never rotates the torso or reuses a post-turn arm path.
+    @nonobjc func performNearbyCanGraspAndHold(target:String,completion:@escaping(NSDictionary)->Void) {
+        precondition(Thread.isMainThread)
+        guard !isRunning,standingPreparationTask==nil,previewedCanGrasp==nil,!graspBeforeDestination,
+              ROBControllerArmApproval.shared.standingLocalCanCampaignActive,
+              !ROBControllerArmApproval.shared.isPending,!ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload,
+              !nominalEmptyCommissioningStepEnabled,!nominalModelAssumedSelfEnabled,!oneDegreeEmptyCalibrationStepEnabled,
+              !sourcePixelSelfReviewEnabled,!holdAfterInitialEmptyLiftEnabled,!approachCanThenHoldEnabled else {
+            completion(["status":"blocked","arm_motion_sent":false,
+                "detail":"Nearby pickup needs the active right-arm can campaign, empty jaws and an idle ordinary task."]);return
+        }
+        graspBeforeDestination=true
+        performUsingLocalRecyclingReceipt("right_recycle_cans",target:target) { [weak self] result in
+            self?.graspBeforeDestination=false;self?.activeGraspBeforeDestination=false
+            completion(result)
+        }
+    }
+
     @nonobjc func performUsingLocalRecyclingReceipt(_ command:String,target:String,completion:@escaping(NSDictionary)->Void) {
         guard ["left_recycle_cans","right_recycle_cans"].contains(command),
               let canCount=try? ROBRecyclingBatchRequest.requestedCount(command:command,target:target) else {
@@ -1121,7 +1143,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let campaignSummary=localReceiptOnly && standingCameraCollisionAdvisoryEligible
             ? "Policy \(Self.cameraAdvisoryPolicyRevision). Operator confirms the initial RIGHT arm is unblocked and authorizes the taught recycling ready pose (\(ROBCanRecyclingReadyPose.revision)), reached by slow coordinated segments from fresh measured hanging feedback. Camera occupied/UNKNOWN/J5 and hand/person collision predictions are advisory throughout this current \(requestedCanCount)-can campaign. Keep their raw observations and label all predictions unverified; no observed-free or measured-registration claim. Initial EMPTY lift uses model geometry, joint limits, nonworsening self clearance, fresh motor feedback and current-spike hold; defer camera inspection until the arm is raised. Then acquire fresh can/bucket positions and visual possession/drop evidence. Current-spike hold, Stop, ownership, joint/rate limits and modeled self collision remain active. Both arms may hold; only physical RIGHT travels. No torso/treads/encoder reset or force escalation. \(holdAfterInitialEmptyLiftEnabled ? "Lift and measured hold ONLY: no jaws, grasp, carry or release; ZERO transfers." : "Open, approach and grip gently, verify the short lift, carry to the bucket and release; reobserve each can.") The frozen local receipt covers this bounded600second execution; interruption ends the current path. Camera alignment remains assumed \(localVisualTrialAssumedSpatialErrorMeters*1000)mm and collision clearance is not certified."
             : approvedSummary
-        let cameraAdvisorySummary=campaignSummary + (previewedCanGrasp == nil ? "" :
+        let pickupSummary=graspBeforeDestination
+            ? " THIS INVOCATION ENDS AT HOLD: survey the nearby table, select a reachable right-side can, prepare the EMPTY gripper at its current hold, approach, grip gently and verify the short lift. The operator will reveal the destination by a subsequent torso turn. No bucket search, torso movement, carry, release, return or next can in this pickup phase; ZERO transfers. A later turn invalidates this scene and requires fresh destination and payload evidence."
+            : ""
+        let cameraAdvisorySummary=campaignSummary + pickupSummary + (previewedCanGrasp == nil ? "" :
             " THIS INVOCATION ENDS AT HOLD: reobserve the previewed near-right can, prepare its EMPTY gripper while stationary at the current held pose if calibration was lost on reconnect, approach, grip gently and perform the checked short verification lift. No bucket search, carry, payload release, return or next can; ZERO transfers. The old preview is an identity hint, never a replayed motion path.")
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
@@ -1746,6 +1771,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         activeApproachCanThenHold = localReceiptCommand != nil && approachCanThenHoldEnabled
         activeHoldAfterInitialEmptyLift = localReceiptCommand != nil && holdAfterInitialEmptyLiftEnabled
         activePreviewedCanGrasp = localReceiptCommand == "right_recycle_cans" ? previewedCanGrasp : nil
+        activeGraspBeforeDestination = localReceiptCommand == "right_recycle_cans" && graspBeforeDestination
         heldGripperReadyGeneration = nil
         initialEmptyLiftHeldEvidence = nil
         collisionMap = command == "left_estimated_calibration" ? activeEstimated?.map : nil
@@ -2042,7 +2068,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     }
 
     @MainActor private func execute(_ command: String) async throws -> NSDictionary {
-        if activePreviewedCanGrasp != nil {
+        if activeCanGraspAndHold {
             var output=try await executeSingle(command) as! [String:Any]
             output["batch_requested"]=requestedCanCount;output["batch_completed"]=0
             output["transfer_completed"]=false;output["requested_grasp_and_hold"]=true
@@ -2751,7 +2777,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             try await beginHeldSceneObservation(); phase = "stationary neck-only scene search"
             update("Holding the arms still while searching and mapping the current workspace")
             let calibrationFile = selectedCanReachCalibrationFile
-            var objects = try await ROBWorkspaceSearch.shared.run(targets: (activeHoldAfterInitialEmptyLift || activeApproachCanThenHold || activePreviewedCanGrasp != nil) ? [.can]:ROBWorkspaceTarget.allCases,
+            var objects = try await ROBWorkspaceSearch.shared.run(targets: (activeHoldAfterInitialEmptyLift || activeApproachCanThenHold || activeCanGraspAndHold) ? [.can]:ROBWorkspaceTarget.allCases,
                 model: model, requireDepth: true,surveyFrontTable:usesHeldCanPreparation,
                 armAlreadyAtGraspReady:usesHeldCanPreparation && ROBCanRecyclingReadyPose.matches(searchBaseline,physicalSide:physicalSide),
                 permitsLocalCanShapePrior:{
@@ -4219,7 +4245,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let started=ProcessInfo.processInfo.systemUptime;var settler=ROBArmRoutineSettler()
         try await wait(duration+3){
             guard let sample=try?self.measured() else{return false};let positions=sample.positionsRadians.map(\.doubleValue)
-            let reached=self.activePreviewedCanGrasp != nil
+            let reached=self.usesHeldCanPreparation
                 ? ROBArmRoutinePlan.near(positions,goal,tolerance:0.015)
                 : 1.5*zip(positions,goal).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
             guard reached else {settler=ROBArmRoutineSettler();return false}
@@ -4318,7 +4344,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             payload:payload,intentionalContact:contact)}.value
         // A transfer needs a destination route. An explicit grasp-and-hold
         // ends after the already-reviewed lift and has no destination stage.
-        if activePreviewedCanGrasp == nil {
+        if !activeCanGraspAndHold {
             guard let destination=recyclingDestination else {throw ROBGhostMotionError.blocked("No observed reachable bucket; remaining EMPTY before grip. A table relay needs its own checked native phase.")}
             let predictedCarry=try ROBCanCarryPreview.make(from:model.positions(vendorLeft:liftQ),can:can,attachedPayload:payload,
                 destination:destination,model:model,side:physicalSide,now:Date().timeIntervalSince1970*1000,
@@ -4355,7 +4381,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         lastVisualGraspEvidence=evidence;try writeVisualGraspEvidence(evidence)
         let appearanceSupported=evidence.verdict == .supported && evidence.toolEvidenceSource=="independent_observed_fingers" &&
             evidence.appearanceReferenceSequence != nil
-        if activePreviewedCanGrasp == nil,appearanceSupported,let support=context.nativeObservedSupport {
+        if !activeCanGraspAndHold,appearanceSupported,let support=context.nativeObservedSupport {
             return try await performNativeSupportedCarry(context:context,support:support,can:can,payload:payload,sourceContact:contact,
                 map:map,model:model,trial:trial)
         }
@@ -4887,7 +4913,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let recoveryReason=localCampaignRecoveryReason
         let canAutoRecover=currentSpikeEvidence==nil && localJob && recoveryReason != nil && recoveryCampaignID != nil &&
             !recyclingGripDispatched && !jawSetupDispatchUncertain && !servoPossiblePayloadUncertain &&
-            !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled && !activeHoldAfterInitialEmptyLift && !activeApproachCanThenHold && activePreviewedCanGrasp == nil
+            !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled && !activeHoldAfterInitialEmptyLift && !activeApproachCanThenHold && !activeCanGraspAndHold
         var preserveLocalReceipt=false
         if localJob,!armTravelDispatched,!recyclingReachDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,failure==nil {
             let perception=["not_found","not_localized","not_reachable","needs_help"].contains(result["status"] as? String ?? "") || localReceiptPerceptionFailure

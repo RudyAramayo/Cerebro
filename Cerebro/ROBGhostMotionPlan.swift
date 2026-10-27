@@ -225,6 +225,27 @@ final class ROBGhostRobotModel {
         }
         return minimum
     }
+
+    /// Height is invariant under the modeled vertical torso-yaw axis. Raising
+    /// every arm/gripper hull above the tread envelope therefore avoids a
+    /// gripper sweeping into a track anywhere in a torso turn. This remains
+    /// a mechanical model check, not environment or payload clearance.
+    func torsoTurnVerticalClearance(vendorJoints: [Double]) -> Double? {
+        let limits = ROBWorkspaceCollisionPlan.jointBounds(model: self)
+        guard vendorJoints.count == 7,
+              zip(vendorJoints, limits).allSatisfy({ $0.isFinite && $1.contains($0) }),
+              let yaw = joints.first(where: { $0.name == "torso_yaw" }),
+              abs(yaw.axis.x) < 0.0001, abs(yaw.axis.y) < 0.0001, abs(yaw.axis.z) > 0.9999 else { return nil }
+        let bounds = worldCollisionBounds(positions: positions(vendorLeft: vendorJoints))
+        let arms = bounds.keys.filter { $0.hasPrefix(physicalSide + "_") && ($0.hasSuffix("_Link") || $0 == toolLink) }
+        let treads = bounds.keys.filter { $0.contains("track") || $0.contains("flipper") || $0.contains("sprocket") }
+        guard arms.count >= 8, arms.contains(toolLink), !treads.isEmpty,
+              let top = treads.compactMap({ bounds[$0]?.high.z }).max() else { return nil }
+        return arms.compactMap { link -> Double? in
+            guard let box = bounds[link] else { return nil }
+            return box.low.z - top - (link == toolLink ? ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters : 0)
+        }.min()
+    }
     /// Exact world AABBs of the verified model's local collision boxes. Used
     /// by depth self filtering and full-arm workspace checking, never as a
     /// claim that a model prior is a measured camera/arm registration.

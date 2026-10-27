@@ -22,6 +22,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		AC2710260000000000000002 /* ROBTreadMotionRamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2710260000000000000001 /* ROBTreadMotionRamp.swift */; };
 		AC2510260000000000000002 /* ROBGripperVisualServo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2510260000000000000001 /* ROBGripperVisualServo.swift */; };
 		AC2410260000000000000010 /* ROBBellyQRCalibrationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC241026000000000000000F /* ROBBellyQRCalibrationWindowController.swift */; };
 		AC241026000000000000000C /* ROBEstimatedFixedHeadCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC241026000000000000000B /* ROBEstimatedFixedHeadCapture.swift */; };
@@ -289,6 +290,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC2710260000000000000001 /* ROBTreadMotionRamp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTreadMotionRamp.swift; sourceTree = "<group>"; };
 		AC2510260000000000000001 /* ROBGripperVisualServo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGripperVisualServo.swift; sourceTree = "<group>"; };
 		AC241026000000000000000F /* ROBBellyQRCalibrationWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBellyQRCalibrationWindowController.swift; sourceTree = "<group>"; };
 		AC241026000000000000000B /* ROBEstimatedFixedHeadCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBEstimatedFixedHeadCapture.swift; sourceTree = "<group>"; };
@@ -800,6 +802,7 @@
 				62224F54B1E408ED04F979A3 /* ShadowPlanner */,
 				49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */,
 				D674002A3113000000000002 /* ROBMarkerlessVisionService.swift */,
+				AC2710260000000000000001 /* ROBTreadMotionRamp.swift */,
 				B7E892F0BA1E3D33BF7797B0 /* ROBTorsoControlWindowController.swift */,
 				D237612E5D39BF4229766EF0 /* ROBTorsoControlCenter.swift */,
 				296CEFD9716806B67EE286A2 /* ROBTicVelocityTransport.swift */,
@@ -1097,6 +1100,7 @@
 			files = (
 				B291B99A5C63A9A985786591 /* ROBShadowPlannerBridge.swift in Sources */,
 				D674002A3113000000000001 /* ROBMarkerlessVisionService.swift in Sources */,
+				AC2710260000000000000002 /* ROBTreadMotionRamp.swift in Sources */,
 				4CD13F5582E197979947B506 /* ROBTorsoControlWindowController.swift in Sources */,
 				503F2719D45BA7356756FD2F /* ROBTorsoControlCenter.swift in Sources */,
 				8845317BA38558B2D3876B8C /* ROBTicVelocityTransport.swift in Sources */,

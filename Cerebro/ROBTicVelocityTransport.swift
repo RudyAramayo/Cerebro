@@ -6,14 +6,21 @@ import Darwin
 /// synthetic Tic position; velocity control works with a camera-established zero.
 final class ROBTicVelocityTransport {
     struct Profile {
-        var pulsesPerTurn = 36_800.0 // Existing ROB gearing; validate on the robot.
+        // Operator-observed quarter turns on2026-10-27: left-8907, right+9091,
+        // both from the old count0. The midpoint+92 is diagnostic only:
+        // missed steps invalidate counts as heading; never reset/home from it.
+        static let observedLeftQuarterTurnCount = -8_907.0
+        static let observedRightQuarterTurnCount = 9_091.0
+        static let observedCenterCount = (observedLeftQuarterTurnCount+observedRightQuarterTurnCount)/2
+        var pulsesPerTurn = 2*(observedRightQuarterTurnCount-observedLeftQuarterTurnCount)
+        var motorDirection = -1.0 // Positive base-relative yaw is ROB's left.
         var maximumDegreesPerSecond = 8.0
         var accelerationDegreesPerSecondSquared = 8.0
 
         func velocityUnits(_ degrees: Double) -> Int32? {
-            guard degrees.isFinite, pulsesPerTurn.isFinite, (1 ... 10_000_000).contains(pulsesPerTurn),
+            guard degrees.isFinite, pulsesPerTurn.isFinite, (1 ... 10_000_000).contains(pulsesPerTurn),abs(motorDirection)==1,
                   abs(degrees) <= 20 else { return nil }
-            let value = degrees * pulsesPerTurn / 360 * 10_000
+            let value = degrees * pulsesPerTurn / 360 * 10_000 * motorDirection
             guard abs(value) <= 500_000_000 else { return nil }
             return Int32(value.rounded())
         }
@@ -21,7 +28,7 @@ final class ROBTicVelocityTransport {
             guard accelerationDegreesPerSecondSquared.isFinite,
                   (0.1 ... 30).contains(accelerationDegreesPerSecondSquared),
                   let scaled = velocityUnits(accelerationDegreesPerSecondSquared / 100) else { return nil }
-            return max(100, scaled)
+            return max(100, abs(scaled))
         }
     }
 
@@ -124,10 +131,11 @@ final class ROBTicVelocityTransport {
                     }
                 case .arm(let requested):
                     armed = false
-                    guard let speed = requested.velocityUnits(requested.maximumDegreesPerSecond), speed > 0,
+                    guard let signedSpeed = requested.velocityUnits(requested.maximumDegreesPerSecond), signedSpeed != 0,
                           let acceleration = requested.accelerationUnits else {
                         throw Self.error("Invalid torso motion profile")
                     }
+                    let speed=abs(signedSpeed)
                     let settingsFile = FileManager.default.temporaryDirectory
                         .appendingPathComponent("rob-tic-profile-\(UUID()).txt")
                     defer { try? FileManager.default.removeItem(at: settingsFile) }

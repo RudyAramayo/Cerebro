@@ -8,10 +8,11 @@ import AppKit
     private let sessionOnWake = NSButton(checkboxWithTitle: "Offer one arm session at launch / wake", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
     private let inspectionPan = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let treadAcceleration = NSPopUpButton(frame: .zero, pullsDown: false)
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 580))
-        let title = NSTextField(labelWithString: "Arms and grippers")
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 680))
+        let title = NSTextField(labelWithString: "Arms and motion")
         title.font = .boldSystemFont(ofSize: 20)
         startup.state = UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) ? .on : .off
         startup.target = self; startup.action = #selector(changeStartup)
@@ -27,6 +28,14 @@ import AppKit
         inspectionPan.setAccessibilityLabel("Arm inspection camera pan")
         let inspectionRow = NSStackView(views: [NSTextField(labelWithString: "Arm inspection camera pan:"), inspectionPan])
         inspectionRow.spacing = 10
+        treadAcceleration.addItems(withTitles: ROBTreadMotionRamp.modeTitles)
+        treadAcceleration.target = self; treadAcceleration.action = #selector(changeTreadAcceleration)
+        treadAcceleration.setAccessibilityLabel("Local tread acceleration")
+        let treadRow = NSStackView(views: [NSTextField(labelWithString: "Local tread acceleration:"), treadAcceleration])
+        treadRow.spacing = 10
+        let treadHelp = NSTextField(wrappingLabelWithString:
+            "Gentle reaches full demand in 2.4 seconds, Medium in 1.2, Aggressive in 0.6. Lower speed limits are reached proportionally sooner. Release ramps down; Stop treads and Escape stop immediately.")
+        treadHelp.textColor = .secondaryLabelColor
         let gripperHelp = NSTextField(wrappingLabelWithString:
             "Calibrate stationary, empty grippers after Amber connects, without raising the arms. Keep the jaws clear at startup. Stop, sleep or connection loss cancels calibration.")
         let behaviorHelp = NSTextField(wrappingLabelWithString:
@@ -40,7 +49,7 @@ import AppKit
         stop.bezelColor = .systemRed
         state.isSelectable = true
         let stack = NSStackView(views: [title, gripperStartup, gripperHelp, sessionOnWake, startup,
-                                       inspectionRow, behaviorHelp, sandbox, sandboxHelp, state, stop])
+                                       inspectionRow, treadRow, treadHelp, behaviorHelp, sandbox, sandboxHelp, state, stop])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -49,13 +58,15 @@ import AppKit
             stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -24)
         ])
-        for label in [gripperHelp, behaviorHelp, sandboxHelp, state] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for label in [gripperHelp, treadHelp, behaviorHelp, sandboxHelp, state] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: ROBTreadMotionRamp.settingsChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBArmRoutineDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBControllerArmApprovalDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .ROBGripperStartupCalibrationDidChange, object: nil)
         refresh()
     }
     @objc private func changeStartup() { UserDefaults.standard.set(startup.state == .on, forKey: ROBArmRoutinePlan.startupDefaultsKey) }
+    @objc private func changeTreadAcceleration() { ROBTreadMotionRamp.selectedMode = treadAcceleration.indexOfSelectedItem }
     @objc private func changeGripperStartup() { ROBGripperStartupCalibration.enabled = gripperStartup.state == .on }
     @objc private func changeSessionOnWake() { UserDefaults.standard.set(sessionOnWake.state == .on, forKey: ROBArmRoutinePlan.sessionOnWakeKey) }
     @objc private func changeInspectionPan() {
@@ -64,6 +75,7 @@ import AppKit
                                   forKey: ROBArmRoutinePlan.inspectionPanDefaultsKey)
     }
     @objc private func refresh() {
+        treadAcceleration.selectItem(at: ROBTreadMotionRamp.selectedMode)
         if ROBControllerArmApproval.shared.isPending { state.stringValue = ROBControllerArmApproval.shared.status }
         else if ROBGripperStartupCalibration.shared.isRunning { state.stringValue = ROBGripperStartupCalibration.shared.status }
         else { state.stringValue = ROBArmRoutineCoordinator.shared.status }

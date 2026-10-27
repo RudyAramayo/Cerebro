@@ -866,9 +866,10 @@ final class ROBArmRoutineCoordinator {
             print("PASS actual local1/5/8 exact scope/import/context/task counts;0/9/empty and non-can commands rejected, count mismatch rejected, partial holds/not-found earn0, no hardware motion or extra spoken grant")
             return
         }
-        if ["standing-camera-start","standing-auto-recovery","previewed-can-hold"].contains(CommandLine.arguments.last ?? "") {
+        if ["standing-camera-start","standing-auto-recovery","previewed-can-hold","nearby-can-hold"].contains(CommandLine.arguments.last ?? "") {
             let recovering=CommandLine.arguments.last=="standing-auto-recovery"
-            let previewedHold=CommandLine.arguments.last=="previewed-can-hold"
+            let nearbyHold=CommandLine.arguments.last=="nearby-can-hold"
+            let previewedHold=CommandLine.arguments.last=="previewed-can-hold" || nearbyHold
             var previewApprovalRequests=0,previewApprovalPrompts=0
             if previewedHold {
                 broker.send={message,_,_ in if message.kind == .actionRequest {previewApprovalRequests+=1};return true}
@@ -925,9 +926,11 @@ final class ROBArmRoutineCoordinator {
             if previewedHold {
                 let can=ROBWorkspaceLocatedObject(target:.can,position:[0.43,-0.105,0.81],confidence:0.7,
                     capturedAt:Date().timeIntervalSince1970*1000,sequence:10,view:.init(panDegrees:-15,upperTarget:6000))
-                trial.performPreviewedCanGrasp(can){result=$0}
-                precondition(trial.isPreparingPreviewedCanObservation && !trial.isRunning)
-                trial.performPreviewedCanGrasp(can){second=$0}
+                if nearbyHold {trial.performNearbyCanGraspAndHold(target:"4"){result=$0}}
+                else {trial.performPreviewedCanGrasp(can){result=$0}}
+                precondition((nearbyHold || trial.isPreparingPreviewedCanObservation) && !trial.isRunning)
+                if nearbyHold {trial.performNearbyCanGraspAndHold(target:"4"){second=$0}}
+                else {trial.performPreviewedCanGrasp(can){second=$0}}
                 precondition(second?["status"] as?String=="blocked" && second?["arm_motion_sent"] as?Bool==false)
             } else {
                 trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){result=$0}
@@ -964,7 +967,7 @@ final class ROBArmRoutineCoordinator {
             precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can])
             if previewedHold {
                 precondition(!trial.isPreparingPreviewedCanObservation,"Completed preparation retained neck ownership")
-                precondition(!preparedPreviewViews.isEmpty && preparedPreviewViews.allSatisfy{$0.panDegrees == -15 && $0.upperTarget==6000},
+                precondition(nearbyHold || (!preparedPreviewViews.isEmpty && preparedPreviewViews.allSatisfy{$0.panDegrees == -15 && $0.upperTarget==6000}),
                     "Preview preparation did not restore the selected can's view")
                 precondition(ROBWorkspaceSearch.shared.requestedFrontTableSurvey)
                 precondition(ROBWorkspaceSearch.shared.requestedAlreadyGraspReady,
@@ -977,7 +980,7 @@ final class ROBArmRoutineCoordinator {
                 let policy=try JSONSerialization.jsonObject(with:Data(contentsOf:policyURL)) as! [String:Any]
                 precondition(policy["debug_feedback_timing"] as?Bool==true && policy["stationary_maximum_age_ms"] as?Double==500)
                 precondition(policy["moving_arm_maximum_age_ms"] as?Int==500)
-                print("PASS previewed grasp: selected-can neck view restored, reset camera sequence accepted, stationary398ms diagnostic delay tolerated and audited, no bucket/batch/transfer credit, no redundant approval, no motion when the target is absent")
+                print("PASS \(nearbyHold ? "nearby pickup before torso turn":"previewed grasp"): fresh can-only table survey, ready pose skips shoulders,398ms diagnostic delay tolerated and audited, no bucket/batch/transfer credit, no redundant approval, no motion when target absent")
             }
             precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("position_mode") || $0.hasPrefix("gripper") || $0.hasPrefix("activate")})
             broker.cancel(reason:"Synthetic camera-start fixture complete")
