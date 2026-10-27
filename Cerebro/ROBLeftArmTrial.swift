@@ -1799,8 +1799,16 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             captureActualCampaignInterruption()
             do {_ = try requireLocalReceipt()} catch {captureActualCampaignInterruption();throw error}
         }
-        let passive=inactiveWorkspaceSearch && sceneHold.count==2 && sceneHold.values.allSatisfy{$0.modes==Array(repeating:0,count:7)} &&
-            !leased && !positionReady && !armTravelDispatched && !jawCommandDispatched && !jawSetupDispatchUncertain && !recyclingGripDispatched
+        // A DEBUG neck scan may keep an already-raised EMPTY arm in its
+        // measured hold. A delivery gap pauses acquisition, never admits a
+        // stale packet or dispatch. Active travel/jaws/leases still fail closed.
+        let debugHeldScan=ROBArmFeedbackTiming.debugEnabled && sceneHold.values.allSatisfy { held in
+            [0,2].contains(where:{held.modes==Array(repeating:$0,count:7)})
+        }
+        let passive=inactiveWorkspaceSearch && sceneHold.count==2 &&
+            (sceneHold.values.allSatisfy{$0.modes==Array(repeating:0,count:7)} || debugHeldScan) &&
+            !leased && leaseRenewals.isEmpty && !positionReady && !armTravelDispatched &&
+            !jawCommandDispatched && !jawSetupDispatchUncertain && !recyclingGripDispatched && !servoPossiblePayloadUncertain
         if localReceiptCommand != nil {
             let sides=passive ? ["left","right"]:[arm == "left" ? "right":"left"]
             var ageFailures:[String]=[]
@@ -1832,7 +1840,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             if !ageFailures.isEmpty {
                 let now=ProcessInfo.processInfo.systemUptime,detail=ageFailures.joined(separator:" ")
                 if passiveFeedbackPauseStarted==nil {passiveFeedbackPauseStarted=now}
-                guard now-passiveFeedbackPauseStarted!<=2 else {throw ROBArmRoutineError.blocked(detail+" Passive same-pose feedback did not recover within2seconds.")}
+                let recoverySeconds=debugHeldScan ? 5.0:2.0
+                guard now-passiveFeedbackPauseStarted!<=recoverySeconds else {
+                    throw ROBArmRoutineError.blocked(detail+" Passive same-pose feedback did not recover within\(Int(recoverySeconds))seconds.")
+                }
                 throw ROBPassiveFeedbackPause(detail:detail+" Pausing nonactuating search for fresh unchanged feedback; no command admitted.")
             }
             passiveFeedbackPauseStarted=nil

@@ -167,7 +167,19 @@ final class ROBWorkspaceSearch {
    }
    try diagnostic.check()
   }
-  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=501;fatal(diagnostic,"motor_age_ms")
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=501
+  do{try diagnostic.check();preconditionFailure("Stationary DEBUG scan admitted501ms feedback")}catch is ROBPassiveFeedbackPause{}
+  let diagnosticRecovery=Task{@MainActor in
+   try await Task.sleep(nanoseconds:50_000_000);precondition(diagnostic.dispatches==0)
+   diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=10
+  }
+  try await diagnostic.accepted{diagnostic.dispatches+=1;diagnostic.acks[43]=true;return 43}
+  try await diagnosticRecovery.value
+  precondition(diagnostic.dispatches==1 && diagnostic.passiveFeedbackPauseStarted==nil)
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=501
+  diagnostic.passiveFeedbackPauseStarted=ProcessInfo.processInfo.systemUptime-5.01
+  fatal(diagnostic,"within5seconds")
+  diagnostic.passiveFeedbackPauseStarted=nil
   for side in ["left","right"] {
    diagnostic.gateway.samples[side]!.effectiveSampleAgeMilliseconds=398
    diagnostic.gateway.samples[side]!.effectiveGripperFeedbackAgeMilliseconds=398
@@ -223,6 +235,7 @@ final class ROBWorkspaceSearch {
   try await Task.sleep(nanoseconds:50_000_000);camera.vision.available=true;camera.vision.sequence=2
   for _ in 0..<20 {if completed{break};try await Task.sleep(nanoseconds:20_000_000)}
   precondition(completed && camera.prepared==1 && camera.vision.ensureCalls==1)
+  print("PASS DEBUG raised EMPTY stationary scan pauses501ms delivery with no dispatch, resumes only after fresh same-pose feedback, times out at5s; active lease/pose/mode/Stop remain strict")
   print("PASS stationary inactive/position holds accept350ms; complete actual local/nonlocal/active check; inactive age-only same-q/mode defers≤2s; q/mode/missing/active-age/timeout fatal; direct local Prepare enrolls then waits fresh; source expiry capped2; no hardware")
  }
 }
