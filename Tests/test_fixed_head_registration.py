@@ -14,7 +14,8 @@ from scipy.spatial.transform import Rotation
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'Cerebro/Resources/ShadowPlanner'))
-from fixed_head_registration import proper_fit, read_capture, register, stationary_gravity_initializer
+from fixed_head_registration import (balanced_surface_patch_indices, proper_fit,
+                                     read_capture, register, stationary_gravity_initializer)
 from markerless import MarkerlessEstimator
 
 
@@ -93,6 +94,40 @@ class FixedHeadRegistrationTests(unittest.TestCase):
         self.assertLess(np.max(np.abs(matrix-np.eye(4))),.01)
         # Exercise the exact interchange schema with the production Swift fitter.
         (self.root/'registration-input.json').write_text(json.dumps(output))
+
+    def test_patch_cap_preserves_sparse_torso_and_existing_split(self):
+        labels=np.array(['base_link']*97+['left_track_link']*9+
+                        ['right_track_link']*29+['torso_link']*13+['lean_link'])
+        available=np.arange(len(labels))
+        old=available[np.linspace(0,len(available)-1,100,dtype=int)]
+        self.assertLess(sum(labels[old]=='torso_link'),10)
+        selected=balanced_surface_patch_indices(available,labels,100)
+        self.assertEqual(len(selected),100)
+        self.assertEqual(len(np.unique(selected)),100)
+        self.assertEqual(sum(labels[selected]=='torso_link'),13)
+        self.assertTrue(set(selected).issubset(available))
+        held=available[::3]
+        chosen=balanced_surface_patch_indices(held,labels,25)
+        self.assertEqual(len(chosen),25)
+        self.assertTrue(set(chosen).issubset(held))
+
+    def test_actual_fit_keeps_rare_torso_support_when_base_dominates(self):
+        cells=np.floor(self.points/.03).astype(np.int64)
+        _,indices=np.unique(cells,axis=0,return_index=True)
+        indices.sort()
+        spatial=cells[indices]
+        partition=(spatial[:,0]*73856093^spatial[:,1]*19349663^spatial[:,2]*83492791)%3
+        training=indices[partition!=0]
+        torso=training[np.linspace(0,len(training)-1,13,dtype=int)]
+        self.labels[:]='base_link'
+        self.labels[torso]='torso_link'
+        output,report=self.fit()
+        self.assertFalse(report['registrationVerified'])
+        self.assertGreaterEqual(sum(s['landmarkID'].startswith('torso_link:') and
+                                   not s['validationOnly'] for s in output['samples']),8)
+        self.assertGreaterEqual(report['heldOutPatchCount'],6)
+        matrix=np.array(report['candidateCameraToRobotColumnMajor']).reshape((4,4),order='F')
+        self.assertLess(np.max(np.abs(matrix-np.eye(4))),.01)
 
     def imu_frames(self, gravity_rgb):
         frames=copy.deepcopy(self.frames)

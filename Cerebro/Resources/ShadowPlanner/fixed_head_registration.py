@@ -23,6 +23,37 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def balanced_surface_patch_indices(indices, labels, limit):
+    """Cap existing spatial patches without losing a sparsely visible link.
+
+    Link order in the CAD must not let a broad base surface crowd out the
+    torso before registration. Allocation changes only sampling: it adds no
+    references and never moves a withheld patch into the training set.
+    """
+    if len(indices) <= limit:
+        return indices.copy()
+    groups = [indices[labels[indices] == name] for name in np.unique(labels[indices])]
+    proportional = indices[np.linspace(0, len(indices) - 1, limit, dtype=int)]
+    # Keep the established sampling when it already retains the ten patches
+    # per reference needed by acquisition. Rebalance only a crowded-out part.
+    minimum = min(10, limit // len(groups))
+    if all(np.count_nonzero(np.isin(proportional, group)) >= min(minimum, len(group))
+           for group in groups):
+        return proportional
+    counts = [0] * len(groups)
+    remaining = limit
+    while remaining:
+        for i, group in enumerate(groups):
+            if counts[i] < len(group):
+                counts[i] += 1
+                remaining -= 1
+                if not remaining:
+                    break
+    selected = [group[np.linspace(0, len(group) - 1, count, dtype=int)]
+                for group, count in zip(groups, counts) if count]
+    return np.sort(np.concatenate(selected))
+
+
 def finite_array(value, shape, name):
     result = np.asarray(value, dtype=float)
     if result.shape != shape or not np.isfinite(result).all():
@@ -217,12 +248,10 @@ def register(document, root, planner=None, monotonic=time.monotonic):
     patch = (cells[:, 0] * 73856093 ^ cells[:, 1] * 19349663 ^ cells[:, 2] * 83492791) % 3
     train = np.flatnonzero(patch != 0)
     held = np.flatnonzero(patch == 0)
-    if len(train) > 100:
-        train = train[np.linspace(0, len(train) - 1, 100, dtype=int)]
+    train = balanced_surface_patch_indices(train, labels, 100)
     if len(held):
         held = held[cKDTree(points[train]).query(points[held])[0] >= .02]
-    if len(held) > 50:
-        held = held[np.linspace(0, len(held) - 1, 50, dtype=int)]
+    held = balanced_surface_patch_indices(held, labels, 50)
     if len(train) < 40 or len(held) < 15:
         raise ValueError(f"Known robot surfaces need more spatially separated fit and held-out patches: {len(train)} fit / {len(held)} held-out, 40 / 15 required")
     if (sum(labels[train] == "torso_link") < 10
