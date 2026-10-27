@@ -279,6 +279,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     @nonobjc private var localReceiptModel: ROBGhostRobotModel?
     private var localReceiptCameraTimer: Timer?
     @nonobjc private var activeLocalRetreat: ROBWorkspaceInitialEmptyRetreat?
+    @nonobjc private var activeStagedEmptyLift:ROBWorkspaceStagedEmptyLift?
+    @nonobjc private var activeStagedEmptyLiftSegment=0
     @nonobjc private var activeNominalRetreat: ROBWorkspaceNominalEmptyCommissioningRetreat?
     @nonobjc var nominalEmptyCommissioningStepEnabled = false
     @nonobjc var nominalModelAssumedSelfEnabled = false
@@ -994,7 +996,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let batch = requestedCanCount > 1 && command == "left_recycle_can"
             ? " \(requestedCanCount) empty cans, sequentially: fresh perception, collision review and visual grasp check for each. A failed or uncertain grasp stops the batch in a hold; no blind next-can retry. One approval covers all \(requestedCanCount) complete transfers." : ""
         let recyclingSummary = localReceiptOnly
-            ? "Tonight's \(requestedCanCount) empty Coke cans to the orange bucket, physical \(physicalSide.uppercased()) arm. Use best-available unmeasured alignment as an operator visual-calibration trial, with assumed spatial allowance \(localVisualTrialAssumedSpatialErrorMeters*1000) mm. For physical RIGHT, first check and execute the empty ready connector against current workspace geometry without requiring a can or bucket detection. Then find the nearest reachable confirmed can from the measured hold; open before approach, close gently and validate the short lift in fresh camera frames before carrying or gravity release. Check the entire arm, open jaws and payload against observed obstacles/free space; unknown space and initial model overlaps may still block. Both arms may hold their current positions. No blind parking, treads, torso, encoder reset, force escalation or blind retries. One exact local user-session receipt covers \(requestedCanCount) transfers within600seconds. Stop/fresh feedback/ownership/limits remain active. No measured registration, grasp or landing success is implied."
+            ? "Tonight's \(requestedCanCount) empty Coke cans to the orange bucket, physical \(physicalSide.uppercased()) arm. Use best-available unmeasured alignment as an operator visual-calibration trial, with assumed spatial allowance \(localVisualTrialAssumedSpatialErrorMeters*1000) mm. For physical RIGHT at hanging, first check the complete J2/J4 vertical lift, J1 rearward move and raised approach against current workspace geometry without requiring a can or bucket detection. Preserve an already referenced raised pose. Then find the nearest reachable confirmed can from the measured hold; open before approach, close gently and validate the short lift in fresh camera frames before carrying or gravity release. Check the entire arm, open jaws and payload against observed obstacles/free space; unknown space and initial model overlaps may still block. Both arms may hold their current positions. No blind parking, treads, torso, encoder reset, force escalation or blind retries. One exact local user-session receipt covers \(requestedCanCount) transfers within600seconds. Stop/fresh feedback/ownership/limits remain active. No measured registration, grasp or landing success is implied."
             : action + batch + notice + bothHolds + current + (workspace ? " Maximum 600 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
         let nominalSummary=localReceiptOnly && nominalEmptyCommissioningStepEnabled
             ? "ONE NOMINAL EMPTY physical RIGHT-arm commissioning experiment only: fresh measured q0 to J2 minus0.075rad over4seconds, at most6cm full-hull travel and0.20rad per joint. No jaw command, grasp, payload, carry, release, automatic return or chained can attempt. Both arms may hold their measured positions. Watch the arm in the actual recorded RIGHT camera view. Exact raw-return bounds are checked for nominal no-contact; unknown space is admitted ONLY in the recorded local swept regions. Current robot occupancy is assumed from the model; this is a geometric assumption, not sensor classification or removal of raw returns. Modeled millimeter-scale gaps are much smaller than the explicitly ASSUMED35mm camera uncertainty: this is NOT certified collision protection and physical contact remains possible. Stop, ownership, current limits, fresh motor/gripper feedback, source/body/profile identity and exact receipt remain required. After this ONE step, measure the endpoint and hold, report partial with ZERO recycled cans; the \(requestedCanCount)-can job remains unfinished. Empty state is assumed from startup/task history, not sensed possession."
@@ -1484,6 +1486,26 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             }
             return
         }
+        if let lift=activeStagedEmptyLift {
+            guard activeCommand=="left_recycle_can",localReceiptCommand != nil,physicalSide=="right",
+                  let map=collisionMap,let model=collisionModel,let trial=lift.context.visualTrial,
+                  ROBWorkspaceSearch.shared.collisionSnapshot?.fingerprint==map.fingerprint,
+                  map.fingerprint==lift.context.mapFingerprint,let path=proposal,path.kind=="staged_empty_lift",
+                  path.baseline==lift.baseline,path.steps==lift.steps,lift.steps.indices.contains(activeStagedEmptyLiftSegment),
+                  !jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched,!servoPossiblePayloadUncertain else {
+                throw ROBArmRoutineError.blocked("The staged EMPTY lift lost its frozen route, empty state or current scene.")
+            }
+            try requireLiveVisualTrial(trial,map:map,model:model)
+            let index=activeStagedEmptyLiftSegment,start=index==0 ? lift.baseline:lift.steps[index-1].positions
+            let goal=lift.steps[index].positions,q=try measured().positionsRadians.map(\.doubleValue),delta=zip(start,goal).map{$1-$0}
+            let length=delta.reduce(0.0){$0+$1*$1}
+            let fraction=length>0 ? min(1,max(0,zip(zip(q,start),delta).reduce(0.0){$0+($1.0.0-$1.0.1)*$1.1}/length)):0
+            let nearest=zip(start,delta).map{$0+fraction*$1}
+            guard q.count==7,1.5*zip(q,nearest).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+                throw ROBArmRoutineError.blocked("The actual arm left the staged EMPTY lift corridor.")
+            }
+            return
+        }
         if let retreat=activeLocalRetreat {
             guard activeCommand=="left_recycle_can",localReceiptCommand != nil,
                   let map=collisionMap,let model=collisionModel,let trial=retreat.context.visualTrial,
@@ -1906,6 +1928,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let settledSince=ProcessInfo.processInfo.systemUptime
         try await wait(8){search.viewReady?(pan,upper)==true && self.vision.fresh &&
             ROBArmRoutineCoordinator.shared.viewIsStationary?()==true && ProcessInfo.processInfo.systemUptime-settledSince>=1.5}
+        let heldNeck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+        guard heldNeck["known"]as?Bool==true,heldNeck["stationary"]as?Bool==true,
+              let heldPan=heldNeck["pan"]as?Int,let heldLower=heldNeck["lower"]as?Int,
+              heldNeck["upper"]as?Int==upper else {
+            throw ROBArmRoutineError.blocked("The calibration camera has no known stationary raw neck hold.")
+        }
         guard let pid=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model) else {throw ROBArmRoutineError.blocked("No current physical camera projection for this empty calibration experiment.")}
         let camera=vision.cameraGeneration,body=ROBFixedHeadBodyMotionIdentity.currentIdentity,session=generation
         if usesFixedCommissioningKeyframes {
@@ -1940,7 +1968,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             }
             let controller=ROBFixedHeadCalibrationWindowController.shared,scope=try controller.scope(model:model,frame:frame)
             let neck=controller.readNeck?() ?? [:]
-            guard scope.lowerTarget==6011,scope.upperTarget==upper,scope.gatewaySessionGeneration==session,
+            // Workspace search bends the lower neck over the shoulder. Bind
+            // its actual settled pose rather than the obsolete upright6011.
+            guard scope.panTarget==heldPan,scope.lowerTarget==heldLower,scope.upperTarget==upper,scope.gatewaySessionGeneration==session,
                   ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,actualFrame:.init(cameraGeneration:frame.cameraGeneration,
                 actualDeviceMXID:frame.intrinsics?.runtimeCalibration?.actualDeviceMXID,
                 runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
@@ -2844,9 +2874,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
-    /// One task-local EMPTY preparation, before any object detector or target
-    /// localization. The existing full-arm workspace proof remains mandatory;
-    /// a named ready endpoint is never permission to replay a taught sweep.
+    /// One task-local EMPTY preparation from the actual measured pose. A
+    /// historical front/ready endpoint is not a prerequisite for acquisition.
+    /// Any initial lift retains the complete current workspace proof.
     @MainActor private func prepareRecyclingBeforeTargetSearch(model:ROBGhostRobotModel) async throws -> NSDictionary? {
         guard localReceiptCommand != nil,physicalSide == "right",!activeApproachCanThenHold,!recyclingReadyEstablished else {return nil}
         _ = try requireLocalReceipt()
@@ -2861,40 +2891,28 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             throw ROBArmRoutineError.blocked("Empty preparation needs the current joint reference; no blind return or encoder reset.")
         }
         phase="empty preparation: workspace clearance"
-        update("Checking the empty-arm ready path against the table and workspace before searching for cans")
+        update("Checking a J2/J4 empty lift from the current arm pose before searching for cans")
         try await beginHeldSceneObservation()
         try await ensureCollisionScene(model:model)
         guard let map=collisionMap else {throw ROBArmRoutineError.blocked("Empty preparation has no current workspace map.")}
-        let retreated=try await performInitialLocalRetreatIfNeeded(map:map,model:model)
+        let retreated:Bool
+        if activeHoldAfterInitialEmptyLift {retreated=try await performInitialLocalRetreatIfNeeded(map:map,model:model)}
+        else {retreated=try await performStagedEmptyLiftIfNeeded(map:map,model:model)}
         if activeHoldAfterInitialEmptyLift {return try initialEmptyLiftHoldResult(performed:retreated)}
-        if retreated {
-            // The first retreat invalidates its old pose/map. Rebuild from
-            // fresh held feedback and raw depth before the ready connector.
-            try await ensureCollisionScene(model:model)
-        }
-        let goal=model.recyclingFrontTarget
-        let connector=try await workspaceConnector(to:goal,name:"Empty-arm ready path before target acquisition")
-        guard connector.steps.allSatisfy({$0.jawAction == nil}),collisionMap != nil else {
-            throw ROBArmRoutineError.blocked("Ready preparation must contain only the reviewed empty-arm connector.")
-        }
-        let previous=proposal;proposal=connector
-        defer {proposal=previous;proposalStep = -1}
+        // The can approach starts at this measured endpoint. Do not insert
+        // the old table-free front pose, an unrelated J1 sweep, or jaw action.
         referencedGeneration=generation
-        inactiveWorkspaceSearch=false
-        try await prepareCameraAndMode(stationaryJaw:false)
-        phase="empty preparation: moving to ready"
-        update("Moving the empty arm along its checked ready path; target tracking starts after the measured hold")
-        try await move(connector)
-        try await holdTaskPosition(goal)
         try check()
-        guard ROBArmRoutinePlan.near(try measured().positionsRadians.map(\.doubleValue),goal,tolerance:0.015),
+        let endpoint=try measured().positionsRadians.map(\.doubleValue)
+        guard endpoint.count==7,endpoint.allSatisfy(\.isFinite),
+              retreated || ROBArmRoutinePlan.near(endpoint,start,tolerance:0.015),
               !jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched,!servoPossiblePayloadUncertain else {
-            throw ROBArmRoutineError.blocked("Ready endpoint or empty preparation scope was not confirmed; holding.")
+            throw ROBArmRoutineError.blocked("The current empty-arm preparation endpoint was not confirmed; holding.")
         }
         recyclingReadyEstablished=true
         taskJawTarget=nil;cameraReady=false;positionReady=false
         collisionMap=nil;collisionModel=nil;collisionReviewProposal=nil;sceneCapturedForThisTask=false;localReceiptHeldNeckIdentity=nil
-        update("Empty arm is measured at ready; acquiring fresh can and bucket positions for the grasp")
+        update("Acquiring fresh can and bucket positions from the current measured arm pose")
         return nil
     }
 
@@ -3134,6 +3152,106 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             try await Task.sleep(nanoseconds:20_000_000)
         }
         throw reject("fresh_post_ready_frame_timeout","No NEW actual fresh RGB-D frame reached the unchanged empty preflight within two seconds; no travel sent.")
+    }
+
+    @MainActor private func performStagedEmptyLiftIfNeeded(map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) async throws->Bool {
+        let sample=try measured(),baseline=sample.positionsRadians.map(\.doubleValue)
+        guard ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) else {return false}
+        guard map.registrationID==nil else {return false}
+        guard localReceiptCommand != nil,physicalSide=="right",!armTravelDispatched,!jawCommandDispatched,
+              !jawSetupDispatchUncertain,!recyclingGripDispatched,!servoPossiblePayloadUncertain,
+              let trial=try visualTrial(map:map,model:model,baseline:baseline),let frame=vision.snapshot()["face"] else {
+            throw ROBArmRoutineError.blocked("The staged lift needs a current first-attempt empty can task and camera.")
+        }
+        let session=generation,camera=vision.cameraGeneration,now=Date().timeIntervalSince1970*1000
+        let measuredAt=now-sample.effectiveSampleAgeMilliseconds,sequence=sample.sequence
+        let reference=try initialEmptyViewReference(frame),recording=URL(fileURLWithPath:lastRecordingPath)
+        let geometry=try ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline)
+        let path=ROBLeftGestureProposal(id:UUID(),name:"J2/J4 lift, rearward J1, raised approach",kind:"staged_empty_lift",
+            modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+            sessionGeneration:session,baseline:baseline,poses:[],steps:geometry.steps)
+        collisionReviewProposal=path
+        publishCollisionReview(map:map,detail:"Relative staged lift geometry is available for read-only preview; clearance review is pending.")
+        let previewFile=recording.deletingPathExtension().appendingPathExtension("staged-empty-lift-preview.json")
+        try path.encoded().write(to:previewFile,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:previewFile.path)
+        phase="J2/J4 and rearward J1 lift review"
+        update("Checking the complete vertical J2/J4, rearward J1 and raised-gripper path")
+        let proof:ROBWorkspaceStagedEmptyLift
+        do {
+            proof=try await Task.detached(priority:.userInitiated) {
+                try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:baseline,map:map,model:model,generation:session,
+                    sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial,measuredAtMilliseconds:measuredAt,
+                    emptyTrialEligibility:true,emptyStateEvidenceSource:"local_first_attempt_no_arm_travel_or_task_grip")
+            }.value
+        }catch {
+            let detail=error.localizedDescription
+            publishCollisionReview(map:map,detail:detail,blocked:true)
+            _=try? await Task.detached(priority:.utility) {
+                let geometry=try ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline)
+                return try ROBInitialRetreatFailureExport.write(recording:recording,map:map,model:model,baseline:baseline,
+                    goal:geometry.steps.last!.positions,trial:trial,stage:"staged_empty_lift_before_position_mode",
+                    reviewTimeMilliseconds:now,measuredAtMilliseconds:measuredAt,sequence:sequence,detail:detail)
+            }.value
+            throw error
+        }
+        try check()
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys,.prettyPrinted]
+        let evidence=recording.deletingPathExtension().appendingPathExtension("staged-empty-lift.json")
+        try encoder.encode(proof).write(to:evidence,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:evidence.path)
+        try await refreshInitialEmptyDispatchView(map:map,model:model,trial:trial,baseline:baseline,reference:reference)
+        guard path.steps==proof.steps else {throw ROBArmRoutineError.blocked("The staged lift changed during clearance review.")}
+        activeStagedEmptyLift=proof;activeStagedEmptyLiftSegment=0;proposal=path;collisionReviewProposal=path
+        defer {activeStagedEmptyLift=nil;activeStagedEmptyLiftSegment=0;proposal=nil;proposalStep = -1;reviewedDispatchStart=nil}
+        inactiveWorkspaceSearch=false
+        try await prepareCameraAndMode(stationaryJaw:false)
+        sentPath=[baseline]
+        for (index,step) in proof.steps.enumerated() {
+            activeStagedEmptyLiftSegment=index
+            try check();try checkCollisionContext()
+            let actual=try measured(),q=actual.positionsRadians.map(\.doubleValue),reviewTime=Date().timeIntervalSince1970*1000
+            let segmentTrial=Self.rebasedVisualTrial(trial,baseline:q),sampleTime=reviewTime-actual.effectiveSampleAgeMilliseconds
+            try await Task.detached(priority:.userInitiated) {
+                try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(proof,index:index,from:q,map:map,model:model,
+                    generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:reviewTime,
+                    trial:segmentTrial,measuredAtMilliseconds:sampleTime)
+            }.value
+            try check();try checkCollisionContext();try requireLiveVisualTrial(trial,map:map,model:model)
+            let dispatch=ROBReviewedArmDispatchStart(proposalID:path.id,index:index,generation:session,mapFingerprint:map.fingerprint,
+                positions:q,sequence:actual.sequence,reviewCompletedAtUptime:ProcessInfo.processInfo.systemUptime)
+            let admission=try measured()
+            guard dispatch.matches(proposalID:path.id,index:index,generation:session,mapFingerprint:map.fingerprint,
+                positions:admission.positionsRadians.map(\.doubleValue),sequence:admission.sequence,nowUptime:ProcessInfo.processInfo.systemUptime) else {
+                throw ROBArmRoutineError.blocked("The actual staged-lift start changed after review; no next step sent.")
+            }
+            proposalStep=index;phase=step.stage ?? "Staged empty lift";update("\(phase): \(index+1)/\(proof.steps.count)")
+            reviewedDispatchStart=dispatch;armTravelDispatched=true;sentPath.append(step.positions)
+            try await accepted {gateway.sendApprovedLeftGestureStep(proposalID:path.id,index:index,duration:step.seconds,expectedSessionGeneration:session)}
+            reviewedDispatchStart=nil;leased=true;lastRenewal=ProcessInfo.processInfo.systemUptime
+            let began=ProcessInfo.processInfo.systemUptime;var settler=ROBArmRoutineSettler()
+            try await wait(step.seconds+3) {
+                guard let sample=try?self.measured() else{return false}
+                let positions=sample.positionsRadians.map(\.doubleValue)
+                // A small segment can fit entirely inside the ordinary
+                // settler tolerance. Reach the next segment's3mm start bound
+                // in distinct stable packets before advancing the route.
+                guard 1.5*zip(positions,step.positions).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+                    settler=ROBArmRoutineSettler();return false
+                }
+                return settler.observe(sequence:sample.sequence,positions:positions,target:step.positions,
+                    now:ProcessInfo.processInfo.systemUptime) && ProcessInfo.processInfo.systemUptime-began>=step.seconds
+            }
+        }
+        guard let endpoint=proof.steps.last?.positions else {throw ROBArmRoutineError.blocked("The staged lift has no endpoint.")}
+        try await holdTaskPosition(endpoint)
+        let actual=try measured().positionsRadians.map(\.doubleValue)
+        guard 1.5*zip(actual,endpoint).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+            throw ROBArmRoutineError.blocked("The raised empty endpoint was not reached; holding.")
+        }
+        referencedGeneration=session
+        update("The staged empty lift is held; acquiring current can and bucket positions")
+        return true
     }
 
     @MainActor private func performInitialLocalRetreatIfNeeded(map initialMap:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) async throws ->Bool {

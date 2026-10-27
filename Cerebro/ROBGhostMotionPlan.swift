@@ -278,6 +278,114 @@ final class ROBGhostRobotModel {
     }
 }
 
+/// Relative EMPTY preparation geometry. This has no scene-clearance or motion
+/// authority: the caller must review every full-arm segment against live depth.
+struct ROBEmptyArmLiftGeometry {
+    let baseline:[Double]
+    let steps:[ROBLeftGestureProposal.Step]
+    let initialTip:SIMD3<Double>,liftedTip:SIMD3<Double>,rearwardTip:SIMD3<Double>,finalTip:SIMD3<Double>
+    let maximumInitialHorizontalTravelMeters:Double
+
+    static func make(model:ROBGhostRobotModel,baseline:[Double],initialRise:Double=0.06,
+        rearwardDistance:Double=0.10,remainingRise:Double=0.10)throws->Self {
+        guard model.physicalSide=="right",baseline.count==7,baseline.allSatisfy(\.isFinite),
+              initialRise.isFinite,(0.02...0.08).contains(initialRise),
+              rearwardDistance.isFinite,(0.05...0.15).contains(rearwardDistance),
+              remainingRise.isFinite,(0.03...0.15).contains(remainingRise) else {
+            throw ROBGhostMotionError.blocked("Staged empty lift needs a finite current RIGHT pose and bounded relative distances.")
+        }
+        let limits=ROBWorkspaceCollisionPlan.jointBounds(model:model)
+        guard zip(baseline,limits).allSatisfy({$1.contains($0)}) else {
+            throw ROBGhostMotionError.blocked("The current empty-lift pose is outside model or motor limits.")
+        }
+        func tip(_ q:[Double])throws->SIMD3<Double> {
+            guard let value=model.toolPosition(model.positions(vendorLeft:q)),
+                  [value.x,value.y,value.z].allSatisfy(\.isFinite) else {
+                throw ROBGhostMotionError.blocked("The staged empty lift lost its model tool frame.")
+            }
+            return value
+        }
+        var q=baseline,steps:[ROBLeftGestureProposal.Step]=[],maximumInitialHorizontal=0.0
+        let initial=try tip(q)
+        func append(_ target:[Double],stage:String,origin:SIMD3<Double>,horizontalLimit:Double,
+                    vertical:Bool,initialStage:Bool=false)throws {
+            let previous=try tip(q)
+            // Check the interpolated joint path, not only the solved endpoint.
+            // Physical table/self clearance is checked separately on all hulls.
+            for index in 1...20 {
+                let fraction=Double(index)/20,probe=zip(q,target).map{$0+($1-$0)*fraction}
+                let point=try tip(probe),horizontal=hypot(point.x-origin.x,point.y-origin.y)
+                if vertical {
+                    guard horizontal<=horizontalLimit,point.z>=previous.z-0.0005 else {
+                        throw ROBGhostMotionError.blocked("The coupled J2/J4 lift would sweep too far horizontally or descend.")
+                    }
+                    if initialStage {maximumInitialHorizontal=max(maximumInitialHorizontal,horizontal)}
+                }else {
+                    guard point.x<=previous.x+0.0005,point.z>=origin.z-0.002,abs(point.y-origin.y)<=0.02 else {
+                        throw ROBGhostMotionError.blocked("The J1 clearance stage would move forward, descend or sweep sideways.")
+                    }
+                }
+            }
+            guard zip(target,limits).allSatisfy({$1.contains($0)}),
+                  let minimum=ROBLeftArmInteractionPlan.duration(from:q,to:target),minimum<=5 else {
+                throw ROBGhostMotionError.blocked("The staged empty lift exceeds joint or trajectory limits.")
+            }
+            steps.append(.init(positions:target,seconds:max(0.8,minimum),stage:stage));q=target
+        }
+        func vertical(_ rise:Double,stage:String,horizontalLimit:Double,initialStage:Bool=false)throws {
+            let origin=try tip(q),count=Int(ceil(rise/0.015))
+            for segment in 1...count {
+                let targetY=origin.y,targetZ=origin.z+rise*Double(segment)/Double(count)
+                var target=q,solved=false
+                for _ in 0..<60 {
+                    let point=try tip(target),error=SIMD2(targetY-point.y,targetZ-point.z)
+                    if simd_length(error)<=0.0002 {solved=true;break}
+                    var a=target,b=target;a[1]+=0.0001;b[3]+=0.0001
+                    let pa=try tip(a),pb=try tip(b)
+                    let j2=SIMD2((pa.y-point.y)/0.0001,(pa.z-point.z)/0.0001)
+                    let j4=SIMD2((pb.y-point.y)/0.0001,(pb.z-point.z)/0.0001)
+                    let aa=simd_dot(j2,j2)+1e-7,bb=simd_dot(j4,j4)+1e-7,ab=simd_dot(j2,j4)
+                    let determinant=aa*bb-ab*ab
+                    guard determinant.isFinite,determinant>1e-12 else {break}
+                    let ea=simd_dot(j2,error),eb=simd_dot(j4,error)
+                    let d2=(ea*bb-eb*ab)/determinant,d4=(eb*aa-ea*ab)/determinant
+                    let scale=min(1,0.06/max(0.000001,max(abs(d2),abs(d4))))
+                    target[1]=max(limits[1].lowerBound,min(limits[1].upperBound,target[1]+scale*d2))
+                    target[3]=max(limits[3].lowerBound,min(limits[3].upperBound,target[3]+scale*d4))
+                }
+                guard solved else {throw ROBGhostMotionError.blocked("J2/J4 cannot reach this relative vertical lift within current joint limits.")}
+                try append(target,stage:stage,origin:origin,horizontalLimit:horizontalLimit,vertical:true,initialStage:initialStage)
+            }
+        }
+        try vertical(initialRise,stage:"J2/J4 vertical lift",horizontalLimit:0.003,initialStage:true)
+        let lifted=try tip(q),rearwardSegments=Int(ceil(rearwardDistance/0.02))
+        for segment in 1...rearwardSegments {
+            let targetX=lifted.x-rearwardDistance*Double(segment)/Double(rearwardSegments)
+            var target=q,solved=false
+            for _ in 0..<60 {
+                let point=try tip(target),error=targetX-point.x
+                if abs(error)<=0.0002 {solved=true;break}
+                var shifted=target;shifted[0]+=0.0001
+                let derivative=((try tip(shifted)).x-point.x)/0.0001
+                guard derivative.isFinite,abs(derivative)>0.05 else {break}
+                let delta=max(-0.06,min(0.06,error/derivative))
+                target[0]=max(limits[0].lowerBound,min(limits[0].upperBound,target[0]+delta))
+            }
+            guard solved else {throw ROBGhostMotionError.blocked("J1 cannot reach the rearward clearance target within current joint limits.")}
+            try append(target,stage:"J1 rearward clearance",origin:lifted,horizontalLimit:0,vertical:false)
+        }
+        let rearward=try tip(q)
+        try vertical(remainingRise,stage:"J2/J4 raised approach",horizontalLimit:0.04)
+        let final=try tip(q)
+        guard final.x<=initial.x-0.04,final.z>=initial.z+initialRise+remainingRise-0.001,
+              !steps.isEmpty,steps.count<=30,steps.reduce(0,{$0+$1.seconds})<=60 else {
+            throw ROBGhostMotionError.blocked("The staged lift did not retain its rearward clearance and raised endpoint.")
+        }
+        return .init(baseline:baseline,steps:steps,initialTip:initial,liftedTip:lifted,rearwardTip:rearward,finalTip:final,
+            maximumInitialHorizontalTravelMeters:maximumInitialHorizontal)
+    }
+}
+
 struct ROBGhostGesture: Codable, Equatable {
     var name: String
     var poses: [[String: Double]]

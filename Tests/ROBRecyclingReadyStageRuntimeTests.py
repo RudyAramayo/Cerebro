@@ -14,7 +14,7 @@ fixture=r'''
 import Foundation
 enum ROBArmRoutineError:Error {case blocked(String)}
 enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double],tolerance:Double=0.08)->Bool {a.count==7 && b.count==7 && zip(a,b).allSatisfy{abs($0-$1)<=tolerance}}}
-struct ROBGhostRobotModel {let recyclingFrontTarget=[1.05,-0.60,0,0,0,0,0]}
+struct ROBGhostRobotModel {}
 struct Map {}
 struct Step {let positions:[Double];var jawAction:String?=nil}
 struct Proposal {let baseline:[Double];let steps:[Step]}
@@ -32,7 +32,8 @@ struct Sample {let positionsRadians:[NSNumber]}
  func update(_ text:String){}
  func beginHeldSceneObservation()async throws{events.append("held observation");inactiveWorkspaceSearch=true}
  func ensureCollisionScene(model:ROBGhostRobotModel)async throws{events.append("workspace");if failureAt=="map"{throw ROBArmRoutineError.blocked("source/table map")};collisionMap=Map()}
- func performInitialLocalRetreatIfNeeded(map:Map,model:ROBGhostRobotModel)async throws->Bool{events.append("review retreat");if failureAt=="retreat"{throw ROBArmRoutineError.blocked("occupied retreat")};if retreat{q[1] -= 0.075;armTravelDispatched=true;referencedGeneration=generation;collisionMap=nil};return retreat}
+ func performInitialLocalRetreatIfNeeded(map:Map,model:ROBGhostRobotModel)async throws->Bool{events.append("review retreat");if failureAt=="retreat"{throw ROBArmRoutineError.blocked("occupied retreat")};if retreat{q[1] -= 0.075;q[3] -= 0.06;armTravelDispatched=true;referencedGeneration=generation;collisionMap=nil;if stopAfterMove{failureAt="stop"}};if failureAt=="endpoint"{q[0]+=0.1};if failureAt=="possession"{servoPossiblePayloadUncertain=true};return retreat}
+ func performStagedEmptyLiftIfNeeded(map:Map,model:ROBGhostRobotModel)async throws->Bool{events.append("staged path");return try await performInitialLocalRetreatIfNeeded(map:map,model:model)}
  func initialEmptyLiftHoldResult(performed:Bool)throws->NSDictionary{events.append("lift only hold");return ["performed":performed]}
  func workspaceConnector(to goal:[Double],name:String)async throws->Proposal{events.append("plan ready");if failureAt=="connector"{throw ROBArmRoutineError.blocked("table collision")};return .init(baseline:q,steps:[.init(positions:goal,jawAction:failureAt=="jaw in path" ? "close":nil)])}
  func bindApproachHumanPath(baseline:[Double],route:[[Double]],map:Map,model:ROBGhostRobotModel)async throws{events.append("bind corridor");if failureAt=="corridor"{throw ROBArmRoutineError.blocked("route obstruction")}}
@@ -45,19 +46,19 @@ struct Sample {let positionsRadians:[NSNumber]}
 @main enum Test {
  @MainActor static func main()async throws {
   let normal=Trial();try await normal.task()
-  precondition(normal.events==["held observation","workspace","review retreat","plan ready","mode","move","hold","target search"])
+  precondition(normal.events==["held observation","workspace","staged path","review retreat","target search"])
   precondition(normal.recyclingReadyEstablished && normal.collisionMap==nil && !normal.cameraReady && !normal.positionReady && normal.proposal==nil)
-  try await normal.task();precondition(normal.events.filter{$0=="move"}.count==1,"Later can replayed empty startup")
+  try await normal.task();precondition(!normal.events.contains("move") && !normal.events.contains("plan ready"),"A historical ready endpoint was inserted")
   let outward=Trial();outward.retreat=true;try await outward.task()
-  precondition(outward.events.filter{$0=="workspace"}.count==2 && outward.events.last=="target search","Retreat reused an old map or required a can")
-  for failure in ["receipt","feedback","stop","map","retreat","connector","jaw in path","mode","dispatch","endpoint","possession"] {
+  precondition(outward.events.filter{$0=="workspace"}.count==1 && outward.events.last=="target search" && outward.collisionMap==nil && outward.q[3] != 0,"Lift endpoint was replaced or old map survived")
+  for failure in ["receipt","feedback","stop","map","retreat","endpoint","possession"] {
    let t=Trial();t.failureAt=failure
    do {try await t.task();preconditionFailure("Rejected preparation continued: \(failure)")}catch{}
    precondition(!t.events.contains("target search") && !t.recyclingReadyEstablished)
    if ["receipt","feedback","stop","map","retreat","connector","jaw in path","mode"].contains(failure){precondition(!t.armTravelDispatched)}
    precondition(t.proposal==nil && !t.jawCommandDispatched)
   }
-  let stopped=Trial();stopped.stopAfterMove=true
+  let stopped=Trial();stopped.retreat=true;stopped.stopAfterMove=true
   do {try await stopped.task();preconditionFailure()}catch{}
   precondition(!stopped.events.contains("target search") && !stopped.recyclingReadyEstablished)
   for payload in [0,1,2,3] {
@@ -69,7 +70,9 @@ struct Sample {let positionsRadians:[NSNumber]}
   let approach=Trial();approach.activeApproachCanThenHold=true;try await approach.task();precondition(approach.events==["target search"])
   let left=Trial();left.physicalSide="left";try await left.task();precondition(left.events==["target search"])
   let ordinary=Trial();ordinary.localReceiptCommand=nil;try await ordinary.task();precondition(ordinary.events==["target search"])
-  print("Ready-stage runtime fixtures passed; no hardware linked")
+  let held=Trial();held.q[0]=0.3;held.referencedGeneration=held.generation;try await held.task()
+  precondition(held.q[0]==0.3 && !held.events.contains("plan ready") && !held.events.contains("move"),"Referenced current pose was sent to a preset")
+  print("Current-pose preparation passed: no historical ready endpoint; complete staged lift selected before targets; checked J2/J4 endpoint preserved; new target map required; receipt/feedback/Stop/pose/payload checks retained; no hardware")
  }
 }
 '''.replace('/* ACTUAL */',method)

@@ -235,6 +235,22 @@ struct ROBEstimatedConvexHull {
     /// a conservative surface-gap lower bound. Face normals and edge-cross
     /// axes test actual hulls rather than rotated bounding-box overlap.
     func signedSeparation(to other:Self,frame:simd_double4x4,otherFrame:simd_double4x4) throws ->Double {
+        try separationWitness(to:other,frame:frame,otherFrame:otherFrame).gap
+    }
+
+    func supportPlaneGap(to other:Self,frame:simd_double4x4,otherFrame:simd_double4x4,axis:SIMD3<Double>)throws->Double {
+        guard [axis.x,axis.y,axis.z].allSatisfy(\.isFinite),abs(simd_length(axis)-1)<1e-8 else {
+            throw ROBGhostMotionError.blocked("A self-clearance support plane is invalid.")
+        }
+        var lowA=Double.infinity,highA = -Double.infinity,lowB=Double.infinity,highB = -Double.infinity
+        for p in vertices {let v=frame*SIMD4(p,1),d=v.x*axis.x+v.y*axis.y+v.z*axis.z;lowA=min(lowA,d);highA=max(highA,d)}
+        for p in other.vertices {let v=otherFrame*SIMD4(p,1),d=v.x*axis.x+v.y*axis.y+v.z*axis.z;lowB=min(lowB,d);highB=max(highB,d)}
+        let gap=max(lowA-highB,lowB-highA)
+        guard gap.isFinite else {throw ROBGhostMotionError.blocked("A self-clearance support gap is nonfinite.")}
+        return gap
+    }
+
+    func separationWitness(to other:Self,frame:simd_double4x4,otherFrame:simd_double4x4)throws->(gap:Double,axis:SIMD3<Double>) {
         func vector(_ frame:simd_double4x4,_ v:SIMD3<Double>)->SIMD3<Double> {
             let p=frame*SIMD4(v,0);return SIMD3(p.x,p.y,p.z)
         }
@@ -262,7 +278,7 @@ struct ROBEstimatedConvexHull {
         // otherwise made a single proof outlive its fresh depth evidence.
         let signed=a.withUnsafeBufferPointer { ap in b.withUnsafeBufferPointer { bp in
             axes.withUnsafeBufferPointer { directions in
-                var result = -Double.infinity,axisIndex=0
+                var result = -Double.infinity,axisIndex=0,bestAxis=SIMD3<Double>.zero
                 while axisIndex<directions.count {
                     let n=directions[axisIndex]
                     var lowA=Double.infinity,highA = -Double.infinity,lowB=Double.infinity,highB = -Double.infinity
@@ -271,12 +287,12 @@ struct ROBEstimatedConvexHull {
                     i=0
                     while i<bp.count {let p=bp[i],v=p.x*n.x+p.y*n.y+p.z*n.z;if v<lowB {lowB=v};if v>highB {highB=v};i+=1}
                     let gap=max(lowA-highB,lowB-highA)
-                    if gap>result {result=gap};axisIndex+=1
+                    if gap>result {result=gap;bestAxis=n};axisIndex+=1
                 }
-                return result
+                return (gap:result,axis:bestAxis)
             }
         }}
-        guard signed.isFinite else{throw ROBGhostMotionError.blocked("The estimated convex-hull separation is nonfinite.")}
+        guard signed.gap.isFinite else{throw ROBGhostMotionError.blocked("The estimated convex-hull separation is nonfinite.")}
         return signed
     }
 
@@ -306,6 +322,7 @@ struct ROBWorkspaceSelfProxyClearance {
     let model: ROBGhostRobotModel
     private var catalog: [String:(path:String,sha256:String)]?
     private var hulls: [String:ROBEstimatedConvexHull] = [:]
+    private var retreatSupportAxes:[String:SIMD3<Double>]=[:]
     init(model:ROBGhostRobotModel) { self.model=model }
 
     private mutating func hull(_ link:String) throws -> ROBEstimatedConvexHull {
@@ -342,7 +359,8 @@ struct ROBWorkspaceSelfProxyClearance {
 
     /// Force one metric for initially deficient pairs throughout a retreat;
     /// switching between two lower bounds must not mimic worsening geometry.
-    mutating func separations(vendorLeft:[Double],forceNarrowPairs:Set<String> = []) throws -> [String:Double] {
+    mutating func separations(vendorLeft:[Double],forceNarrowPairs:Set<String> = [],
+        minimumRetreatBounds:[String:Double]?=nil) throws -> [String:Double] {
         let positions=model.positions(vendorLeft:vendorLeft),bounds=model.worldCollisionBounds(positions:positions)
         let arms=bounds.keys.filter{$0.hasPrefix(model.physicalSide+"_") && ($0.hasSuffix("_Link") || $0==model.toolLink)}.sorted()
         let proxies=bounds.keys.filter{$0.contains("track") || $0.contains("flipper") || $0.contains("sprocket")}.sorted()
@@ -358,7 +376,17 @@ struct ROBWorkspaceSelfProxyClearance {
                 throw ROBGhostMotionError.blocked("Convex self-clearance lost an actual link transform.")
             }
             let left=try hull(arm),right=try hull(proxy)
-            result[key]=try left.signedSeparation(to:right,frame:frame,otherFrame:otherFrame)
+            // A retained unit plane is a conservative bound on the complete
+            // convex hulls, even if it stops being the closest feature. Reuse
+            // it only while it proves the previous retreat bound (or ordinary
+            // 30mm clearance). Otherwise recompute the full SAT witness.
+            if let required=minimumRetreatBounds?[key],let axis=retreatSupportAxes[key] {
+                let gap=try left.supportPlaneGap(to:right,frame:frame,otherFrame:otherFrame,axis:axis)
+                if gap+1e-9>=min(0.030,required) {result[key]=gap;continue}
+            }
+            let witness=try left.separationWitness(to:right,frame:frame,otherFrame:otherFrame)
+            result[key]=witness.gap
+            if minimumRetreatBounds != nil {retreatSupportAxes[key]=witness.axis}
         }}
         return result
     }
@@ -798,6 +826,18 @@ struct ROBWorkspaceInitialEmptyRetreat: Codable, Equatable {
     }
 }
 
+/// Complete empty preparation from the measured hanging pose. Only the
+/// existing tread-proxy deficits may retreat; world obstacles remain intact.
+struct ROBWorkspaceStagedEmptyLift:Codable,Equatable {
+    let context:ROBWorkspaceCollisionContext
+    let baseline:[Double]
+    let steps:[ROBLeftGestureProposal.Step]
+    let checkedPoseCount:Int
+    let initialProxyClearancesMeters:[String:Double]
+    let endpointProxyClearancesMeters:[String:Double]
+    let emptyStateEvidenceSource:String
+}
+
 /// Bounded model-estimated endpoints; each still needs the complete initial
 /// empty-retreat proof and an independent fresh dispatch-start reproof.
 struct ROBWorkspaceInitialRetreatCandidate:Codable {
@@ -996,6 +1036,147 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     /// Candidate endpoints only. Their names/deltas are model estimates, not
     /// clearance or actuator authority. Actual URDF FK chooses each side's
     /// rearward/outward/forward signs, rather than mirroring motor commands.
+    static func reviewStagedEmptyLift(from baseline:[Double],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
+        trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,emptyTrialEligibility:Bool,
+        emptyStateEvidenceSource:String)throws->ROBWorkspaceStagedEmptyLift {
+        var context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
+        guard model.physicalSide=="right",baseline==trial.baseline,
+              ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)),emptyTrialEligibility,
+              ["operator_declared_empty","local_first_attempt_no_arm_travel_or_task_grip"].contains(emptyStateEvidenceSource),
+              measuredAtMilliseconds.isFinite,(0...250).contains(nowMilliseconds-measuredAtMilliseconds),
+              !trial.usesOperatorClearedUnknownApproach else {
+            throw ROBGhostMotionError.blocked("The staged EMPTY lift requires fresh measured hanging, current can-task scope and empty-state evidence.")
+        }
+        let geometry=try ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline)
+        var proxy=ROBWorkspaceSelfProxyClearance(model:model)
+        let initial=try proxy.separations(vendorLeft:baseline)
+        let result=try reviewEmptyLiftHullPath(baseline:baseline,steps:geometry.steps,initialPairs:initial,
+            requireFinalClearance:true,map:map,model:model,context:context)
+        context.skippedStaticRobotLinks=result.staticLinks
+        return .init(context:context,baseline:baseline,steps:geometry.steps,checkedPoseCount:result.checked,
+            initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:result.endpoint,
+            emptyStateEvidenceSource:emptyStateEvidenceSource)
+    }
+
+    /// Recheck the exact next segment from ACTUAL feedback. This cannot admit
+    /// a new route, a jaw command, a payload, or an arbitrary overlapping start.
+    static func reviewStagedEmptyLiftSegment(_ proof:ROBWorkspaceStagedEmptyLift,index:Int,from actual:[Double],
+        map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,
+        nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double)throws {
+        let context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
+        guard proof.steps.indices.contains(index),actual.count==7,actual.allSatisfy(\.isFinite),actual==trial.baseline,
+              proof.context.mapFingerprint==context.mapFingerprint,proof.context.sceneID==sceneID,
+              proof.context.cameraGeneration==cameraGeneration,proof.context.sessionGeneration==generation,
+              proof.context.modelID==model.modelID,proof.context.geometryID==model.geometryID,
+              proof.context.mappingID==model.selectedMappingID,proof.context.visualTrial != nil,
+              proof.steps == (try ROBEmptyArmLiftGeometry.make(model:model,baseline:proof.baseline)).steps,
+              measuredAtMilliseconds.isFinite,(0...250).contains(nowMilliseconds-measuredAtMilliseconds) else {
+            throw ROBGhostMotionError.blocked("The staged EMPTY lift segment lost its frozen route or fresh context.")
+        }
+        let expected=index==0 ? proof.baseline:proof.steps[index-1].positions
+        guard 1.5*zip(actual,expected).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+            throw ROBGhostMotionError.blocked("The measured arm is outside the staged EMPTY lift start corridor.")
+        }
+        _=try reviewEmptyLiftHullPath(baseline:actual,steps:[proof.steps[index]],initialPairs:proof.initialProxyClearancesMeters,
+            requireFinalClearance:index==proof.steps.count-1,map:map,model:model,context:context)
+    }
+
+    private static func reviewEmptyLiftHullPath(baseline:[Double],steps:[ROBLeftGestureProposal.Step],
+        initialPairs:[String:Double],requireFinalClearance:Bool,map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext)throws->
+        (checked:Int,endpoint:[String:Double],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]?) {
+        guard !steps.isEmpty,steps.count<=30,steps.allSatisfy({$0.jawAction==nil && (0.7...5).contains($0.seconds)}),
+              steps.reduce(0,{$0+$1.seconds})<=60,!initialPairs.isEmpty else {
+            throw ROBGhostMotionError.blocked("The staged EMPTY lift has invalid timing, jaws or self geometry.")
+        }
+        let deficits=Set(initialPairs.filter{$0.value<0.030}.keys)
+        var proxy=ROBWorkspaceSelfProxyClearance(model:model)
+        var previousPairs=initialPairs,previous=baseline
+        var checker=Checker(map:map,model:model,context:context)
+        checker.planningSeconds=30
+        for step in steps {
+            try Task.checkCancellation()
+            guard let minimum=ROBLeftArmInteractionPlan.duration(from:previous,to:step.positions),step.seconds>=minimum-1e-9 else {
+                throw ROBGhostMotionError.blocked("The staged EMPTY lift exceeds the trajectory speed bound.")
+            }
+            let count=try emptyLiftSampleCount(from:previous,to:step.positions,model:model)
+            for sample in 0...count {
+                try Task.checkCancellation()
+                let fraction=Double(sample)/Double(count),q=zip(previous,step.positions).map{$0+($1-$0)*fraction}
+                let pairs=try proxy.separations(vendorLeft:q,forceNarrowPairs:deficits,minimumRetreatBounds:previousPairs)
+                guard Set(pairs.keys)==Set(initialPairs.keys) else {throw ROBGhostMotionError.blocked("The staged lift self geometry changed.")}
+                for (pair,initial) in initialPairs {
+                    let gap=pairs[pair]!
+                    if initial<0.030 {
+                        guard gap+1e-9>=min(0.030,previousPairs[pair]!) else {
+                            throw ROBGhostMotionError.blocked("The staged EMPTY lift worsens pre-existing self-proxy pair \(pair).")
+                        }
+                    }else if gap<0.030 {
+                        throw ROBGhostMotionError.blocked("The staged EMPTY lift creates a new self-proxy deficit at \(pair).")
+                    }
+                }
+                if let reason=checker.pose(q,payload:nil,requireSelfClearance:false) {throw ROBGhostMotionError.blocked(reason)}
+                previousPairs=pairs
+            }
+            previous=step.positions
+        }
+        if requireFinalClearance {
+            // A reused plane can remain conservative after the closest
+            // feature changes. Recompute the complete endpoint SAT once;
+            // a weak old witness must not hide a now-clear endpoint.
+            previousPairs=try proxy.separations(vendorLeft:previous,forceNarrowPairs:deficits)
+            guard initialPairs.allSatisfy({pair,first in previousPairs[pair]!>=0.030 &&
+                (first>=0.030 || previousPairs[pair]!>first+0.000001)}) else {
+                throw ROBGhostMotionError.blocked("The staged EMPTY lift must finish with ordinary 30 mm tread clearance.")
+            }
+        }
+        return (checker.checked,previousPairs,checker.staticRobotLinkEvidence)
+    }
+
+    /// Every actual hull lies inside its rigidly transported baseline box.
+    /// Bound each corner's chord plus curvature using the existing 1.5m lever;
+    /// coordinated joints need not pay that lever's full travel independently.
+    static func emptyLiftSampleCount(from start:[Double],to goal:[Double],model:ROBGhostRobotModel)throws->Int {
+        let limits=jointBounds(model:model)
+        guard start.count==7,goal.count==7,zip(start,limits).allSatisfy({$0.isFinite && $1.contains($0)}),
+              zip(goal,limits).allSatisfy({$0.isFinite && $1.contains($0)}) else {
+            throw ROBGhostMotionError.blocked("The staged lift sampling coordinates exceed joint bounds.")
+        }
+        let pose=model.positions(vendorLeft:start),frames=model.frames(pose),bounds=model.worldCollisionBounds(positions:pose)
+        var local:[String:[SIMD3<Double>]]=[:]
+        for (link,box) in bounds where link.hasPrefix(model.physicalSide+"_") && (link.hasSuffix("_Link") || link==model.toolLink) {
+            guard let frame=frames[link] else {throw ROBGhostMotionError.blocked("The staged lift is missing an arm frame.")}
+            var points:[SIMD3<Double>]=[]
+            for x in [box.low.x,box.high.x] {for y in [box.low.y,box.high.y] {for z in [box.low.z,box.high.z] {
+                let p=simd_inverse(frame)*SIMD4(x,y,z,1);points.append(SIMD3(p.x,p.y,p.z))
+            }}}
+            local[link]=points
+        }
+        guard local.count>=8 else {throw ROBGhostMotionError.blocked("The staged lift is missing complete arm hulls.")}
+        let angle=zip(start,goal).reduce(0.0){$0+abs($1.1-$1.0)}
+        var count=1
+        while count<=maximumPoseChecks {
+            try Task.checkCancellation()
+            var previous:[String:[SIMD3<Double>]]=[:],largest=0.0
+            let curvature=0.75*pow(angle/Double(count),2)
+            for sample in 0...count {
+                let t=Double(sample)/Double(count),q=zip(start,goal).map{$0+($1-$0)*t},current=model.frames(model.positions(vendorLeft:q))
+                for (link,points) in local {
+                    guard let frame=current[link] else {throw ROBGhostMotionError.blocked("The staged lift lost an arm frame.")}
+                    let world=points.map{p->SIMD3<Double> in let v=frame*SIMD4(p,1);return SIMD3(v.x,v.y,v.z)}
+                    if let before=previous[link] {for i in world.indices {largest=max(largest,simd_distance(world[i],before[i])+curvature)}}
+                    previous[link]=world
+                }
+            }
+            if largest<=sweptPointTravelMeters {return count}
+            count*=2
+        }
+        throw ROBGhostMotionError.blocked("The staged lift exceeds the swept sampling budget.")
+    }
+
     static func initialEmptyRetreatCandidates(from start:[Double],model:ROBGhostRobotModel)->[ROBWorkspaceInitialRetreatCandidate] {
         guard model.physicalSide=="right",start.count==7,start.allSatisfy(\.isFinite),
               ROBArmRoutinePlan.near(start,Array(repeating:0,count:7)),
@@ -1129,6 +1310,13 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         let deficientPairs=Set(initial.filter{$0.value<0.030}.keys)
         guard !deficientPairs.isEmpty else {
             throw ROBGhostMotionError.blocked("No pre-existing self-proxy clearance deficit needs an initial retreat; use ordinary path review.")
+        }
+        // Reject an impossible endpoint before spending the candidate budget
+        // on its sweep. This is the same endpoint requirement enforced below.
+        let endpointCandidate=try selfProxyClearance.separations(vendorLeft:goal,forceNarrowPairs:deficientPairs)
+        guard initial.allSatisfy({pair,first in endpointCandidate[pair]!>=0.030 &&
+            (first>=0.030 || endpointCandidate[pair]!>first+0.000001)}) else {
+            throw ROBGhostMotionError.blocked("Initial nonworsening retreat must finish with ordinary 30 mm self clearance.")
         }
         // Baseline world AABB corners enclose the actual hull. Transporting
         // that enclosing box by each link's rigid delta conservatively covers
@@ -1464,6 +1652,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         var contactStepIndex = -1
         var selfProxyClearance:ROBWorkspaceSelfProxyClearance? = nil
         let started = ProcessInfo.processInfo.systemUptime
+        var planningSeconds=maximumPlanningSeconds
         var checked = 0
         var staticRobotLinkEvidence:[ROBWorkspaceStaticRobotLinkEvidence]? = nil
         var verifiedShapes:[String:ROBNominalShape] = [:]
@@ -1481,7 +1670,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             if advisoryUnknownExamples.count<16 {advisoryUnknownExamples.append("\(label) [\(x),\(y),\(z)]")}
         }
         var limits: [ClosedRange<Double>] { ROBWorkspaceCollisionPlan.jointBounds(model:model) }
-        var exhausted: Bool { checked >= maximumPoseChecks || ProcessInfo.processInfo.systemUptime-started > maximumPlanningSeconds }
+        var exhausted: Bool { checked >= maximumPoseChecks || ProcessInfo.processInfo.systemUptime-started > planningSeconds }
         mutating func segment(from start:[Double],to end:[Double],payload:ROBWorkspaceCarriedObject?) -> String? {
             guard start.count == 7, end.count == 7 else { return "Arm coordinates are incomplete." }
             let bounds = limits
