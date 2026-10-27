@@ -984,6 +984,16 @@ import simd
         renderTime(0)
     }
     @objc private func executeReviewed() {
+        if let preview=canPreview,preview.side=="right",preview.reachesCan {
+            guard !ROBLeftArmTrial.shared.isRunning else{return}
+            playing=false;executeButton.isEnabled=false;setPreviewFrozen(true)
+            ROBLeftArmTrial.shared.performPreviewedCanGrasp(preview.can) { [weak self] result in
+                self?.setPreviewFrozen(false)
+                self?.status.stringValue=result["detail"]as?String ?? "Grasp-and-hold ended"
+            }
+            status.stringValue="Reobserving the reviewed can, then native grasp and short lift under the standing authorization. End in hold."
+            return
+        }
         guard let proposal, let model, liveBaseline, !replayingRecording else { return }
         // Keep the reviewed path fixed while the measured scene stays live.
         playing = false
@@ -1167,7 +1177,11 @@ import simd
                 (headEstimate == nil ? " Head: reference; command estimate unavailable." : " Head: accepted neck command estimate.") +
                 " Other joints: scan reference."
         }
-        if let proposal, let fresh = freshBaseline(), !busy, !ROBControllerArmApproval.shared.isPending, !replayingRecording {
+        executeButton.title=canPreview == nil ? "Request execution of reviewed path" : "Grasp can + lift and hold"
+        if let preview=canPreview,!busy,!ROBControllerArmApproval.shared.isPending,!replayingRecording {
+            executeButton.isEnabled=preview.side=="right" && preview.reachesCan && freshBaseline() != nil &&
+                ROBControllerArmApproval.shared.standingLocalCanCampaignActive
+        } else if let proposal, let fresh = freshBaseline(), !busy, !ROBControllerArmApproval.shared.isPending, !replayingRecording {
             executeButton.isEnabled = liveBaseline && fresh.generation == proposal.sessionGeneration
                 && ROBArmRoutinePlan.near(fresh.q, proposal.baseline, tolerance: 0.015)
         } else { executeButton.isEnabled = false }

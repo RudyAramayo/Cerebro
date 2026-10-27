@@ -850,8 +850,14 @@ final class ROBArmRoutineCoordinator {
             print("PASS actual local1/5/8 exact scope/import/context/task counts;0/9/empty and non-can commands rejected, count mismatch rejected, partial holds/not-found earn0, no hardware motion or extra spoken grant")
             return
         }
-        if ["standing-camera-start","standing-auto-recovery"].contains(CommandLine.arguments.last ?? "") {
+        if ["standing-camera-start","standing-auto-recovery","previewed-can-hold"].contains(CommandLine.arguments.last ?? "") {
             let recovering=CommandLine.arguments.last=="standing-auto-recovery"
+            let previewedHold=CommandLine.arguments.last=="previewed-can-hold"
+            var previewApprovalRequests=0,previewApprovalPrompts=0
+            if previewedHold {
+                broker.send={message,_,_ in if message.kind == .actionRequest {previewApprovalRequests+=1};return true}
+                broker.announceApproval={_ in previewApprovalPrompts+=1}
+            }
             broker.standingCanCampaignDirectory=folder.appendingPathComponent("standing-camera-campaign")
             broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("standing-camera-audit")
             let source="Synthetic fixture only: one authorized four-can campaign, not a real operator instruction."
@@ -871,6 +877,10 @@ final class ROBArmRoutineCoordinator {
             ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64)
             let v=ROBArmRoutineVision.shared;v.frameAvailable=false;v.fresh=false;v.captureWidth=640;v.captureHeight=400
             g.mode=["left":0,"right":0];g.calibrated=["left","right"];g.commands=[]
+            if previewedHold {
+                g.q["left"]=try ROBCanRecyclingReadyPose.target(physicalSide:"right")
+                g.mode["left"]=2
+            }
             var result:NSDictionary?,second:NSDictionary?
             var observedGenerations:[UInt64]=[],pendingIDs:[String]=[]
             if recovering {ROBWorkspaceSearch.shared.onInspect={
@@ -881,18 +891,32 @@ final class ROBArmRoutineCoordinator {
                     DispatchQueue.main.asyncAfter(deadline:.now()+1.5){g.generation+=1;g.ready=true}
                 }
             }}
-            trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){result=$0}
-            trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){second=$0}
-            precondition(second?["status"] as?String=="busy")
+            if previewedHold {
+                let can=ROBWorkspaceLocatedObject(target:.can,position:[0.43,-0.105,0.81],confidence:0.7,
+                    capturedAt:Date().timeIntervalSince1970*1000,sequence:10,view:.init(panDegrees:-15,upperTarget:6000))
+                trial.performPreviewedCanGrasp(can){result=$0}
+                trial.performPreviewedCanGrasp(can){second=$0}
+                precondition(second?["status"] as?String=="blocked" && second?["arm_motion_sent"] as?Bool==false)
+            } else {
+                trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){result=$0}
+                trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){second=$0}
+                precondition(second?["status"] as?String=="busy")
+            }
             try await Task.sleep(nanoseconds:150_000_000)
             precondition(g.commands.isEmpty && !trial.isRunning && result==nil)
+            // This entry-point fixture uses the stub's actual 24x24 RGB and
+            // intrinsics; source-resolution rejection belongs to camera tests.
+            if previewedHold {v.captureWidth=24;v.captureHeight=24}
             v.frameAvailable=true;v.fresh=true
-            try await Task.sleep(nanoseconds:150_000_000)
-            precondition(g.commands.isEmpty && !trial.isRunning && result==nil,"An old640x400frame froze a standing task context")
-            v.captureHeight=480;v.cameraGeneration=UUID()
+            if !previewedHold {
+                try await Task.sleep(nanoseconds:150_000_000)
+                precondition(g.commands.isEmpty && !trial.isRunning && result==nil,"An old640x400frame froze a standing task context")
+            }
+            if !previewedHold {v.captureHeight=480}
+            v.cameraGeneration=UUID()
             let end=ProcessInfo.processInfo.systemUptime+15
             while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
-            guard let output=result else{fatalError("Standing camera warmup did not start a fresh can-only perception task")}
+            guard let output=result else{fatalError("Standing task did not finish: \(trial.status); commands=\(g.commands)")}
             if recovering {
                 precondition(output["status"] as?String=="blocked" && output["requires_new_plan"] as?Bool==true,output.description)
                 precondition(output["interruption_reason"] as?String=="transportLost" && output["possible_payload_held"] as?Bool==false)
@@ -905,9 +929,17 @@ final class ROBArmRoutineCoordinator {
                 print("PASS actual standing AUTO recovery:typedtransportloss stopsoldjob, nativepassivereconnect, advancingBOTH-armstablefeedback/new480image, NEWpendingID/gatewaygeneration/canplan, no oldwaypoint or manualretry")
             }else{precondition(output["status"] as?String=="not_found",output.description)}
             precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can])
+            if previewedHold {
+                precondition(ROBWorkspaceSearch.shared.requestedFrontTableSurvey)
+                precondition(output["requested_grasp_and_hold"] as?Bool==true && output["batch_completed"] as?Int==0 &&
+                    output["transfer_completed"] as?Bool==false,output.description)
+                precondition(broker.standingLocalCanCampaignActive,"A no-target grasp attempt consumed the standing campaign")
+                precondition(previewApprovalRequests==0 && previewApprovalPrompts==0,"Preview execution requested redundant arm authorization")
+                print("PASS previewed grasp: serialized one-can front-table reacquisition, no bucket/batch/transfer credit, no redundant approval, no motion when the target is absent")
+            }
             precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("position_mode") || $0.hasPrefix("gripper") || $0.hasPrefix("activate")})
             broker.cancel(reason:"Synthetic camera-start fixture complete")
-            print("PASS actual standing Trial camera startup: serializedpassive enrollment, rejectsold400frame, waitsadvancing640480source, freshnormalcan-onlyjob withoutcalibrationcapture or arm/jaw outputs")
+            if !previewedHold {print("PASS actual standing Trial camera startup: serializedpassive enrollment, rejectsold400frame, waitsadvancing640480source, freshnormalcan-onlyjob withoutcalibrationcapture or arm/jaw outputs")}
             return
         }
         if ["one-degree-empty","one-degree-empty-delayed-endpoint","one-degree-empty-camera-gap"].contains(CommandLine.arguments.last ?? "") {
