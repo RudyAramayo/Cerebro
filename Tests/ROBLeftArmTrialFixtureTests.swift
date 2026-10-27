@@ -210,6 +210,7 @@ final class ROBAmberGatewayClient: NSObject {
         return id
     }
     var onGhostStep: (() -> Void)?
+    var afterPriorityHold:(()->Void)?
     var beforeGhostAdmission: (() -> Void)?
     var delayOneDegreeEndpoint = false
     var oneDegreeSentAt: Double?, oneDegreeConvergedAt: Double?, oneDegreeFirstHoldAt: Double?
@@ -244,6 +245,7 @@ final class ROBAmberGatewayClient: NSObject {
             oneDegreeFirstHoldAt=ProcessInfo.processInfo.systemUptime
         }
         if !rejectHold { activeLeases.remove(arm) }
+        afterPriorityHold?()
         return ack("priority_hold", arm, accepted: !rejectHold, holdConfirmed: confirmHold)
     }
     func renewLease(forArm arm: String, leaseMilliseconds: UInt32) -> UInt64 { ack("renew_lease", arm, accepted: !rejectRenewal) }
@@ -904,9 +906,14 @@ final class ROBArmRoutineCoordinator {
             print("PASS actual standing Trial camera startup: serializedpassive enrollment, rejectsold400frame, waitsadvancing640480source, freshnormalcan-onlyjob withoutcalibrationcapture or arm/jaw outputs")
             return
         }
-        if ["one-degree-empty","one-degree-empty-delayed-endpoint"].contains(CommandLine.arguments.last ?? "") {
-            let delayedEndpoint=CommandLine.arguments.last=="one-degree-empty-delayed-endpoint"
+        if ["one-degree-empty","one-degree-empty-delayed-endpoint","one-degree-empty-camera-gap"].contains(CommandLine.arguments.last ?? "") {
+            let cameraGap=CommandLine.arguments.last=="one-degree-empty-camera-gap"
+            let delayedEndpoint=CommandLine.arguments.last=="one-degree-empty-delayed-endpoint" || cameraGap
             g.delayOneDegreeEndpoint=delayedEndpoint
+            if cameraGap {
+                g.onGhostStep={ROBArmRoutineVision.shared.fresh=false}
+                g.afterPriorityHold={ROBArmRoutineVision.shared.fresh=true}
+            }
             precondition(!trial.oneDegreeEmptyCalibrationStepEnabled)
             let model=try ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"),physicalSide:"right")
             let frame=model.frames(model.positions(vendorLeft:Array(repeating:0,count:7)))[model.toolLink]!
@@ -959,6 +966,7 @@ final class ROBArmRoutineCoordinator {
             precondition(value["status"] as?String=="partial_empty_calibration_step_held",value.description)
             precondition(value["batch_completed"] as?Int==0 && value["jaw_command_sent"] as?Bool==false && value["reach_sent"] as?Bool==false)
             precondition(value["arm_motion_sent"] as?Bool==true && value["collision_protection_certified"] as?Bool==false)
+            precondition(value["fresh_post_hold_camera_inspection"] as?Bool==true)
             precondition(g.commands.filter{$0.hasPrefix("ghost_step")}.count==1 && !g.commands.contains{$0.hasPrefix("calibrate") || $0.hasPrefix("gripper") || $0.hasPrefix("deactivate")})
             precondition(ROBGripperStartupCalibration.shared.setupCalls==0 && g.q["left"]==[0,-0.02,0,0,0,0,0] && g.q["right"]==Array(repeating:0,count:7))
             precondition(g.activeLeases.isEmpty && neck["pan_degrees"] as?Double == -55 && neck["upper"] as?Int==5650)
@@ -972,6 +980,12 @@ final class ROBArmRoutineCoordinator {
             let evidence=URL(fileURLWithPath:trial.lastRecordingPath).deletingPathExtension().appendingPathExtension("one-degree-empty-evidence")
             let map=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:Data(contentsOf:evidence.appendingPathComponent("collision-map.json")))
             let proof=try JSONDecoder().decode(ROBWorkspaceOneDegreeEmptyCalibrationStep.self,from:Data(contentsOf:evidence.appendingPathComponent("proof.json")))
+            for name in ["before","after"] {
+                precondition(FileManager.default.fileExists(atPath:evidence.appendingPathComponent(name+".jpg").path))
+                let view=try JSONSerialization.jsonObject(with:Data(contentsOf:evidence.appendingPathComponent(name+".json")))as![String:Any]
+                precondition(view["motionAuthority"]as?Bool==false && view["registrationVerified"]as?Bool==false)
+            }
+            if cameraGap {print("PASS camera analysis gap during exact bounded actuator step: measured endpoint and hold before NEW same-source pixels; both views archived; no camera exception for another route")}
             precondition(proof.environmentPredictionIsDiagnosticOnly && !proof.collisionCertificate)
             precondition(proof.environmentDiagnostics.predictedNominalContact,"Synthetic surface return must remain diagnostic evidence")
             precondition(map.registrationID==nil && map.observedFrameCount==3 && map.observations.allSatisfy{$0.recordedPanDegrees == -55 && $0.recordedLowerTarget==6411 && $0.recordedUpperTarget==5650 && !$0.measuredSelfMaskApplied})

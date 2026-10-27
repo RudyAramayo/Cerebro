@@ -44,6 +44,7 @@ final class Gateway {
  var passiveFeedbackPauseStarted:Double?,lastHeldFeedbackDiagnostic:String?,lastRecordingPath="",phase="passive search"
  var waiting=Set<UInt64>(),acks:[UInt64:Bool]=[:],holdConfirmations:[UInt64:Bool]=[:],dispatches=0
  static let neckOnlyCommands=Set<String>()
+ var defersOneDegreeCameraInspection=false
  var activeApproachUnknownAdvisory=false,approachUnknownAdvisoryEnabled=false
  var activeApproachCanThenHold=false,approachCanThenHoldEnabled=false
  var failure:String?,activeHoldAfterInitialEmptyLift=false,holdAfterInitialEmptyLiftEnabled=false,sourcePixelSelfReviewEnabled=false
@@ -62,7 +63,8 @@ final class Gateway {
 @MainActor final class Vision {
  var enrolled=false,available=false,sequence:UInt64=1,ensureCalls=0
  var fresh:Bool{enrolled && available}
- var handsClear:Bool{true}
+ var clear=true
+ var handsClear:Bool{clear}
  struct Depth {let width=640,height=480}
  struct Frame {let sequence:UInt64;var depth:Depth?=Depth()}
  func snapshot()->[String:Frame]{available ? ["face":.init(sequence:sequence)]:[:]}
@@ -151,6 +153,15 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
    precondition(String(describing:error).contains("stationary neck scan") && String(describing:error).contains("motor_age_ms"))
   }
   ROBControllerArmApproval.shared.onAuthorize=nil
+  let bounded=Hold();bounded.inactiveWorkspaceSearch=false;bounded.cameraReady=true
+  bounded.defersOneDegreeCameraInspection=true
+  try bounded.check()
+  bounded.defersOneDegreeCameraInspection=false;fatal(bounded,"camera_fresh=false")
+  bounded.defersOneDegreeCameraInspection=true
+  ROBArmRoutineCoordinator.shared.viewIsStationary={false};fatal(bounded,"body_stationary=false")
+  ROBArmRoutineCoordinator.shared.viewIsStationary={true}
+  bounded.vision.enrolled=true;bounded.vision.available=true;bounded.vision.clear=false
+  fatal(bounded,"Person or hand clearance")
   let camera=CameraPrepare();var completed=false
   camera.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){r in completed=r["status"]as?String=="prepared"}
   precondition(camera.vision.enrolled && camera.prepared==0)

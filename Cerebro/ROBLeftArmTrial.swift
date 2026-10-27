@@ -296,6 +296,16 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private var usesFixedCommissioningKeyframes:Bool {nominalModelAssumedSelfEnabled || sourcePixelSelfReviewEnabled}
     private var currentSourcePixelEvidenceSHA256:String? {sourcePixelSelfReviewEnabled ? sourcePixelCurrentEvidenceSHA256:nil}
     @nonobjc private var activeOneDegreeCalibration: ROBWorkspaceOneDegreeEmptyCalibrationStep?
+    private var oneDegreeCameraInspectionDeadline:Double?
+    /// The separately bounded actuator experiment inspects fresh pixels before
+    /// dispatch and again after holding. It never uses old pixels as clearance.
+    private var defersOneDegreeCameraInspection:Bool {
+        guard let end=oneDegreeCameraInspectionDeadline,let proof=activeOneDegreeCalibration else{return false}
+        return isRunning && oneDegreeEmptyCalibrationStepEnabled && physicalSide=="right" &&
+            localReceiptCommand=="right_recycle_cans" && armTravelDispatched &&
+            !jawCommandDispatched && !jawSetupDispatchUncertain && !recyclingGripDispatched && !servoPossiblePayloadUncertain &&
+            proof.maximumHullTravelMeters<=0.020 && ProcessInfo.processInfo.systemUptime<end
+    }
     @nonobjc var oneDegreeEmptyCalibrationStepEnabled = false
     /// DEBUG-only early stop on the ordinary, fully checked empty entry path.
     @nonobjc var approachUnknownAdvisoryEnabled = false
@@ -1278,9 +1288,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             assumedSpatialErrorMeters:value.assumedSpatialErrorMeters,operatorClearedUnknownApproach:value.operatorClearedUnknownApproach)
     }
 
-    private func requireLiveVisualTrial(_ trial:ROBWorkspaceVisualCalibrationTrial,map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) throws {
+    private func requireLiveVisualTrial(_ trial:ROBWorkspaceVisualCalibrationTrial,map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
+        requireFreshCamera:Bool=true) throws {
         let e=try requireLocalReceipt()
-        guard vision.fresh else {throw ROBArmRoutineError.blocked("The visual-calibration motion needs a fresh camera frame; the unchanged job receipt does not permit stale-image travel.")}
+        guard !requireFreshCamera || vision.fresh else {throw ROBArmRoutineError.blocked("The visual-calibration motion needs a fresh camera frame; the unchanged job receipt does not permit stale-image travel.")}
         guard trial.receiptID==e["receiptID"] as? String,trial.receiptSHA256==e["receiptSHA256"] as? String,
               trial.appSessionID==e["appSessionID"] as? String,trial.command==e["command"] as? String,
               trial.summarySHA256==e["summarySHA256"] as? String,trial.authorizationContextIdentity==e["contextIdentity"] as? String,
@@ -1454,7 +1465,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                   !jawCommandDispatched,!jawSetupDispatchUncertain,!recyclingGripDispatched else {
                 throw ROBArmRoutineError.blocked("The separate one-degree EMPTY calibration permission, source or no-jaw scope changed.")
             }
-            try requireLiveVisualTrial(trial,map:map,model:model)
+            try requireLiveVisualTrial(trial,map:map,model:model,requireFreshCamera:!defersOneDegreeCameraInspection)
             let q=try measured().positionsRadians.map(\.doubleValue),delta=zip(calibration.baseline,calibration.goal).map{$1-$0}
             let length=delta.reduce(0.0){$0+$1*$1}
             let fraction=length>0 ? min(1,max(0,zip(zip(q,calibration.baseline),delta).reduce(0.0){$0+($1.0.0-$1.0.1)*$1.1}/length)):0
@@ -1732,10 +1743,11 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         if activeCommand == "left_estimated_calibration", generation > 0 { try checkCollisionContext() }
         if cameraReady {
-            guard vision.fresh, ROBArmRoutineCoordinator.shared.viewIsStationary?() == true else {
-                throw ROBArmRoutineError.blocked("Live camera or stationary body view lost; left-arm hold requested.")
+            let fresh=vision.fresh,stationary=ROBArmRoutineCoordinator.shared.viewIsStationary?() == true
+            guard (fresh || defersOneDegreeCameraInspection),stationary else {
+                throw ROBArmRoutineError.blocked("Live camera or stationary body view lost; \(physicalSide)-arm hold requested. camera_fresh=\(fresh), body_stationary=\(stationary).")
             }
-            guard vision.handsClear else {
+            if (fresh || !defersOneDegreeCameraInspection) && !vision.handsClear {
                 throw ROBArmRoutineError.blocked("Person or hand clearance was lost; an arm hold was requested.")
             }
         }
@@ -2370,6 +2382,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         try await refreshInitialEmptyDispatchView(map:map,model:model,trial:trial,baseline:q,reference:reference)
         cameraReady=true
         try check();try checkCollisionContext();try requireLiveVisualTrial(trial,map:map,model:model)
+        guard let beforeFrame=vision.snapshot()["face"] else {throw ROBArmRoutineError.blocked("No current before-step camera frame.")}
         let current=try measured(),admissionTime=Date().timeIntervalSince1970*1000
         try proof.validateContext(map:map,model:model,generation:session,sceneID:map.sceneID,cameraGeneration:camera,
             nowMilliseconds:admissionTime,trial:trial,measuredAtMilliseconds:admissionTime-current.effectiveSampleAgeMilliseconds,
@@ -2382,6 +2395,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         proposalStep=0;phase="ONE one-degree EMPTY commissioning step";sentPath=[q,proof.goal]
         update("One four-second one-degree EMPTY step; watching the RIGHT arm, then holding. Collision uncertainty remains unverified.")
+        oneDegreeCameraInspectionDeadline=ProcessInfo.processInfo.systemUptime+12
+        defer{oneDegreeCameraInspectionDeadline=nil}
         reviewedDispatchStart=dispatch;armTravelDispatched=true
         try await accepted{gateway.sendApprovedLeftGestureStep(proposalID:path.id,index:0,duration:4,expectedSessionGeneration:session)}
         reviewedDispatchStart=nil;leased=true;lastRenewal=ProcessInfo.processInfo.systemUptime
@@ -2400,14 +2415,47 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             return settler.observe(sequence:feedback.sequence,positions:positions,target:proof.goal,
                 now:ProcessInfo.processInfo.systemUptime) && ProcessInfo.processInfo.systemUptime-began>=4
         }
-        try await holdTaskPosition(proof.goal);taskJawTarget=nil
+        try await holdTaskPosition(proof.goal)
         let endpoint=try measured().positionsRadians.map(\.doubleValue)
         guard 1.5*zip(endpoint,proof.goal).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {throw ROBArmRoutineError.blocked("The calibration endpoint is held but did not reach its reviewed goal; no further step admitted.")}
+        oneDegreeCameraInspectionDeadline=nil;cameraReady=false
+        let heldAt=Date().timeIntervalSince1970*1000
+        let afterFrame=try await vision.settledDepthFrame(deadlineUptime:ProcessInfo.processInfo.systemUptime+4)
+        try check()
+        guard afterFrame.sequence>beforeFrame.sequence,afterFrame.capturedAt>=heldAt,
+              afterFrame.cameraGeneration==beforeFrame.cameraGeneration,
+              afterFrame.intrinsics?.runtimeCalibration?.identity==beforeFrame.intrinsics?.runtimeCalibration?.identity,
+              afterFrame.intrinsics?.cameraServiceSourceSHA256==beforeFrame.intrinsics?.cameraServiceSourceSHA256,
+              try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:afterFrame)==ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:beforeFrame),
+              ROBArmRoutineCoordinator.shared.viewIsStationary?()==true,
+              1.5*zip(try measured().positionsRadians.map(\.doubleValue),proof.goal).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+            throw ROBArmRoutineError.blocked("The bounded step is held, but its new post-hold camera/pose inspection changed; no further step.")
+        }
+        try requireLiveVisualTrial(trial,map:map,model:model)
+        let evidenceDirectory=URL(fileURLWithPath:recording).deletingPathExtension().appendingPathExtension("one-degree-empty-evidence")
+        for (name,frame,positions) in [("before",beforeFrame,q),("after",afterFrame,endpoint)] {
+            guard let depth=frame.depth,let k=frame.intrinsics,let image=CIContext().createCGImage(frame.image,from:frame.image.extent),
+                  let jpeg=NSBitmapImageRep(cgImage:image).representation(using:.jpeg,properties:[.compressionFactor:0.95]) else {
+                throw ROBArmRoutineError.blocked("The bounded step is held, but its inspection pixels could not be archived.")
+            }
+            let data=Data(depth.millimetersLittleEndian)
+            let metadata:[String:Any]=["sequence":NSNumber(value:frame.sequence),"capturedAtMilliseconds":frame.capturedAt,
+                "cameraGeneration":frame.cameraGeneration.uuidString,"intrinsics":[k.fx,k.fy,k.cx,k.cy],
+                "width":depth.width,"height":depth.height,"heldJointPositions":positions,
+                "jointPositionsAreExposureMatched":false,"registrationVerified":false,"motionAuthority":false,
+                "rgbSHA256":ROBGhostRobotModel.hash(jpeg),"depthSHA256":ROBGhostRobotModel.hash(data)]
+            for (extensionName,bytes) in [("jpg",jpeg),("depth-u16le",data),("json",try JSONSerialization.data(withJSONObject:metadata,options:.sortedKeys))] {
+                let url=evidenceDirectory.appendingPathComponent(name+"."+extensionName)
+                try bytes.write(to:url,options:.atomic);try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+            }
+        }
+        taskJawTarget=nil
         return ["status":"partial_empty_calibration_step_held","measured":false,"joint_motion_measured":true,"motion_completed":false,
             "transfer_completed":false,"one_degree_empty_calibration_step":true,"collision_protection_certified":false,
             "baseline_positions":q,"goal_positions":proof.goal,"measured_positions":endpoint,"endpoint_stopped_and_held":true,
             "assumed_camera_uncertainty_m":0.035,"contact_predictions_are_diagnostics_only":true,
             "jaw_command_sent":false,"evidence_directory":URL(fileURLWithPath:recording).deletingPathExtension().appendingPathExtension("one-degree-empty-evidence").path,
+            "fresh_post_hold_camera_inspection":true,"before_camera_sequence":NSNumber(value:beforeFrame.sequence),"after_camera_sequence":NSNumber(value:afterFrame.sequence),
             "detail":"ONE four-second one-degree EMPTY actuator calibration step reached its measured endpoint and is held. Camera uncertainty remains unverified; no jaw, grasp, carry, release, return or chained can attempt. ZERO transfers completed."]
     }
 
