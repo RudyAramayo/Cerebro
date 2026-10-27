@@ -74,7 +74,7 @@ struct ROBTableRelayInitialEmptyEvidence {
     var manualArmSessionDetail: String {
         guard manualArmSessionActive, let session = manualArmSession else { return "No active manual arm session" }
         let remaining = max(0, Int(ceil(session.expires.timeIntervalSince(now()))))
-        return String(format: "Both-arm manual control: %d:%02d remaining. Mode and position buttons need no further approval. Stop ends this session.", remaining / 60, remaining % 60)
+        return String(format: "Both-arm manual control: %d:%02d remaining. Mode, position and gripper Hold/Release need no further approval. Stop ends this session.", remaining / 60, remaining % 60)
     }
     var armSessionActive: Bool { armSession.map(sessionIsFresh) ?? false }
     var armSessionDetail: String {
@@ -982,7 +982,7 @@ struct ROBTableRelayInitialEmptyEvidence {
         guard gateway.isReady(), generation != 0 else {
             completion(["status": "blocked", "detail": "Connect Amber before starting manual arm control."]); return
         }
-        let summary = "Authorize both arms' manual UI controls for 15 minutes: activate, deactivate holding torque, enter position mode and send joint or Cartesian position targets. Support an arm before removing holding torque. One spoken or controller approval covers subsequent manual button commands until the fixed deadline. Approval itself sends no movement. Stop, End session, sleep/restart or a changed gateway connection ends this permission. This does not authorize automatic pickup routines, grippers, encoder reset, current mode or CAN/core restart."
+        let summary = "Authorize both arms' manual UI controls for 15 minutes: activate, deactivate holding torque, enter position mode, send joint or Cartesian position targets, and use gripper Hold/Release at the selected bounded intensity. Support an arm before removing holding torque, clear the jaw pinch zone before Hold, and support any held object before Release. One spoken or controller approval covers subsequent manual button commands until the fixed deadline. Approval itself sends no movement. Stop, End session, sleep/restart or a changed gateway connection ends this permission. This does not authorize automatic pickup routines, full-travel gripper calibration, encoder reset, current mode or CAN/core restart."
         request(action: "arm_operation", arguments: ["operation": "manual", "arm": "both", "summary": summary],
             summary: summary, execute: { [weak self] done in
                 guard let self, let p = self.pending else { return }
@@ -991,7 +991,7 @@ struct ROBTableRelayInitialEmptyEvidence {
                 }
                 self.manualArmSession = ManualArmSession(id: p.id, peer: p.peer, voiceAuthorized: p.voiceAuthorized,
                     expires: self.now().addingTimeInterval(900), gatewayGeneration: generation)
-                done(["status": "completed", "detail": "Both-arm manual control authorized for 15 minutes. Mode and position buttons are ready."])
+                done(["status": "completed", "detail": "Both-arm manual control authorized for 15 minutes. Mode, position and gripper Hold/Release buttons are ready."])
             }, cancel: {}, completion: completion)
     }
 
@@ -1567,7 +1567,13 @@ struct ROBTableRelayInitialEmptyEvidence {
     /// Recheck feedback and the gateway generation after the operator decides.
     @nonobjc func requestGatewayCommand(operation: String, arm: String, summary: String,
         command: @escaping () -> UInt64, completion: @escaping (NSDictionary) -> Void) {
-        if ["activate", "position", "deactivate"].contains(operation), !manualArmSessionActive {
+        guard ["left", "right"].contains(arm) else {
+            completion(["status": "rejected", "detail": "Unknown manual arm selection."]); return
+        }
+        // Only the native Diagnostics handlers enter this lane. Full-travel
+        // calibration remains separate; routine/model requests cannot inherit it.
+        let covered = ["activate", "position", "deactivate", "close_gripper", "open_gripper"].contains(operation)
+        if covered, !manualArmSessionActive {
             beginManualArmSession { [weak self] result in
                 guard result["status"] as? String == "completed", let self else { completion(result); return }
                 self.requestGatewayCommand(operation: operation, arm: arm, summary: summary, command: command, completion: completion)
@@ -1586,7 +1592,7 @@ struct ROBTableRelayInitialEmptyEvidence {
             observer = nil; timeout?.cancel(); timeout = nil
         }
         request(action: "arm_operation", arguments: ["operation": operation, "arm": arm, "summary": summary],
-            summary: summary, allowManualArmSession: ["activate", "position", "deactivate"].contains(operation), execute: { done in
+            summary: summary, allowManualArmSession: covered, execute: { done in
             let readiness = gateway.manualArmControlReadiness(forUDPPort: port,
                 expectedSessionGeneration: generation)
             guard generation != 0, readiness["allowed"] as? Bool == true else {

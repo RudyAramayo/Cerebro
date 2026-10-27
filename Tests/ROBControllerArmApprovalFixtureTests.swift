@@ -12,11 +12,12 @@ final class ROBAmberGatewayClient: NSObject {
     static let shared = ROBAmberGatewayClient()
     var generation: UInt64 = 1
     var ready = true
+    var feedbackFresh = true
     var holds: [String] = []
     func isReady() -> Bool { ready }
     func connectionSnapshot() -> NSDictionary { ["sessionGeneration": NSNumber(value: generation)] }
     func manualArmControlReadiness(forUDPPort: Int, expectedSessionGeneration: UInt64) -> NSDictionary {
-        ["allowed": ready && expectedSessionGeneration == generation, "reason": "Feedback/session changed"]
+        ["allowed": ready && feedbackFresh && expectedSessionGeneration == generation, "reason": "Feedback/session changed"]
     }
     func priorityHold(forArm arm: String) -> UInt64 { holds.append(arm); return 1 }
 }
@@ -362,6 +363,34 @@ final class ROBAmberGatewayClient: NSObject {
             NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
                 userInfo: ["commandID": NSNumber(value: 807), "accepted": true])
             check(!b.isPending && b.manualArmSessionActive, "Acknowledged manual mode command keeps the session available")
+            var gripperDispatches = 0
+            for arm in ["left", "right"] {
+                for operation in ["close_gripper", "open_gripper", "close_gripper", "open_gripper"] {
+                    let id = UInt64(900 + gripperDispatches)
+                    var terminal: NSDictionary = [:]
+                    b.requestGatewayCommand(operation: operation, arm: arm, summary: "Native gripper \(operation) \(arm)",
+                        command: { gripperDispatches += 1; return id }, completion: { terminal = $0 })
+                    check(b.isPending && prompts == 1, "Hold/Release must reuse the existing manual approval on either arm")
+                    NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                        userInfo: ["commandID": NSNumber(value: id), "accepted": true])
+                    check(terminal["status"] as? String == "accepted_unverified" && !b.isPending,
+                        "Gripper acknowledgement must remain distinct from measured physical completion")
+                }
+            }
+            check(gripperDispatches == 8 && prompts == 1 && b.manualArmSessionActive,
+                "Repeated bilateral Hold/Release must not consume or extend the manual session")
+            check(b.manualArmSessionDetail.contains("gripper Hold/Release"), "Countdown must disclose the complete manual scope")
+            var rejected: NSDictionary = [:]
+            gateway.feedbackFresh = false
+            b.requestGatewayCommand(operation: "close_gripper", arm: "right", summary: "Stale motor feedback",
+                command: { gripperDispatches += 1; return 999 }, completion: { rejected = $0 })
+            check(rejected["status"] as? String == "blocked" && gripperDispatches == 8 && prompts == 1 && b.manualArmSessionActive,
+                "An authorized gripper still needs fresh feedback; a no-dispatch rejection must not add a prompt")
+            gateway.feedbackFresh = true
+            b.requestGatewayCommand(operation: "open_gripper", arm: "both", summary: "Invalid single-arm selection",
+                command: { gripperDispatches += 1; return 999 }, completion: { rejected = $0 })
+            check(rejected["status"] as? String == "rejected" && gripperDispatches == 8 && prompts == 1,
+                "An invalid physical side must not silently route to the left arm")
             var ordinaryRan = false
             b.request(operation: "manual", arm: "right", summary: "Ordinary model request",
                 execute: { _ in ordinaryRan = true }, cancel: {}, completion: { _ in })
@@ -412,6 +441,53 @@ final class ROBAmberGatewayClient: NSObject {
             _ = b.receiveSpokenAuthorization("yes proceed")
             check(prompts == 1 && commands == 1 && b.manualArmSessionActive, "First manual button executes after one approval, not two")
             b.cancel(reason: "End fixture")
+        }
+
+        // A gripper can be the first native manual action. It starts the full
+        // session once; calibration and automatic requests stay separate.
+        for operation in ["close_gripper", "open_gripper"] {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            gateway.ready = true; gateway.feedbackFresh = true; gateway.generation = 600
+            var prompts = 0, commands = 0, requests: [ROBRobotActionMessage] = []
+            b.announceApproval = { _ in prompts += 1 }
+            b.send = { message, _, _ in if message.kind == .actionRequest { requests.append(message) }; return true }
+            _ = b.receive(hello, device: device, session: session)
+            b.requestGatewayCommand(operation: operation, arm: "right", summary: "First native gripper button",
+                command: { commands += 1; return 1001 }, completion: { _ in })
+            check(commands == 0 && prompts == 1 && requests.count == 1,
+                "A first Hold/Release click must request one complete manual session before dispatch")
+            check((requests[0].arguments["summary"] as? String)?.contains("gripper Hold/Release") == true,
+                "Controller must see the gripper scope before approving the manual session")
+            _ = b.receive(reply(requests[0]), device: device, session: session)
+            check(commands == 1 && prompts == 1 && b.manualArmSessionActive,
+                "Controller approval must dispatch the first gripper action without a second question")
+            NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                userInfo: ["commandID": NSNumber(value: 1001), "accepted": false, "error": "Fixture rejected command"])
+            check(b.manualArmSessionActive && !b.isPending, "Rejected gripper acknowledgement must retain the active manual session")
+            b.requestGatewayCommand(operation: "calibrate_gripper", arm: "right", summary: "Full-travel calibration",
+                command: { commands += 1; return 1002 }, completion: { _ in })
+            check(commands == 1 && prompts == 2, "Full-travel calibration must retain its separate approval")
+            b.cancel(reason: "End fixture")
+        }
+        for ending in ["expiry", "connection", "disconnect", "stop"] {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            gateway.ready = true; gateway.generation = 700
+            var clock = Date(), commands = 0, prompts = 0
+            b.now = { clock }; b.announceApproval = { _ in prompts += 1 }
+            b.beginManualArmSession { _ in }; _ = b.receiveSpokenAuthorization("yes proceed")
+            b.requestGatewayCommand(operation: "open_gripper", arm: "right", summary: "Pending gripper release",
+                command: { commands += 1; return 1101 }, completion: { _ in })
+            check(commands == 1 && prompts == 1 && b.isPending, "Gripper must enter the existing manual session")
+            if ending == "expiry" { clock.addTimeInterval(901) }
+            if ending == "connection" { gateway.generation += 1 }
+            if ending == "disconnect" { gateway.ready = false }
+            if ending == "stop" { b.cancel(reason: "Operator Stop") }
+            b.tick()
+            NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                userInfo: ["commandID": NSNumber(value: 1101), "accepted": true])
+            check(!b.manualArmSessionActive && !b.isPending && commands == 1,
+                "\(ending) must revoke gripper session without retrying or restoring a late command")
+            gateway.ready = true
         }
 
         // A local imported receipt is a distinct lane, never a microphone or

@@ -83,19 +83,23 @@ commands or a claimed successful grasp/delivery.
 
 In **Amber Arm Diagnostics**, select **Start 15-minute manual session**, then
 answer the on-device question once. The first Activate, Position, Deactivate,
-joint-position or Cartesian-position button also requests this complete session
+joint-position, Cartesian-position, or gripper Hold/Release button also requests this complete session
 if none is active. The Diagnostics countdown shows its remaining time. Both the
 Torso Servo Controls and Diagnostics reuse the same permission for both arms;
 individual covered commands do not ask again. Starting the explicit session
 ends the automatic arm task and requests hold before asking. Approval alone
 does not move an arm. Support an arm before deactivating holding torque.
+Both physical grippers' Hold and Release buttons reuse that same session at
+the selected bounded intensity (2–20). Clear the pinch zone before Hold and
+support any held object before Release. Calibration and fresh feedback are
+still checked before each dispatch; acknowledgement does not verify jaw motion.
 
 The 900-second deadline starts at acceptance and never extends when a button is
 pressed. Stop, **End manual session**, sleep/restart, or loss/change of the
 authenticated arm connection ends it and requests hold. A rejected button
 command does not erase an otherwise valid session. Each command still checks
 current feedback, connection and ownership. The scope excludes automatic
-pickup routines, grippers, encoder resets, current mode and controller-stack
+pickup routines, full-travel gripper calibration, encoder resets, current mode and controller-stack
 restarts. Ordinary model requests cannot inherit this native manual-UI scope.
 Lost diagnostics acknowledgements expire instead of disabling the buttons
 indefinitely; an expired acknowledgement is reported as an unverified outcome.

@@ -975,7 +975,7 @@ private final class ROBAmberArmSchematicView: NSView {
         commandRow.spacing = 8
         manualSessionButton.target = self
         manualSessionButton.action = #selector(startManualSession(_:))
-        manualSessionButton.toolTip = "One spoken or controller approval enables both arms' mode and position controls for 15 minutes. Stops the active automatic routine first."
+        manualSessionButton.toolTip = "One spoken or controller approval enables both arms' mode, position and gripper Hold/Release controls for 15 minutes. Stops the active automatic routine first."
         endManualSessionButton.target = self
         endManualSessionButton.action = #selector(endManualSession(_:))
 
@@ -1257,10 +1257,10 @@ private final class ROBAmberArmSchematicView: NSView {
         calibrateButton.setAccessibilityLabel("Calibrate \(arm.rawValue) gripper")
         let releaseButton = actionButton("Release…", action: #selector(releaseGripper(_:)))
         releaseButton.contentTintColor = .systemOrange
-        releaseButton.toolTip = "Requests Amber's bounded release action after controller approval; jaw position and force are not measured."
+        releaseButton.toolTip = "Uses the active 15-minute manual session without another prompt. Requests bounded release; support any held object. Jaw position and force are not measured."
         let holdButton = actionButton("Hold…", action: #selector(holdGripper(_:)))
         holdButton.contentTintColor = .systemOrange
-        holdButton.toolTip = "Requests Amber's bounded hold action after controller approval; jaw position and force are not measured."
+        holdButton.toolTip = "Uses the active 15-minute manual session without another prompt. Requests bounded hold; clear the pinch zone. Jaw position and force are not measured."
         let stopButton = actionButton("Stop N/A", action: #selector(stopGripperUnavailable(_:)))
         stopButton.isEnabled = false
         stopButton.toolTip = "Amber exposes release, hold, and calibration only. It has no verified stop primitive; release would itself cause motion and may drop an object."
