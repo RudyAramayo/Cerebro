@@ -2998,7 +2998,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             throw ROBArmRoutineError.blocked("Empty preparation cannot restart after travel, a jaw operation or possible possession.")
         }
         let start=try measured().positionsRadians.map(\.doubleValue)
-        guard referencedGeneration == generation || ROBArmRoutinePlan.near(start,Array(repeating:0,count:7)) else {
+        guard referencedGeneration == generation || ROBArmRoutinePlan.near(start,Array(repeating:0,count:7)) ||
+              activeCameraCollisionAdvisory && ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(start) else {
             throw ROBArmRoutineError.blocked("Empty preparation needs the current joint reference; no blind return or encoder reset.")
         }
         phase="empty preparation: workspace clearance"
@@ -3265,7 +3266,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
 
     @MainActor private func performStagedEmptyLiftIfNeeded(map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) async throws->Bool {
         let sample=try measured(),baseline=sample.positionsRadians.map(\.doubleValue)
-        guard ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) else {return false}
+        guard ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) ||
+              activeCameraCollisionAdvisory && ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(baseline) else {return false}
         guard map.registrationID==nil else {return false}
         guard localReceiptCommand != nil,physicalSide=="right",!armTravelDispatched,!jawCommandDispatched,
               !jawSetupDispatchUncertain,!recyclingGripDispatched,!servoPossiblePayloadUncertain,

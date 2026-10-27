@@ -75,7 +75,7 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
    for step in geometry.steps {
     let allowed=step.stage=="J1 rearward clearance" ? [0]:[1,3]
     precondition((0..<7).allSatisfy{allowed.contains($0) || step.positions[$0]==previous[$0]})
-    precondition(step.jawAction==nil)
+    precondition(step.jawAction==nil && step.seconds>=3.2)
     previous=step.positions
    }
    let proof=try review(q)
@@ -109,6 +109,17 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   obstacle.obstacleLow=endpoint.low;obstacle.obstacleHigh=endpoint.high
   blocked("obstacle") {_=try review(start,source:obstacle)}
   #if DEBUG
+  let interruptedStart=[0.0,-0.03941,0,-0.03082,0,0,0]
+  precondition(ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(interruptedStart))
+  precondition(!ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart([0,-0.051,0,0,0,0,0]))
+  precondition(!ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart([0.026,0,0,0,0,0,0]))
+  blocked("fresh measured hanging") {_=try review(interruptedStart)}
+  let interruptedProof=try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:interruptedStart,map:map,model:model,
+    generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,
+    trial:trial(map,interruptedStart,cameraAdvisory:true),measuredAtMilliseconds:1000,
+    emptyTrialEligibility:true,emptyStateEvidenceSource:"operator_declared_empty")
+  precondition(interruptedProof.baseline==interruptedStart && interruptedProof.steps.reduce(0,{$0+$1.seconds})<=60)
+  print("PASS fresh interrupted-start lift with unchanged3mm execution corridor; minimum3.2seconds per segment")
   let cameraTrial=trial(obstacle,start,cameraAdvisory:true)
   precondition(cameraTrial.valid && cameraTrial.usesOperatorClearedCameraCollisionAdvisory)
   let cameraProof=try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:start,map:obstacle,model:model,generation:generation,

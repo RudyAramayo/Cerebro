@@ -38,10 +38,12 @@ fixture=r'''
 import Foundation
 enum ROBArmRoutineError:Error {case blocked(String)}
 typealias ROBGhostRobotModel=Int
+enum ROBEmptyArmLiftGeometry {static func acceptsOperatorClearedInitialStart(_ q:[Double])->Bool {false}}
 enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double],tolerance:Double=0.025)->Bool {zip(a,b).allSatisfy{abs($0-$1)<=tolerance}}}
 enum ROBRecyclingBatchRequest {static func executionCount(requestedCount:Int,standingRemainingTransfers:Int?)->Int? {requestedCount}}
 struct Feedback {let positionsRadians=[NSNumber](repeating:0,count:7)}
 @MainActor final class Harness {
+ var activeCameraCollisionAdvisory=false
  var activeHoldAfterInitialEmptyLift=false,holdAfterInitialEmptyLiftEnabled=false,activeApproachCanThenHold=false
  var localReceiptCommand:String?="right_recycle_cans",physicalSide="right"
  var jawCommandDispatched=false,jawSetupDispatchUncertain=false,recyclingGripDispatched=false,stopped=false

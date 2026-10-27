@@ -15,6 +15,7 @@ import Foundation
 enum ROBArmRoutineError:Error {case blocked(String)}
 enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double],tolerance:Double=0.08)->Bool {a.count==7 && b.count==7 && zip(a,b).allSatisfy{abs($0-$1)<=tolerance}}}
 struct ROBGhostRobotModel {}
+enum ROBEmptyArmLiftGeometry {static func acceptsOperatorClearedInitialStart(_ q:[Double])->Bool {false}}
 struct Map {}
 struct Step {let positions:[Double];var jawAction:String?=nil}
 struct Proposal {let baseline:[Double];let steps:[Step]}
@@ -24,6 +25,7 @@ struct Sample {let positionsRadians:[NSNumber]}
  var activeCommand="left_recycle_can",armTravelDispatched=false,jawCommandDispatched=false,jawSetupDispatchUncertain=false,recyclingGripDispatched=false,servoPossiblePayloadUncertain=false
  var recyclingCan:Int?,generation:UInt64=1,referencedGeneration:UInt64=0
  var phase="",collisionMap:Map?,collisionModel:ROBGhostRobotModel?,collisionReviewProposal:Proposal?,proposal:Proposal?,proposalStep = -1
+ var activeCameraCollisionAdvisory=false
  var activeApproachCanThenHold=false,activeHoldAfterInitialEmptyLift=false,inactiveWorkspaceSearch=false,taskJawTarget:[Double]?,cameraReady=false,positionReady=false,sceneCapturedForThisTask=false,localReceiptHeldNeckIdentity:String?
  var q=Array(repeating:0.0,count:7),events:[String]=[],failureAt="",retreat=false,stopAfterMove=false
  func check()throws{if failureAt=="stop"{throw ROBArmRoutineError.blocked("Stop")}}

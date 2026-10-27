@@ -286,6 +286,16 @@ struct ROBEmptyArmLiftGeometry {
     let initialTip:SIMD3<Double>,liftedTip:SIMD3<Double>,rearwardTip:SIMD3<Double>,finalTip:SIMD3<Double>
     let maximumInitialHorizontalTravelMeters:Double
 
+    /// Covers the measured beginning of an interrupted EMPTY vertical lift,
+    /// without commanding a return to zero or reusing an old waypoint.
+    /// Other joints retain the ordinary hanging tolerance. Full geometry,
+    /// empty-state and current operator scope are checked by the caller.
+    static func acceptsOperatorClearedInitialStart(_ q:[Double])->Bool {
+        q.count==7 && q.enumerated().allSatisfy { index,value in
+            value.isFinite && (index==1 || index==3 ? (-0.05...0.025).contains(value):abs(value)<=0.025)
+        }
+    }
+
     static func make(model:ROBGhostRobotModel,baseline:[Double],initialRise:Double=0.06,
         rearwardDistance:Double=0.10,remainingRise:Double=0.10)throws->Self {
         guard model.physicalSide=="right",baseline.count==7,baseline.allSatisfy(\.isFinite),
@@ -330,7 +340,10 @@ struct ROBEmptyArmLiftGeometry {
                   let minimum=ROBLeftArmInteractionPlan.duration(from:q,to:target),minimum<=5 else {
                 throw ROBGhostMotionError.blocked("The staged empty lift exceeds joint or trajectory limits.")
             }
-            steps.append(.init(positions:target,seconds:max(0.8,minimum),stage:stage));q=target
+            // The native joint feedback is asynchronous and the loaded shoulder
+            // tracks more slowly than the elbow. Slow the coupled path while
+            // retaining the existing3mm measured corridor and endpoint gate.
+            steps.append(.init(positions:target,seconds:max(3.2,minimum),stage:stage));q=target
         }
         func vertical(_ rise:Double,stage:String,horizontalLimit:Double,initialStage:Bool=false)throws {
             let origin=try tip(q),count=Int(ceil(rise/0.015))

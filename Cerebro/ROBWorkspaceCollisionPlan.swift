@@ -1095,7 +1095,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         var context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
         guard model.physicalSide=="right",baseline==trial.baseline,
-              ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)),emptyTrialEligibility,
+              (ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) ||
+               trial.usesOperatorClearedCameraCollisionAdvisory && ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(baseline)),emptyTrialEligibility,
               ["operator_declared_empty","local_first_attempt_no_arm_travel_or_task_grip"].contains(emptyStateEvidenceSource),
               measuredAtMilliseconds.isFinite,(0...250).contains(nowMilliseconds-measuredAtMilliseconds),
               !trial.usesOperatorClearedUnknownApproach else {
