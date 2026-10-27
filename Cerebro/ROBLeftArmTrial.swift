@@ -310,6 +310,23 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     /// DEBUG-only early stop on the ordinary, fully checked empty entry path.
     @nonobjc var approachUnknownAdvisoryEnabled = false
     private var activeApproachUnknownAdvisory = false
+    private static let cameraAdvisoryPolicyRevision="operator_cleared_right_can_camera_advisory_v1"
+    private var activeCameraCollisionAdvisory=false
+    private var standingCameraCollisionAdvisoryEligible:Bool {
+        #if DEBUG
+        return physicalSide=="right" && ROBControllerArmApproval.shared.standingLocalCanCampaignActive &&
+            !nominalEmptyCommissioningStepEnabled && !nominalModelAssumedSelfEnabled && !oneDegreeEmptyCalibrationStepEnabled &&
+            !sourcePixelSelfReviewEnabled && !approachCanThenHoldEnabled && !approachUnknownAdvisoryEnabled
+        #else
+        return false
+        #endif
+    }
+    private var defersInitialLiftCameraInspection:Bool {
+        activeCameraCollisionAdvisory && activeStagedEmptyLift != nil && isRunning && physicalSide=="right" &&
+            localReceiptCommand=="right_recycle_cans" && !jawCommandDispatched && !jawSetupDispatchUncertain &&
+            !recyclingGripDispatched && !servoPossiblePayloadUncertain
+    }
+
     @nonobjc var approachCanThenHoldEnabled = false
     private var activeApproachCanThenHold = false
     @nonobjc var holdAfterInitialEmptyLiftEnabled = false
@@ -1029,6 +1046,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let approvedSummary=localReceiptOnly && approachUnknownAdvisoryEnabled
             ? "DEBUG operator-cleared UNKNOWN-advisory EMPTY physical RIGHT open-jaw approach: search the can and workspace, perform any needed occupied/full-arm/self-checked initial empty lift, reobserve, then execute the complete checked dynamic entry and bounded observed-jaw alignment. Unobserved cells remain UNKNOWN and are recorded as advisory; they do not veto this approach and are never relabeled free or observed. ALL occupied returns, self-collision, person/Stop, joints/rates/current/fresh feedback and exact camera/body/standing-receipt checks remain enforced. Stop at actual ready-to-grip alignment BEFORE closing. Opening/startup empty-jaw readiness is permitted; no close, verification lift, payload, carry, release, automatic recovery or next attempt. Hold the measured endpoint, ZERO transfers. Assumed visual uncertainty remains \(localVisualTrialAssumedSpatialErrorMeters*1000)mm. This accepted uncertainty is NOT certified collision clearance or measured registration. No other route receives this UNKNOWN policy."
             : approachSummary
+        let cameraAdvisorySummary=localReceiptOnly && standingCameraCollisionAdvisoryEligible
+            ? "Policy \(Self.cameraAdvisoryPolicyRevision). Operator confirms the initial RIGHT arm is unblocked and authorizes the fixed J2/J4 vertical lift, rearward J1 and raised approach. Camera occupied/UNKNOWN/J5 and hand/person collision predictions are advisory throughout this current \(requestedCanCount)-can campaign. Keep their raw observations and label all predictions unverified; no observed-free or measured-registration claim. Initial EMPTY lift uses model geometry, joint limits, nonworsening self clearance, fresh motor feedback and current-spike hold; defer camera inspection until the arm is raised. Then acquire fresh can/bucket positions and visual possession/drop evidence. Current-spike hold, Stop, ownership, joint/rate limits and modeled self collision remain active. Both arms may hold; only physical RIGHT travels. No torso/treads/encoder reset or force escalation. \(holdAfterInitialEmptyLiftEnabled ? "Lift and measured hold ONLY: no jaws, grasp, carry or release; ZERO transfers." : "Open, approach and grip gently, verify the short lift, carry to the bucket and release; reobserve each can.") The frozen local receipt covers this bounded600second execution; interruption ends the current path. Camera alignment remains assumed \(localVisualTrialAssumedSpatialErrorMeters*1000)mm and collision clearance is not certified."
+            : approvedSummary
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
             start(command, summary: action, limit: limit, completion: completion)
@@ -1040,7 +1060,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             self?.localReceiptEvidence = localReceiptOnly ? ROBControllerArmApproval.shared.activeLocalRecyclingApprovalEvidence : nil
             self?.localReceiptContextIdentity = localReceiptOnly ? self?.currentLocalRecyclingContextIdentity() : nil
             self?.jawIntensity = intensity
-            self?.start(command, summary: approvedSummary, limit: limit, completion: done)
+            self?.start(command, summary: cameraAdvisorySummary, limit: limit, completion: done)
         }
         let cancel = { [weak self] in
             self?.captureActualCampaignInterruption()
@@ -1080,22 +1100,22 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             localReceiptCameraTimer?.invalidate();localReceiptCameraTimer=nil
             localReceiptContextComponents=nil
             ROBControllerArmApproval.shared.requestRecyclingWorkspaceTask(command:requestedCommand,arm:physicalSide,canCount:canCount,
-                summary:approvedSummary,contextIdentity:{[weak self] in self?.currentLocalRecyclingContextIdentity()},receiptOnly:true,
+                summary:cameraAdvisorySummary,contextIdentity:{[weak self] in self?.currentLocalRecyclingContextIdentity()},receiptOnly:true,
                 permitsUnmeasuredVisualCalibrationTrial:true,nominalEmptyCommissioningStepEnabled:nominalEmptyCommissioningStepEnabled,
                 nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,approachCanThenHoldEnabled:approachCanThenHoldEnabled,approachUnknownAdvisoryEnabled:approachUnknownAdvisoryEnabled,
                 sourcePixelSelfReviewSHA256:currentSourcePixelEvidenceSHA256,
                 oneDegreeEmptyCalibrationStepEnabled:oneDegreeEmptyCalibrationStepEnabled,
                 execute:execute,cancel:cancel,completion:finished)
         } else if workspace && physicalSide == "right" {
-            ROBControllerArmApproval.shared.requestRightWorkspaceTask(summary: approvedSummary, execute:execute, cancel:cancel, completion:finished)
+            ROBControllerArmApproval.shared.requestRightWorkspaceTask(summary: cameraAdvisorySummary, execute:execute, cancel:cancel, completion:finished)
         } else if workspace {
-            ROBControllerArmApproval.shared.requestLeftWorkspaceTask(summary: approvedSummary, execute: execute,
+            ROBControllerArmApproval.shared.requestLeftWorkspaceTask(summary: cameraAdvisorySummary, execute: execute,
                 cancel: cancel, completion: finished)
         } else if travel {
-            ROBControllerArmApproval.shared.requestLeftGesture(summary: approvedSummary, execute: execute,
+            ROBControllerArmApproval.shared.requestLeftGesture(summary: cameraAdvisorySummary, execute: execute,
                 cancel: cancel, completion: finished)
         } else {
-            ROBControllerArmApproval.shared.requestLeftStationary(summary: approvedSummary,
+            ROBControllerArmApproval.shared.requestLeftStationary(summary: cameraAdvisorySummary,
                 execute: execute, cancel: cancel, completion: finished)
         }
     }
@@ -1227,6 +1247,14 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               (frozen["oneDegreeEmptyCalibrationStepEnabled"] as? Bool ?? false)==oneDegreeEmptyCalibrationStepEnabled else {
             throw ROBArmRoutineError.blocked("The receipt's nominal-empty experiment flag changed.")
         }
+        if activeCameraCollisionAdvisory {
+            guard standingCameraCollisionAdvisoryEligible,command=="right_recycle_cans",
+                  summary.contains(Self.cameraAdvisoryPolicyRevision),
+                  let campaign=current["standingCampaignID"] as? String,campaign==frozen["standingCampaignID"] as? String,
+                  campaign==ROBControllerArmApproval.shared.standingLocalCanCampaignState?["campaignID"] as? String else {
+                throw ROBArmRoutineError.blocked("Camera advisory lost its exact operator-cleared standing can campaign.")
+            }
+        }
         if approachUnknownAdvisoryEnabled {
             guard activeApproachUnknownAdvisory,activeApproachCanThenHold,physicalSide=="right",!recyclingGripDispatched,!servoPossiblePayloadUncertain,
                   let campaign=current["standingCampaignID"]as?String,campaign==frozen["standingCampaignID"]as?String,
@@ -1270,7 +1298,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             currentPoseIdentity:ROBGhostRobotModel.hash(poseData),baseline:baseline,issuedAtMilliseconds:now,
             expiresAtMilliseconds:min(now+600_000,(receipt["executingUntilMilliseconds"] as? NSNumber)?.doubleValue ?? now),
             assumedSpatialErrorMeters:localVisualTrialAssumedSpatialErrorMeters,
-            operatorClearedUnknownApproach:activeApproachUnknownAdvisory ? true:nil)
+            operatorClearedUnknownApproach:activeApproachUnknownAdvisory ? true:nil,
+            operatorClearedCameraCollisionAdvisory:activeCameraCollisionAdvisory ? true:nil)
         _ = try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(map,model:model,generation:generation,
             sceneID:map.sceneID,cameraGeneration:vision.cameraGeneration,nowMilliseconds:now,trial:value)
         return value
@@ -1285,17 +1314,19 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             observationPoseIdentity:value.observationPoseIdentity,
             currentPoseIdentity:ROBGhostRobotModel.hash(Data((value.currentPoseIdentity+baseline.map(String.init(describing:)).joined(separator:",")).utf8)),
             baseline:baseline,issuedAtMilliseconds:value.issuedAtMilliseconds,expiresAtMilliseconds:value.expiresAtMilliseconds,
-            assumedSpatialErrorMeters:value.assumedSpatialErrorMeters,operatorClearedUnknownApproach:value.operatorClearedUnknownApproach)
+            assumedSpatialErrorMeters:value.assumedSpatialErrorMeters,operatorClearedUnknownApproach:value.operatorClearedUnknownApproach,
+            operatorClearedCameraCollisionAdvisory:value.operatorClearedCameraCollisionAdvisory)
     }
 
     private func requireLiveVisualTrial(_ trial:ROBWorkspaceVisualCalibrationTrial,map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
         requireFreshCamera:Bool=true) throws {
         let e=try requireLocalReceipt()
-        guard !requireFreshCamera || vision.fresh else {throw ROBArmRoutineError.blocked("The visual-calibration motion needs a fresh camera frame; the unchanged job receipt does not permit stale-image travel.")}
+        guard !requireFreshCamera || defersInitialLiftCameraInspection || vision.fresh else {throw ROBArmRoutineError.blocked("The visual-calibration motion needs a fresh camera frame; the unchanged job receipt does not permit stale-image travel.")}
         guard trial.receiptID==e["receiptID"] as? String,trial.receiptSHA256==e["receiptSHA256"] as? String,
               trial.appSessionID==e["appSessionID"] as? String,trial.command==e["command"] as? String,
               trial.summarySHA256==e["summarySHA256"] as? String,trial.authorizationContextIdentity==e["contextIdentity"] as? String,
               (trial.operatorClearedUnknownApproach ?? false)==activeApproachUnknownAdvisory,
+              (trial.operatorClearedCameraCollisionAdvisory ?? false)==activeCameraCollisionAdvisory,
               !activeApproachUnknownAdvisory || (activeApproachCanThenHold && physicalSide=="right" && !recyclingGripDispatched && !servoPossiblePayloadUncertain && !jawSetupDispatchUncertain),
               trial.assumedSpatialErrorMeters==localVisualTrialAssumedSpatialErrorMeters,
               localReceiptHeldNeckIdentity != nil,localReceiptHeldNeckIdentity==localNeckIdentity(),
@@ -1614,6 +1645,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             activeEstimated = nil
         }
         owner = id; isRunning = true; self.summary = summary; currentLimit = limit
+        activeCameraCollisionAdvisory = localReceiptCommand=="right_recycle_cans" && standingCameraCollisionAdvisoryEligible && summary.contains(Self.cameraAdvisoryPolicyRevision)
         activeApproachUnknownAdvisory = localReceiptCommand != nil && approachUnknownAdvisoryEnabled
         activeApproachCanThenHold = localReceiptCommand != nil && approachCanThenHoldEnabled
         activeHoldAfterInitialEmptyLift = localReceiptCommand != nil && holdAfterInitialEmptyLiftEnabled
@@ -1744,10 +1776,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         if activeCommand == "left_estimated_calibration", generation > 0 { try checkCollisionContext() }
         if cameraReady {
             let fresh=vision.fresh,stationary=ROBArmRoutineCoordinator.shared.viewIsStationary?() == true
-            guard (fresh || defersOneDegreeCameraInspection),stationary else {
+            guard (fresh || defersOneDegreeCameraInspection || defersInitialLiftCameraInspection),stationary else {
                 throw ROBArmRoutineError.blocked("Live camera or stationary body view lost; \(physicalSide)-arm hold requested. camera_fresh=\(fresh), body_stationary=\(stationary).")
             }
-            if (fresh || !defersOneDegreeCameraInspection) && !vision.handsClear {
+            if !activeCameraCollisionAdvisory && (fresh || !defersOneDegreeCameraInspection) && !vision.handsClear {
                 throw ROBArmRoutineError.blocked("Person or hand clearance was lost; an arm hold was requested.")
             }
         }
@@ -3208,7 +3240,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     // Historical visibility cannot veto a current approach.
                     // Assess people only in this new post-ready exposure;
                     // stale observations wait for reacquisition below.
-                    guard frame.handsClear else {
+                    guard activeCameraCollisionAdvisory || frame.handsClear else {
                         throw reject("person_or_hand_visible","A hand or person is visible in the fresh post-ready frame; holding the empty preflight.")
                     }
                     let scope:ROBFixedHeadRegistrationScope
@@ -3277,7 +3309,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let evidence=recording.deletingPathExtension().appendingPathExtension("staged-empty-lift.json")
         try encoder.encode(proof).write(to:evidence,options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:evidence.path)
-        try await refreshInitialEmptyDispatchView(map:map,model:model,trial:trial,baseline:baseline,reference:reference)
+        if !activeCameraCollisionAdvisory {
+            try await refreshInitialEmptyDispatchView(map:map,model:model,trial:trial,baseline:baseline,reference:reference)
+        }
         guard path.steps==proof.steps else {throw ROBArmRoutineError.blocked("The staged lift changed during clearance review.")}
         activeStagedEmptyLift=proof;activeStagedEmptyLiftSegment=0;proposal=path;collisionReviewProposal=path
         defer {activeStagedEmptyLift=nil;activeStagedEmptyLiftSegment=0;proposal=nil;proposalStep = -1;reviewedDispatchStart=nil}
@@ -3333,7 +3367,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 "actualMeasuredEndpoint":actual,"endpointWithin3mmOfGoal":true,
                 "telemetrySequence":NSNumber(value:endpointSample.sequence),"gatewaySessionGeneration":NSNumber(value:session),
                 "recordedAtMilliseconds":Date().timeIntervalSince1970*1000,"proofFile":evidence.path,
-                "unknownSpaceAdvisory":true,"observedFreeInferred":false,"jawCommandSent":false,"transfersCompleted":0,
+                "unknownSpaceAdvisory":true,"cameraCollisionAdvisory":activeCameraCollisionAdvisory,"observedFreeInferred":false,"jawCommandSent":false,"transfersCompleted":0,
                 "initialSelfHypothesisGroupCount":proof.initialSelfHypothesis?.groups.count ?? 0,
                 "measuredSelfRecognition":false,"collisionClearanceCertified":false]
             let file=recording.deletingPathExtension().appendingPathExtension("initial-empty-lift-held.json")
@@ -3712,7 +3746,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 throw ROBArmRoutineError.blocked("The already-settled visual trial camera view changed before arm preparation.")
             }
         }
-        try await wait(10) { self.vision.fresh && ROBArmRoutineCoordinator.shared.viewIsStationary?() == true }
+        try await wait(10) { (self.defersInitialLiftCameraInspection || self.vision.fresh) && ROBArmRoutineCoordinator.shared.viewIsStationary?() == true }
         cameraReady = true
         try record(measured())
         if let owner {
@@ -4308,7 +4342,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
 
     @MainActor private func emptyJawIdentificationIsClear(context:ROBRecyclingVisualInspection.ServoContext,model:ROBGhostRobotModel,
         map:ROBWorkspaceCollisionSnapshot,can:ROBWorkspaceLocatedObject)async throws->Bool {
-        guard !recyclingGripDispatched,!jawSetupDispatchUncertain,let frame=vision.snapshot()["face"],frame.handsClear,
+        guard !recyclingGripDispatched,!jawSetupDispatchUncertain,let frame=vision.snapshot()["face"],(activeCameraCollisionAdvisory || frame.handsClear),
               let k=frame.intrinsics,let depth=frame.depth,
               case .visualTrial(let projection)=context.baseline.projection,
               let tip=model.toolPosition(model.positions(vendorLeft:try measured().positionsRadians.map(\.doubleValue))),
@@ -4321,7 +4355,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         guard u+0.22<b[0]-0.03 || u-0.22>b[2]+0.03 || v+0.22<b[1]-0.03 || v-0.22>b[3]+0.03 else{return false}
         let(observation,observedFrame)=try await vision.observeWorkspace()
         try check()
-        guard (0...700).contains(Date().timeIntervalSince1970*1000-observedFrame.capturedAt),observedFrame.handsClear,
+        guard (0...700).contains(Date().timeIntervalSince1970*1000-observedFrame.capturedAt),(activeCameraCollisionAdvisory || observedFrame.handsClear),
               try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:observedFrame)==context.baseline.scope else{return false}
         let boxes=(observation.cans ?? [observation.can]).filter{$0.visuallyUsable}.map(\.box)
         guard !boxes.isEmpty,boxes.allSatisfy({box in u+0.22<box[0]-0.03 || u-0.22>box[2]+0.03 || v+0.22<box[1]-0.03 || v-0.22>box[3]+0.03}) else{return false}
@@ -4783,6 +4817,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
         owner = nil; isRunning = false; task = nil; proposal = nil;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; proposalStep = -1; reviewedDispatchStart = nil
+        activeCameraCollisionAdvisory=false
         activeApproachUnknownAdvisory=false
         activeApproachCanThenHold=false
         activeHoldAfterInitialEmptyLift=false;initialEmptyLiftHeldEvidence=nil

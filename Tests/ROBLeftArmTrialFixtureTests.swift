@@ -331,6 +331,7 @@ struct ROBWorkspaceCanSelection {
 
 final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
+    var panTargetForView:((Double)->NSNumber?)?={NSNumber(value:6000+Int(($0/0.03).rounded()))}
     var announce: ((String) -> Void)?
     var lastReport: NSDictionary = ["detail": "Fixture search only"]
     private var collisionSnapshotValue: ROBWorkspaceCollisionSnapshot?
@@ -377,7 +378,7 @@ final class ROBWorkspaceSearch {
     }
     func clearCollisionScene() { collisionSnapshotValue = nil }
     @MainActor func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
-        check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
+        initialEmptyRightLift:Bool=false,check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
         collisionScanCalls += 1; collisionSnapshotValue = nil
         try check(); onCollisionScan?()
         if failCollisionScan { throw ROBArmRoutineError.blocked("Fixture RGB-D scene unavailable") }

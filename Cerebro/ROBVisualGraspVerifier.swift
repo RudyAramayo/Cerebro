@@ -41,6 +41,7 @@ struct ROBVisualGraspVerifier {
         let measuredToolDepthMeters: Double
         let toolFeedbackCapturedAtMilliseconds: Double
         let handsClear: Bool
+        var cameraCollisionAdvisory=false
         var toolEvidenceSource: String = "registered_measured_feedback"
         var observedFingerRegions: [Box] = []
     }
@@ -67,6 +68,7 @@ struct ROBVisualGraspVerifier {
         var toolEvidenceSource: String = "registered_measured_feedback"
         var appearanceReferenceSequence:UInt64? = nil
         var appearanceReferenceCapturedAtMilliseconds:Double? = nil
+        var cameraCollisionAdvisory=false
         let possessionMeasured = false
     }
     enum Unavailable: LocalizedError {
@@ -140,6 +142,7 @@ struct ROBVisualGraspVerifier {
             firstSequence:baseline.sequence,lastSequence:baseline.sequence,cameraGeneration:baseline.cameraGeneration,
             fixedViewIdentity:baseline.fixedViewIdentity,targetIdentity:baseline.targetIdentity,targetBox:targetBox,
             baselineCapturedAtMilliseconds:baseline.capturedAtMilliseconds,lastCapturedAtMilliseconds:baseline.capturedAtMilliseconds)
+        evidence.cameraCollisionAdvisory=baseline.cameraCollisionAdvisory
         evidence.toolEvidenceSource=baseline.toolEvidenceSource
         evidence.appearanceReferenceSequence=independentAppearance?.sequence
         evidence.appearanceReferenceCapturedAtMilliseconds=independentAppearance?.capturedAtMilliseconds
@@ -249,7 +252,7 @@ struct ROBVisualGraspVerifier {
               reference.width==current.width,reference.height==current.height,
               reference.gray.count==current.gray.count,reference.depthMeters.count==current.depthMeters.count,
               reference.cameraGeneration==current.cameraGeneration,reference.fixedViewIdentity==current.fixedViewIdentity,
-              reference.targetIdentity==current.targetIdentity,reference.synchronizedRGBDepth,reference.handsClear,
+              reference.targetIdentity==current.targetIdentity,reference.synchronizedRGBDepth,(reference.handsClear || reference.cameraCollisionAdvisory),
               current.sequence>=reference.sequence,(0...30_000).contains(current.capturedAtMilliseconds-reference.capturedAtMilliseconds) else {return nil}
         let w=targetBox.right-targetBox.left,h=targetBox.bottom-targetBox.top
         let core=Box(left:targetBox.left+w*0.2,top:targetBox.top+h*0.15,right:targetBox.right-w*0.2,bottom:targetBox.bottom-h*0.15)
@@ -280,11 +283,11 @@ struct ROBVisualGraspVerifier {
               (0...30_000).contains(current.capturedAtMilliseconds-seed.capturedAtMilliseconds),
               seed.cameraGeneration==current.cameraGeneration,seed.fixedViewIdentity==current.fixedViewIdentity,
               seed.targetIdentity==current.targetIdentity,seed.width==current.width,seed.height==current.height,
-              seed.gray.count==current.gray.count,seed.canBox.valid,seed.handsClear,seed.synchronizedRGBDepth else{return nil}
+              seed.gray.count==current.gray.count,seed.canBox.valid,(seed.handsClear || seed.cameraCollisionAdvisory),seed.synchronizedRGBDepth else{return nil}
         let pixels=Sample(sequence:seed.sequence,capturedAtMilliseconds:seed.capturedAtMilliseconds,synchronizedRGBDepth:seed.synchronizedRGBDepth,
             cameraGeneration:seed.cameraGeneration,fixedViewIdentity:seed.fixedViewIdentity,targetIdentity:seed.targetIdentity,
             width:seed.width,height:seed.height,gray:seed.gray,depthMeters:[],measuredToolCenter:.init(x:.nan,y:.nan),
-            measuredToolDepthMeters:.nan,toolFeedbackCapturedAtMilliseconds:.nan,handsClear:seed.handsClear)
+            measuredToolDepthMeters:.nan,toolFeedbackCapturedAtMilliseconds:.nan,handsClear:seed.handsClear,cameraCollisionAdvisory:seed.cameraCollisionAdvisory)
         let w=seed.canBox.right-seed.canBox.left,h=seed.canBox.bottom-seed.canBox.top
         let core=Box(left:seed.canBox.left+w*0.2,top:seed.canBox.top+h*0.15,right:seed.canBox.right-w*0.2,bottom:seed.canBox.bottom-h*0.15)
         guard let patch=Self.patch(pixels,box:core) else{return nil}
@@ -305,7 +308,7 @@ struct ROBVisualGraspVerifier {
     private static func valid(_ s:Sample,now:Double) -> Bool {
         guard (80...640).contains(s.width),(60...480).contains(s.height),s.gray.count==s.width*s.height,
               s.depthMeters.count==s.gray.count,s.sequence>0,s.capturedAtMilliseconds.isFinite,now.isFinite,
-              (0...800).contains(now-s.capturedAtMilliseconds),s.synchronizedRGBDepth,s.handsClear,
+              (0...800).contains(now-s.capturedAtMilliseconds),s.synchronizedRGBDepth,(s.handsClear || s.cameraCollisionAdvisory),
               s.measuredToolCenter.x.isFinite,s.measuredToolCenter.y.isFinite,
               (0...1).contains(s.measuredToolCenter.x),(0...1).contains(s.measuredToolCenter.y),
               s.measuredToolDepthMeters.isFinite,(0.15...5).contains(s.measuredToolDepthMeters),
@@ -389,6 +392,7 @@ extension ROBVisualGraspVerifier {
         let fixedViewIdentity:String,targetIdentity:String,sourceIdentity:String
         let width:Int,height:Int,gray:[UInt8],canBox:Box
         let synchronizedRGBDepth:Bool,handsClear:Bool
+        var cameraCollisionAdvisory=false
     }
     struct ObservedJawInput {
         let sequence:UInt64,capturedAtMilliseconds:Double,cameraGeneration:UUID
@@ -400,6 +404,7 @@ extension ROBVisualGraspVerifier {
         let jawSequence:UInt64,jawCapturedAtMilliseconds:Double,jawScopeIdentity:String
         let jawConfidence:Double,jawEvidenceKind:String
         let canBox:Box
+        var cameraCollisionAdvisory=false
     }
     /// Minted only by the actual observed-jaw verifier reaching support.
     /// This object cannot be decoded, copied from an archive or claimed twice.
@@ -442,7 +447,7 @@ extension ROBVisualGraspVerifier {
         private static func sample(_ v:ObservedJawInput,now:Double)throws->Sample {
             guard !v.sourceIdentity.isEmpty,!v.fixedViewIdentity.isEmpty,v.canBox.valid,
                   (80...640).contains(v.width),(60...480).contains(v.height),v.gray.count==v.width*v.height,
-                  v.depthMeters.count==v.gray.count,v.synchronizedRGBDepth,v.handsClear,
+                  v.depthMeters.count==v.gray.count,v.synchronizedRGBDepth,(v.handsClear || v.cameraCollisionAdvisory),
                   [v.fx,v.fy,v.cx,v.cy].allSatisfy(\.isFinite),v.fx>0,v.fy>0,
                   v.fingerTipsPixels.count==2,v.jawSequence==v.sequence,
                   v.jawCapturedAtMilliseconds==v.capturedAtMilliseconds,v.jawScopeIdentity==v.fixedViewIdentity,
@@ -488,7 +493,7 @@ extension ROBVisualGraspVerifier {
             var sample=Sample(sequence:v.sequence,capturedAtMilliseconds:v.capturedAtMilliseconds,synchronizedRGBDepth:v.synchronizedRGBDepth,
                 cameraGeneration:v.cameraGeneration,fixedViewIdentity:v.fixedViewIdentity,targetIdentity:v.targetIdentity,width:v.width,height:v.height,
                 gray:v.gray,depthMeters:v.depthMeters,measuredToolCenter:.init(x:v.jawCenterPixels.x/Double(v.width),y:v.jawCenterPixels.y/Double(v.height)),
-                measuredToolDepthMeters:(depths[0]+depths[1])/2,toolFeedbackCapturedAtMilliseconds:v.jawCapturedAtMilliseconds,handsClear:v.handsClear)
+                measuredToolDepthMeters:(depths[0]+depths[1])/2,toolFeedbackCapturedAtMilliseconds:v.jawCapturedAtMilliseconds,handsClear:v.handsClear,cameraCollisionAdvisory:v.cameraCollisionAdvisory)
             sample.toolEvidenceSource="independent_observed_fingers";sample.observedFingerRegions=regions
             guard valid(sample,now:now) else {throw Unavailable.evidence("Observed jaw capture is stale or invalid.")}
             return sample

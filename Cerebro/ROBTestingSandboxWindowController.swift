@@ -289,7 +289,7 @@ import UniformTypeIdentifiers
                 holdAfterInitialEmptyLift.target = self; holdAfterInitialEmptyLift.action = #selector(changeHoldAfterInitialEmptyLift)
                 holdAfterInitialEmptyLift.state = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled ? .on : .off
                 detailStack.addArrangedSubview(holdAfterInitialEmptyLift)
-                addHelp("DEBUG: perform one operator-cleared initial EMPTY lift, then hold at the measured endpoint. Original returns wholly near the starting arm (within the assumed alignment error, capped at 50 mm) are recorded as robot/cable hypotheses for this lift only; all other observed returns remain obstacles. This is not measured self recognition or certified clearance. Unseen space remains UNKNOWN and advisory. Keep modeled self clearance, motor feedback, current-spike hold and Stop. No jaw, grasp, carry, release, return or chained step. ZERO transfers.")
+                addHelp("DEBUG: initial EMPTY J2/J4 lift, rearward J1 and raised approach, then measured hold. The current operator-cleared RIGHT can campaign treats camera obstacle, UNKNOWN and hand/person collision predictions as advisory; raw observations remain unchanged. Keep modeled self collision, joint limits, fresh motor feedback, current-spike hold and Stop. The prepared job shows the exact active policy; no measured registration or certified clearance is implied. Lift-only mode sends no jaw, grasp, carry, release, return or next step. ZERO transfers.")
             }
             #endif
             localApprovalInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-local-recycling-approval-scope")

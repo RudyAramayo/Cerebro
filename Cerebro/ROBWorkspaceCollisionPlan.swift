@@ -497,13 +497,17 @@ struct ROBWorkspaceVisualCalibrationTrial: Codable, Equatable {
     /// DEBUG explicit EMPTY open-jaw approach only. Unknown remains unknown;
     /// the native receipt must independently bind this operator assumption.
     let operatorClearedUnknownApproach: Bool?
+    /// Current operator-cleared RIGHT can campaign only. Camera predictions
+    /// are diagnostics, never observed-free evidence or collision certification.
+    let operatorClearedCameraCollisionAdvisory: Bool?
 
     init(receiptID:String,receiptSHA256:String,appSessionID:String,command:String,canCount:Int,
         summarySHA256:String,authorizationContextIdentity:String,sessionGeneration:UInt64,sceneID:UUID,
         cameraGeneration:UUID,modelID:String,geometryID:String,mappingID:String,mapFingerprint:String,
         bodyMotionIdentity:String,estimatedCameraProjectionIdentity:String,observationPoseIdentity:String,
         currentPoseIdentity:String,baseline:[Double],issuedAtMilliseconds:Double,expiresAtMilliseconds:Double,
-        assumedSpatialErrorMeters:Double,operatorClearedUnknownApproach:Bool? = nil) {
+        assumedSpatialErrorMeters:Double,operatorClearedUnknownApproach:Bool? = nil,
+        operatorClearedCameraCollisionAdvisory:Bool? = nil) {
         self.receiptID=receiptID;self.receiptSHA256=receiptSHA256;self.appSessionID=appSessionID
         self.command=command;self.canCount=canCount;self.summarySHA256=summarySHA256
         self.authorizationContextIdentity=authorizationContextIdentity;self.sessionGeneration=sessionGeneration
@@ -513,6 +517,18 @@ struct ROBWorkspaceVisualCalibrationTrial: Codable, Equatable {
         self.currentPoseIdentity=currentPoseIdentity;self.baseline=baseline;self.issuedAtMilliseconds=issuedAtMilliseconds
         self.expiresAtMilliseconds=expiresAtMilliseconds;self.assumedSpatialErrorMeters=assumedSpatialErrorMeters
         self.operatorClearedUnknownApproach=operatorClearedUnknownApproach
+        self.operatorClearedCameraCollisionAdvisory=operatorClearedCameraCollisionAdvisory
+    }
+
+    var usesOperatorClearedCameraCollisionAdvisory:Bool {
+        #if DEBUG
+        return operatorClearedCameraCollisionAdvisory == true && command == "right_recycle_cans" && operatorClearedUnknownApproach != true
+        #else
+        return false
+        #endif
+    }
+    var maximumAdvisoryMapAgeMilliseconds:Double {
+        usesOperatorClearedCameraCollisionAdvisory ? 600_000:ROBWorkspaceCollisionPlan.maximumMapAgeMilliseconds
     }
 
     var usesOperatorClearedUnknownApproach:Bool {
@@ -526,6 +542,7 @@ struct ROBWorkspaceVisualCalibrationTrial: Codable, Equatable {
     var valid: Bool {
         func hash(_ value: String) -> Bool {value.count == 64 && value.allSatisfy(\.isHexDigit)}
         return (operatorClearedUnknownApproach != true || usesOperatorClearedUnknownApproach) &&
+            (operatorClearedCameraCollisionAdvisory != true || usesOperatorClearedCameraCollisionAdvisory) &&
             !receiptID.isEmpty && receiptID.utf8.count <= 128 && !appSessionID.isEmpty &&
             appSessionID.utf8.count <= 128 && !authorizationContextIdentity.isEmpty &&
             authorizationContextIdentity.utf8.count <= 256 && (1...8).contains(canCount) &&
@@ -539,6 +556,7 @@ struct ROBWorkspaceVisualCalibrationTrial: Codable, Equatable {
     }
     var detail: String {
         let normal=String(format:"Operator-authorized visual calibration trial; camera alignment unmeasured; assumed spatial allowance %.1f mm. No registration authority.",assumedSpatialErrorMeters*1000)
+        if usesOperatorClearedCameraCollisionAdvisory {return normal+" Camera occupied/UNKNOWN and person-clearance predictions are advisory for the operator-cleared RIGHT can campaign. Modeled self collision, joint/trajectory limits and runtime motor/current/Stop controls remain enforced. No camera collision-clearance certificate."}
         return usesOperatorClearedUnknownApproach ? normal+" UNKNOWN space is operator-cleared advisory for this EMPTY open-jaw approach only; no observed-free or verified collision-clearance claim. Occupied returns remain checked.":normal
     }
 }
@@ -772,9 +790,20 @@ struct ROBWorkspaceCollisionContext: Codable, Equatable {
     var visualTrial: ROBWorkspaceVisualCalibrationTrial? = nil
     var skippedStaticRobotLinks:[ROBWorkspaceStaticRobotLinkEvidence]? = nil
     var unknownSpaceAdvisory:ROBWorkspaceUnknownSpaceAdvisoryAudit? = nil
+    var cameraCollisionAdvisory:ROBWorkspaceCameraCollisionAdvisoryAudit? = nil
     var spatialErrorAllowanceMeters: Double {
         visualTrial?.assumedSpatialErrorMeters ?? registrationUncertaintyMeters ?? .infinity
     }
+}
+
+struct ROBWorkspaceCameraCollisionAdvisoryAudit:Codable,Equatable {
+    let kind:String
+    var occupiedBroadPhaseQueries:Int = 0
+    var unknownBroadPhaseQueries:Int = 0
+    var examples:[String] = []
+    let rawMapModified:Bool = false
+    let observedFreeInferred:Bool = false
+    let collisionClearanceCertified:Bool = false
 }
 
 /// Query diagnostics only. Neither the map nor its unknown state is rewritten.
@@ -1019,8 +1048,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         let times = [map.createdAtMilliseconds,map.oldestCapturedAtMilliseconds,map.lastCapturedAtMilliseconds]
         guard times.allSatisfy(\.isFinite), map.oldestCapturedAtMilliseconds <= map.lastCapturedAtMilliseconds,
               map.lastCapturedAtMilliseconds <= map.createdAtMilliseconds+5,
-              (0...maximumMapAgeMilliseconds).contains(nowMilliseconds-map.oldestCapturedAtMilliseconds),
-              (0...maximumMapAgeMilliseconds).contains(nowMilliseconds-map.lastCapturedAtMilliseconds),
+              (0...trial.maximumAdvisoryMapAgeMilliseconds).contains(nowMilliseconds-map.oldestCapturedAtMilliseconds),
+              (0...trial.maximumAdvisoryMapAgeMilliseconds).contains(nowMilliseconds-map.lastCapturedAtMilliseconds),
               map.voxelSizeMeters.isFinite, (0.01...0.04).contains(map.voxelSizeMeters) else {
             throw ROBGhostMotionError.blocked("Workspace free-space evidence is stale or invalid. Hold the arm and scan the entire route again.")
         }
@@ -1080,6 +1109,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             requireFinalClearance:true,map:map,model:model,context:context,selfHypothesis:selfHypothesis,originalBaseline:baseline)
         context.skippedStaticRobotLinks=result.staticLinks
         context.unknownSpaceAdvisory=result.unknownAdvisory
+        context.cameraCollisionAdvisory=result.cameraAdvisory
         return .init(context:context,baseline:baseline,steps:geometry.steps,checkedPoseCount:result.checked,
             initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:result.endpoint,
             emptyStateEvidenceSource:emptyStateEvidenceSource,initialSelfHypothesis:selfHypothesis,initialMarginRetreats:result.marginRetreats)
@@ -1097,6 +1127,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
               proof.context.cameraGeneration==cameraGeneration,proof.context.sessionGeneration==generation,
               proof.context.modelID==model.modelID,proof.context.geometryID==model.geometryID,
               proof.context.mappingID==model.selectedMappingID,proof.context.visualTrial != nil,
+              proof.context.visualTrial?.operatorClearedCameraCollisionAdvisory == trial.operatorClearedCameraCollisionAdvisory,
               proof.steps == (try ROBEmptyArmLiftGeometry.make(model:model,baseline:proof.baseline)).steps,
               measuredAtMilliseconds.isFinite,(0...250).contains(nowMilliseconds-measuredAtMilliseconds) else {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift segment lost its frozen route or fresh context.")
@@ -1116,7 +1147,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
 
     private static func initialLiftSelfHypothesis(baseline:[Double],map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext)throws->ROBWorkspaceInitialLiftSelfHypothesis? {
-        guard let groups=map.originalOccupiedSourceGroups else{return nil}
+        guard context.visualTrial?.usesOperatorClearedCameraCollisionAdvisory != true,
+              let groups=map.originalOccupiedSourceGroups else{return nil}
         guard groups.count<=400_000,map.voxelSizeMeters==0.025 else {
             throw ROBGhostMotionError.blocked("Initial arm source groups exceed their bounded original map.")
         }
@@ -1163,7 +1195,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         initialPairs:[String:Double],requireFinalClearance:Bool,map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext,selfHypothesis:ROBWorkspaceInitialLiftSelfHypothesis?,
         originalBaseline:[Double],measuredStartAllowance:Double=0,priorRetreats:[ROBWorkspaceInitialMarginRetreat]=[])throws->
-        (checked:Int,endpoint:[String:Double],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]?,unknownAdvisory:ROBWorkspaceUnknownSpaceAdvisoryAudit?,marginRetreats:[ROBWorkspaceInitialMarginRetreat]) {
+        (checked:Int,endpoint:[String:Double],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]?,unknownAdvisory:ROBWorkspaceUnknownSpaceAdvisoryAudit?,cameraAdvisory:ROBWorkspaceCameraCollisionAdvisoryAudit?,marginRetreats:[ROBWorkspaceInitialMarginRetreat]) {
         guard !steps.isEmpty,steps.count<=30,steps.allSatisfy({$0.jawAction==nil && (0.7...5).contains($0.seconds)}),
               steps.reduce(0,{$0+$1.seconds})<=60,!initialPairs.isEmpty else {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift has invalid timing, jaws or self geometry.")
@@ -1221,7 +1253,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             }
             try checker.requireInitialMarginEndpointClear(previous)
         }
-        return (checker.checked,previousPairs,checker.staticRobotLinkEvidence,checker.unknownSpaceAdvisoryAudit,
+        return (checker.checked,previousPairs,checker.staticRobotLinkEvidence,checker.unknownSpaceAdvisoryAudit,checker.cameraAdvisoryAudit,
             checker.initialMarginRetreats.sorted{$0.key<$1.key}.map(\.value))
     }
 
@@ -1461,6 +1493,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         }
         context.skippedStaticRobotLinks=checker.staticRobotLinkEvidence
         context.unknownSpaceAdvisory=checker.unknownSpaceAdvisoryAudit
+        context.cameraCollisionAdvisory=checker.cameraAdvisoryAudit
         return .init(context:context,baseline:start,goal:goal,step:.init(positions:goal,seconds:4,stage:"Initial EMPTY nonworsening self-proxy retreat"),
             checkedPoseCount:checker.checked,maximumHullTravelMeters:maximumTravel,
             initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:endpoint,
@@ -1537,6 +1570,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         }
         context.skippedStaticRobotLinks=checker.staticRobotLinkEvidence
         context.unknownSpaceAdvisory=checker.unknownSpaceAdvisoryAudit
+        context.cameraCollisionAdvisory=checker.cameraAdvisoryAudit
         return .init(context:context,baseline:baseline,goal:previous,steps:steps,payload:payload,checkedPoseCount:checker.checked,
             intentionalContact:intentionalContact,contactStepIndex:contactStepIndex,carryingAtStart:carryingAtStart)
     }
@@ -1573,7 +1607,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
               context.lastCapturedAtMilliseconds == current.lastCapturedAtMilliseconds,
               context.intentionalContactFingerprint == intentionalContact?.fingerprint,
               context.checkedAtMilliseconds.isFinite,
-              (0...Self.maximumMapAgeMilliseconds).contains(nowMilliseconds-context.checkedAtMilliseconds),
+              (0...trial.maximumAdvisoryMapAgeMilliseconds).contains(nowMilliseconds-context.checkedAtMilliseconds),
               baseline == trial.baseline,goal == steps.last?.positions else {
             throw ROBGhostMotionError.blocked("The reviewed visual-calibration trial or path changed. Build a new explicitly scoped proposal.")
         }
@@ -1581,7 +1615,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             nowMilliseconds:nowMilliseconds,payload:payload,intentionalContact:intentionalContact,
             contactStepIndex:contactStepIndex,carryingAtStart:carryingAtStart)
         guard reviewed.context.skippedStaticRobotLinks==context.skippedStaticRobotLinks,
-              reviewed.context.unknownSpaceAdvisory==context.unknownSpaceAdvisory else {
+              reviewed.context.unknownSpaceAdvisory==context.unknownSpaceAdvisory,
+              reviewed.context.cameraCollisionAdvisory==context.cameraCollisionAdvisory else {
             throw ROBGhostMotionError.blocked("The invariant static robot-link evidence changed; review the current body and arm context again.")
         }
     }
@@ -1792,11 +1827,22 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                 }
             }
         }
+        var cameraAdvisoryAudit:ROBWorkspaceCameraCollisionAdvisoryAudit?
+        var cameraCollisionIsAdvisory:Bool {context.visualTrial?.usesOperatorClearedCameraCollisionAdvisory == true}
+        mutating func recordCameraAdvisory(low:SIMD3<Double>,high:SIMD3<Double>,label:String) {
+            if cameraAdvisoryAudit == nil {cameraAdvisoryAudit = .init(kind:"operator_cleared_right_can_camera_predictions_advisory")}
+            let state=map.state(inBoundsLow:low,high:high)
+            if state == .occupied {cameraAdvisoryAudit!.occupiedBroadPhaseQueries += 1}
+            if state == .unknown {cameraAdvisoryAudit!.unknownBroadPhaseQueries += 1}
+            if state != .free,cameraAdvisoryAudit!.examples.count<16 {
+                cameraAdvisoryAudit!.examples.append(label+": "+(state == .occupied ? "occupied broad-phase prediction":"unknown broad-phase region"))
+            }
+        }
         var unknownSpaceIsAdvisory:Bool {
             initialEmptyLiftUnknownAdvisory || context.visualTrial?.usesOperatorClearedUnknownApproach==true
         }
         var unknownSpaceAdvisoryAudit:ROBWorkspaceUnknownSpaceAdvisoryAudit? {
-            guard unknownSpaceIsAdvisory else{return nil}
+            guard unknownSpaceIsAdvisory,!cameraCollisionIsAdvisory else{return nil}
             return .init(kind:initialEmptyLiftUnknownAdvisory
                 ? "operator_cleared_unknown_initial_empty_lift_not_observed_free"
                 : "operator_cleared_unknown_empty_approach_not_observed_free",
@@ -1830,7 +1876,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             return nil
         }
         mutating func pose(_ q:[Double],payload:ROBWorkspaceCarriedObject?,requireSelfClearance:Bool = true) -> String? {
-            if unknownSpaceIsAdvisory,payload != nil {
+            if unknownSpaceIsAdvisory,!cameraCollisionIsAdvisory,payload != nil {
                 return "Operator-cleared UNKNOWN space cannot admit a carried payload."
             }
             guard !exhausted else { return "Workspace collision search reached its time or sampling bound." }
@@ -1852,6 +1898,28 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                     return String(format:"The complete arm model enters its tread/self-proxy clearance (%.1f mm; required 30 mm). A distinct checked nonworsening retreat is required; visual-trial alignment permission does not exempt it.",selfGap*1000)
                 }
                 return "The complete arm model is missing or enters its tread clearance margin."
+            }
+            if cameraCollisionIsAdvisory {
+                // Keep the source map unchanged. These broad-phase predictions
+                // are recorded, but cannot veto this explicitly scoped trial.
+                // Joint/model/self checks above and payload validity below are
+                // still mandatory; runtime independently enforces the receipt.
+                let margin=mechanicalClearanceMeters+context.spatialErrorAllowanceMeters+sweptPointTravelMeters
+                for link in arms {
+                    let box=bounds[link]!,extra=margin+(link==model.toolLink ? openJawAdditionalMarginMeters:0)
+                    recordCameraAdvisory(low:box.low-SIMD3(repeating:extra),high:box.high+SIMD3(repeating:extra),label:link)
+                }
+                if let payload {
+                    guard payload.valid,let tool=frames[model.toolLink] else {return "The carried-object envelope or tool transform is invalid."}
+                    let c=payload.centerInToolMeters,h=payload.halfExtentsMeters
+                    var low=SIMD3<Double>(repeating:.infinity),high=SIMD3<Double>(repeating:-.infinity)
+                    for x in [-1.0,1] {for y in [-1.0,1] {for z in [-1.0,1] {
+                        let p=tool*SIMD4(c[0]+x*h[0],c[1]+y*h[1],c[2]+z*h[2],1)
+                        low=simd_min(low,SIMD3(p.x,p.y,p.z));high=simd_max(high,SIMD3(p.x,p.y,p.z))
+                    }}}
+                    recordCameraAdvisory(low:low-SIMD3(repeating:margin),high:high+SIMD3(repeating:margin),label:"carried object")
+                }
+                return nil
             }
             // Physical uncertainty remains mechanical + registration + one
             // full swept sample travel. Exact queries below use WHOLE voxel

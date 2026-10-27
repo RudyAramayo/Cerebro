@@ -511,11 +511,13 @@ final class ROBArmRoutineVision {
         poseHeldDuringCapture: Bool,
         openingCommandAtMilliseconds: Double? = nil,
         nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000,
-        humanClearance:HumanClearance? = nil) throws -> ROBGripperVisualServo.Frame {
+        humanClearance:HumanClearance? = nil,
+        cameraCollisionAdvisoryTrial:ROBWorkspaceVisualCalibrationTrial? = nil) throws -> ROBGripperVisualServo.Frame {
         guard nowMilliseconds.isFinite, frame.capturedAt.isFinite,
               (0...700).contains(nowMilliseconds-frame.capturedAt), frame.sequence>0,
               frame.cameraGeneration==cameraGeneration,
-              (frame.handsClear || humanClearance?.matches(frame:frame,scopeIdentity:scopeIdentity)==true),
+              (frame.handsClear || humanClearance?.matches(frame:frame,scopeIdentity:scopeIdentity)==true ||
+               (cameraCollisionAdvisoryTrial?.usesOperatorClearedCameraCollisionAdvisory==true && cameraCollisionAdvisoryTrial?.cameraGeneration==frame.cameraGeneration)),
               !scopeIdentity.isEmpty, scopeIdentity.utf8.count<=8192,
               poseHeldDuringCapture, jointPositions.count==7,
               jointPositions.allSatisfy(\.isFinite), jointCapturedAtMilliseconds.isFinite,

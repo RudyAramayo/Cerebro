@@ -59,8 +59,8 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   var map=SyntheticMap(sceneID:scene,cameraGeneration:camera,sessionGeneration:generation,modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID)
   map.registrationID=nil;map.registrationUncertaintyMeters=nil
   map.visualCalibrationScope = .init(bodyMotionIdentity:"fixture",bodyContextIsCurrent:true,estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,observedFrameCount:2)
-  func trial(_ source:SyntheticMap,_ start:[Double])->ROBWorkspaceVisualCalibrationTrial {
-   .init(receiptID:"fixture",receiptSHA256:hash,appSessionID:"fixture",command:"right_recycle_cans",canCount:8,summarySHA256:hash,authorizationContextIdentity:"fixture",sessionGeneration:generation,sceneID:scene,cameraGeneration:camera,modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,mapFingerprint:source.fingerprint,bodyMotionIdentity:"fixture",estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,currentPoseIdentity:hash,baseline:start,issuedAtMilliseconds:1000,expiresAtMilliseconds:2000,assumedSpatialErrorMeters:0.05)
+  func trial(_ source:SyntheticMap,_ start:[Double],cameraAdvisory:Bool=false)->ROBWorkspaceVisualCalibrationTrial {
+   .init(receiptID:"fixture",receiptSHA256:hash,appSessionID:"fixture",command:"right_recycle_cans",canCount:8,summarySHA256:hash,authorizationContextIdentity:"fixture",sessionGeneration:generation,sceneID:scene,cameraGeneration:camera,modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,mapFingerprint:source.fingerprint,bodyMotionIdentity:"fixture",estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,currentPoseIdentity:hash,baseline:start,issuedAtMilliseconds:1000,expiresAtMilliseconds:601000,assumedSpatialErrorMeters:0.05,operatorClearedCameraCollisionAdvisory:cameraAdvisory ? true:nil)
   }
   func review(_ start:[Double],source:SyntheticMap?=nil,age:Double=0,empty:Bool=true)throws->ROBWorkspaceStagedEmptyLift {
    let m=source ?? map
@@ -108,6 +108,46 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   let endpoint=model.worldCollisionBounds(positions:model.positions(vendorLeft:proof.steps.last!.positions))[model.toolLink]!
   obstacle.obstacleLow=endpoint.low;obstacle.obstacleHigh=endpoint.high
   blocked("obstacle") {_=try review(start,source:obstacle)}
+  #if DEBUG
+  let cameraTrial=trial(obstacle,start,cameraAdvisory:true)
+  precondition(cameraTrial.valid && cameraTrial.usesOperatorClearedCameraCollisionAdvisory)
+  let cameraProof=try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:start,map:obstacle,model:model,generation:generation,
+    sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:cameraTrial,measuredAtMilliseconds:1000,
+    emptyTrialEligibility:true,emptyStateEvidenceSource:"operator_declared_empty")
+  precondition(cameraProof.steps==proof.steps && cameraProof.initialSelfHypothesis==nil && cameraProof.initialMarginRetreats.isEmpty)
+  let cameraAudit=cameraProof.context.cameraCollisionAdvisory!
+  precondition(cameraAudit.occupiedBroadPhaseQueries>0 && !cameraAudit.rawMapModified && !cameraAudit.observedFreeInferred && !cameraAudit.collisionClearanceCertified)
+  precondition(obstacle.state(inBoundsLow:endpoint.low,high:endpoint.high) == .occupied)
+  try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(cameraProof,index:0,from:start,map:obstacle,model:model,
+    generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:70000,
+    trial:cameraTrial,measuredAtMilliseconds:70000)
+  blocked("frozen route") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(cameraProof,index:0,from:start,map:obstacle,
+    model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,
+    trial:trial(obstacle,start),measuredAtMilliseconds:1000)}
+  blocked("self-proxy") {_=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:start,
+    steps:[.init(positions:start,seconds:0.8)],map:obstacle,model:model,generation:generation,sceneID:scene,
+    cameraGeneration:camera,nowMilliseconds:1000,trial:cameraTrial)}
+  let advisoryPayload=ROBWorkspaceCarriedObject(measurementID:"fixture",centerInToolMeters:[0,0,0.05],halfExtentsMeters:[0.03,0.03,0.06])
+  let carryProof=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:raised,
+    steps:[.init(positions:raised,seconds:0.8)],map:obstacle,model:model,generation:generation,sceneID:scene,
+    cameraGeneration:camera,nowMilliseconds:1000,trial:trial(obstacle,raised,cameraAdvisory:true),payload:advisoryPayload,carryingAtStart:true)
+  precondition(carryProof.context.cameraCollisionAdvisory!.occupiedBroadPhaseQueries>0)
+  let invalidPayload=ROBWorkspaceCarriedObject(measurementID:"fixture",centerInToolMeters:[0,0,0],halfExtentsMeters:[-1,0.03,0.06])
+  blocked("payload") {_=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:raised,
+    steps:[.init(positions:raised,seconds:0.8)],map:obstacle,model:model,generation:generation,sceneID:scene,
+    cameraGeneration:camera,nowMilliseconds:1000,trial:trial(obstacle,raised,cameraAdvisory:true),payload:invalidPayload,carryingAtStart:true)}
+  let unseenCarry=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:raised,
+    steps:[.init(positions:raised,seconds:0.8)],map:unseen,model:model,generation:generation,sceneID:scene,
+    cameraGeneration:camera,nowMilliseconds:1000,trial:trial(unseen,raised,cameraAdvisory:true),payload:advisoryPayload,carryingAtStart:true)
+  precondition(unseenCarry.context.cameraCollisionAdvisory!.unknownBroadPhaseQueries>0)
+  var changed=try JSONSerialization.jsonObject(with:JSONEncoder().encode(cameraTrial)) as! [String:Any]
+  changed["command"]="left_recycle_cans"
+  let changedTrial=try JSONDecoder().decode(ROBWorkspaceVisualCalibrationTrial.self,from:JSONSerialization.data(withJSONObject:changed))
+  precondition(!changedTrial.valid)
+  print("PASS camera advisory retains occupied/UNKNOWN raw data, full lift geometry and payload validity; self collision and policy changes still reject")
+  #else
+  precondition(!trial(obstacle,start,cameraAdvisory:true).valid,"Release admitted camera advisory")
+  #endif
   obstacle.observed=false
   blocked("obstacle") {_=try review(start,source:obstacle)}
   func pointGroup(_ p:SIMD3<Double>)->ROBWorkspaceOccupiedSourceGroup {

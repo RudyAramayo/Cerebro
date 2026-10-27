@@ -44,7 +44,7 @@ final class Gateway {
  var passiveFeedbackPauseStarted:Double?,lastHeldFeedbackDiagnostic:String?,lastRecordingPath="",phase="passive search"
  var waiting=Set<UInt64>(),acks:[UInt64:Bool]=[:],holdConfirmations:[UInt64:Bool]=[:],dispatches=0
  static let neckOnlyCommands=Set<String>()
- var defersOneDegreeCameraInspection=false
+ var defersOneDegreeCameraInspection=false,defersInitialLiftCameraInspection=false,activeCameraCollisionAdvisory=false
  var activeApproachUnknownAdvisory=false,approachUnknownAdvisoryEnabled=false
  var activeApproachCanThenHold=false,approachCanThenHoldEnabled=false
  var failure:String?,activeHoldAfterInitialEmptyLift=false,holdAfterInitialEmptyLiftEnabled=false,sourcePixelSelfReviewEnabled=false
@@ -162,6 +162,15 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   ROBArmRoutineCoordinator.shared.viewIsStationary={true}
   bounded.vision.enrolled=true;bounded.vision.available=true;bounded.vision.clear=false
   fatal(bounded,"Person or hand clearance")
+  let advisory=Hold();advisory.inactiveWorkspaceSearch=false;advisory.cameraReady=true
+  advisory.activeCameraCollisionAdvisory=true;advisory.defersInitialLiftCameraInspection=true
+  advisory.vision.clear=false
+  try advisory.check()
+  advisory.defersInitialLiftCameraInspection=false;fatal(advisory,"camera_fresh=false")
+  advisory.vision.enrolled=true;advisory.vision.available=true;try advisory.check()
+  ROBArmRoutineCoordinator.shared.viewIsStationary={false};fatal(advisory,"body_stationary=false")
+  ROBArmRoutineCoordinator.shared.viewIsStationary={true}
+  advisory.failure="Stop requested";fatal(advisory,"Stop requested")
   let camera=CameraPrepare();var completed=false
   camera.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){r in completed=r["status"]as?String=="prepared"}
   precondition(camera.vision.enrolled && camera.prepared==0)

@@ -194,6 +194,7 @@ import CoreImage
         var retainedFrames:[ROBGripperVisualServo.Frame]=[]
         var provisionalCoMotion=false
         var canAppearanceSeed:ROBVisualGraspVerifier.AppearanceSeed?
+        var cameraCollisionAdvisoryTrial:ROBWorkspaceVisualCalibrationTrial?
         var nativeObservedSupport:ROBVisualGraspVerifier.ObservedSupport?
         @MainActor init(baseline:ServoBaseline,can:ROBWorkspaceLocatedObject,model:ROBGhostRobotModel,box:[Double]) {
             self.baseline=baseline;self.can=can;targetBox=box
@@ -263,6 +264,7 @@ import CoreImage
         let view="observed-jaw-servo:"+trial.receiptID+":"+ROBGhostRobotModel.hash(try encoder.encode(scope))+":"+projection.frameContractIdentity
         let baseline=ServoBaseline(projection:.visualTrial(projection),scope:scope,targetIdentity:"can-\(can.sequence)-\(trial.receiptID)",viewIdentity:view)
         let result=ServoContext(baseline:baseline,can:can,model:model,box:detections[0].box)
+        result.cameraCollisionAdvisoryTrial=trial.usesOperatorClearedCameraCollisionAdvisory ? trial:nil
         guard let seedFeedback=feedbackForFrame(reference),seedFeedback.sampleAgeAtReceiptMilliseconds<=250 else {
             throw ROBGhostMotionError.blocked("Pre-approach can appearance needs its actual exposure-matched held feedback.")
         }
@@ -270,7 +272,7 @@ import CoreImage
         let seedPixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:reference,scopeIdentity:view,
             jointPositions:seedFeedback.positionsRadians.map(\.doubleValue),
             jointCapturedAtMilliseconds:seedNow-seedFeedback.effectiveSampleAgeMilliseconds,
-            poseHeldDuringCapture:true,openingCommandAtMilliseconds:nil,nowMilliseconds:seedNow)
+            poseHeldDuringCapture:true,openingCommandAtMilliseconds:nil,nowMilliseconds:seedNow,cameraCollisionAdvisoryTrial:result.cameraCollisionAdvisoryTrial)
         // The seed retains only actual RGB appearance; its exposure-matched
         // feedback never substitutes for current observed finger evidence.
         let seedRGB=Array(seedPixels.rgb)
@@ -280,7 +282,7 @@ import CoreImage
             cameraGeneration:reference.cameraGeneration,fixedViewIdentity:view,targetIdentity:baseline.targetIdentity,
             sourceIdentity:projection.frameContractIdentity,width:seedPixels.width,height:seedPixels.height,gray:seedGray,
             canBox:.init(left:seedBox[0],top:seedBox[1],right:seedBox[2],bottom:seedBox[3]),
-            synchronizedRGBDepth:true,handsClear:reference.handsClear)
+            synchronizedRGBDepth:true,handsClear:reference.handsClear,cameraCollisionAdvisory:trial.usesOperatorClearedCameraCollisionAdvisory)
 
         guard let image=servoImageContext.createCGImage(reference.image,from:reference.image.extent) else {throw ROBGhostMotionError.blocked("The actual can seed pixels are unavailable.")}
         try result.tracker.perform([result.request],on:image)
@@ -329,7 +331,7 @@ import CoreImage
         }
         var pixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:frame,scopeIdentity:context.baseline.viewIdentity,
             jointPositions:feedback.positionsRadians.map(\.doubleValue),jointCapturedAtMilliseconds:historicalTime,
-            poseHeldDuringCapture:true,openingCommandAtMilliseconds:openingCommandAtMilliseconds,nowMilliseconds:now)
+            poseHeldDuringCapture:true,openingCommandAtMilliseconds:openingCommandAtMilliseconds,nowMilliseconds:now,cameraCollisionAdvisoryTrial:context.cameraCollisionAdvisoryTrial)
         let currentTool=model.toolPosition(model.positions(vendorLeft:currentFeedback.positionsRadians.map(\.doubleValue)))
         guard let currentTool,let k=frame.intrinsics,let depth=frame.depth else {throw ROBGhostMotionError.blocked("Missing nominal tool search region; no visual jaw location inferred.")}
         let optical=simd_inverse(projection.cameraToModel)*SIMD4(currentTool.x,currentTool.y,currentTool.z,1)
@@ -408,7 +410,8 @@ import CoreImage
                 fingerTipsPixels:jaw.tipsPixels.map{.init(x:$0[0],y:$0[1])},jawSequence:jaw.sequence,
                 jawCapturedAtMilliseconds:jaw.capturedAtMilliseconds,jawScopeIdentity:jaw.scopeIdentity,
                 jawConfidence:jaw.confidence,jawEvidenceKind:jaw.evidenceKind,
-                canBox:.init(left:value.canBox[0],top:value.canBox[1],right:value.canBox[2],bottom:value.canBox[3]))
+                canBox:.init(left:value.canBox[0],top:value.canBox[1],right:value.canBox[2],bottom:value.canBox[3]),
+                cameraCollisionAdvisory:context.cameraCollisionAdvisoryTrial?.usesOperatorClearedCameraCollisionAdvisory==true)
         }
         var verifier:ROBVisualGraspVerifier.ObservedJawVerifier
         do {

@@ -68,6 +68,20 @@ private struct Scene {
         expect((last.correlation ?? 0)>0.99,"Successful fixture must actually track the original texture")
         expect((last.targetToolMotionErrorPixels ?? 100)<0.01,"Tracked displacement must agree with measured tool projection")
 
+        var advisoryBaseline=scene.sample(handsClear:false);advisoryBaseline.cameraCollisionAdvisory=true
+        var advisoryVerifier=try ROBVisualGraspVerifier(baseline:advisoryBaseline,targetBox:scene.box,nowMilliseconds:10_000)
+        for index in 1...3 {
+            let time=10_000+Double(index)*200
+            var observed=scene.sample(sequence:UInt64(index+1),time:time,canDX:12,canDY:-8,
+                toolDX:12,toolDY:-8,canDepthDelta:-0.025,toolDepthDelta:-0.025,handsClear:false)
+            observed.cameraCollisionAdvisory=true
+            last=advisoryVerifier.observe(observed,nowMilliseconds:time)
+        }
+        expect(last.verdict == .supported && last.cameraCollisionAdvisory,"Camera advisory must preserve actual coherent grasp evidence")
+        expect(!advisoryBaseline.handsClear,"Camera policy must not falsify human observations")
+        var stale=advisoryBaseline;stale.cameraCollisionAdvisory=true
+        do {_ = try ROBVisualGraspVerifier(baseline:stale,targetBox:scene.box,nowMilliseconds:11_000);fatalError("Advisory admitted stale grasp evidence")}catch{}
+
         // Brightness changes alone cannot turn a can left on the table into a
         // supported grasp, even when the tool actually moves.
         verifier=try scene.verifier()
