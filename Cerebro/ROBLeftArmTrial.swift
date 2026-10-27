@@ -2480,7 +2480,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             // Empty preparation depends on workspace clearance, not on a
             // detected/stationary can or bucket. Acquire targets from the
             // measured ready pose after this independently checked connector.
-            if physicalSide == "right" { try await prepareRightRecyclingSceneHolds() }
+            if physicalSide == "right" { try await prepareRightRecyclingSceneHolds(allowDeferredJawSetup:!activeHoldAfterInitialEmptyLift) }
             let model = try workspaceModel()
             if let preparation = try await prepareRecyclingBeforeTargetSearch(model:model) {return preparation}
             q = try measured().positionsRadians.map(\.doubleValue)
