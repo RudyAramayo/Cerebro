@@ -295,6 +295,7 @@ final class ROBAmberGatewayClient: NSObject {
 }
 
 enum ROBNeckRGBPoseDisplay {
+    static func preferredFullHeightTaskStereoMode(model:ROBGhostRobotModel)->String?{nil}
     struct ActualFrameSource {let cameraGeneration:UUID,actualDeviceMXID:String?,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?;let scope:ROBFixedHeadRegistrationScope;let inertialJSON:Data?}
     static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Bool {return true}
 
@@ -474,7 +475,8 @@ final class ROBArmRoutineVision {
         guard let frame=snapshot()["face"] else {throw ROBArmRoutineError.blocked("No synthetic workspace pixels")}
         return(.init(can:absent,orangeBucket:absent,leftArmHanging:false,rightArmHanging:false,hangingConfidence:0,cans:[]),frame)
     }
-    func ensureActiveForTaskObservation() {if !frameAvailable {setActive(true)}}
+    func taskObservationFrameMatchesRequest(_ frame:Frame)->Bool{true}
+    func ensureActiveForTaskObservation(stereoMode:String? = nil) {if !frameAvailable {setActive(true)}}
     func setActive(_ active: Bool, teaching: Bool = false) {
         activationHistory.append(active)
         if clearsFramesOnSetActive {frameAvailable=false}

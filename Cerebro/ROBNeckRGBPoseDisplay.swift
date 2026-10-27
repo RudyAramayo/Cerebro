@@ -141,6 +141,7 @@ enum ROBNeckRGBPoseDisplay {
         let referenceUpperTarget:Int?,slopeRadiansPerRawUnit:Double
         let cameraGeneration:UUID,runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
         let actualDeviceMXID:String,imuSensor:String,imuToRGBRotation:[Double],intrinsicsIdentities:Set<String>
+        let fullHeightStereoModes:Set<String>
         let sources:[PinnedGravitySource]
         func angle(upperTarget:Int)->Double {
             guard let referenceUpperTarget else{return deltaRadians}
@@ -283,7 +284,7 @@ enum ROBNeckRGBPoseDisplay {
         }
         struct Row {let role:String,pose:String,upperTarget:Int,requiredPitch:Double,gravity:SIMD3<Double>,camera:simd_double4x4}
         var rows:[Row]=[],sources:[PinnedGravitySource]=[],totalRawBytes=0,heldGenerationSeen=false
-        var commonSensor:String?,commonIMURotation:[Double]?,intrinsicsIdentities=Set<String>()
+        var commonSensor:String?,commonIMURotation:[Double]?,intrinsicsIdentities=Set<String>(),fullHeightStereoModes=Set<String>()
         func numbers(_ x:Any?,count:Int)throws->[Double] {
             guard let v=x as?[Double],v.count==count,v.allSatisfy(\.isFinite) else{throw Failure.invalid};return v
         }
@@ -344,6 +345,10 @@ enum ROBNeckRGBPoseDisplay {
                       let timestamp=imu["reference_timestamp_ns"]as?UInt64,timestamp>=latest,
                       abs(Double(timestamp-latest)/1e6-age)<=0.02 else{throw Failure.invalid}
                 let depthURL=root.appendingPathComponent(depthPath),depth=try read(depthURL.path,sha:depthSHA)
+                if w==640,h==480,let mode=frame["stereoMode"]as?String,["standard","near_field"].contains(mode),
+                   frame["stereoModeSource"]as?String=="sdk_initial_config_readback" {
+                    fullHeightStereoModes.insert(mode)
+                }
                 totalRawBytes+=depth.count
                 guard depth.count==w*h*2,totalRawBytes<=64_000_000 else{throw Failure.invalid}
                 sources.append(try PinnedGravitySource(depthURL.path))
@@ -399,7 +404,8 @@ enum ROBNeckRGBPoseDisplay {
             referenceUpperTarget:e.referenceUpperTarget,slopeRadiansPerRawUnit:slope,
             cameraGeneration:activeGeneration,runtimeCalibrationIdentity:e.runtimeCalibrationIdentity,
             cameraServiceSourceSHA256:e.cameraServiceSourceSHA256,actualDeviceMXID:e.actualDeviceMXID,
-            imuSensor:commonSensor!,imuToRGBRotation:commonIMURotation!,intrinsicsIdentities:intrinsicsIdentities,sources:sources)
+            imuSensor:commonSensor!,imuToRGBRotation:commonIMURotation!,intrinsicsIdentities:intrinsicsIdentities,
+            fullHeightStereoModes:fullHeightStereoModes,sources:sources)
     }
     private static func bellyFloorEvidence(_ reference:BellyFloorDisplayReference)throws->(Data,SIMD3<Double>) {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
@@ -588,6 +594,12 @@ enum ROBNeckRGBPoseDisplay {
     static func configurationIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.id}
     static func operatorPanCalibrationDescription(model:ROBGhostRobotModel)->String? {profile(model:model)?.operatorPanCalibration?.shortDescription}
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.estimatedCameraProjectionIdentity}
+    /// Reproduce the source used by the pinned, validated pitch evidence.
+    /// Acquisition configuration is not acceptance of a new frame or pose.
+    static func preferredFullHeightTaskStereoMode(model:ROBGhostRobotModel)->String? {
+        guard let modes=profile(model:model)?.gravityPitch?.fullHeightStereoModes,modes.count==1 else{return nil}
+        return modes.first
+    }
     /// A frame-free pose cannot attest to the live camera source. Actual-frame
     /// consumers call this in addition to their held-pose and source gates.
     static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,cameraGeneration:UUID,

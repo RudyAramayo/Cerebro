@@ -66,7 +66,8 @@ final class Gateway {
  struct Depth {let width=640,height=480}
  struct Frame {let sequence:UInt64;var depth:Depth?=Depth()}
  func snapshot()->[String:Frame]{available ? ["face":.init(sequence:sequence)]:[:]}
- func ensureActiveForTaskObservation(){ensureCalls+=1;enrolled=true}
+ func taskObservationFrameMatchesRequest(_ frame:Frame)->Bool{true}
+ func ensureActiveForTaskObservation(stereoMode:String? = nil){ensureCalls+=1;enrolled=true}
 }
 final class ROBControllerArmApproval {
  static let shared=ROBControllerArmApproval();var standingLocalCanCampaignActive=false,isPending=false
@@ -76,6 +77,7 @@ final class ROBControllerArmApproval {
  func authorizesRightArmTrial(_ summary:String)->Bool{onAuthorize?();return true}
 }
 final class ROBArmRoutineCoordinator {static let shared=ROBArmRoutineCoordinator();var cameraDemand:((Bool)->Void)?;var viewIsStationary:(()->Bool)?={true}}
+enum ROBNeckRGBPoseDisplay {static func preferredFullHeightTaskStereoMode(model:Int)->String?{nil}}
 enum ROBWorkspaceCollisionPlan {static let sweptPointTravelMeters=0.003}
 enum ROBLeftArmInteractionPlan {static func stationaryFrontTarget(_ q:[Double])->[Double]?{q}}
 enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
@@ -83,6 +85,7 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
  let vision=Vision();var sourcePixelSelfReviewEnabled=false,nominalEmptyCommissioningStepEnabled=false,nominalModelAssumedSelfEnabled=false,oneDegreeEmptyCalibrationStepEnabled=false,isRunning=false
  var standingPreparationTask:Task<Void,Never>?,localCameraPreparationTask:Task<Void,Never>?,localReceiptCameraTimer:Timer?
  var prepared=0
+ func workspaceModel()throws->Int{0}
  func prepareSourcePixelSelfReview(command:String,target:String,completion:@escaping(NSDictionary)->Void){preconditionFailure("Unexpected pixel path")}
  func update(_ text:String){}
  func performImpl(_ command:String,target:String,localReceiptOnly:Bool,completion:@escaping(NSDictionary)->Void){precondition(vision.fresh);prepared+=1;completion(["status":"prepared"])}

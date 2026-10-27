@@ -166,6 +166,14 @@ final class ROBArmRoutineVision {
 
     var cameraGeneration: UUID { lock.lock(); defer { lock.unlock() }; return captureIdentity.generation }
     var fullHeightTaskObservationRequested: Bool { lock.lock(); defer { lock.unlock() }; return observedJawFullHeightDemand }
+    private var observedJawTaskStereoMode: String?
+    var taskObservationStereoMode: String? { lock.lock(); defer { lock.unlock() }; return observedJawTaskStereoMode }
+    func taskObservationFrameMatchesRequest(_ frame:Frame)->Bool {
+        lock.lock();defer {lock.unlock()}
+        guard frame.depth?.width==640,frame.depth?.height==480 else{return false}
+        guard let mode=observedJawTaskStereoMode else{return true}
+        return frame.intrinsics?.stereoMode==mode && frame.intrinsics?.stereoModeSource=="sdk_initial_config_readback"
+    }
 
     /// A user-applied head-depth correction changes every projected coordinate.
     /// Drop in-flight inference and enroll fresh frames in a new generation.
@@ -267,7 +275,7 @@ final class ROBArmRoutineVision {
     func setActive(_ value: Bool, teaching: Bool = false) {
         lock.lock(); defer { lock.unlock() }
         active = value; self.teaching = teaching; epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]; inputNotes = [:]
-        if !value {observedJawFullHeightDemand=false}
+        if !value {observedJawFullHeightDemand=false;observedJawTaskStereoMode=nil}
         lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
         lastSettlingDiagnostics=[:]
         if value { lastInspection = [:] }
@@ -276,9 +284,10 @@ final class ROBArmRoutineVision {
     /// A standing task may enroll its camera before freezing a fresh job.
     /// Keeping an already-active consumer intact avoids erasing valid frames
     /// or invalidating in-flight inspection merely because Run was requested.
-    func ensureActiveForTaskObservation() {
+    func ensureActiveForTaskObservation(stereoMode:String? = nil) {
         lock.lock(); defer { lock.unlock() }
         observedJawFullHeightDemand=true
+        observedJawTaskStereoMode=stereoMode.flatMap{["standard","near_field"].contains($0) ? $0:nil}
         guard !active else {return}
         active=true;teaching=false;epoch=UUID();frames=[:];busy=[];lastOffer=[:];inputNotes=[:]
         lastIncomingCapture=nil;lastIncomingSequence=0;processingMilliseconds=0;lastInspection=[:];lastSettlingDiagnostics=[:]

@@ -3,6 +3,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+from ROBMainCameraHeadlessStaticTests import braced_declaration
 
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / 'Cerebro/ROBArmRoutineVision.swift').read_text()
@@ -14,7 +15,7 @@ while level:
     level += (source[end] == '{') - (source[end] == '}')
     end += 1
 method = source[start:end]
-enroll_start = source.index('    func ensureActiveForTaskObservation()')
+enroll_start = source.index('    func ensureActiveForTaskObservation(')
 enroll_brace = source.index('{', enroll_start)
 level = 1
 enroll_end = enroll_brace + 1
@@ -41,6 +42,7 @@ enum ROBGripperVisualServo {
 }
 struct Match {var status="matched"}
 struct K {
+ var stereoMode:String?,stereoModeSource:String?
  var fx=600.0,fy=610.0,cx=319.5,cy=239.5
  var rgbOutputUndistorted:Bool?=true
  var depthRGBGeometryCorrespondence:Match?=Match()
@@ -58,6 +60,7 @@ final class Adapter {
  let lock=NSLock()
  var active=false,teaching=false,epoch=UUID()
  var observedJawFullHeightDemand=false
+ var observedJawTaskStereoMode:String?
  var frames:[String:Frame]=[:],busy=Set<String>(),lastOffer:[String:Double]=[:],inputNotes:[String:String]=[:]
  var lastIncomingCapture:Double?=nil,lastIncomingSequence:UInt64=0,processingMilliseconds=0.0
  var lastInspection:[String:Any]=[:],lastSettlingDiagnostics:[String:Any]=[:]
@@ -70,6 +73,7 @@ final class Adapter {
  struct HumanClearance {func matches(frame:Frame,scopeIdentity:String)->Bool {false}}
  /* ACTUAL METHOD */
  /* ACTUAL ENROLLMENT */
+ /* ACTUAL SOURCE REQUEST */
 }
 @main enum Test {
  static func main()throws {
@@ -90,6 +94,14 @@ final class Adapter {
   precondition(adapter.observedJawFullHeightDemand,"Standing jaw observation requests full camera height")
   precondition(adapter.epoch==enrolledEpoch && adapter.frames["face"]?.sequence==10 && adapter.busy.contains("face") && adapter.teaching,
    "An already-active camera must retain its frames and ongoing consumer state")
+  adapter.ensureActiveForTaskObservation(stereoMode:"near_field")
+  precondition(!adapter.taskObservationFrameMatchesRequest(input),"Old camera frames satisfied a new mode request")
+  var requested=input;requested.intrinsics!.stereoMode="near_field";requested.intrinsics!.stereoModeSource="cli_request"
+  precondition(!adapter.taskObservationFrameMatchesRequest(requested),"CLI intent treated as actual readback")
+  requested.intrinsics!.stereoModeSource="sdk_initial_config_readback"
+  precondition(adapter.taskObservationFrameMatchesRequest(requested))
+  requested.intrinsics!.stereoMode="standard";precondition(!adapter.taskObservationFrameMatchesRequest(requested))
+  precondition(adapter.epoch==enrolledEpoch && adapter.frames["face"]?.sequence==10)
   adapter.active=false;adapter.ensureActiveForTaskObservation()
   precondition(adapter.active && !adapter.teaching && adapter.epoch != enrolledEpoch && adapter.frames.isEmpty && adapter.busy.isEmpty)
   precondition(adapter.cameraGeneration==enrolledGeneration,"Consumer enrollment must not invent a physical camera restart")
@@ -125,7 +137,7 @@ final class Adapter {
   print("PASS actual observed-jaw native adapter: RGB channels/orientation align with raw depth; rescaled K; missing depth retained; fresh held scope/CAN/source/hands guards; no hardware")
  }
 }
-'''.replace('/* ACTUAL METHOD */', method).replace('/* ACTUAL ENROLLMENT */', enrollment)
+'''.replace('/* ACTUAL METHOD */', method).replace('/* ACTUAL ENROLLMENT */', enrollment).replace('/* ACTUAL SOURCE REQUEST */',braced_declaration(source,'    func taskObservationFrameMatchesRequest('))
 with tempfile.TemporaryDirectory(prefix='rob-jaw-frame-') as tmp:
     folder = Path(tmp)
     swift = folder / 'Fixture.swift'

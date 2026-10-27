@@ -1152,7 +1152,8 @@ final class CameraViewController: NSViewController {
         let realtime = armRoutineDemand || geminiVideoIsActive || followVideoIsActive
         let taskResolution = armRoutineDemand && ROBArmRoutineVision.shared.fullHeightTaskObservationRequested
             ? "640x480" : "640x400"
-        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (realtime ? taskResolution : nil))
+        cameraManager?.setArmTaskCaptureConfiguration(resolution:demand.resolutionOverride ?? (realtime ? taskResolution : nil),
+            stereoMode:armRoutineDemand ? ROBArmRoutineVision.shared.taskObservationStereoMode:nil)
     }
 
     private func applyProcessingSettings() {

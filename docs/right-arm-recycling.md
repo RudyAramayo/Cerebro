@@ -40,6 +40,28 @@ historical `can-reach.json` file.
 
 ## Visual checks and changed targets
 
+Complete standing right-arm can tasks now prepare the empty arm before object search.
+Preparation captures workspace geometry, reviews any initial outward retreat,
+and plans a complete connector to the right ready endpoint. It does not require
+a detected can, a bucket opening, or a stationary target. Target acquisition
+starts only after feedback confirms the ready hold, using a new scene from that
+pose. Later cans retain their ordinary fresh search and grasp checks.
+
+The ready endpoint is a planning goal, not a taught-path clearance exemption.
+Table/occupied-space, whole-arm, self-clearance, source identity, current, joint,
+feedback, ownership and Stop checks still apply. A missing or rejected workspace
+map stops preparation before travel; it does not start an object-search retry
+loop. The lift-only experiment still stops after its single reviewed retreat.
+This sequencing change does not establish a measured camera-to-arm transform.
+The separately scoped open-jaw approach experiment keeps its existing sequence.
+
+Task camera enrollment requests the stereo mode recorded in the validated
+full-height pitch evidence when that evidence specifies one unambiguous mode.
+It waits for actual SDK mode readback before freezing the task context; an old
+standard-mode frame cannot satisfy a near-field request. Explicit calibration
+captures retain priority, and ending the arm demand restores the ordinary mode.
+Current-frame projection validation still runs after enrollment.
+
 For the standing local can trial, an unknown-cell rejection during the initial
 empty retreat now starts a bounded neck-only recovery before any arm mode,
 trajectory or jaw command. The diagnostic identifies the actual link and voxel.

@@ -31,7 +31,7 @@ extension ROBNeckRGBPoseDisplayFixture {
             let g4=simd_inverse(projected)*SIMD4<Double>(0,0,9.81,0),g=[g4.x,g4.y,g4.z]
             var frames:[[String:Any]]=[]
             for frame in 0..<3 {
-                let depth=Data(repeating:UInt8(1+index*3+frame),count:16*16*2),name="frame-\(frame).depth-u16le"
+                let depth=Data(repeating:UInt8(1+index*3+frame),count:640*480*2),name="frame-\(frame).depth-u16le"
                 try depth.write(to:dir.appendingPathComponent(name))
                 let latest=UInt64(1_000_000_000+index*100_000_000+frame*10_000_000)
                 let imu:[String:Any]=["sensor":"synthetic-inertial-fixture","stationary":true,"axes":"sensor_native",
@@ -39,7 +39,7 @@ extension ROBNeckRGBPoseDisplayFixture {
                     "gyro_rad_s":[0.0,0.0,0.0],"imu_to_rgb_rotation":[1.0,0,0,0,1,0,0,0,1],"sample_count":30,
                     "window_milliseconds":300.0,"age_milliseconds":1.0,"latest_timestamp_ns":latest,"reference_timestamp_ns":latest+1_000_000]
                 frames.append(["sequence":frame+1,"capturedAtMilliseconds":1000.0+Double(frame),"cameraGeneration":generations[index].uuidString,
-                    "width":16,"height":16,"depthPath":name,"captureSHA256":hash(depth),"rgbOutputUndistorted":true,
+                    "width":640,"height":480,"stereoMode":"near_field","stereoModeSource":"sdk_initial_config_readback","depthPath":name,"captureSHA256":hash(depth),"rgbOutputUndistorted":true,
                     "depthRGBGeometryCorrespondence":["status":"matched"],"runtimeCalibration":runtime,
                     "runtimeCalibrationIdentity":runtimeID,"cameraServiceSourceSHA256":service,"imu":imu])
             }
@@ -66,6 +66,7 @@ extension ROBNeckRGBPoseDisplayFixture {
                 runtimeCalibrationIdentity:runtimeID,cameraServiceSourceSHA256:service),"Invalid refinement retained its source contract: "+label)
         }
         try install(evidence)
+        precondition(ROBNeckRGBPoseDisplay.preferredFullHeightTaskStereoMode(model:model)=="near_field","Task camera must request the actual pinned acquisition mode")
         let refinedID=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!
         precondition(refinedID != oldPID)
         let otherSide=try ROBGhostRobotModel(directory:model.directory,physicalSide:"left")

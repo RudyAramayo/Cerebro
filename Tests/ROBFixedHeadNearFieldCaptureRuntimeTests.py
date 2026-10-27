@@ -19,7 +19,7 @@ assert 'photo_mount_origin_unrefined_rgb_orientation_initializer_only' in captur
 manager_body=manager[manager.index('final class CameraManager:'):]
 manager_methods='\n'.join(braced_declaration(manager_body,s) for s in (
     '    func setCaptureResolutionOverride(', '    func setCalibrationCaptureOverride(',
-    '    func clearCalibrationCaptureOverride(', '    private func applyCaptureConfiguration()',
+    '    func clearCalibrationCaptureOverride(', '    func setArmTaskCaptureConfiguration(', '    private func applyCaptureConfiguration()',
     '    private static func normalizedResolution(', '    private static func capturePreset('))
 harness=r'''
 import AppKit
@@ -39,6 +39,7 @@ final class Manager {
     let role:CameraRole
     let sessionQueue=DispatchQueue(label:"test.capture")
     var captureResolutionOverride:String?
+    var armTaskStereoModeOverride:String?
     var calibrationCaptureOverride:(token:UUID,resolution:String,stereoMode:String)?
     var appliedCaptureResolutionOverride:String?,appliedStereoModeOverride:String?
     var wantsRunning=true,activeSource:CameraSource? = .depthAIService
@@ -123,6 +124,19 @@ final class Identity {
         precondition(manager.depthClient!.calls.last!.0=="1280x800" && manager.depthClient!.calls.last!.1==nil,
             "Completion did not restore the latest ordinary demand")
         precondition(manager.generationChanges==generation+2,"Mode changes did not invalidate native camera provenance")
+        let taskManager=Manager()
+        taskManager.setArmTaskCaptureConfiguration(resolution:"640x480",stereoMode:"near_field");taskManager.settle()
+        precondition(taskManager.generationChanges==1,"Task size/mode caused intermediate restarts")
+        precondition(taskManager.depthClient!.calls.last!.1=="near_field")
+        taskManager.setCalibrationCaptureOverride(token:a,resolution:"640x400",stereoMode:"standard");taskManager.settle()
+        precondition(taskManager.depthClient!.calls.last!.1=="standard","Task displaced explicit calibration")
+        taskManager.clearCalibrationCaptureOverride(token:a);taskManager.settle()
+        precondition(taskManager.depthClient!.calls.last!.1=="near_field","Review did not restore current task source")
+        taskManager.setArmTaskCaptureConfiguration(resolution:nil,stereoMode:nil);taskManager.settle()
+        precondition(taskManager.depthClient!.calls.last!.1==nil,"Finished task retained camera override")
+        let beforeInvalid=taskManager.depthClient!.calls.count
+        taskManager.setArmTaskCaptureConfiguration(resolution:nil,stereoMode:"unsupported");taskManager.settle()
+        precondition(taskManager.depthClient!.calls.count==beforeInvalid)
         let belly=Manager(.belly)
         belly.setCalibrationCaptureOverride(token:a,resolution:"640x400",stereoMode:"near_field");belly.settle()
         precondition(belly.depthClient!.calls.isEmpty,"Face calibration changed the belly camera")

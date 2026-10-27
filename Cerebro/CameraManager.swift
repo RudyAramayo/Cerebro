@@ -367,6 +367,7 @@ protocol CameraManagerProtocol: AnyObject {
     /// Temporarily changes the hardware capture size for explicit footage
     /// recording. Nil restores the autonomy/default capture configuration.
     func setCaptureResolutionOverride(_ resolution: String?)
+    func setArmTaskCaptureConfiguration(resolution:String?,stereoMode:String?)
     func setCalibrationCaptureOverride(token: UUID, resolution: String, stereoMode: String)
     func clearCalibrationCaptureOverride(token: UUID)
     /// Cameras eligible for the RGB-only AVFoundation fallback. DepthAI
@@ -442,6 +443,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var acceptedFallbackOutputGeneration: UInt64?
     private var captureResolutionOverride: String?
     private var calibrationCaptureOverride: (token: UUID, resolution: String, stereoMode: String)?
+    private var armTaskStereoModeOverride: String?
     private var appliedCaptureResolutionOverride: String?
     private var appliedStereoModeOverride: String?
     private let depthIngressLock = NSLock()
@@ -585,6 +587,19 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         }
     }
 
+    func setArmTaskCaptureConfiguration(resolution:String?,stereoMode:String?) {
+        guard role == .face,stereoMode == nil || ["standard","near_field"].contains(stereoMode!) else{return}
+        let normalized=Self.normalizedResolution(resolution)
+        sessionQueue.async { [weak self] in
+            guard let self,self.armTaskStereoModeOverride != stereoMode || self.captureResolutionOverride != normalized else{return}
+            // Apply size and mode together so a task requests one hardware
+            // restart, not an intermediate standard/cropped camera source.
+            self.armTaskStereoModeOverride=stereoMode
+            self.captureResolutionOverride=normalized
+            self.applyCaptureConfiguration()
+        }
+    }
+
     func clearCalibrationCaptureOverride(token: UUID) {
         sessionQueue.async { [weak self] in
             guard let self, self.calibrationCaptureOverride?.token == token else { return }
@@ -595,7 +610,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
 
     private func applyCaptureConfiguration() {
         let resolution = calibrationCaptureOverride?.resolution ?? captureResolutionOverride
-        let mode = calibrationCaptureOverride?.stereoMode
+        let mode = calibrationCaptureOverride?.stereoMode ?? armTaskStereoModeOverride
         if resolution != appliedCaptureResolutionOverride || mode != appliedStereoModeOverride {
             appliedCaptureResolutionOverride = resolution; appliedStereoModeOverride = mode
             // An actual hardware configuration restart owns a new native
