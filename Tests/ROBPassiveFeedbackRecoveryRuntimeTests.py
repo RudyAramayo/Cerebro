@@ -103,6 +103,16 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   }
   precondition(ROBHeldArmFeedbackGuard.scanMaximumAge(modes:Array(repeating:0,count:7))==350)
   precondition(ROBHeldArmFeedbackGuard.scanMaximumAge(modes:Array(repeating:2,count:7))==250)
+  // The unused inactive arm keeps350ms even after the selected arm enters
+  // position mode. Its pose/mode checks and the active arm's250ms stay strict.
+  for travelling in [false,true] {
+   let other=Hold();other.inactiveWorkspaceSearch=false;other.positionReady=true;other.leased=travelling
+   other.gateway.mode["left"]=2;other.gateway.samples["left"]!.statuses=Array(repeating:2,count:7)
+   other.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=350
+   other.gateway.samples["right"]!.effectiveGripperFeedbackAgeMilliseconds=350
+   try other.check();precondition(other.lastHeldFeedbackDiagnostic==nil)
+   other.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=351;fatal(other,"motor_age_ms")
+  }
   let h=Hold();h.gateway.samples["right"]!.effectiveGripperFeedbackAgeMilliseconds=351
   do{try h.check();preconditionFailure("Strict check soft-passed stale feedback")}catch is ROBPassiveFeedbackPause{}
   precondition(h.lastHeldFeedbackDiagnostic?.contains("gripper_age_ms")==true)
@@ -113,7 +123,10 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   let changed=Hold();changed.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=300;changed.gateway.mode["right"]=1;fatal(changed,"gateway_modes")
   let drift=Hold();drift.gateway.samples["right"]!.positionsRadians[0]=0.01;fatal(drift,"position_drift_m")
   let missing=Hold();missing.gateway.samples.removeValue(forKey:"right");fatal(missing,"telemetry_missing")
-  let active=Hold();active.leased=true;active.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=300;fatal(active,"motor_age_ms")
+  let active=Hold();active.leased=true
+  active.sceneHold["right"]!.modes=Array(repeating:2,count:7);active.gateway.mode["right"]=2
+  active.gateway.samples["right"]!.statuses=Array(repeating:2,count:7)
+  active.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=300;fatal(active,"motor_age_ms")
   do{try await active.accepted{active.dispatches+=1;return 1};preconditionFailure("Active stale state dispatched")}catch{}
   precondition(active.dispatches==0)
   // Exercise the COMPLETE actual check, including authorization/session and old scan tail.

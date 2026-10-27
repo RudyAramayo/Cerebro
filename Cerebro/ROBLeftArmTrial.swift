@@ -209,7 +209,7 @@ private struct ROBSourcePixelArchiveInputs {
     }
 }
 
-/// Inactive neck scans tolerate350ms delivery jitter; motion keeps250ms/3mm.
+/// Inactive arms tolerate350ms delivery jitter; active feedback keeps250ms/3mm.
 private enum ROBHeldArmFeedbackGuard {
     static let stationaryScanMaximumAgeMilliseconds = 350.0
     static func scanMaximumAge(modes:[Int])->Double {
@@ -1669,7 +1669,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 let modes=gateway.modes(forArm:side).map(\.intValue),reported=sample?.statuses.map(\.intValue) ?? []
                 let fields=ROBHeldArmFeedbackGuard.failures(present:sample != nil,motorAge:motor,gripperAge:gripper,q:q,expectedQ:held.positions,
                     gatewayModes:modes,reportedModes:reported,expectedModes:held.modes,
-                    maximumAgeMilliseconds:passive ? ROBHeldArmFeedbackGuard.stationaryScanMaximumAgeMilliseconds : 250)
+                    maximumAgeMilliseconds:ROBHeldArmFeedbackGuard.scanMaximumAge(modes:held.modes))
                 if !fields.isEmpty {
                     let delivery=sample.map{max(0,ProcessInfo.processInfo.systemUptime-$0.receivedAtUptime)*1000} ?? .infinity
                     let drift=q.count==7 ? 1.5*zip(q,held.positions).reduce(0.0,{$0+abs($1.0-$1.1)}):Double.infinity

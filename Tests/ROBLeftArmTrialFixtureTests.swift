@@ -456,10 +456,12 @@ final class ROBArmRoutineVision {
     struct Depth {var width=24,height=24;var millimetersLittleEndian:Data {Data(repeating:0,count:width*height*2)};func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
     struct Frame {var image=CIImage(color:CIColor(red:0,green:0,blue:0)).cropped(to:CGRect(x:0,y:0,width:24,height:24));let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true;var depthCoverage=1.0}
     var frameSequence:UInt64=10,captureFocalLength=24.0
+    var captureCameraServiceSourceSHA256:String?=nil
     var captureWidth=24,captureHeight=24
     func snapshot()->[String:Frame] {
         frameSequence+=1
         var k=Intrinsics(runtimeCalibration:.init(identity:runtimeIdentity,stereoPolicySHA256:stereoPolicyIdentity));k.fx=captureFocalLength;k.fy=captureFocalLength
+        k.cameraServiceSourceSHA256=captureCameraServiceSourceSHA256
         return frameAvailable ? ["face":.init(cameraGeneration:cameraGeneration,intrinsics:k,
             capturedAt:Date().timeIntervalSince1970*1000,sequence:frameSequence,depth:.init(width:captureWidth,height:captureHeight))] : [:]
     }
@@ -919,10 +921,11 @@ final class ROBArmRoutineCoordinator {
             var camera=matrix_identity_double4x4;camera.columns.3=SIMD4(rawPoint-SIMD3(0,0,0.9),1)
             ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64);ROBNeckRGBPoseDisplay.nominalCameraToModel=camera
             ROBArmRoutineVision.shared.captureFocalLength=10000;ROBArmRoutineVision.shared.frameAvailable=true
+            ROBArmRoutineVision.shared.captureCameraServiceSourceSHA256=String(repeating:"d",count:64)
             ROBArmRoutineVision.shared.clearsFramesOnSetActive=true
-            var neck:NSDictionary=["known":true,"stationary":true,"pan":6015,"pan_degrees":0.0,"lower":6011,"upper":6160,"ready_at":0.0]
+            var neck:NSDictionary=["known":true,"stationary":true,"pan":6015,"pan_degrees":0.0,"lower":6411,"upper":6160,"ready_at":0.0]
             ROBFixedHeadCalibrationWindowController.shared.readNeck={neck}
-            ROBWorkspaceSearch.shared.prepareView={p,u in neck=["known":true,"stationary":true,"pan":Int((6000+p/0.03).rounded()),"pan_degrees":p,"lower":6011,"upper":u,"ready_at":0.0];return true}
+            ROBWorkspaceSearch.shared.prepareView={p,u in neck=["known":true,"stationary":true,"pan":Int((6000+p/0.03).rounded()),"pan_degrees":p,"lower":6411,"upper":u,"ready_at":0.0];return true}
             ROBWorkspaceSearch.shared.viewReady={p,u in neck["upper"] as?Int==u && neck["pan_degrees"] as?Double==p}
             ROBArmRoutineCoordinator.shared.viewIsStationary={true}
             trial.oneDegreeEmptyCalibrationStepEnabled=true;trial.localVisualTrialAssumedSpatialErrorMeters=0.035
@@ -950,6 +953,9 @@ final class ROBArmRoutineCoordinator {
             let end=ProcessInfo.processInfo.systemUptime+30
             while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
             guard let value=result else {fatalError("One-degree synthetic integration did not complete")}
+            if value["status"] as?String != "partial_empty_calibration_step_held" {
+                FileHandle.standardError.write(Data(("One-degree fixture result: "+value.description+"\n").utf8))
+            }
             precondition(value["status"] as?String=="partial_empty_calibration_step_held",value.description)
             precondition(value["batch_completed"] as?Int==0 && value["jaw_command_sent"] as?Bool==false && value["reach_sent"] as?Bool==false)
             precondition(value["arm_motion_sent"] as?Bool==true && value["collision_protection_certified"] as?Bool==false)
@@ -968,7 +974,7 @@ final class ROBArmRoutineCoordinator {
             let proof=try JSONDecoder().decode(ROBWorkspaceOneDegreeEmptyCalibrationStep.self,from:Data(contentsOf:evidence.appendingPathComponent("proof.json")))
             precondition(proof.environmentPredictionIsDiagnosticOnly && !proof.collisionCertificate)
             precondition(proof.environmentDiagnostics.predictedNominalContact,"Synthetic surface return must remain diagnostic evidence")
-            precondition(map.registrationID==nil && map.observedFrameCount==3 && map.observations.allSatisfy{$0.recordedPanDegrees == -55 && $0.recordedUpperTarget==5650 && !$0.measuredSelfMaskApplied})
+            precondition(map.registrationID==nil && map.observedFrameCount==3 && map.observations.allSatisfy{$0.recordedPanDegrees == -55 && $0.recordedLowerTarget==6411 && $0.recordedUpperTarget==5650 && !$0.measuredSelfMaskApplied})
             print("PASS one-degree EMPTY actual Trial+broker+core: defaultOFF exactreceipt,3advancing synthetic raw frames retained including predictedcontact, ONE4sminus.02step/no jaw/detector/return/autochain, fresh endpointheld,0transfers,private diagnosticproof; no hardware transport")
             return
         }
