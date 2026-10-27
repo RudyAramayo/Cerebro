@@ -22,9 +22,9 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
         ROBGhostRobotModel.hash(Data("synthetic-map:\(obstacleLow.debugDescription):\(obstacleHigh.debugDescription):\(observed)".utf8))
     }
     func state(at point: SIMD3<Double>) -> ROBWorkspaceVoxelState {
-        guard observed, (0..<3).allSatisfy({ abs(point[$0]) <= 3 }) else { return .unknown }
+        guard (0..<3).allSatisfy({ abs(point[$0]) <= 3 }) else { return .unknown }
         if let low = obstacleLow, let high = obstacleHigh, (0..<3).allSatisfy({ (low[$0]...high[$0]).contains(point[$0]) }) { return .occupied }
-        return .free
+        return observed ? .free:.unknown
     }
     func state(inBoundsLow low:SIMD3<Double>,high:SIMD3<Double>) -> ROBWorkspaceVoxelState {
         guard observed, (0..<3).allSatisfy({ low[$0] >= -3 && high[$0] <= 3 }) else { return .unknown }
@@ -76,10 +76,23 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   blocked("fresh measured hanging") {_=try review(start,empty:false)}
   blocked("fresh measured hanging") {_=try review([0.2,0,0,0,0,0,0])}
   var unseen=map;unseen.observed=false
-  blocked("unobserved") {_=try review(start,source:unseen)}
+  let unseenProof=try review(start,source:unseen)
+  precondition(unseenProof.steps==proof.steps,"Unknown space changed the fixed lift geometry")
+  let advisory=unseenProof.context.unknownSpaceAdvisory!
+  precondition(advisory.kind=="operator_cleared_unknown_initial_empty_lift_not_observed_free")
+  precondition(advisory.broadPhaseUnknownCellVisits>0 && !advisory.observedFreeInferred && !advisory.occupiedFilteringChanged)
+  precondition(unseen.state(at:SIMD3(0,0,0)) == .unknown,"The lift must not relabel unknown cells")
+  try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(unseenProof,index:0,from:start,map:unseen,model:model,
+    generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(unseen,start),measuredAtMilliseconds:1000)
+  let raised=proof.steps.last!.positions
+  blocked("unobserved") {_=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:raised,
+    steps:[.init(positions:raised,seconds:0.8)],map:unseen,model:model,generation:generation,sceneID:scene,
+    cameraGeneration:camera,nowMilliseconds:1000,trial:trial(unseen,raised))}
   var obstacle=map
   let endpoint=model.worldCollisionBounds(positions:model.positions(vendorLeft:proof.steps.last!.positions))[model.toolLink]!
   obstacle.obstacleLow=endpoint.low;obstacle.obstacleHigh=endpoint.high
+  blocked("obstacle") {_=try review(start,source:obstacle)}
+  obstacle.observed=false
   blocked("obstacle") {_=try review(start,source:obstacle)}
   var wrong=start;wrong[0]+=0.005
   blocked("start corridor") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(proof,index:0,from:wrong,map:map,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,wrong),measuredAtMilliseconds:1000)}
@@ -108,6 +121,6 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
    previous=step.positions
   }
   precondition(maxHop<=ROBWorkspaceCollisionPlan.sweptPointTravelMeters)
-  print("PASS independent actual-hull sweep bound",maxHop,"m; map/unknown/occupied/start/empty/limits rejection; no hardware or transfer")
+  print("PASS independent actual-hull sweep bound",maxHop,"m; initial UNKNOWN advisory, mixed occupied veto, ordinary UNKNOWN veto, start/empty/limits rejection; no hardware or transfer")
  }
 }

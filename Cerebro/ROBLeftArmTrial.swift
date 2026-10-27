@@ -1006,7 +1006,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let batch = requestedCanCount > 1 && command == "left_recycle_can"
             ? " \(requestedCanCount) empty cans, sequentially: fresh perception, collision review and visual grasp check for each. A failed or uncertain grasp stops the batch in a hold; no blind next-can retry. One approval covers all \(requestedCanCount) complete transfers." : ""
         let recyclingSummary = localReceiptOnly
-            ? "Tonight's \(requestedCanCount) empty Coke cans to the orange bucket, physical \(physicalSide.uppercased()) arm. Use best-available unmeasured alignment as an operator visual-calibration trial, with assumed spatial allowance \(localVisualTrialAssumedSpatialErrorMeters*1000) mm. For physical RIGHT at hanging, first check the complete J2/J4 vertical lift, J1 rearward move and raised approach against current workspace geometry without requiring a can or bucket detection. Preserve an already referenced raised pose. Then find the nearest reachable confirmed can from the measured hold; open before approach, close gently and validate the short lift in fresh camera frames before carrying or gravity release. Check the entire arm, open jaws and payload against observed obstacles/free space; unknown space and initial model overlaps may still block. Both arms may hold their current positions. No blind parking, treads, torso, encoder reset, force escalation or blind retries. One exact local user-session receipt covers \(requestedCanCount) transfers within600seconds. Stop/fresh feedback/ownership/limits remain active. No measured registration, grasp or landing success is implied."
+            ? "Tonight's \(requestedCanCount) empty Coke cans to the orange bucket, physical \(physicalSide.uppercased()) arm. Use best-available unmeasured alignment as an operator visual-calibration trial, with assumed spatial allowance \(localVisualTrialAssumedSpatialErrorMeters*1000) mm. For physical RIGHT at hanging, first check the complete J2/J4 vertical lift, J1 rearward move and raised approach against current workspace geometry without requiring a can or bucket detection. Preserve an already referenced raised pose. Then find the nearest reachable confirmed can from the measured hold; open before approach, close gently and validate the short lift in fresh camera frames before carrying or gravity release. Check the entire arm, open jaws and payload against observed obstacles/free space; UNKNOWN space is advisory during this initial EMPTY lift; later routes retain their existing policy and modeled self-clearance still applies. Both arms may hold their current positions. No blind parking, treads, torso, encoder reset, force escalation or blind retries. One exact local user-session receipt covers \(requestedCanCount) transfers within600seconds. Stop/fresh feedback/ownership/limits remain active. No measured registration, grasp or landing success is implied."
             : action + batch + notice + bothHolds + current + (workspace ? " Maximum 600 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
         let nominalSummary=localReceiptOnly && nominalEmptyCommissioningStepEnabled
             ? "ONE NOMINAL EMPTY physical RIGHT-arm commissioning experiment only: fresh measured q0 to J2 minus0.075rad over4seconds, at most6cm full-hull travel and0.20rad per joint. No jaw command, grasp, payload, carry, release, automatic return or chained can attempt. Both arms may hold their measured positions. Watch the arm in the actual recorded RIGHT camera view. Exact raw-return bounds are checked for nominal no-contact; unknown space is admitted ONLY in the recorded local swept regions. Current robot occupancy is assumed from the model; this is a geometric assumption, not sensor classification or removal of raw returns. Modeled millimeter-scale gaps are much smaller than the explicitly ASSUMED35mm camera uncertainty: this is NOT certified collision protection and physical contact remains possible. Stop, ownership, current limits, fresh motor/gripper feedback, source/body/profile identity and exact receipt remain required. After this ONE step, measure the endpoint and hold, report partial with ZERO recycled cans; the \(requestedCanCount)-can job remains unfinished. Empty state is assumed from startup/task history, not sensed possession."
@@ -1021,7 +1021,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ? "ONE DEBUG EXPERIMENTAL LLM-VISUAL-REVIEWED SOURCE-PIXEL EMPTY RIGHT-arm step, J2 minus0.075rad ONLY over4seconds,≤60mm full-hull travel, then hold. Fresh RGB/depth+exactneck/BOTHq/device/runtime/source checks matched an historical reviewed template to THIS current raw map; current evidence SHA256 \(currentSourcePixelEvidenceSHA256 ?? "unavailable"). Original template SHA256 \(sourcePixelTemplateSHA256 ?? "unavailable"). Current raw map SHA256 \(sourcePixelCurrentMapFingerprint ?? "unavailable"). This is experimental perception, NOT measured self/registration or motion authority. Only original source groups whose EVERY accepted contributor is positively matched experimental robot may be excluded; table/person/hand/uncertain/unmasked/mixed groups remain external. No MODEL-hull fallback or normal-route exemption; all raw data retained. Prepared fixed P4000L6011U5450, both arms held, only RIGHT J2 travels. Record14 actual RGB-D/BOTHq keyframes3before/8during/3after, no30fps claim. Preserve actual external-contact/joint/fullarm/self-nonworsening/endclearance/person/current/feedback/ownership/Stop checks. No jaw,payload,grip,carry,release,return,retry,automatic chaining or transfer. Empty state and35mm camera error remain assumptions; contact/property risk possible. A fresh exact native private receipt is still required."
             : experimentSummary
         let liftSummary=localReceiptOnly && holdAfterInitialEmptyLiftEnabled
-            ? "DEBUG initial EMPTY lift and hold only, physical RIGHT arm: search fresh can/workspace observations, select one initial empty lift using the ordinary complete occupied/unknown/full-arm/self-clearance review, recheck its exact measured start before dispatch, then measure the endpoint and hold. No jaw commands or startup jaw calibration, grasp, payload, carry, release, return, rescan after lifting, next can or chained motion. If no initial lift is required, remain unchanged and report that. ZERO transfers; the \(requestedCanCount)-can campaign remains unfinished. Both arms may hold their current measured positions. The same explicit visual trial uses assumed spatial error \(localVisualTrialAssumedSpatialErrorMeters*1000) mm; no calibration or collision exemption is added. Preserve joint bounds, fresh motor/gripper feedback, source/body/context identity, exclusive ownership, current-spike hold and immediate Stop."
+            ? "DEBUG initial EMPTY lift and hold only, physical RIGHT arm: search fresh can/workspace observations, select one initial empty lift using occupied-return/full-arm/self-clearance review with UNKNOWN space advisory only for this initial EMPTY lift, recheck its exact measured start before dispatch, then measure the endpoint and hold. No jaw commands or startup jaw calibration, grasp, payload, carry, release, return, rescan after lifting, next can or chained motion. If no initial lift is required, remain unchanged and report that. ZERO transfers; the \(requestedCanCount)-can campaign remains unfinished. Both arms may hold their current measured positions. The same explicit visual trial uses assumed spatial error \(localVisualTrialAssumedSpatialErrorMeters*1000) mm; no measured calibration or observed-free claim is added. Preserve joint bounds, fresh motor/gripper feedback, source/body/context identity, exclusive ownership, current-spike hold and immediate Stop."
             : pixelSummary
         let approachSummary=localReceiptOnly && approachCanThenHoldEnabled
             ? "DEBUG approach can then hold with OPEN jaws: search the can and workspace, perform any ordinary fully checked initial empty lift, reobserve and execute the complete checked dynamic entry and bounded observed-jaw alignment. Stop at actual ready-to-grip alignment BEFORE close, verification lift, payload, carry or release. Opening/startup jaw readiness is permitted; closing is prohibited. Hold the measured endpoint, ZERO transfers, no automatic recovery or next attempt. Preserve ordinary occupied/unknown/full-arm/self-clearance, joint/current/person/Stop, fresh feedback and exact camera/body/receipt protections. Assumed visual uncertainty remains \(localVisualTrialAssumedSpatialErrorMeters*1000)mm; no commissioning collision exemption."
@@ -2974,9 +2974,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         try await beginHeldSceneObservation()
         try await ensureCollisionScene(model:model)
         guard let map=collisionMap else {throw ROBArmRoutineError.blocked("Empty preparation has no current workspace map.")}
-        let retreated:Bool
-        if activeHoldAfterInitialEmptyLift {retreated=try await performInitialLocalRetreatIfNeeded(map:map,model:model)}
-        else {retreated=try await performStagedEmptyLiftIfNeeded(map:map,model:model)}
+        let retreated=try await performStagedEmptyLiftIfNeeded(map:map,model:model)
         if activeHoldAfterInitialEmptyLift {return try initialEmptyLiftHoldResult(performed:retreated)}
         // The can approach starts at this measured endpoint. Do not insert
         // the old table-free front pose, an unrelated J1 sweep, or jaw action.
@@ -3324,12 +3322,26 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         guard let endpoint=proof.steps.last?.positions else {throw ROBArmRoutineError.blocked("The staged lift has no endpoint.")}
         try await holdTaskPosition(endpoint)
-        let actual=try measured().positionsRadians.map(\.doubleValue)
+        let endpointSample=try measured(),actual=endpointSample.positionsRadians.map(\.doubleValue)
         guard 1.5*zip(actual,endpoint).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
             throw ROBArmRoutineError.blocked("The raised empty endpoint was not reached; holding.")
         }
+        if activeHoldAfterInitialEmptyLift {
+            let value:[String:Any]=["kind":"staged_initial_empty_lift_held","motionAuthority":false,
+                "proposalID":path.id.uuidString,"mapFingerprint":map.fingerprint,"modelID":model.modelID,
+                "geometryID":model.geometryID,"selectedBaseline":baseline,"selectedGoal":endpoint,
+                "actualMeasuredEndpoint":actual,"endpointWithin3mmOfGoal":true,
+                "telemetrySequence":NSNumber(value:endpointSample.sequence),"gatewaySessionGeneration":NSNumber(value:session),
+                "recordedAtMilliseconds":Date().timeIntervalSince1970*1000,"proofFile":evidence.path,
+                "unknownSpaceAdvisory":true,"observedFreeInferred":false,"jawCommandSent":false,"transfersCompleted":0]
+            let file=recording.deletingPathExtension().appendingPathExtension("initial-empty-lift-held.json")
+            try JSONSerialization.data(withJSONObject:value,options:[.sortedKeys,.prettyPrinted]).write(to:file,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+            var stored=value;stored["recordingPath"]=file.path;initialEmptyLiftHeldEvidence=stored as NSDictionary
+        }
         referencedGeneration=session
-        update("The staged empty lift is held; acquiring current can and bucket positions")
+        update(activeHoldAfterInitialEmptyLift ? "The staged empty lift is held for inspection. ZERO transfers."
+            : "The staged empty lift is held; acquiring current can and bucket positions")
         return true
     }
 
@@ -3455,7 +3467,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             "motion_completed":false,"transfer_completed":false,"batch_completed":0,"placement_verified":false,
             "grasp_visually_supported":false,"initial_empty_lift_only":true,"initial_empty_lift_performed":performed,
             "jaw_commands_permitted":false,"grasp_attempted":false,"measured_positions":sample.positionsRadians.map(\.doubleValue),
-            "detail":performed ? "Initial fully checked empty lift is held for inspection. No jaw, grasp, carry, release, return or next step. ZERO cans transferred."
+            "detail":performed ? "Initial empty lift is held for inspection; unknown space was advisory. No jaw, grasp, carry, release, return or next step. ZERO cans transferred."
                 : "No initial empty lift was required by the current model check. The arm remains unchanged; no jaw or can operation. ZERO cans transferred."]
         if let evidence=initialEmptyLiftHeldEvidence {output["initial_empty_lift_evidence"]=evidence}
         return output as NSDictionary

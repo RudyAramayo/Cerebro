@@ -289,7 +289,7 @@ import UniformTypeIdentifiers
                 holdAfterInitialEmptyLift.target = self; holdAfterInitialEmptyLift.action = #selector(changeHoldAfterInitialEmptyLift)
                 holdAfterInitialEmptyLift.state = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled ? .on : .off
                 detailStack.addArrangedSubview(holdAfterInitialEmptyLift)
-                addHelp("DEBUG: use the ordinary complete occupied/unknown/self-clearance checks for one initial EMPTY lift, then hold at the measured endpoint. No jaw, grasp, carry, release, return, rescan after lifting or chained step. ZERO can transfers. If no initial lift is needed, remain unchanged.")
+                addHelp("DEBUG: perform one initial EMPTY lift with observed-obstacle and self-clearance checks, then hold at the measured endpoint. Unseen space behind the arm is advisory for this lift; it remains UNKNOWN. No jaw, grasp, carry, release, return, rescan after lifting or chained step. ZERO can transfers. If no initial lift is needed, remain unchanged.")
             }
             #endif
             localApprovalInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-local-recycling-approval-scope")

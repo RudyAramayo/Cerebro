@@ -1055,6 +1055,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         let result=try reviewEmptyLiftHullPath(baseline:baseline,steps:geometry.steps,initialPairs:initial,
             requireFinalClearance:true,map:map,model:model,context:context)
         context.skippedStaticRobotLinks=result.staticLinks
+        context.unknownSpaceAdvisory=result.unknownAdvisory
         return .init(context:context,baseline:baseline,steps:geometry.steps,checkedPoseCount:result.checked,
             initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:result.endpoint,
             emptyStateEvidenceSource:emptyStateEvidenceSource)
@@ -1087,7 +1088,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     private static func reviewEmptyLiftHullPath(baseline:[Double],steps:[ROBLeftGestureProposal.Step],
         initialPairs:[String:Double],requireFinalClearance:Bool,map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext)throws->
-        (checked:Int,endpoint:[String:Double],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]?) {
+        (checked:Int,endpoint:[String:Double],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]?,unknownAdvisory:ROBWorkspaceUnknownSpaceAdvisoryAudit?) {
         guard !steps.isEmpty,steps.count<=30,steps.allSatisfy({$0.jawAction==nil && (0.7...5).contains($0.seconds)}),
               steps.reduce(0,{$0+$1.seconds})<=60,!initialPairs.isEmpty else {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift has invalid timing, jaws or self geometry.")
@@ -1097,6 +1098,11 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         var previousPairs=initialPairs,previous=baseline
         var checker=Checker(map:map,model:model,context:context)
         checker.planningSeconds=30
+        // The operator-cleared initial EMPTY preparation must not require
+        // seeing behind J5 or the other arm surfaces before it can lift.
+        // This checker is local to the fixed staged lift and its rechecks;
+        // ordinary connectors, grasp and payload routes retain their policy.
+        checker.initialEmptyLiftUnknownAdvisory=true
         for step in steps {
             try Task.checkCancellation()
             guard let minimum=ROBLeftArmInteractionPlan.duration(from:previous,to:step.positions),step.seconds>=minimum-1e-9 else {
@@ -1133,7 +1139,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                 throw ROBGhostMotionError.blocked("The staged EMPTY lift must finish with ordinary 30 mm tread clearance.")
             }
         }
-        return (checker.checked,previousPairs,checker.staticRobotLinkEvidence)
+        return (checker.checked,previousPairs,checker.staticRobotLinkEvidence,checker.unknownSpaceAdvisoryAudit)
     }
 
     /// Every actual hull lies inside its rigidly transported baseline box.
@@ -1659,9 +1665,15 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         var unavailableConvexLinks=Set<String>()
         var advisoryUnknownVisits=0
         var advisoryUnknownExamples:[String]=[]
+        var initialEmptyLiftUnknownAdvisory=false
+        var unknownSpaceIsAdvisory:Bool {
+            initialEmptyLiftUnknownAdvisory || context.visualTrial?.usesOperatorClearedUnknownApproach==true
+        }
         var unknownSpaceAdvisoryAudit:ROBWorkspaceUnknownSpaceAdvisoryAudit? {
-            guard context.visualTrial?.usesOperatorClearedUnknownApproach==true else{return nil}
-            return .init(kind:"operator_cleared_unknown_empty_approach_not_observed_free",
+            guard unknownSpaceIsAdvisory else{return nil}
+            return .init(kind:initialEmptyLiftUnknownAdvisory
+                ? "operator_cleared_unknown_initial_empty_lift_not_observed_free"
+                : "operator_cleared_unknown_empty_approach_not_observed_free",
                 broadPhaseUnknownCellVisits:advisoryUnknownVisits,exampleQueries:advisoryUnknownExamples,
                 observedFreeInferred:false,occupiedFilteringChanged:false)
         }
@@ -1692,7 +1704,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             return nil
         }
         mutating func pose(_ q:[Double],payload:ROBWorkspaceCarriedObject?,requireSelfClearance:Bool = true) -> String? {
-            if context.visualTrial?.usesOperatorClearedUnknownApproach==true,payload != nil {
+            if unknownSpaceIsAdvisory,payload != nil {
                 return "Operator-cleared UNKNOWN space cannot admit a carried payload."
             }
             guard !exhausted else { return "Workspace collision search reached its time or sampling bound." }
@@ -1789,7 +1801,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             for x in lo[0]...hi[0] {for y in lo[1]...hi[1] {for z in lo[2]...hi[2] {
                 let center=SIMD3((Double(x)+0.5)*size,(Double(y)+0.5)*size,(Double(z)+0.5)*size),state=map.state(at:center)
                 if state == .free {continue}
-                if state == .unknown,context.visualTrial?.usesOperatorClearedUnknownApproach==true {
+                if state == .unknown,unknownSpaceIsAdvisory {
                     recordAdvisoryUnknown(label,x,y,z);continue
                 }
                 let whole=ROBNominalRawBox(low:center-SIMD3(repeating:size/2),high:center+SIMD3(repeating:size/2),key:"\(x),\(y),\(z)")
@@ -1828,7 +1840,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             return nil
         }
         mutating func volume(low:SIMD3<Double>,high:SIMD3<Double>,label:String,payload:ROBWorkspaceCarriedObject?) -> String? {
-            if context.visualTrial?.usesOperatorClearedUnknownApproach==true {
+            if unknownSpaceIsAdvisory {
                 // A mixed-volume provider may return UNKNOWN before visiting
                 // another occupied cell. Enumerate EVERY cell; advisory must
                 // never turn that early UNKNOWN into an occupied-space bypass.

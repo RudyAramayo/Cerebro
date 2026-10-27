@@ -10,6 +10,7 @@ source=(ROOT/'Cerebro/ROBLeftArmTrial.swift').read_text()
 execute=braced_declaration(source,'    @MainActor private func execute(_ command: String)')
 result=braced_declaration(source,'    @MainActor private func initialEmptyLiftHoldResult(performed:Bool)')
 single=braced_declaration(source,'    @MainActor private func executeSingle(_ command: String)')
+staged_preparation=braced_declaration(source,'    @MainActor private func prepareRecyclingBeforeTargetSearch(')
 preparation=next(line.strip() for line in single.splitlines() if 'prepareRightRecyclingSceneHolds(' in line)
 start=single.index('                if try await performInitialLocalRetreatIfNeeded(map:map,model:model)')
 branch=single[start:single.index('                guard referencedGeneration',start)]
@@ -36,6 +37,8 @@ assert 'Hold after initial empty lift' in ui and 'sandbox-hold-after-initial-emp
 fixture=r'''
 import Foundation
 enum ROBArmRoutineError:Error {case blocked(String)}
+typealias ROBGhostRobotModel=Int
+enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double],tolerance:Double=0.025)->Bool {zip(a,b).allSatisfy{abs($0-$1)<=tolerance}}}
 enum ROBRecyclingBatchRequest {static func executionCount(requestedCount:Int,standingRemainingTransfers:Int?)->Int? {requestedCount}}
 struct Feedback {let positionsRadians=[NSNumber](repeating:0,count:7)}
 @MainActor final class Harness {
@@ -47,11 +50,22 @@ struct Feedback {let positionsRadians=[NSNumber](repeating:0,count:7)}
  var oneDegreeEmptyCalibrationStepEnabled=false,nominalEmptyCommissioningStepEnabled=false
  var singleCalls=0,proofCalls=0,calibrationCalls=0,liftNeeded=true,proofRejects=false
  var holdPreparationCalls=0,deferredJawSetupCalls=0
+ var recyclingReadyEstablished=false,armTravelDispatched=false,servoPossiblePayloadUncertain=false
+ var activeCommand="left_recycle_can",phase="",generation:UInt64=42,referencedGeneration:UInt64?=42
+ var taskJawTarget:Int?,cameraReady=false,positionReady=false,stagedProofCalls=0
  var localReceiptHeldNeckIdentity:String?,recyclingCan:Int?,lastVisualGraspEvidence:Int?,collisionMap:Int?,collisionModel:Int?,collisionReviewProposal:Int?
  var movingTargetReplansRemaining=1,sceneCapturedForThisTask=false
  func check()throws {if stopped {throw ROBArmRoutineError.blocked("Stop")}}
  func measured()throws->Feedback {try check();return .init()}
  func update(_ value:String){}
+ func requireLocalReceipt()throws->Int {try check();return 1}
+ func beginHeldSceneObservation()async throws {try check()}
+ func ensureCollisionScene(model:Int)async throws {try check();collisionMap=1}
+ func performStagedEmptyLiftIfNeeded(map:Int,model:Int)async throws->Bool {
+  stagedProofCalls+=1;try check();if proofRejects {throw ROBArmRoutineError.blocked("Staged proof rejected")};return liftNeeded
+ }
+ __ACTUAL_STAGED_PREPARATION__
+ func stagedEntry()async throws->NSDictionary? {try await prepareRecyclingBeforeTargetSearch(model:1)}
  func prepareRightRecyclingSceneHolds(allowDeferredJawSetup:Bool=true)async throws {
   holdPreparationCalls+=1;if allowDeferredJawSetup {deferredJawSetupCalls+=1}
  }
@@ -89,11 +103,18 @@ struct Feedback {let positionsRadians=[NSNumber](repeating:0,count:7)}
    let b=try await h.run()
    precondition(h.singleCalls==1 && h.calibrationCalls==0 && b["motion_completed"]as!Bool==false && b["batch_completed"]as!Int==0)
    precondition(b["transfer_completed"]as!Bool==false && b["grasp_visually_supported"]as!Bool==false)
+   let beforeLegacy=h.proofCalls
+   let staged=try await h.stagedEntry()!
+   precondition(h.stagedProofCalls==1 && h.proofCalls==beforeLegacy,"Lift-and-hold used the old retreat planner")
+   precondition(staged["initial_empty_lift_performed"]as!Bool==needed && !h.recyclingReadyEstablished)
   }
   let ordinary=Harness();_=try await ordinary.entry("left_recycle_can")
   try await ordinary.prepareEntry();precondition(ordinary.deferredJawSetupCalls==1,"Ordinary recycling lost deferred jaw setup")
   let left=Harness();left.physicalSide="left";try await left.prepareEntry();precondition(left.holdPreparationCalls==0)
   precondition(ordinary.proofCalls==1 && ordinary.singleCalls==1,"OFFremoved ordinary fresh-rescan continuation")
+  let continuous=Harness();let staged=try await continuous.stagedEntry()
+  precondition(staged==nil && continuous.stagedProofCalls==1 && continuous.proofCalls==0 && continuous.recyclingReadyEstablished,
+    "Ordinary can preparation and hold-only mode must use the same staged lift")
   for mode in ["proof_reject","Stop","jaw","setup_uncertain","grip","wrong_arm","missing_endpoint"] {
    let h=Harness();h.activeHoldAfterInitialEmptyLift=true
    if mode=="proof_reject" {h.proofRejects=true}
@@ -109,7 +130,7 @@ struct Feedback {let positionsRadians=[NSNumber](repeating:0,count:7)}
   print("PASS actual DEBUG initial-empty-lift stop/result branches: defaultOFFbatch unchanged, one full-proof invocation then hold/no rescan, no-neededno-motion, zero transfers/jaws/grasp/carry, Stop/proof/jaw/scope/endpoint rejection; no actuator IO")
  }
 }
-'''.replace('__ACTUAL_PREPARATION__',preparation).replace('__ACTUAL_BRANCH__',branch).replace('__ACTUAL_RESULT__',result).replace('__ACTUAL_EXECUTE__',execute)
+'''.replace('__ACTUAL_STAGED_PREPARATION__',staged_preparation).replace('__ACTUAL_PREPARATION__',preparation).replace('__ACTUAL_BRANCH__',branch).replace('__ACTUAL_RESULT__',result).replace('__ACTUAL_EXECUTE__',execute)
 with tempfile.TemporaryDirectory(prefix='rob-initial-lift-hold-',dir='/private/tmp') as folder:
     p=Path(folder);(p/'Fixture.swift').write_text(fixture)
     subprocess.run(['xcrun','swiftc','-O','-DDEBUG','-swift-version','5','-parse-as-library',str(p/'Fixture.swift'),'-o',str(p/'fixture')],check=True,timeout=45)
