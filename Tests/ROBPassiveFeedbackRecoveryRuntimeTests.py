@@ -10,6 +10,8 @@ guard=braced_declaration(source,'private enum ROBHeldArmFeedbackGuard {').replac
 pause=braced_declaration(source,'private struct ROBPassiveFeedbackPause:').replace('private struct','struct',1)
 check=braced_declaration(source,'    private func check() throws {')
 fullCheck=check.replace('private func','func',1)
+diagnostics='\n'.join(braced_declaration(source,m).replace('private ','',1)for m in [
+ '    private var diagnosticStationaryFeedbackEnabled:Bool {','    private func stationaryFeedbackMaximumAge(modes:'])
 methods='\n'.join(braced_declaration(source,m).replace('private func','func',1)for m in ['    @MainActor private func passiveFeedbackCheckpoint()','    @MainActor private func wait(_ seconds:','    @MainActor private func accepted('])
 enroll=braced_declaration(source,'    @nonobjc func performUsingLocalRecyclingReceipt(').replace('@nonobjc func','func',1)
 batch=braced_declaration((root/'Cerebro/ROBWorkspaceSearchPlan.swift').read_text(),'enum ROBRecyclingBatchRequest {')
@@ -42,6 +44,8 @@ final class Gateway {
  var inactiveWorkspaceSearch=true,leased=false,positionReady=false,armTravelDispatched=false,jawCommandDispatched=false,jawSetupDispatchUncertain=false,recyclingGripDispatched=false
  var sceneHold:[String:(positions:[Double],modes:[Int])]=["left":(Array(repeating:0,count:7),Array(repeating:0,count:7)),"right":(Array(repeating:0,count:7),Array(repeating:0,count:7))]
  var passiveFeedbackPauseStarted:Double?,lastHeldFeedbackDiagnostic:String?,lastRecordingPath="",phase="passive search"
+ var diagnosticProcessingActive:(()->Bool)?,servoPossiblePayloadUncertain=false
+ /* DIAGNOSTICS */
  var waiting=Set<UInt64>(),acks:[UInt64:Bool]=[:],holdConfirmations:[UInt64:Bool]=[:],dispatches=0
  static let neckOnlyCommands=Set<String>()
  var defersOneDegreeCameraInspection=false,defersInitialLiftCameraInspection=false,activeCameraCollisionAdvisory=false
@@ -62,12 +66,14 @@ final class Gateway {
 }
 @MainActor final class Vision {
  var enrolled=false,available=false,sequence:UInt64=1,ensureCalls=0
+ let cameraGeneration=UUID(),readinessDescription="fixture"
  var fresh:Bool{enrolled && available}
  var clear=true
  var handsClear:Bool{clear}
  struct Depth {let width=640,height=480}
- struct Frame {let sequence:UInt64;var depth:Depth?=Depth()}
- func snapshot()->[String:Frame]{available ? ["face":.init(sequence:sequence)]:[:]}
+ struct Frame {let sequence:UInt64,cameraGeneration:UUID;let capturedAt=Date().timeIntervalSince1970*1000;var depth:Depth?=Depth()}
+ func snapshot()->[String:Frame]{available ? ["face":.init(sequence:sequence,cameraGeneration:cameraGeneration)]:[:]}
+ func healthSnapshot()->NSDictionary{[:]}
  func taskObservationFrameMatchesRequest(_ frame:Frame)->Bool{true}
  func ensureActiveForTaskObservation(stereoMode:String? = nil){ensureCalls+=1;enrolled=true}
 }
@@ -83,10 +89,16 @@ enum ROBNeckRGBPoseDisplay {static func preferredFullHeightTaskStereoMode(model:
 enum ROBWorkspaceCollisionPlan {static let sweptPointTravelMeters=0.003}
 enum ROBLeftArmInteractionPlan {static func stationaryFrontTarget(_ q:[Double])->[Double]?{q}}
 enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
+final class ROBWorkspaceSearch {
+ static let shared=ROBWorkspaceSearch()
+ var prepareView:((Double,Int)->Bool)?,viewReady:((Double,Int)->Bool)?
+}
 @MainActor final class CameraPrepare {
  let vision=Vision();var sourcePixelSelfReviewEnabled=false,nominalEmptyCommissioningStepEnabled=false,nominalModelAssumedSelfEnabled=false,oneDegreeEmptyCalibrationStepEnabled=false,isRunning=false
  var standingPreparationTask:Task<Void,Never>?,localCameraPreparationTask:Task<Void,Never>?,localReceiptCameraTimer:Timer?
  var prepared=0
+ struct Located {struct View {let panDegrees:Double;let upperTarget:Int};let view:View}
+ var previewedCanGrasp:Located?
  func workspaceModel()throws->Int{0}
  func prepareSourcePixelSelfReview(command:String,target:String,completion:@escaping(NSDictionary)->Void){preconditionFailure("Unexpected pixel path")}
  func update(_ text:String){}
@@ -139,6 +151,35 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   ROBControllerArmApproval.shared.onAuthorize={agedDuringAuthorization.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=351}
   try agedDuringAuthorization.check() // No duplicate age read after authority work in local passive mode.
   ROBControllerArmApproval.shared.onAuthorize=nil
+  // The real failure had a raised RIGHT arm and inactive LEFT arm. Exercise
+  // both check() branches and make sure diagnostics never excuse a mode fault,
+  // pose drift, missing packet, active lease, or more than1second of age.
+  let diagnostic=Hold();diagnostic.diagnosticProcessingActive={true}
+  diagnostic.sceneHold["left"]!.modes=Array(repeating:2,count:7)
+  diagnostic.gateway.mode["left"]=2;diagnostic.gateway.samples["left"]!.statuses=Array(repeating:2,count:7)
+  #if DEBUG
+  for age in [398.0,750.0,1_000.0] {
+   for side in ["left","right"] {
+    diagnostic.gateway.samples[side]!.effectiveSampleAgeMilliseconds=age
+    diagnostic.gateway.samples[side]!.effectiveGripperFeedbackAgeMilliseconds=age
+   }
+   try diagnostic.check()
+  }
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=1_001;fatal(diagnostic,"motor_age_ms")
+  for side in ["left","right"] {
+   diagnostic.gateway.samples[side]!.effectiveSampleAgeMilliseconds=398
+   diagnostic.gateway.samples[side]!.effectiveGripperFeedbackAgeMilliseconds=398
+  }
+  diagnostic.gateway.samples["right"]!.positionsRadians[0]=0.01;fatal(diagnostic,"position_drift_m")
+  diagnostic.gateway.samples["right"]!.positionsRadians[0]=0
+  diagnostic.gateway.mode["right"]=1;fatal(diagnostic,"gateway_modes");diagnostic.gateway.mode["right"]=0
+  diagnostic.inactiveWorkspaceSearch=false;diagnostic.leased=true;fatal(diagnostic,"motor_age_ms")
+  diagnostic.leased=false;diagnostic.inactiveWorkspaceSearch=true
+  diagnostic.diagnosticProcessingActive={false};fatal(diagnostic,"motor_age_ms")
+  #else
+  precondition(!diagnostic.diagnosticStationaryFeedbackEnabled)
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=398;fatal(diagnostic,"motor_age_ms")
+  #endif
   do{try agedDuringAuthorization.check();preconditionFailure("Next checkpoint must detect stale feedback")}catch is ROBPassiveFeedbackPause{}
   let nonlocal=Hold();nonlocal.localReceiptCommand=nil
   ROBControllerArmApproval.shared.onAuthorize={nonlocal.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=351}
@@ -180,8 +221,9 @@ enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double])->Bool{true}}
   print("PASS stationary inactive/position holds accept350ms; complete actual local/nonlocal/active check; inactive age-only same-q/mode defers≤2s; q/mode/missing/active-age/timeout fatal; direct local Prepare enrolls then waits fresh; source expiry capped2; no hardware")
  }
 }
-'''.replace('/* GUARD */',guard).replace('/* PAUSE */',pause).replace('/* BATCH */',batch).replace('/* FULL CHECK */',fullCheck).replace('/* METHODS */',methods).replace('/* ENROLL */',enroll)
+'''.replace('/* GUARD */',guard).replace('/* PAUSE */',pause).replace('/* BATCH */',batch).replace('/* FULL CHECK */',fullCheck).replace('/* METHODS */',methods).replace('/* ENROLL */',enroll).replace('/* DIAGNOSTICS */',diagnostics)
 with tempfile.TemporaryDirectory(prefix='rob-passive-feedback-',dir='/private/tmp')as folder:
  p=Path(folder);(p/'Fixture.swift').write_text(fixture)
- subprocess.run(['xcrun','swiftc','-O','-swift-version','5','-parse-as-library',str(p/'Fixture.swift'),'-o',str(p/'fixture')],check=True)
- subprocess.run([str(p/'fixture')],check=True,timeout=10)
+ for flags in [[],['-D','DEBUG']]:
+  subprocess.run(['xcrun','swiftc','-O','-swift-version','5','-parse-as-library',*flags,str(p/'Fixture.swift'),'-o',str(p/'fixture')],check=True)
+  subprocess.run([str(p/'fixture')],check=True,timeout=10)

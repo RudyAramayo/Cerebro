@@ -10,6 +10,9 @@ source = (root / 'Cerebro/ROBLeftArmTrial.swift').read_text()
 guard = braced_declaration(source, 'private enum ROBHeldArmFeedbackGuard {').replace('private enum', 'enum', 1)
 policy = braced_declaration(source, '    private var selectedFeedbackMaximumAgeMilliseconds:Double {').replace('private var', 'var', 1)
 measured = braced_declaration(source, '    private func measured()').replace('private func', 'func', 1)
+diagnostics = '\n'.join(braced_declaration(source, marker).replace('private ', '', 1) for marker in [
+    '    private var diagnosticStationaryFeedbackEnabled:Bool {',
+    '    private func stationaryFeedbackMaximumAge(modes:'])
 record = braced_declaration(source, '    private func record(')
 assert 'if deliveredAge > selectedFeedbackMaximumAgeMilliseconds' in record
 assert 'sample.sampleAgeAtReceiptMilliseconds <= 250' in record
@@ -38,6 +41,8 @@ final class Hold {
  var sceneHold:[String:(positions:[Double],modes:[Int])]=["left":(Array(repeating:0,count:7),Array(repeating:0,count:7))]
  enum Recovery {case feedbackLost}
  var localCampaignRecoveryReason:Recovery?
+ var diagnosticProcessingActive:(()->Bool)?
+ /* DIAGNOSTICS */
  /* POLICY */
  /* MEASURED */
 }
@@ -83,13 +88,43 @@ final class Hold {
   let moving=Hold();moving.armTravelDispatched=true
   moving.gateway.sample!.effectiveSampleAgeMilliseconds=250;moving.gateway.sample!.effectiveGripperFeedbackAgeMilliseconds=250
   _ = try moving.measured();precondition(moving.selectedFeedbackMaximumAgeMilliseconds==250)
+  let debug=Hold();debug.diagnosticProcessingActive={true}
+  #if DEBUG
+  for age in [398.0,750.0,1_000.0] {
+   debug.gateway.sample!.effectiveSampleAgeMilliseconds=age
+   debug.gateway.sample!.effectiveGripperFeedbackAgeMilliseconds=age
+   _ = try debug.measured();precondition(debug.selectedFeedbackMaximumAgeMilliseconds==1_000)
+  }
+  debug.gateway.sample!.effectiveSampleAgeMilliseconds=1_001
+  do{_ = try debug.measured();preconditionFailure("Diagnostic budget became unbounded")}catch{}
+  let invalidations:[(Hold)->Void]=[
+   {$0.diagnosticProcessingActive={false}},{$0.diagnosticProcessingActive=nil},
+   {$0.leased=true},{$0.leaseRenewals=[1:0]},{$0.armTravelDispatched=true},
+   {$0.jawCommandDispatched=true},{$0.jawSetupDispatchUncertain=true},
+   {$0.recyclingGripDispatched=true},{$0.servoPossiblePayloadUncertain=true},
+   {$0.gateway.sample!.positionsRadians[0]=0.01},{$0.gateway.mode=1},
+   {$0.gateway.sample!.statuses[0]=0},{$0.gateway.sample!.currents[0]=NSNumber(value:Double.nan)}]
+  for invalidate in invalidations {
+   let h=Hold();h.diagnosticProcessingActive={true}
+   h.gateway.sample!.effectiveSampleAgeMilliseconds=398
+   invalidate(h)
+   do{_ = try h.measured();preconditionFailure("Diagnostic scope leaked into invalid/moving state")}catch{}
+  }
+  #else
+  precondition(!debug.diagnosticStationaryFeedbackEnabled)
+  precondition(debug.selectedFeedbackMaximumAgeMilliseconds==350)
+  debug.gateway.sample!.effectiveSampleAgeMilliseconds=398
+  do{_ = try debug.measured();preconditionFailure("Release build used diagnostic timing")}catch{}
+  #endif
+  print("PASS diagnostic timing: DEBUG stationary398/750/1000ms, bounded expiry, close/motion/jaw/lease/payload invalidation, Release unchanged")
   print("PASS actual selected-arm stationary feedback: inactive/position scans and empty planning accept294/350ms;351ms/missing/invalid/drift/mode fail; travel/jaw/payload/lease restores250ms before dispatch; raw receipt age unchanged; no hardware")
  }
 }
-'''.replace('/* GUARD */', guard).replace('/* POLICY */', policy).replace('/* MEASURED */', measured)
+'''.replace('/* GUARD */', guard).replace('/* POLICY */', policy).replace('/* MEASURED */', measured).replace('/* DIAGNOSTICS */', diagnostics)
 with tempfile.TemporaryDirectory(prefix='rob-stationary-planning-feedback-') as directory:
     path = Path(directory)
     (path / 'Fixture.swift').write_text(fixture)
-    subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', '-module-cache-path',
-                    '/private/tmp/cerebro-swift-module-cache', str(path / 'Fixture.swift'), '-o', str(path / 'fixture')], check=True)
-    subprocess.run([str(path / 'fixture')], check=True)
+    for flags in [[], ['-D', 'DEBUG']]:
+        subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *flags, '-module-cache-path',
+                        '/private/tmp/cerebro-swift-module-cache', str(path / 'Fixture.swift'), '-o', str(path / 'fixture')], check=True)
+        subprocess.run([str(path / 'fixture')], check=True)

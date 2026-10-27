@@ -5687,6 +5687,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     __weak ROBMainViewController *weakSelf = self;
     ROBArmRoutineCoordinator *routine = [ROBArmRoutineCoordinator shared];
+    [ROBLeftArmTrial shared].diagnosticProcessingActive = ^BOOL {
+        ROBMainViewController *owner = weakSelf;
+        return owner != nil && [[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey] &&
+            (owner.controllerDiagnosticsWindowController.window.isVisible || owner.cameraWindowController.window.isVisible ||
+             owner.bellyCameraWindowController.window.isVisible || owner.insta360DiagnosticsWindowController.window.isVisible);
+    };
     __block BOOL armViewPreparationStarted = NO;
     routine.cameraDemand = ^(BOOL active) {
         ROBMainViewController *strongSelf = weakSelf;

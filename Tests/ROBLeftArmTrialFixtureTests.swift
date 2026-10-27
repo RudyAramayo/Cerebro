@@ -156,6 +156,7 @@ final class ROBAmberGatewayClient: NSObject {
     var freezeSequenceForArms: Set<String> = [] { didSet { frozenSequences = [:] } }
     private var frozenSequences: [String:UInt64] = [:]
     var onTelemetry: ((String) -> Void)?
+    var queuedFeedbackMilliseconds:[String:Double]=[:]
     var feedbackReadyAt = 0.0
     var modeFeedbackDelay = 0.0
     var modeFeedbackReadyAt: [String: Double] = [:]
@@ -174,7 +175,8 @@ final class ROBAmberGatewayClient: NSObject {
             deliveredSequence = frozenSequences[arm]!
         } else { deliveredSequence = sequence }
         let status = ProcessInfo.processInfo.systemUptime < (modeFeedbackReadyAt[arm] ?? 0) ? 1 : mode[arm]!
-        let sample = ROBAmberGatewayTelemetry(sequence: deliveredSequence, positions: q[arm]!, stale: stale, status: status)
+        let sample = ROBAmberGatewayTelemetry(sequence: deliveredSequence, positions: q[arm]!, stale: stale, status: status,
+            queuedMilliseconds:queuedFeedbackMilliseconds[arm] ?? 0)
         sample.currents = Array(repeating: NSNumber(value: current), count: 7)
         return sample
     }
@@ -880,6 +882,11 @@ final class ROBArmRoutineCoordinator {
             if previewedHold {
                 g.q["left"]=try ROBCanRecyclingReadyPose.target(physicalSide:"right")
                 g.mode["left"]=2
+                trial.diagnosticProcessingActive={true}
+                // Reproduce the real inactive-LEFT delivery delay while the
+                // physical RIGHT arm is already raised and held.
+                ROBWorkspaceSearch.shared.onInspect={g.queuedFeedbackMilliseconds["right"]=398}
+                ROBWorkspaceSearch.shared.afterInspect={g.queuedFeedbackMilliseconds=[:]}
                 // The cropped preview stream has a high sequence before the
                 // full-height camera restart resets its counter.
                 v.frameAvailable=true;v.frameSequence=50_000
@@ -950,7 +957,11 @@ final class ROBArmRoutineCoordinator {
                     output["transfer_completed"] as?Bool==false,output.description)
                 precondition(broker.standingLocalCanCampaignActive,"A no-target grasp attempt consumed the standing campaign")
                 precondition(previewApprovalRequests==0 && previewApprovalPrompts==0,"Preview execution requested redundant arm authorization")
-                print("PASS previewed grasp: selected-can neck view restored, new camera generation accepts a reset sequence, serialized one-can front-table reacquisition, no bucket/batch/transfer credit, no redundant approval, no motion when the target is absent")
+                let policyURL=URL(fileURLWithPath:trial.lastRecordingPath).deletingPathExtension().appendingPathExtension("feedback-policy.json")
+                let policy=try JSONSerialization.jsonObject(with:Data(contentsOf:policyURL)) as! [String:Any]
+                precondition(policy["diagnostic_stationary_timing"] as?Bool==true && policy["stationary_maximum_age_ms"] as?Double==1_000)
+                precondition(policy["moving_arm_maximum_age_ms"] as?Int==250)
+                print("PASS previewed grasp: selected-can neck view restored, reset camera sequence accepted, stationary398ms diagnostic delay tolerated and audited, no bucket/batch/transfer credit, no redundant approval, no motion when the target is absent")
             }
             precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("position_mode") || $0.hasPrefix("gripper") || $0.hasPrefix("activate")})
             broker.cancel(reason:"Synthetic camera-start fixture complete")
