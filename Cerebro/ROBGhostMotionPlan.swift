@@ -240,6 +240,37 @@ final class ROBGhostRobotModel {
         }
         return bounds
     }
+    /// Upper bound for displacement of EVERY point in the local collision
+    /// boxes between two configurations. Rigid point displacement is convex
+    /// over each box, so its eight corners suffice. This is model geometry,
+    /// not camera registration, endpoint-only TCP tracking or a force sensor.
+    func maximumArmHullDisplacement(from start:[Double],to end:[Double],openJawPadding:Double) throws->Double {
+        let limits=ROBWorkspaceCollisionPlan.jointBounds(model:self)
+        guard start.count==7,end.count==7,openJawPadding.isFinite,(0...0.1).contains(openJawPadding),
+              zip(start,limits).allSatisfy({$0.isFinite && $1.contains($0)}),
+              zip(end,limits).allSatisfy({$0.isFinite && $1.contains($0)}) else {
+            throw ROBGhostMotionError.blocked("The measured arm corridor has invalid joints or jaw padding.")
+        }
+        let a=frames(positions(vendorLeft:start)),b=frames(positions(vendorLeft:end))
+        let links=hulls.keys.filter{$0.hasPrefix(physicalSide+"_") && ($0.hasSuffix("_Link") || $0==toolLink || $0==physicalSide+"_base_link")}
+        guard links.count>=8 else {throw ROBGhostMotionError.blocked("The measured arm corridor lacks the complete arm model.")}
+        var maximum=0.0
+        for link in links {
+            guard let corners=hullBoxes[link],corners.count==8,let first=a[link],let second=b[link] else {
+                throw ROBGhostMotionError.blocked("The measured arm corridor lost a collision box or frame.")
+            }
+            let padding=link==toolLink ? openJawPadding:0
+            let low=corners.reduce(corners[0]){simd_min($0,$1)}-SIMD3(repeating:padding)
+            let high=corners.reduce(corners[0]){simd_max($0,$1)}+SIMD3(repeating:padding)
+            for x in [low.x,high.x] {for y in [low.y,high.y] {for z in [low.z,high.z] {
+                let p=SIMD4(x,y,z,1),u=first*p,v=second*p
+                let distance=simd_distance(SIMD3(u.x,u.y,u.z),SIMD3(v.x,v.y,v.z))
+                guard distance.isFinite else {throw ROBGhostMotionError.blocked("The measured arm corridor has a nonfinite hull displacement.")}
+                maximum=max(maximum,distance)
+            }}}
+        }
+        return maximum
+    }
     /// Bounded position-only numerical IK for preview. No motor command is
     /// generated here; the separate proposal compiler enforces execution scope.
     func solveLeft(target: SIMD3<Double>, from initial: [String: Double], frontWorkspace: Bool = false) -> [String: Double]? {

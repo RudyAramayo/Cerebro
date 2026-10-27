@@ -83,6 +83,23 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
    let decoded=try JSONDecoder().decode(ROBWorkspaceStagedEmptyLift.self,from:JSONEncoder().encode(proof));precondition(decoded==proof)
    print("PASS staged modeled lift",proof.checkedPoseCount,"poses; initial horizontal mm",geometry.maximumInitialHorizontalTravelMeters*1000,"final delta m",geometry.finalTip-geometry.initialTip)
   }
+  let actual=[0.0,-0.0272707695624114,0,-0.01308996938995747,0,0,0]
+  let firstBaseline=[0.0,-0.01949860023712415,0,0,0,0,0]
+  let firstGoal=[0.0,-0.1282092619004997,0,-0.1435886966215985,0,0,0]
+  let delta=zip(firstBaseline,firstGoal).map{$1-$0},length=delta.reduce(0.0){$0+$1*$1}
+  let fraction=min(1,max(0,zip(zip(actual,firstBaseline),delta).reduce(0.0){$0+($1.0.0-$1.0.1)*$1.1}/length))
+  let nearest=zip(firstBaseline,delta).map{$0+fraction*$1}
+  let oldBound=1.5*zip(actual,nearest).reduce(0.0){$0+abs($1.0-$1.1)}
+  let physicalBound=try model.maximumArmHullDisplacement(from:nearest,to:actual,openJawPadding:0.04)
+  precondition(oldBound>0.003 && physicalBound<0.003)
+  var far=nearest;far[3]-=0.08
+  let rejected=try model.maximumArmHullDisplacement(from:nearest,to:far,openJawPadding:0.04)
+  precondition(rejected>0.003)
+  // Full-box displacement must cover every interior tool-box sample too.
+  let a=model.frames(model.positions(vendorLeft:nearest))[model.toolLink]!,b=model.frames(model.positions(vendorLeft:actual))[model.toolLink]!
+  let centerA=a*SIMD4<Double>(0,0,0,1),centerB=b*SIMD4<Double>(0,0,0,1)
+  precondition(simd_distance(SIMD3(centerA.x,centerA.y,centerA.z),SIMD3(centerB.x,centerB.y,centerB.z))<=physicalBound+1e-9)
+  print("PASS recorded tracking deviation: old lever bound",oldBound*1000,"mm; complete arm/open-jaw box bound",physicalBound*1000,"mm; actual excessive displacement rejected")
   let proof=try review(start)
   for index in [0,4,9,15] {
    let q=index==0 ? proof.baseline:proof.steps[index-1].positions

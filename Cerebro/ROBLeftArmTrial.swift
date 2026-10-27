@@ -1543,8 +1543,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             let length=delta.reduce(0.0){$0+$1*$1}
             let fraction=length>0 ? min(1,max(0,zip(zip(q,start),delta).reduce(0.0){$0+($1.0.0-$1.0.1)*$1.1}/length)):0
             let nearest=zip(start,delta).map{$0+fraction*$1}
-            guard q.count==7,1.5*zip(q,nearest).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
-                throw ROBArmRoutineError.blocked("The actual arm left the staged EMPTY lift corridor.")
+            let actualHullDeviation=try model.maximumArmHullDisplacement(from:nearest,to:q,
+                openJawPadding:ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters)
+            guard actualHullDeviation<=0.003 else {
+                throw ROBArmRoutineError.blocked(String(format:"The actual arm left the staged EMPTY lift corridor: full-hull deviation %.3f mm exceeds3mm.",actualHullDeviation*1000))
             }
             return
         }
