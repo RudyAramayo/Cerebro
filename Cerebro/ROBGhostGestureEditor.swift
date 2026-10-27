@@ -987,11 +987,11 @@ import simd
         if let preview=canPreview,preview.side=="right",preview.reachesCan {
             guard !ROBLeftArmTrial.shared.isRunning else{return}
             playing=false;executeButton.isEnabled=false;setPreviewFrozen(true)
+            status.stringValue="Reobserving the reviewed can, then native grasp and short lift under the standing authorization. End in hold."
             ROBLeftArmTrial.shared.performPreviewedCanGrasp(preview.can) { [weak self] result in
                 self?.setPreviewFrozen(false)
                 self?.status.stringValue=result["detail"]as?String ?? "Grasp-and-hold ended"
             }
-            status.stringValue="Reobserving the reviewed can, then native grasp and short lift under the standing authorization. End in hold."
             return
         }
         guard let proposal, let model, liveBaseline, !replayingRecording else { return }

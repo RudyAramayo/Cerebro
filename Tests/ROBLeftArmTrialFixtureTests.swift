@@ -880,7 +880,14 @@ final class ROBArmRoutineCoordinator {
             if previewedHold {
                 g.q["left"]=try ROBCanRecyclingReadyPose.target(physicalSide:"right")
                 g.mode["left"]=2
+                // The cropped preview stream has a high sequence before the
+                // full-height camera restart resets its counter.
+                v.frameAvailable=true;v.frameSequence=50_000
             }
+            var preparedPreviewViews:[ROBWorkspaceView]=[]
+            if previewedHold {ROBWorkspaceSearch.shared.prepareView={pan,upper in
+                preparedPreviewViews.append(.init(panDegrees:pan,upperTarget:upper));return true
+            }}
             var result:NSDictionary?,second:NSDictionary?
             var observedGenerations:[UInt64]=[],pendingIDs:[String]=[]
             if recovering {ROBWorkspaceSearch.shared.onInspect={
@@ -914,6 +921,7 @@ final class ROBArmRoutineCoordinator {
             }
             if !previewedHold {v.captureHeight=480}
             v.cameraGeneration=UUID()
+            if previewedHold {v.frameSequence=0}
             let end=ProcessInfo.processInfo.systemUptime+15
             while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
             guard let output=result else{fatalError("Standing task did not finish: \(trial.status); commands=\(g.commands)")}
@@ -930,12 +938,14 @@ final class ROBArmRoutineCoordinator {
             }else{precondition(output["status"] as?String=="not_found",output.description)}
             precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can])
             if previewedHold {
+                precondition(!preparedPreviewViews.isEmpty && preparedPreviewViews.allSatisfy{$0.panDegrees == -15 && $0.upperTarget==6000},
+                    "Preview preparation did not restore the selected can's view")
                 precondition(ROBWorkspaceSearch.shared.requestedFrontTableSurvey)
                 precondition(output["requested_grasp_and_hold"] as?Bool==true && output["batch_completed"] as?Int==0 &&
                     output["transfer_completed"] as?Bool==false,output.description)
                 precondition(broker.standingLocalCanCampaignActive,"A no-target grasp attempt consumed the standing campaign")
                 precondition(previewApprovalRequests==0 && previewApprovalPrompts==0,"Preview execution requested redundant arm authorization")
-                print("PASS previewed grasp: serialized one-can front-table reacquisition, no bucket/batch/transfer credit, no redundant approval, no motion when the target is absent")
+                print("PASS previewed grasp: selected-can neck view restored, new camera generation accepts a reset sequence, serialized one-can front-table reacquisition, no bucket/batch/transfer credit, no redundant approval, no motion when the target is absent")
             }
             precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("position_mode") || $0.hasPrefix("gripper") || $0.hasPrefix("activate")})
             broker.cancel(reason:"Synthetic camera-start fixture complete")

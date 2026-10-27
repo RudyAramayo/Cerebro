@@ -937,37 +937,60 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 completion(["status":"busy","detail":"The standing can task is already preparing or running."]);return
             }
             localReceiptCameraTimer?.invalidate();localReceiptCameraTimer=nil
-            let before=vision.snapshot()["face"]?.sequence ?? 0
+            let before=vision.snapshot()["face"]
+            let requestedAt=Date().timeIntervalSince1970*1000
+            let previewView=previewedCanGrasp?.view
             vision.ensureActiveForTaskObservation(stereoMode:(try? workspaceModel()).flatMap{ROBNeckRGBPoseDisplay.preferredFullHeightTaskStereoMode(model:$0)});ROBArmRoutineCoordinator.shared.cameraDemand?(true)
-            update("Starting the live task camera before freezing a fresh can-task plan")
+            update(previewView == nil ? "Starting the live task camera before freezing a fresh can-task plan"
+                : "Returning the camera to the reviewed can before freezing a fresh grasp plan")
             standingPreparationTask=Task { @MainActor [weak self] in
                 guard let self else{return}
                 defer {self.standingPreparationTask=nil}
-                let end=ProcessInfo.processInfo.systemUptime+12
+                let end=ProcessInfo.processInfo.systemUptime+(previewView == nil ? 12:24)
+                var viewReadyAfter:Double?=previewView == nil ? requestedAt:nil
                 while !Task.isCancelled,broker.standingLocalCanCampaignActive,
                       broker.standingLocalCanCampaignState?["campaignID"] as? String==campaign,
                       ProcessInfo.processInfo.systemUptime<end {
-                    if self.vision.fresh,let frame=self.vision.snapshot()["face"],frame.sequence>before,
+                    // A front-table scan can finish at a low depth-only view.
+                    // Restore only its selected can's neck view before asking
+                    // for task-quality pixels; no arm or jaw command belongs here.
+                    if let view=previewView {
+                        let search=ROBWorkspaceSearch.shared
+                        let prepared=search.prepareView?(view.panDegrees,view.upperTarget)==true
+                        if !prepared || search.viewReady?(view.panDegrees,view.upperTarget) != true {
+                            viewReadyAfter=nil
+                            try?await Task.sleep(nanoseconds:100_000_000);continue
+                        }
+                        if viewReadyAfter==nil {viewReadyAfter=Date().timeIntervalSince1970*1000}
+                    }
+                    if let notBefore=viewReadyAfter,self.vision.fresh,let frame=self.vision.snapshot()["face"],
+                       frame.cameraGeneration==self.vision.cameraGeneration,frame.sequence>0,frame.capturedAt>notBefore,
+                       before.map({frame.cameraGeneration != $0.cameraGeneration || frame.sequence>$0.sequence}) ?? true,
                        self.vision.taskObservationFrameMatchesRequest(frame) {
                         self.performImpl(command,target:target,localReceiptOnly:true,completion:completion);return
                     }
                     try?await Task.sleep(nanoseconds:100_000_000)
                 }
                 if !Task.isCancelled {completion(["status":"blocked","arm_motion_sent":false,"jaw_command_sent":false,
-                    "detail":"The standing task camera did not provide a fresh frame before preparation expired; no arm command sent."])}
+                    "camera":self.vision.healthSnapshot(),
+                    "detail":"The standing task camera did not provide a fresh frame from the requested view before preparation expired. \(self.vision.readinessDescription). No arm or jaw command sent."])}
             }
             return
         }
         guard localCameraPreparationTask==nil,!isRunning,!broker.isPending else {completion(["status":"busy","detail":"A task is already preparing or running."]);return}
         localReceiptCameraTimer?.invalidate();localReceiptCameraTimer=nil
-        let previous=vision.snapshot()["face"]?.sequence ?? 0
+        let previous=vision.snapshot()["face"]
+        let requestedAt=Date().timeIntervalSince1970*1000
         vision.ensureActiveForTaskObservation(stereoMode:(try? workspaceModel()).flatMap{ROBNeckRGBPoseDisplay.preferredFullHeightTaskStereoMode(model:$0)});ROBArmRoutineCoordinator.shared.cameraDemand?(true)
         if vision.fresh,let frame=vision.snapshot()["face"],vision.taskObservationFrameMatchesRequest(frame) {performImpl(command,target:target,localReceiptOnly:true,completion:completion);return}
         localCameraPreparationTask=Task { @MainActor [weak self] in
             guard let self else{return};defer {self.localCameraPreparationTask=nil}
             let end=ProcessInfo.processInfo.systemUptime+12
             while !Task.isCancelled,!self.isRunning,!broker.isPending,ProcessInfo.processInfo.systemUptime<end {
-                if self.vision.fresh,let frame=self.vision.snapshot()["face"],frame.sequence>previous,self.vision.taskObservationFrameMatchesRequest(frame) {
+                if self.vision.fresh,let frame=self.vision.snapshot()["face"],frame.cameraGeneration==self.vision.cameraGeneration,
+                   frame.sequence>0,frame.capturedAt>requestedAt,
+                   previous.map({frame.cameraGeneration != $0.cameraGeneration || frame.sequence>$0.sequence}) ?? true,
+                   self.vision.taskObservationFrameMatchesRequest(frame) {
                     self.performImpl(command,target:target,localReceiptOnly:true,completion:completion);return
                 }
                 try?await Task.sleep(nanoseconds:50_000_000)
