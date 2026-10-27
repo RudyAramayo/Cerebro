@@ -95,7 +95,9 @@ final class Identity {
     var nextResolution="640x400",nextStereoMode="near_field"
     var captureBodyIdentity:String?,isRunning=false,status="ready",diagnosticFailure=false,beginFailure=false
     func display(_ value:String){status=value}
-    func captureAndFit(token:UUID)async throws {
+    var fitRequests:[Bool]=[]
+    func captureAndFit(token:UUID,fit:Bool=true)async throws {
+        fitRequests.append(fit)
         if beginFailure {throw Failure.diagnostic}
         cameraDemandCaptureID=token;armOwner=UUID();captureBodyIdentity="body";isRunning=true
         cameraDemandResolution=nextResolution;cameraDemandStereoMode=nextStereoMode
@@ -290,6 +292,10 @@ final class Identity {
         precondition(reviewDemand.cameraManager.generationChanges==beforeModeChange+1,"A real mode change did not create exactly one new native source")
         review.windowWillClose(Notification(name:Notification.Name("closed")))
         precondition(review.cameraDemandCaptureID==nil && review.cameraDemandResolution==nil && review.cameraDemandStereoMode==nil && ROBAmberArmMotionArbiter.shared.releases==12)
+        review.captureOnly()
+        while review.task != nil {await Task.yield()}
+        precondition(review.fitRequests.last==false,"Capture-only requested a torso fit")
+        review.windowWillClose(Notification(name:Notification.Name("closed")))
         print("PASS fixed-head capture: held identical pipeline preserved, new genuine advancing settled source frames/runtime/service pinning, real mode changes restart, crop/full-height dimensions, token restoration/stale cleanup and registration identity")
     }
 }
@@ -303,7 +309,8 @@ harness='import Foundation\nimport CryptoKit\nenum ROBFixedHeadRegistrationScope
 harness=harness.replace('/* IDENTITY */',braced_declaration(controller,'    @nonobjc static func intrinsicsIdentity('))
 harness=harness.replace('/* DEMAND */',braced_declaration(view,'    @objc private func fixedHeadCalibrationDemandDidChange(').replace('cameraManager?.','cameraManager.'))
 harness=harness.replace('/* REVIEW */','\n'.join(braced_declaration(controller,s) for s in (
-    '    @objc func captureCurrentView()', '    private func releaseCameraDemand(', '    private func finishCapture(',
+    '    @objc func captureCurrentView()', '    @objc private func captureOnly()', '    private func startCapture(',
+    '    private func releaseCameraDemand(', '    private func finishCapture(',
     '    private func preservedCaptureSource(',
     '    @objc func stop()', '    func windowWillClose(')).replace('private func ','func '))
 with tempfile.TemporaryDirectory(prefix='rob-fixed-near-field-',dir='/private/tmp') as directory:

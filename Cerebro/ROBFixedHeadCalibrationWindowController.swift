@@ -75,6 +75,7 @@ struct ROBFixedHeadCaptureFrameGate {
     private let image = NSImageView()
     private let details = NSTextView()
     private let captureButton = NSButton(title: "Capture + fit current head pose", target: nil, action: nil)
+    private let captureOnlyButton = NSButton(title: "Capture RGB-D + IMU only", target:nil, action:nil)
     private let importButton = NSButton(title: "Import calibration evidence…", target: nil, action: nil)
     private let stopButton = NSButton(title: "Stop capture", target: nil, action: nil)
     @nonobjc private var task: Task<Void, Never>?
@@ -146,9 +147,11 @@ struct ROBFixedHeadCaptureFrameGate {
         let actions = NSStackView(); actions.spacing = 8
         captureButton.target = self; captureButton.action = #selector(captureCurrentView)
         captureButton.identifier = NSUserInterfaceItemIdentifier("fixed-head-capture-fit")
+        captureOnlyButton.target=self;captureOnlyButton.action=#selector(captureOnly)
+        captureOnlyButton.identifier=NSUserInterfaceItemIdentifier("fixed-head-capture-only")
         importButton.target = self; importButton.action = #selector(importLandmarks)
         stopButton.target = self; stopButton.action = #selector(stop)
-        for b in [captureButton, importButton, stopButton] { actions.addArrangedSubview(b) }
+        for b in [captureButton, captureOnlyButton, importButton, stopButton] { actions.addArrangedSubview(b) }
         let folder = NSButton(title: "Show evidence", target: self, action: #selector(showEvidence))
         actions.addArrangedSubview(folder); root.addArrangedSubview(actions)
         image.imageScaling = .scaleProportionallyUpOrDown
@@ -172,6 +175,7 @@ struct ROBFixedHeadCaptureFrameGate {
     private func display(_ text: String) {
         status = text; details.string = text
         captureButton.isEnabled = !isRunning; importButton.isEnabled = !isRunning
+        captureOnlyButton.isEnabled = !isRunning
         side.isEnabled = !isRunning; referenceError.isEnabled = !isRunning
         nearFieldDepth.isEnabled = !isRunning
         fullCameraHeight.isEnabled = !isRunning
@@ -215,6 +219,10 @@ struct ROBFixedHeadCaptureFrameGate {
     }
 
     @objc func captureCurrentView() {
+        startCapture(fit:true)
+    }
+    @objc private func captureOnly() {startCapture(fit:false)}
+    private func startCapture(fit:Bool) {
         guard !isRunning, task == nil else { return }
         // A held camera override is replaced atomically by beginCapture. An
         // OFF/ON roundtrip would unnecessarily restart the identical pipeline.
@@ -222,7 +230,7 @@ struct ROBFixedHeadCaptureFrameGate {
         let keepModeForReview = holdCameraMode.state == .on
         task = Task { @MainActor [weak self] in
             guard let self else { return }
-            do { try await self.captureAndFit(token: token) }
+            do { try await self.captureAndFit(token: token,fit:fit) }
             catch { self.display(error is CancellationError ? "Capture stopped; saved evidence retained." : error.localizedDescription) }
             self.finishCapture(token: token, holdModeForReview: keepModeForReview && !Task.isCancelled)
         }
@@ -294,7 +302,7 @@ struct ROBFixedHeadCaptureFrameGate {
         return .init(cameraGeneration:frame.cameraGeneration,afterSequence:frame.sequence,afterCapturedAtMilliseconds:frame.capturedAt,
             runtimeCalibrationIdentity:runtime.identity,cameraServiceSourceSHA256:service)
     }
-    private func captureAndFit(token: UUID) async throws {
+    private func captureAndFit(token: UUID,fit:Bool=true) async throws {
         guard let uncertainty = Double(referenceError.stringValue), (5...40).contains(uncertainty),
               let resources = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
             throw ROBGhostMotionError.blocked("Use a CAD reference uncertainty between 5 and 40 mm; the bundled model must be available.")
@@ -430,6 +438,10 @@ struct ROBFixedHeadCaptureFrameGate {
         let inputURL = destination.appendingPathComponent("capture-input.json"), outputURL = destination.appendingPathComponent("registration-input.json")
         try JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted,.sortedKeys]).write(to: inputURL, options: .atomic)
         try checkPose(expected)
+        if !fit {
+            display("Saved five native RGB-D + IMU observations at P\(scope.panTarget) L\(scope.lowerTarget) U\(scope.upperTarget). No torso fit, registration installation or arm movement.\n\(inputURL.path)")
+            return
+        }
         let worker = Process(); process = worker
         worker.executableURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/ShadowPlanner/venv/bin/python3")
         worker.arguments = ["-B",resources.appendingPathComponent("fixed_head_registration.py").path,"--input",inputURL.path,"--output",outputURL.path]

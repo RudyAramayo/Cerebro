@@ -331,6 +331,81 @@ extension ROBNeckRGBPoseDisplayFixture {
         precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==oldPID)
         precondition(current()!.provisionalCameraToModel==baseline.last!.provisionalCameraToModel,"Absent optional refinement changed legacy matrix")
         precondition(ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:UUID(),runtimeCalibrationIdentity:nil,cameraServiceSourceSHA256:nil))
+        // A stationary body need not have model +Z aligned with gravity. Fit
+        // optical pitch separately from a shared training-only gravity vector,
+        // then check two independent views without changing arm coordinates.
+        let bodyTargets=[(4500,5300),(6000,6500),(6000,5650),(5000,5900),(5600,6200)]
+        let bodyBaseline=bodyTargets.map { ROBNeckRGBPoseDisplay.pose(model:model,panTarget:$0.0,lowerTarget:6411,upperTarget:$0.1)! }
+        let bodyUp=simd_normalize(SIMD3<Double>(-0.04,0.01,1)),bodyGeneration=UUID()
+        var bodyCaptures:[[String:Any]]=[],bodyDocuments:[[String:Any]]=[],bodyPaths:[URL]=[]
+        for (index,target) in bodyTargets.enumerated() {
+            let dir=temporary.appendingPathComponent("synthetic-body-gravity-\(index)")
+            try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+            let input=dir.appendingPathComponent("capture-input.json")
+            let scope=ROBFixedHeadRegistrationScope(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+                cameraGeneration:bodyGeneration,gatewaySessionGeneration:1,displayCorrectionIdentity:"fixture:body:"+currentBody,
+                panTarget:target.0,lowerTarget:6411,upperTarget:target.1,intrinsicsIdentity:String(repeating:"e",count:64))
+            let pitch=affineIntercept+affineSlope*Double(target.1-affineReference)
+            let camera=bodyBaseline[index].provisionalCameraToModel*simd_double4x4(simd_quatd(angle:pitch,axis:SIMD3(1,0,0)))
+            let g=simd_inverse(camera)*SIMD4(bodyUp*9.81,0)
+            var frames=documents[0]["frames"]as![[String:Any]]
+            for j in frames.indices {
+                let data=Data(repeating:UInt8(index*3+j+40),count:640*480*2),name="frame-\(j).depth-u16le"
+                try data.write(to:dir.appendingPathComponent(name))
+                frames[j]["depthPath"]=name;frames[j]["captureSHA256"]=hash(data);frames[j]["cameraGeneration"]=bodyGeneration.uuidString
+                var imu=frames[j]["imu"]as![String:Any];imu["gravity_mps2"]=[g.x,g.y,g.z];frames[j]["imu"]=imu
+            }
+            let document:[String:Any]=["schemaVersion":1,"cameraRole":"face","scope":try JSONSerialization.jsonObject(with:JSONEncoder().encode(scope)),"frames":frames]
+            try write(document,to:input);bodyDocuments.append(document);bodyPaths.append(input)
+            bodyCaptures.append(["role":index<3 ? "training":"held_out","captureInputPath":input.path,"captureInputSHA256":hash(try Data(contentsOf:input))])
+        }
+        var bodyEvidence=affine
+        bodyEvidence["method"]="affine_training_upper_with_body_gravity_reference_v1"
+        bodyEvidence["bodyMotionIdentity"]=currentBody;bodyEvidence["activeCameraGeneration"]=bodyGeneration.uuidString
+        bodyEvidence["modelBaseUpAssumed"]=false;bodyEvidence["bodyGravityReferenceModel"]=[bodyUp.x,bodyUp.y,bodyUp.z]
+        bodyEvidence["referenceLowerTarget"]=6411;bodyEvidence["captures"]=bodyCaptures
+        try install(bodyEvidence)
+        let bodyProjectionID=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!
+        precondition(bodyProjectionID != affineID)
+        func bodySource(lower:Int=6411,imuOverride:[String:Any]?=nil)->ROBNeckRGBPoseDisplay.ActualFrameSource {
+            let scope=ROBFixedHeadRegistrationScope(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+                cameraGeneration:bodyGeneration,gatewaySessionGeneration:1,displayCorrectionIdentity:"fixture:body:"+currentBody,
+                panTarget:bodyTargets[4].0,lowerTarget:lower,upperTarget:bodyTargets[4].1,intrinsicsIdentity:String(repeating:"e",count:64))
+            let imu=imuOverride ?? (bodyDocuments[4]["frames"]as![[String:Any]])[0]["imu"]as![String:Any]
+            return .init(cameraGeneration:bodyGeneration,actualDeviceMXID:device,runtimeCalibrationIdentity:runtimeID,
+                cameraServiceSourceSHA256:service,scope:scope,inertialJSON:try! JSONSerialization.data(withJSONObject:imu))
+        }
+        precondition(ROBNeckRGBPoseDisplay.estimatedProjectionSourceFailure(model:model,actualFrame:bodySource())==nil)
+        precondition(ROBNeckRGBPoseDisplay.estimatedProjectionSourceFailure(model:model,actualFrame:bodySource(lower:6011)) != nil)
+        var movedIMU=(bodyDocuments[4]["frames"]as![[String:Any]])[0]["imu"]as![String:Any]
+        let actual=movedIMU["gravity_mps2"]as![Double],changed=heldTurn*SIMD3(actual[0],actual[1],actual[2])
+        movedIMU["gravity_mps2"]=[changed.x,changed.y,changed.z]
+        precondition(ROBNeckRGBPoseDisplay.estimatedProjectionSourceFailure(model:model,actualFrame:bodySource(imuOverride:movedIMU)) != nil)
+        for (i,target) in bodyTargets.enumerated() {
+            let pose=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:target.0,lowerTarget:6411,upperTarget:target.1)!
+            precondition(pose.provisionalCameraToModel.columns.0==bodyBaseline[i].provisionalCameraToModel.columns.0 &&
+                pose.provisionalCameraToModel.columns.3==bodyBaseline[i].provisionalCameraToModel.columns.3 && !pose.hasDepthProjectionAuthority)
+        }
+        for (key,value) in [("modelBaseUpAssumed",true as Any),("referenceLowerTarget",6011 as Any),
+            ("bodyGravityReferenceModel",[0.0,0.0,1.0]as Any),("captures",Array(bodyCaptures.dropLast())as Any)] {
+            var bad=bodyEvidence;bad[key]=value;try install(bad);rejects("Invalid body-gravity evidence: "+key)
+        }
+        // Corrupt only an independent view while retaining authentic hashes.
+        var badHeld=bodyDocuments[4],badFrames=badHeld["frames"]as![[String:Any]]
+        for i in badFrames.indices {badFrames[i]["imu"]=movedIMU}
+        badHeld["frames"]=badFrames;try write(badHeld,to:bodyPaths[4])
+        var badSources=bodyCaptures;badSources[4]["captureInputSHA256"]=hash(try Data(contentsOf:bodyPaths[4]))
+        var badProof=bodyEvidence;badProof["captures"]=badSources;try install(badProof)
+        rejects("Body reference absorbed independent held-out gravity disagreement")
+        try write(bodyDocuments[4],to:bodyPaths[4]);try install(bodyEvidence)
+        a["demoPortableGravityPitchPrior"]=true;try write(a,to:activation)
+        rejects("Body reference became a portable prior across physical posture changes")
+        a.removeValue(forKey:"demoPortableGravityPitchPrior");try write(a,to:activation)
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==bodyProjectionID)
+        ROBFixedHeadBodyMotionIdentity.invalidate()
+        rejects("LACT/torso/tread motion retained a stationary body-gravity reference")
+        a.removeValue(forKey:"estimatedGravityPitchRefinement");try write(a,to:activation)
+        print("PASS stationary body gravity: training-only common direction, independent held-out poses, unchanged optical origin/image-right/arm mapping, strict current residual/lower/body checks, no portable rebinding or motion authority")
         print("PASS synthetic frozen gravity pitch: central estimated post-X only, exact origin/image-right, immutable source/body/runtime/generation bindings, independent held-out pose, either legal capture mapping with identical shared head and separate arm identities, cached evidence/raw tamper rejection, stationary/factory-rotation checks, legacy identity unchanged; no registration or motion authority")
     }
 }

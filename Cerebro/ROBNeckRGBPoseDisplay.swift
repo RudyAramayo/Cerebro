@@ -119,6 +119,7 @@ enum ROBNeckRGBPoseDisplay {
         let runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
         let deltaRadians:Double?
         let referenceUpperTarget:Int?,interceptRadians:Double?,slopeRadiansPerRawUnit:Double?
+        let bodyGravityReferenceModel:[Double]?,referenceLowerTarget:Int?
         let registrationVerified:Bool,armMotionAuthority:Bool,rawDepthCorrected:Bool
         let modelBaseUpAssumed:Bool,opticalOriginPriorUnchanged:Bool,imageRightHeadingPriorUnchanged:Bool
         let captures:[Capture]
@@ -142,6 +143,7 @@ enum ROBNeckRGBPoseDisplay {
         let cameraGeneration:UUID,runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
         let actualDeviceMXID:String,imuSensor:String,imuToRGBRotation:[Double],intrinsicsIdentities:Set<String>
         let fullHeightStereoModes:Set<String>
+        let bodyGravityReferenceModel:SIMD3<Double>,referenceLowerTarget:Int?
         let sources:[PinnedGravitySource]
         func angle(upperTarget:Int)->Double {
             guard let referenceUpperTarget else{return deltaRadians}
@@ -244,7 +246,19 @@ enum ROBNeckRGBPoseDisplay {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
         guard bytes.count<100_000 else{throw Failure.invalid}
         let e=try JSONDecoder().decode(GravityPitchEvidence.self,from:bytes)
-        let affine=e.method=="affine_training_upper_post_optical_x_preserve_origin_image_right_v1"
+        let bodyReference=e.method=="affine_training_upper_with_body_gravity_reference_v1"
+        let affine=bodyReference || e.method=="affine_training_upper_post_optical_x_preserve_origin_image_right_v1"
+        let up:SIMD3<Double>
+        if bodyReference {
+            guard !demoPortableGravityPitchPrior,!e.modelBaseUpAssumed,
+                  let v=e.bodyGravityReferenceModel,v.count==3,v.allSatisfy(\.isFinite),
+                  let lower=e.referenceLowerTarget,(3000...10000).contains(lower) else {throw Failure.invalid}
+            up=SIMD3(v[0],v[1],v[2])
+            guard abs(simd_length(up)-1)<=1e-9,up.z>=cos(5 * Double.pi/180) else {throw Failure.invalid}
+        }else {
+            guard e.bodyGravityReferenceModel==nil,e.referenceLowerTarget==nil,e.modelBaseUpAssumed else {throw Failure.invalid}
+            up=SIMD3(0,0,1)
+        }
         if affine {
             guard e.deltaRadians==nil,let upper=e.referenceUpperTarget,(3000...10000).contains(upper),
                   let a=e.interceptRadians,a.isFinite,let b=e.slopeRadiansPerRawUnit,b.isFinite,
@@ -263,7 +277,7 @@ enum ROBNeckRGBPoseDisplay {
               !e.actualDeviceMXID.isEmpty,e.actualDeviceMXID.count<=128,
               hash(e.runtimeCalibrationIdentity),hash(e.cameraServiceSourceSHA256),
               !e.registrationVerified,!e.armMotionAuthority,!e.rawDepthCorrected,
-              e.modelBaseUpAssumed,e.opticalOriginPriorUnchanged,e.imageRightHeadingPriorUnchanged,
+              e.opticalOriginPriorUnchanged,e.imageRightHeadingPriorUnchanged,
               (4...16).contains(e.captures.count),Set(e.captures.map(\.captureInputPath)).count==e.captures.count,
               let torso=model.frames(model.reference)["torso_link"] else{throw Failure.invalid}
         // The capture UI's selected arm mapping is source provenance, not a
@@ -282,7 +296,7 @@ enum ROBNeckRGBPoseDisplay {
             }) else{throw Failure.invalid}
             sourceModel=other
         }
-        struct Row {let role:String,pose:String,upperTarget:Int,requiredPitch:Double,gravity:SIMD3<Double>,camera:simd_double4x4}
+        struct Row {let role:String,pose:String,panTarget:Int,upperTarget:Int,requiredPitch:Double,gravity:SIMD3<Double>,camera:simd_double4x4}
         var rows:[Row]=[],sources:[PinnedGravitySource]=[],totalRawBytes=0,heldGenerationSeen=false
         var commonSensor:String?,commonIMURotation:[Double]?,intrinsicsIdentities=Set<String>(),fullHeightStereoModes=Set<String>()
         func numbers(_ x:Any?,count:Int)throws->[Double] {
@@ -308,7 +322,8 @@ enum ROBNeckRGBPoseDisplay {
             let scope=try JSONDecoder().decode(ROBFixedHeadRegistrationScope.self,from:JSONSerialization.data(withJSONObject:scopeJSON))
             try scope.validate();intrinsicsIdentities.insert(scope.intrinsicsIdentity)
             guard scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==e.mappingID,
-                  scope.displayCorrectionIdentity.hasSuffix(":body:"+e.bodyMotionIdentity) else{throw Failure.invalid}
+                  scope.displayCorrectionIdentity.hasSuffix(":body:"+e.bodyMotionIdentity),
+                  e.referenceLowerTarget.map({$0==scope.lowerTarget}) ?? true else{throw Failure.invalid}
             let sourceChain=try chain(model:sourceModel,parameters:parameters,panTarget:scope.panTarget,
                 lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget)
             let currentChain=try chain(model:model,parameters:parameters,panTarget:scope.panTarget,
@@ -366,10 +381,11 @@ enum ROBNeckRGBPoseDisplay {
             guard simd_length(sum)>=Double(directions.count)*0.99 else{throw Failure.invalid}
             let g=simd_normalize(sum)
             guard directions.allSatisfy({acos(min(1,max(-1,simd_dot($0,g))))<=Double.pi/180}) else{throw Failure.invalid}
-            let s=SIMD3(camera.columns.0.z,camera.columns.1.z,camera.columns.2.z)
+            let sourceUp=simd_transpose(camera)*SIMD4(up,0)
+            let s=SIMD3(sourceUp.x,sourceUp.y,sourceUp.z)
             guard hypot(g.y,g.z)>0.1,hypot(s.y,s.z)>0.1 else{throw Failure.invalid}
             let angle=atan2(s.z*g.y-s.y*g.z,s.y*g.y+s.z*g.z)
-            rows.append(Row(role:capture.role,pose:"\(scope.panTarget):\(scope.lowerTarget):\(scope.upperTarget)",upperTarget:scope.upperTarget,
+            rows.append(Row(role:capture.role,pose:"\(scope.panTarget):\(scope.lowerTarget):\(scope.upperTarget)",panTarget:scope.panTarget,upperTarget:scope.upperTarget,
                 requiredPitch:angle,gravity:g,camera:camera))
             if capture.role=="held_out",scope.cameraGeneration==activeGeneration {heldGenerationSeen=true}
         }
@@ -398,14 +414,29 @@ enum ROBNeckRGBPoseDisplay {
             let delta=intercept+slope*Double(row.upperTarget-(e.referenceUpperTarget ?? row.upperTarget))
             let correction=rotated(SIMD3(delta,0,0))
             let projected=row.camera*correction*SIMD4(row.gravity,0)
-            return acos(min(1,max(-1,projected.z)))<=Double.pi/180
+            return acos(min(1,max(-1,simd_dot(SIMD3(projected.x,projected.y,projected.z),up))))<=Double.pi/180
         }) else{throw Failure.invalid}
+        if bodyReference {
+            // Estimate the common body gravity direction from TRAINING only.
+            // Wide pan coverage separates body tilt from optical pitch; two
+            // independent held-out neck poses still have to pass above.
+            guard held.count>=2,
+                  training.map(\.panTarget).max()!-training.map(\.panTarget).min()!>=1500 else{throw Failure.invalid}
+            let sum=training.reduce(SIMD3<Double>.zero){result,row in
+                let angle=intercept+slope*Double(row.upperTarget-e.referenceUpperTarget!)
+                let p=row.camera*rotated(SIMD3(angle,0,0))*SIMD4(row.gravity,0)
+                return result+SIMD3(p.x,p.y,p.z)
+            }
+            guard simd_length(sum)>Double(training.count)*0.99,
+                  simd_distance(simd_normalize(sum),up)<=1e-9 else{throw Failure.invalid}
+        }
         return GravityPitch(reference:reference,deltaRadians:intercept,bodyMotionIdentity:e.bodyMotionIdentity,
             referenceUpperTarget:e.referenceUpperTarget,slopeRadiansPerRawUnit:slope,
             cameraGeneration:activeGeneration,runtimeCalibrationIdentity:e.runtimeCalibrationIdentity,
             cameraServiceSourceSHA256:e.cameraServiceSourceSHA256,actualDeviceMXID:e.actualDeviceMXID,
             imuSensor:commonSensor!,imuToRGBRotation:commonIMURotation!,intrinsicsIdentities:intrinsicsIdentities,
-            fullHeightStereoModes:fullHeightStereoModes,sources:sources)
+            fullHeightStereoModes:fullHeightStereoModes,bodyGravityReferenceModel:up,
+            referenceLowerTarget:e.referenceLowerTarget,sources:sources)
     }
     private static func bellyFloorEvidence(_ reference:BellyFloorDisplayReference)throws->(Data,SIMD3<Double>) {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
@@ -568,6 +599,12 @@ enum ROBNeckRGBPoseDisplay {
                     identity["kind"]="estimated_affine_upper_post_optical_x_pitch_v1"
                     identity["referenceUpperTarget"]=upper;identity["slopeRadiansPerRawUnit"]=gravityPitch!.slopeRadiansPerRawUnit
                 }
+                if let lower=gravityPitch!.referenceLowerTarget {
+                    identity["kind"]="estimated_affine_upper_with_body_gravity_reference_v1"
+                    identity["referenceLowerTarget"]=lower
+                    let up=gravityPitch!.bodyGravityReferenceModel
+                    identity["bodyGravityReferenceModel"]=[up.x,up.y,up.z]
+                }
                 if portable {identity["demoPortableGravityPitchPrior"]="immutable_pitch_parameter_prior_current_frame_validation_v1"}
                 finalEstimatedIdentity=sha(try JSONSerialization.data(withJSONObject:identity,options:[.sortedKeys]))
             }else{gravityPitch=nil;finalEstimatedIdentity=estimatedIdentity}
@@ -636,6 +673,9 @@ enum ROBNeckRGBPoseDisplay {
         }
         guard let pitch=value.gravityPitch else{return nil}
         let scope=actualFrame.scope
+        guard pitch.referenceLowerTarget.map({$0==scope.lowerTarget}) ?? true else {
+            return reject("lower-neck pose differs from the body-gravity calibration")
+        }
         guard (try? scope.validate()) != nil else{return reject("invalid frame scope")}
         guard scope.cameraGeneration==actualFrame.cameraGeneration else{return reject("frame and scope camera generations differ")}
         guard scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==model.selectedMappingID else {
@@ -678,7 +718,7 @@ enum ROBNeckRGBPoseDisplay {
         let rotation=simd_double3x3(columns:(SIMD3(r[0],r[3],r[6]),SIMD3(r[1],r[4],r[7]),SIMD3(r[2],r[5],r[8])))
         let projected=camera*SIMD4(simd_normalize(rotation*g),0)
         // Same accelerometer sign and full 3D residual used by the evidence loader.
-        let residual=acos(min(1,max(-1,projected.z)))
+        let residual=acos(min(1,max(-1,simd_dot(SIMD3(projected.x,projected.y,projected.z),pitch.bodyGravityReferenceModel))))
         guard residual<=Double.pi/180 else {
             return reject(String(format:"gravity direction disagrees by %.3f degrees (limit 1.000) at raw neck P%d L%d U%d",residual*180/Double.pi,scope.panTarget,scope.lowerTarget,scope.upperTarget))
         }
