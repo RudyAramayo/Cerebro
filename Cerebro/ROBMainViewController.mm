@@ -5734,7 +5734,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [ROBControllerArmApproval shared].announceApproval = ^(NSString *text) { [weakSelf.speechBox sayArmAuthorizationPrompt:text]; };
     workspace.prepareView = ^BOOL(double pan, NSInteger upper) {
         ROBMainViewController *owner = weakSelf;
-        if (owner == nil || (! [ROBLeftArmTrial shared].isRunning && ![ROBNeckQRCalibration shared].isRunning) || owner.stageShowCoordinator.isRunning ||
+        if (owner == nil || (![ROBLeftArmTrial shared].isRunning &&
+            ![ROBLeftArmTrial shared].isPreparingPreviewedCanObservation && ![ROBNeckQRCalibration shared].isRunning) || owner.stageShowCoordinator.isRunning ||
             owner.pendingRobotActionRequests.count > 0 || [ROBAmberStackMaintenanceController shared].isRunning ||
             [ROBTorsoControlCenter shared].isArmed) { return NO; }
         if (!armViewPreparationStarted) {

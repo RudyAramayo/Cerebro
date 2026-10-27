@@ -13,7 +13,7 @@ enum ROBArmRoutineError: LocalizedError {
     private(set) var isRunning = false
     private(set) var status = "Arms idle"
     private(set) var inspectionPanDegrees = 0.0
-    var ownsPhysicalMotion: Bool { (isRunning && activeCommand != "teach") || ROBShowMotionCoordinator.shared.isRunning || ROBLeftArmTrial.shared.isRunning }
+    var ownsPhysicalMotion: Bool { (isRunning && activeCommand != "teach") || ROBShowMotionCoordinator.shared.isRunning || ROBLeftArmTrial.shared.isRunning || ROBLeftArmTrial.shared.isPreparingPreviewedCanObservation }
     var cameraDemand: ((Bool) -> Void)?
     var prepareView: (() -> Bool)?
     var viewIsStationary: (() -> Bool)?

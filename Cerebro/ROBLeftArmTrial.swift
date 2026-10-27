@@ -338,6 +338,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private var activeHoldAfterInitialEmptyLift = false
     @nonobjc private var previewedCanGrasp: ROBWorkspaceLocatedObject?
     @nonobjc private var activePreviewedCanGrasp: ROBWorkspaceLocatedObject?
+    /// Neck-only preparation is part of this native user-started task. It
+    /// reserves the camera view without granting any arm or jaw dispatch.
+    var isPreparingPreviewedCanObservation:Bool {
+        previewedCanGrasp != nil && standingPreparationTask != nil && !isRunning &&
+            ROBControllerArmApproval.shared.standingLocalCanCampaignActive
+    }
     private var previewedGripperReadyGeneration: UInt64?
     private var initialEmptyLiftHeldEvidence: NSDictionary?
     var localVisualTrialAssumedSpatialErrorMeters = 0.05

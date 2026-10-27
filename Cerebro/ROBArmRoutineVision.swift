@@ -3376,6 +3376,22 @@ struct ROBWorkspaceCanSelection {
                 "scene_id":sceneID.uuidString,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true])
         }
         if localReachSelectionRequired {found[.can]=localReachSelection?.object}
+        // Coverage is a temporary glance, not the task's resting attention.
+        // Return to the selected object while this search still owns the neck.
+        // Keep measured fixed-head contexts unchanged and never freshen the
+        // object's earlier coordinates merely because the camera looked back.
+        if fixedRegisteredView==nil,let focus=found[.can] ?? found[.orangeBucket] {
+            try await searchCheckpoint()
+            progress("Returning the camera to the \(focus.target.spokenName).")
+            guard try await moveView(focus.view) else {
+                throw ROBArmRoutineError.blocked("The object was located, but the camera could not return to its view. No reach started.")
+            }
+            try await searchCheckpoint();try requireSceneProjectionIdentity()
+            evidence.append(["object_focus_return":true,"target":focus.target.rawValue,
+                "pan":focus.view.panDegrees,"upper":focus.view.upperTarget,
+                "neck_settled":true,"object_observation_refreshed":false,
+                "source_sequence":NSNumber(value:focus.sequence),"source_captured_at_ms":focus.capturedAt])
+        }
         let missing = targets.filter { found[$0] == nil }.map(\.spokenName)
         let unseen = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName)
         let seen = targets.filter { visuallyFound.contains($0) }.map(\.spokenName)

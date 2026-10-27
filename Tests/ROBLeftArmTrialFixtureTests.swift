@@ -886,6 +886,9 @@ final class ROBArmRoutineCoordinator {
             }
             var preparedPreviewViews:[ROBWorkspaceView]=[]
             if previewedHold {ROBWorkspaceSearch.shared.prepareView={pan,upper in
+                // Use the native callback's preparation admission; an idle
+                // task must not silently reject its own neck-only startup.
+                guard trial.isPreparingPreviewedCanObservation || trial.isRunning else{return false}
                 preparedPreviewViews.append(.init(panDegrees:pan,upperTarget:upper));return true
             }}
             var result:NSDictionary?,second:NSDictionary?
@@ -902,6 +905,7 @@ final class ROBArmRoutineCoordinator {
                 let can=ROBWorkspaceLocatedObject(target:.can,position:[0.43,-0.105,0.81],confidence:0.7,
                     capturedAt:Date().timeIntervalSince1970*1000,sequence:10,view:.init(panDegrees:-15,upperTarget:6000))
                 trial.performPreviewedCanGrasp(can){result=$0}
+                precondition(trial.isPreparingPreviewedCanObservation && !trial.isRunning)
                 trial.performPreviewedCanGrasp(can){second=$0}
                 precondition(second?["status"] as?String=="blocked" && second?["arm_motion_sent"] as?Bool==false)
             } else {
@@ -938,6 +942,7 @@ final class ROBArmRoutineCoordinator {
             }else{precondition(output["status"] as?String=="not_found",output.description)}
             precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can])
             if previewedHold {
+                precondition(!trial.isPreparingPreviewedCanObservation,"Completed preparation retained neck ownership")
                 precondition(!preparedPreviewViews.isEmpty && preparedPreviewViews.allSatisfy{$0.panDegrees == -15 && $0.upperTarget==6000},
                     "Preview preparation did not restore the selected can's view")
                 precondition(ROBWorkspaceSearch.shared.requestedFrontTableSurvey)
