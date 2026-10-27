@@ -337,6 +337,7 @@ final class ROBWorkspaceSearch {
     var announce: ((String) -> Void)?
     var lastReport: NSDictionary = ["detail": "Fixture search only"]
     private var collisionSnapshotValue: ROBWorkspaceCollisionSnapshot?
+    private var collisionSnapshotModel:ROBGhostRobotModel?
     var collisionScanCalls = 0
     var failCollisionScan = false
     var syntheticDistantPlane = false
@@ -374,6 +375,15 @@ final class ROBWorkspaceSearch {
               (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
         return value
     }
+    func collisionSnapshot(validating trial:ROBWorkspaceVisualCalibrationTrial)->ROBWorkspaceCollisionSnapshot? {
+        guard let value=collisionSnapshotValue,let model=collisionSnapshotModel,
+              estimatedCameraProjectionIsCurrent(model:model,map:value),
+              (try? ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(value,model:model,
+                generation:ROBAmberGatewayClient.shared.generation,sceneID:value.sceneID,
+                cameraGeneration:ROBArmRoutineVision.shared.cameraGeneration,
+                nowMilliseconds:Date().timeIntervalSince1970*1000,trial:trial)) != nil else{return nil}
+        return value
+    }
     @MainActor func captureRegisteredCurrentScene(model:ROBGhostRobotModel,generation:UInt64,
         check:() throws->Void,progress:(String)->Void) async throws->ROBWorkspaceCollisionSnapshot {
         try await scanCollisionScene(model:model,generation:generation,check:check,progress:progress)
@@ -408,6 +418,7 @@ final class ROBWorkspaceSearch {
             "Synthetic RGB-D must never manufacture measured camera-to-arm registration")
         try check()
         collisionSnapshotValue = snapshot
+        collisionSnapshotModel = model
         lastReport = ["status": "depth_scene_captured", "detail": snapshot.registrationDetail,
             "collision_map_frames": snapshot.observedFrameCount, "arm_motion_sent": false]
         return snapshot

@@ -1671,8 +1671,19 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             try validateEstimatedContext(active,generation:generation)
             return
         }
-        guard let map = collisionMap, let model = collisionModel,
-              let current = ROBWorkspaceSearch.shared.collisionSnapshot,
+        guard let map = collisionMap, let model = collisionModel else {
+            throw ROBArmRoutineError.blocked("Scan current workspace geometry before arm travel.")
+        }
+        var visual:ROBWorkspaceVisualCalibrationTrial?
+        if localReceiptCommand != nil,map.registrationID == nil {
+            // This rechecks the actual active receipt before using its map-age
+            // policy. The normal cache's60second cutoff must not override the
+            // same trial's already-validated advisory evidence lifetime.
+            visual=try visualTrial(map:map,model:model,baseline:try measured().positionsRadians.map(\.doubleValue))
+        }
+        let current=visual.flatMap{ROBWorkspaceSearch.shared.collisionSnapshot(validating:$0)}
+            ?? (visual == nil ? ROBWorkspaceSearch.shared.collisionSnapshot:nil)
+        guard let current,
               current.sceneID == map.sceneID, current.fingerprint == map.fingerprint else {
             throw ROBArmRoutineError.blocked("Scan current workspace geometry before arm travel.")
         }
@@ -1683,9 +1694,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 throw ROBArmRoutineError.blocked("The held neck or physical camera projection changed after the local trial review.")
             }
         }
-        if localReceiptCommand != nil, map.registrationID == nil {
-            _ = try visualTrial(map:map,model:model,baseline:try measured().positionsRadians.map(\.doubleValue))
-        } else {
+        if visual == nil {
             _ = try ROBWorkspaceCollisionPlan.validateMap(map,model:model,generation:generation,
                 sceneID:map.sceneID,cameraGeneration:vision.cameraGeneration,nowMilliseconds:Date().timeIntervalSince1970*1000)
         }

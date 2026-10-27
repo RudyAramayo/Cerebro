@@ -1413,6 +1413,19 @@ struct ROBWorkspaceCanSelection {
         return value
     }
 
+    /// A trial keeps its own bounded evidence age. Revalidate the exact raw
+    /// map against its proof and live source identities; never refresh capture
+    /// timestamps or expose this allowance through the ordinary scene getter.
+    @nonobjc func collisionSnapshot(validating trial:ROBWorkspaceVisualCalibrationTrial)->ROBWorkspaceCollisionSnapshot? {
+        guard let value=collisionSnapshotValue,let model=collisionSnapshotModel,
+              let generation=(ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value,
+              estimatedCameraProjectionIsCurrent(model:model,map:value),
+              (try? ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(value,model:model,generation:generation,
+                sceneID:value.sceneID,cameraGeneration:ROBArmRoutineVision.shared.cameraGeneration,
+                nowMilliseconds:Date().timeIntervalSince1970*1000,trial:trial)) != nil else{return nil}
+        return value
+    }
+
     @MainActor @nonobjc func depthAlignmentDidChange() {
         collisionSnapshotValue = nil
         collisionSnapshotModel = nil
