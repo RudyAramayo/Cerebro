@@ -31,7 +31,7 @@ struct Sample {let positionsRadians:[NSNumber]}
  func measured()throws->Sample{if failureAt=="feedback"{throw ROBArmRoutineError.blocked("feedback")};return .init(positionsRadians:q.map{NSNumber(value:$0)})}
  func update(_ text:String){}
  func beginHeldSceneObservation()async throws{events.append("held observation");inactiveWorkspaceSearch=true}
- func ensureCollisionScene(model:ROBGhostRobotModel)async throws{events.append("workspace");if failureAt=="map"{throw ROBArmRoutineError.blocked("source/table map")};collisionMap=Map()}
+ func ensureCollisionScene(model:ROBGhostRobotModel,initialEmptyRightLift:Bool=false)async throws{precondition(initialEmptyRightLift);events.append("workspace");if failureAt=="map"{throw ROBArmRoutineError.blocked("source/table map")};collisionMap=Map()}
  func performInitialLocalRetreatIfNeeded(map:Map,model:ROBGhostRobotModel)async throws->Bool{events.append("review retreat");if failureAt=="retreat"{throw ROBArmRoutineError.blocked("occupied retreat")};if retreat{q[1] -= 0.075;q[3] -= 0.06;armTravelDispatched=true;referencedGeneration=generation;collisionMap=nil;if stopAfterMove{failureAt="stop"}};if failureAt=="endpoint"{q[0]+=0.1};if failureAt=="possession"{servoPossiblePayloadUncertain=true};return retreat}
  func performStagedEmptyLiftIfNeeded(map:Map,model:ROBGhostRobotModel)async throws->Bool{events.append("staged path");return try await performInitialLocalRetreatIfNeeded(map:map,model:model)}
  func initialEmptyLiftHoldResult(performed:Bool)throws->NSDictionary{events.append("lift only hold");return ["performed":performed]}

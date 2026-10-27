@@ -132,6 +132,24 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
     steps:[.init(positions:raised,seconds:0.8)],map:ordinary,model:model,generation:generation,sceneID:scene,
     cameraGeneration:camera,nowMilliseconds:1000,trial:trial(ordinary,raised))}
   print("PASS frozen initial self hypothesis; raw returns retained; mixed external, aggregate-only and ordinary-route obstacles still veto")
+  let toolFrame=model.frames(model.positions(vendorLeft:start))[model.toolLink]!
+  let toolVertices=try String(contentsOf:model.directory.appendingPathComponent(model.hulls[model.toolLink]!),encoding:.utf8)
+    .split(separator:"\n").compactMap{line->SIMD3<Double>? in
+     let fields=line.split(whereSeparator:\.isWhitespace)
+     guard fields.count==4,fields[0]=="v",let x=Double(fields[1]),let y=Double(fields[2]),let z=Double(fields[3]) else{return nil}
+     let p=toolFrame*SIMD4(x,y,z,1);return SIMD3(p.x,p.y,p.z)
+    }
+  let lowest=toolVertices.min{$0.z<$1.z}!
+  var retreatMap=map;retreatMap.sourceGroups=[pointGroup(lowest-SIMD3(0,0,0.105))]
+  let retreatProof=try review(start,source:retreatMap)
+  precondition(!retreatProof.initialMarginRetreats.isEmpty)
+  precondition(retreatProof.initialMarginRetreats.allSatisfy{$0.minimumReviewedClearanceMeters+1e-9 >= $0.initialClearanceMeters && $0.initialClearanceMeters >= $0.minimumRequiredClearanceMeters})
+  try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(retreatProof,index:15,from:retreatProof.steps[14].positions,
+    map:retreatMap,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,
+    trial:trial(retreatMap,retreatProof.steps[14].positions),measuredAtMilliseconds:1000)
+  var tooClose=map;tooClose.sourceGroups=[pointGroup(lowest-SIMD3(0,0,0.075))]
+  blocked("obstacle") {_=try review(start,source:tooClose)}
+  print("PASS initial mechanical-margin retreat moves away, restores full endpoint clearance and retains alignment/jaw/sweep allowances")
   var wrong=start;wrong[0]+=0.005
   blocked("start corridor") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(proof,index:0,from:wrong,map:map,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,wrong),measuredAtMilliseconds:1000)}
   blocked("frozen route") {try ROBWorkspaceCollisionPlan.reviewStagedEmptyLiftSegment(proof,index:16,from:start,map:map,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,start),measuredAtMilliseconds:1000)}

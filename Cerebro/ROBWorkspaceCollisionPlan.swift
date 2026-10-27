@@ -837,6 +837,13 @@ struct ROBWorkspaceStagedEmptyLift:Codable,Equatable {
     let endpointProxyClearancesMeters:[String:Double]
     let emptyStateEvidenceSource:String
     var initialSelfHypothesis:ROBWorkspaceInitialLiftSelfHypothesis? = nil
+    var initialMarginRetreats:[ROBWorkspaceInitialMarginRetreat] = []
+}
+
+struct ROBWorkspaceInitialMarginRetreat:Codable,Equatable {
+    let link:String,originalBounds:ROBWorkspaceOccupiedReturnBounds
+    let initialClearanceMeters:Double,minimumRequiredClearanceMeters:Double,ordinaryMarginMeters:Double
+    var minimumReviewedClearanceMeters:Double
 }
 
 /// Operator-cleared initial EMPTY preparation only. Unregistered robot and
@@ -1070,12 +1077,12 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         let initial=try proxy.separations(vendorLeft:baseline)
         let selfHypothesis=try initialLiftSelfHypothesis(baseline:baseline,map:map,model:model,context:context)
         let result=try reviewEmptyLiftHullPath(baseline:baseline,steps:geometry.steps,initialPairs:initial,
-            requireFinalClearance:true,map:map,model:model,context:context,selfHypothesis:selfHypothesis)
+            requireFinalClearance:true,map:map,model:model,context:context,selfHypothesis:selfHypothesis,originalBaseline:baseline)
         context.skippedStaticRobotLinks=result.staticLinks
         context.unknownSpaceAdvisory=result.unknownAdvisory
         return .init(context:context,baseline:baseline,steps:geometry.steps,checkedPoseCount:result.checked,
             initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:result.endpoint,
-            emptyStateEvidenceSource:emptyStateEvidenceSource,initialSelfHypothesis:selfHypothesis)
+            emptyStateEvidenceSource:emptyStateEvidenceSource,initialSelfHypothesis:selfHypothesis,initialMarginRetreats:result.marginRetreats)
     }
 
     /// Recheck the exact next segment from ACTUAL feedback. This cannot admit
@@ -1103,7 +1110,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             throw ROBGhostMotionError.blocked("The initial arm self hypothesis changed; no next segment sent.")
         }
         _=try reviewEmptyLiftHullPath(baseline:actual,steps:[proof.steps[index]],initialPairs:proof.initialProxyClearancesMeters,
-            requireFinalClearance:index==proof.steps.count-1,map:map,model:model,context:context,selfHypothesis:selfHypothesis)
+            requireFinalClearance:index==proof.steps.count-1,map:map,model:model,context:context,selfHypothesis:selfHypothesis,
+            originalBaseline:proof.baseline,measuredStartAllowance:0.003,priorRetreats:proof.initialMarginRetreats)
     }
 
     private static func initialLiftSelfHypothesis(baseline:[Double],map:any ROBWorkspaceCollisionMap,
@@ -1153,8 +1161,9 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
 
     private static func reviewEmptyLiftHullPath(baseline:[Double],steps:[ROBLeftGestureProposal.Step],
         initialPairs:[String:Double],requireFinalClearance:Bool,map:any ROBWorkspaceCollisionMap,
-        model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext,selfHypothesis:ROBWorkspaceInitialLiftSelfHypothesis?)throws->
-        (checked:Int,endpoint:[String:Double],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]?,unknownAdvisory:ROBWorkspaceUnknownSpaceAdvisoryAudit?) {
+        model:ROBGhostRobotModel,context:ROBWorkspaceCollisionContext,selfHypothesis:ROBWorkspaceInitialLiftSelfHypothesis?,
+        originalBaseline:[Double],measuredStartAllowance:Double=0,priorRetreats:[ROBWorkspaceInitialMarginRetreat]=[])throws->
+        (checked:Int,endpoint:[String:Double],staticLinks:[ROBWorkspaceStaticRobotLinkEvidence]?,unknownAdvisory:ROBWorkspaceUnknownSpaceAdvisoryAudit?,marginRetreats:[ROBWorkspaceInitialMarginRetreat]) {
         guard !steps.isEmpty,steps.count<=30,steps.allSatisfy({$0.jawAction==nil && (0.7...5).contains($0.seconds)}),
               steps.reduce(0,{$0+$1.seconds})<=60,!initialPairs.isEmpty else {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift has invalid timing, jaws or self geometry.")
@@ -1169,6 +1178,9 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         // This checker is local to the fixed staged lift and its rechecks;
         // ordinary connectors, grasp and payload routes retain their policy.
         checker.initialEmptyLiftUnknownAdvisory=true
+        checker.initialEmptyLiftBaselineFrames=model.frames(model.positions(vendorLeft:originalBaseline))
+        checker.initialMarginStartAllowance=measuredStartAllowance
+        for retreat in priorRetreats {checker.initialMarginRetreats[Checker.retreatKey(retreat.link,retreat.originalBounds)]=retreat}
         for group in selfHypothesis?.groups ?? [] {
             checker.initialEmptyLiftSelfGroups[SIMD3(group.sourceVoxel[0],group.sourceVoxel[1],group.sourceVoxel[2])]=group.originalBounds
         }
@@ -1207,8 +1219,10 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                 (first>=0.030 || previousPairs[pair]!>first+0.000001)}) else {
                 throw ROBGhostMotionError.blocked("The staged EMPTY lift must finish with ordinary 30 mm tread clearance.")
             }
+            try checker.requireInitialMarginEndpointClear(previous)
         }
-        return (checker.checked,previousPairs,checker.staticRobotLinkEvidence,checker.unknownSpaceAdvisoryAudit)
+        return (checker.checked,previousPairs,checker.staticRobotLinkEvidence,checker.unknownSpaceAdvisoryAudit,
+            checker.initialMarginRetreats.sorted{$0.key<$1.key}.map(\.value))
     }
 
     /// Every actual hull lies inside its rigidly transported baseline box.
@@ -1736,6 +1750,48 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         var advisoryUnknownExamples:[String]=[]
         var initialEmptyLiftUnknownAdvisory=false
         var initialEmptyLiftSelfGroups:[SIMD3<Int>:ROBWorkspaceOccupiedReturnBounds]=[:]
+        var initialEmptyLiftBaselineFrames:[String:simd_double4x4]=[:]
+        var initialEmptyLiftBaselineShapes:[String:ROBNominalWorldShape]=[:]
+        var initialMarginBaselineDistances:[String:Double]=[:]
+        var initialMarginStartAllowance=0.0
+        var initialMarginRetreats:[String:ROBWorkspaceInitialMarginRetreat]=[:]
+        static func retreatKey(_ link:String,_ bounds:ROBWorkspaceOccupiedReturnBounds)->String {
+            link+":"+(bounds.lowMeters+bounds.highMeters).map{String($0.bitPattern)}.joined(separator:",")
+        }
+        mutating func permitsInitialMarginRetreat(_ shape:ROBNominalWorldShape,_ query:ROBNominalRawBox,
+            margin:Double,label:String)throws->Bool {
+            guard initialEmptyLiftUnknownAdvisory,let frame=initialEmptyLiftBaselineFrames[label] else{return false}
+            let bounds=ROBWorkspaceOccupiedReturnBounds(lowMeters:[query.low.x,query.low.y,query.low.z],highMeters:[query.high.x,query.high.y,query.high.z])
+            let key=Self.retreatKey(label,bounds)
+            if initialEmptyLiftBaselineShapes[label]==nil {initialEmptyLiftBaselineShapes[label]=ROBNominalWorldShape(shape.source,frame)}
+            let initial:Double
+            if let cached=initialMarginBaselineDistances[key] {initial=cached}
+            else {initial=try initialEmptyLiftBaselineShapes[label]!.distance(query);initialMarginBaselineDistances[key]=initial}
+            // Recover only the existing mechanical cushion. Preserve the
+            // complete alignment, open-jaw and swept-sample allowances, with
+            // an additional3mm reserve for the measured dispatch corridor.
+            let required=margin-ROBWorkspaceCollisionPlan.mechanicalClearanceMeters+0.003
+            guard initial>=required,initial<=margin+0.000001 else{return false}
+            let current=try shape.distance(query)
+            guard current+initialMarginStartAllowance+1e-9>=initial else{return false}
+            var audit=initialMarginRetreats[key] ?? .init(link:label,originalBounds:bounds,initialClearanceMeters:initial,
+                minimumRequiredClearanceMeters:required,ordinaryMarginMeters:margin,minimumReviewedClearanceMeters:current)
+            audit.minimumReviewedClearanceMeters=min(audit.minimumReviewedClearanceMeters,current)
+            initialMarginRetreats[key]=audit
+            return true
+        }
+        mutating func requireInitialMarginEndpointClear(_ q:[Double])throws {
+            let frames=model.frames(model.positions(vendorLeft:q))
+            for audit in initialMarginRetreats.values {
+                guard let frame=frames[audit.link] else {throw ROBGhostMotionError.blocked("Initial margin retreat lost its endpoint model.")}
+                let shape=try ROBWorkspaceVerifiedConvexEnvelope.load(model:model,link:audit.link)
+                let low=audit.originalBounds.lowMeters,high=audit.originalBounds.highMeters
+                let query=ROBNominalRawBox(low:SIMD3(low[0],low[1],low[2]),high:SIMD3(high[0],high[1],high[2]),key:"")
+                guard try ROBNominalWorldShape(shape,frame).distance(query)>=audit.ordinaryMarginMeters else {
+                    throw ROBGhostMotionError.blocked("The initial empty lift must finish outside its original occupied margin overlaps.")
+                }
+            }
+        }
         var unknownSpaceIsAdvisory:Bool {
             initialEmptyLiftUnknownAdvisory || context.visualTrial?.usesOperatorClearedUnknownApproach==true
         }
@@ -1906,6 +1962,10 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                     let distance:Double
                     do {distance=try shape.distance(query,stopAtDistance:margin)}catch{return error.localizedDescription}
                     if distance>margin+0.000001 {continue}
+                    if state == .occupied,raw != nil {
+                        do {if try permitsInitialMarginRetreat(shape,query,margin:margin,label:label) {continue}}
+                        catch {return error.localizedDescription}
+                    }
                     if state == .occupied,let contact=intentionalContact,contact.permits(label:label,payload:payload,stepIndex:contactStepIndex),
                        (raw != nil ? contact.containsMeasuredBounds(low:query.low,high:query.high):contact.containsWholeVoxel(center:center,size:size)) {continue}
                     let detail=String(format:" Convex distance upper bound %.3f mm; retained envelope margin %.3f mm; voxel [%d,%d,%d]; representation %@.",distance*1000,margin*1000,x,y,z,representation)

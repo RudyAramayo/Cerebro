@@ -60,7 +60,7 @@ struct Feedback {let positionsRadians=[NSNumber](repeating:0,count:7)}
  func update(_ value:String){}
  func requireLocalReceipt()throws->Int {try check();return 1}
  func beginHeldSceneObservation()async throws {try check()}
- func ensureCollisionScene(model:Int)async throws {try check();collisionMap=1}
+ func ensureCollisionScene(model:Int,initialEmptyRightLift:Bool=false)async throws {precondition(initialEmptyRightLift);try check();collisionMap=1}
  func performStagedEmptyLiftIfNeeded(map:Int,model:Int)async throws->Bool {
   stagedProofCalls+=1;try check();if proofRejects {throw ROBArmRoutineError.blocked("Staged proof rejected")};return liftNeeded
  }

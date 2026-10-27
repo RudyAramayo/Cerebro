@@ -2129,7 +2129,7 @@ struct ROBWorkspaceCanSelection {
     /// Start every scene from current pixels while the arms remain held. A
     /// previous route, object location or map never authorizes parking first.
     @MainActor @nonobjc func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
-        check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
+        initialEmptyRightLift:Bool=false,check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
         collisionSnapshotValue = nil
         collisionSnapshotModel = model
         // A measured view is retained exactly, including its lower-neck target.
@@ -2184,6 +2184,15 @@ struct ROBWorkspaceCanSelection {
             currentView=view;lastPrepareAccepted=prepared;lastViewReady=ready
         }
         var views=try await preparedCollisionScanViews(check:stagingCheck,status:settleStatus)
+        if initialEmptyRightLift {
+            guard model.physicalSide=="right" else {throw ROBWorkspaceDepthMapError.invalidFrame}
+            // The fixed operator-cleared RIGHT preparation treats unseen
+            // space as advisory. Observe its arm/table side now; search the
+            // remaining scene from the raised pose instead of spending most
+            // of the map's freshness budget scanning the opposite side.
+            views=Array(views.filter{$0.upperTarget==5650 && $0.panDegrees<=0}.prefix(2))
+            guard !views.isEmpty else {throw ROBWorkspaceDepthMapError.invalidFrame}
+        }
         // A local fixed-pose proof cannot be stretched across an unmeasured sweep.
         if let fixed=registeredCurrentView(model:model) {views=[fixed]}
         for (index,view) in views.enumerated() {

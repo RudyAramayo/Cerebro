@@ -1376,7 +1376,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
 
     /// No arm travel, including a taught empty return, precedes this scan.
     /// Existing object-search frames may supply the same fresh scene evidence.
-    @MainActor private func ensureCollisionScene(model: ROBGhostRobotModel) async throws {
+    @MainActor private func ensureCollisionScene(model: ROBGhostRobotModel,initialEmptyRightLift:Bool=false) async throws {
         let prior = inactiveWorkspaceSearch
         try await beginHeldSceneObservation()
         defer { inactiveWorkspaceSearch = prior }
@@ -1391,7 +1391,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             map = observed
         } else {
             map = try await ROBWorkspaceSearch.shared.scanCollisionScene(model:model,generation:generation,
-                check:{ try self.check() },progress:{ self.update($0) })
+                initialEmptyRightLift:initialEmptyRightLift,check:{ try self.check() },progress:{ self.update($0) })
         }
         collisionMap = map; collisionModel = model; collisionReviewProposal = nil
         sceneCapturedForThisTask = true
@@ -2972,7 +2972,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         phase="empty preparation: workspace clearance"
         update("Checking a J2/J4 empty lift from the current arm pose before searching for cans")
         try await beginHeldSceneObservation()
-        try await ensureCollisionScene(model:model)
+        try await ensureCollisionScene(model:model,initialEmptyRightLift:true)
         guard let map=collisionMap else {throw ROBArmRoutineError.blocked("Empty preparation has no current workspace map.")}
         let retreated=try await performStagedEmptyLiftIfNeeded(map:map,model:model)
         if activeHoldAfterInitialEmptyLift {return try initialEmptyLiftHoldResult(performed:retreated)}
