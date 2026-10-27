@@ -37,11 +37,13 @@ final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     let isRunning = false
     var searchRequests = 0
+    var searchCommands:[String]=[]
     func cancel(reason: String) {}
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
-        precondition(command == "left_search_workspace", "Ghost can search attempted a motion command")
+        precondition(["left_search_workspace","right_search_workspace"].contains(command), "Ghost can search attempted a motion command")
         precondition(target == "can", "Ghost can preview waited for unrelated bucket search")
         searchRequests += 1
+        searchCommands.append(command)
         completion(["detail":"Fixture camera only"])
     }
 }
@@ -676,6 +678,24 @@ final class GhostFixtureSnapshotView: NSView {
             "Physical-right initialization read R11 rather than L10")
         let rightExecute=descendants(rightEditor.panelView).first{$0.identifier?.rawValue=="ghost-execute"} as! NSButton
         precondition(!rightExecute.isEnabled,"Live-shaped fixture data must not create actuator authority")
+        func assertRightGhostAtMeasuredPose() {
+            for link in ["right_two_Link","right_four_Link","right_tool"] {
+                let actual=rightScene.rootNode.fixtureDescendants.first{$0.name=="Blue ghost \(link)"}!
+                let expected=rightScene.rootNode.fixtureDescendants.first{$0.name=="Original URDF \(link)"}!
+                precondition(actual.simdTransform==expected.simdTransform && actual.isHidden,
+                    "Startup, rejected left preset or failed search left an unrelated right-arm ghost")
+            }
+        }
+        assertRightGhostAtMeasuredPose()
+        rightEditor.reviewPresetNamed("center")
+        assertRightGhostAtMeasuredPose()
+        rightEditor.reviewPresetNamed("wave")
+        assertRightGhostAtMeasuredPose()
+        ROBWorkspaceSearch.shared.locatedObjects=[:]
+        rightEditor.reviewPresetNamed("can")
+        precondition(ROBArmRoutineCoordinator.shared.searchCommands.last=="right_search_workspace")
+        assertRightGhostAtMeasuredPose()
+        precondition(!rightExecute.isEnabled)
         rightEditor.invalidate();gateway.ready=false;gateway.samples=[:]
         trial.physicalSide="left";trial.collisionReviewProposal=historical
         editor.reviewPresetNamed("collision")

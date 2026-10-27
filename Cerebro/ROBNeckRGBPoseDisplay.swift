@@ -618,40 +618,71 @@ enum ROBNeckRGBPoseDisplay {
         let inertialJSON:Data?
     }
     static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Bool {
-        guard let value=profile(model:model) else{return !gravityPitchRefinementRequested}
-        guard let pitch=value.gravityPitch else{return true}
+        estimatedProjectionSourceFailure(model:model,actualFrame:actualFrame)==nil
+    }
+    struct EstimatedProjectionSourceFailure:LocalizedError {
+        let reason:String
+        let retryAfterSettling:Bool
+        var errorDescription:String? {"Camera projection rejected: \(reason). No arm travel was sent by this scan."}
+    }
+    /// Keep the acceptance predicate and diagnostic in one place. A physical
+    /// source/geometry mismatch cannot be repaired by retrying every scan view.
+    static func estimatedProjectionSourceFailure(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->EstimatedProjectionSourceFailure? {
+        func reject(_ reason:String,transient:Bool=false)->EstimatedProjectionSourceFailure {
+            .init(reason:reason,retryAfterSettling:transient)
+        }
+        guard let value=profile(model:model) else {
+            return gravityPitchRefinementRequested ? reject("requested gravity-pitch profile or its pinned evidence is invalid"):nil
+        }
+        guard let pitch=value.gravityPitch else{return nil}
         let scope=actualFrame.scope
-        guard (try? scope.validate()) != nil,scope.cameraGeneration==actualFrame.cameraGeneration,
-              scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==model.selectedMappingID,
-              (value.demoPortableGravityPitchPrior || pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity),
-              scope.displayCorrectionIdentity.hasSuffix(":body:"+ROBFixedHeadBodyMotionIdentity.currentIdentity),
-              actualFrame.actualDeviceMXID==pitch.actualDeviceMXID,
-              actualFrame.runtimeCalibrationIdentity==pitch.runtimeCalibrationIdentity,
-              actualFrame.cameraServiceSourceSHA256==pitch.cameraServiceSourceSHA256,
-              pitch.intrinsicsIdentities.contains(scope.intrinsicsIdentity),
-              let bytes=actualFrame.inertialJSON,bytes.count<16_000,
+        guard (try? scope.validate()) != nil else{return reject("invalid frame scope")}
+        guard scope.cameraGeneration==actualFrame.cameraGeneration else{return reject("frame and scope camera generations differ")}
+        guard scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==model.selectedMappingID else {
+            return reject("frame scope does not match the selected robot model and arm mapping")
+        }
+        guard value.demoPortableGravityPitchPrior || pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,
+              scope.displayCorrectionIdentity.hasSuffix(":body:"+ROBFixedHeadBodyMotionIdentity.currentIdentity) else {
+            return reject("body-motion identity differs from the camera scope or profile")
+        }
+        guard actualFrame.actualDeviceMXID==pitch.actualDeviceMXID else{return reject("camera device differs from the pinned profile")}
+        guard actualFrame.runtimeCalibrationIdentity==pitch.runtimeCalibrationIdentity else{return reject("runtime camera calibration differs from the pinned profile")}
+        guard actualFrame.cameraServiceSourceSHA256==pitch.cameraServiceSourceSHA256 else{return reject("camera service source differs from the pinned profile")}
+        guard pitch.intrinsicsIdentities.contains(scope.intrinsicsIdentity) else {
+            return reject("RGB-D intrinsics \(scope.intrinsicsIdentity) are outside the pinned profile; expected \(pitch.intrinsicsIdentities.sorted().joined(separator:", "))")
+        }
+        guard let bytes=actualFrame.inertialJSON,bytes.count<16_000,
               let imu=(try?JSONSerialization.jsonObject(with:bytes))as?[String:Any],
-              imu["stationary"]as?Bool==true,imu["sensor"]as?String==pitch.imuSensor,
+              imu["sensor"]as?String==pitch.imuSensor,
               imu["axes"]as?String=="sensor_native",imu["gravity_source"]as?String=="stationary_accelerometer_mean",
+              let r=imu["imu_to_rgb_rotation"]as?[Double],r==pitch.imuToRGBRotation else {
+            return reject("missing or incompatible IMU source/axes/rotation")
+        }
+        guard imu["stationary"]as?Bool==true,
               let count=imu["sample_count"]as?Int,(20...1000).contains(count),
               let window=imu["window_milliseconds"]as?Double,window.isFinite,(300...1000).contains(window),
               let age=imu["age_milliseconds"]as?Double,age.isFinite,(0...100).contains(age),
               let latest=imu["latest_timestamp_ns"]as?UInt64,latest>0,
               let reference=imu["reference_timestamp_ns"]as?UInt64,reference>=latest,
-              abs(Double(reference-latest)/1e6-age)<=0.02 else{return false}
+              abs(Double(reference-latest)/1e6-age)<=0.02 else{return reject("IMU is not fresh and settled",transient:true)}
         func vector(_ key:String)->[Double]? {
             guard let a=imu[key]as?[Double],a.count==3,a.allSatisfy(\.isFinite) else{return nil};return a
         }
         guard let gravity=vector("gravity_mps2"),let std=vector("gravity_std_mps2"),let gyro=vector("gyro_rad_s"),
-              std.allSatisfy({(0...0.1).contains($0)}),
-              let r=imu["imu_to_rgb_rotation"]as?[Double],r==pitch.imuToRGBRotation,
-              let camera=provisionalCameraToModel(model:model,panTarget:scope.panTarget,lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget) else{return false}
+              std.allSatisfy({(0...0.1).contains($0)}) else{return reject("IMU vectors are invalid or unsettled",transient:true)}
+        guard let camera=provisionalCameraToModel(model:model,panTarget:scope.panTarget,lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget) else {
+            return reject("no projection for raw neck P\(scope.panTarget) L\(scope.lowerTarget) U\(scope.upperTarget)")
+        }
         let g=SIMD3(gravity[0],gravity[1],gravity[2]),omega=SIMD3(gyro[0],gyro[1],gyro[2])
-        guard (7...12).contains(simd_length(g)),simd_length(omega)<=0.03 else{return false}
+        guard (7...12).contains(simd_length(g)),simd_length(omega)<=0.03 else{return reject("IMU gravity magnitude or angular speed is unsettled",transient:true)}
         let rotation=simd_double3x3(columns:(SIMD3(r[0],r[3],r[6]),SIMD3(r[1],r[4],r[7]),SIMD3(r[2],r[5],r[8])))
         let projected=camera*SIMD4(simd_normalize(rotation*g),0)
         // Same accelerometer sign and full 3D residual used by the evidence loader.
-        return acos(min(1,max(-1,projected.z)))<=Double.pi/180
+        let residual=acos(min(1,max(-1,projected.z)))
+        guard residual<=Double.pi/180 else {
+            return reject(String(format:"gravity direction disagrees by %.3f degrees (limit 1.000) at raw neck P%d L%d U%d",residual*180/Double.pi,scope.panTarget,scope.lowerTarget,scope.upperTarget))
+        }
+        return nil
     }
     /// Read-only audit of a validated current use. Original body/generation and
     /// evidence hashes are never rebound. This pitch-only model prior cannot

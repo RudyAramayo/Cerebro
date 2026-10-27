@@ -129,7 +129,9 @@ import simd
                data.count <= 2_000_000, let values = try? JSONDecoder().decode([ROBGhostGesture].self, from: data) {
                 saved = Array(values.prefix(40))
             }
-            reloadPresets(); selectPreset()
+            reloadPresets(); presets.selectItem(at:2)
+            canArm.selectItem(at:model.physicalSide == "right" ? 1:0)
+            resetGhostToCurrentPose()
         } catch { status.stringValue = error.localizedDescription; executeButton.isEnabled = false }
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
     }
@@ -314,7 +316,7 @@ import simd
     private func row(_ views: [NSView]) -> NSStackView { let value = NSStackView(views: views); value.spacing = 7; return value }
     private func buildPanel() {
         let title = NSTextField(labelWithString: "Ghost gestures"); title.font = .boldSystemFont(ofSize: 19)
-        let help = NSTextField(wrappingLabelWithString: "Robot: measured left arm and accepted neck command estimates. Blue: proposed motion. Preview and save every named joint; execution currently supports supervised left-arm gestures. Other joints remain reference estimates.")
+        let help = NSTextField(wrappingLabelWithString: "Robot: selected arm's fresh encoder pose and accepted neck command estimates. Other joints remain reference estimates. Blue: a preview or an edit; it is not an executable path until reviewed. Built-in handoff and wave gestures apply to the left arm only.")
         help.textColor = .secondaryLabelColor
         headInfo.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         headInfo.identifier = NSUserInterfaceItemIdentifier("ghost-head-command")
@@ -394,14 +396,16 @@ import simd
         // The selected side determines both encoder mapping and live baseline;
         // changing the preview selector never changes actuator ownership.
         self.model = model
+        resetGhostToCurrentPose()
         clearCanVisuals()
         displayedCan = nil
         canInfo.stringValue = "Finding a fresh RGB-D can target…"
         status.stringValue = "Neck-camera search, then ghost rehearsal. Arms and jaws stay unchanged."
         let request = UUID(); canRequestID = request
-        ROBArmRoutineCoordinator.shared.performCommand("left_search_workspace", target: "can") { [weak self] result in
+        ROBArmRoutineCoordinator.shared.performCommand("\(side)_search_workspace", target: "can") { [weak self] result in
             guard let self, self.canRequestID == request else { return }
             guard let can = ROBWorkspaceSearch.shared.locatedObjects[.can] else {
+                self.resetGhostToCurrentPose()
                 self.canInfo.stringValue = "Can target: no confirmed RGB-D position"
                 self.status.stringValue = result["detail"] as? String ?? "The can was not localized."
                 return
@@ -822,6 +826,17 @@ import simd
               generation > 0 else { return nil }
         return (sample.positionsRadians.map(\.doubleValue), generation)
     }
+    /// No startup/default gesture is a pickup proposal. Clear stale edits when
+    /// searching so a failed search cannot leave an unrelated blue arm pose.
+    private func resetGhostToCurrentPose() {
+        guard let model else {return}
+        ghost=freshBaseline().map {model.positions(vendorLeft:$0.q)} ?? model.reference
+        updateOriginal(ghost);updateGhost(ghost)
+        poses=[];timeline.doubleValue=0;timeline.maxValue=1
+        poseCount.stringValue="No pickup path"
+        identity.stringValue="Current pose only · no pickup path"
+        executeButton.isEnabled=false
+    }
     private func invalidateReview() {
         canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil; collisionPreview = nil
         collisionPathOverlay.childNodes.forEach { $0.removeFromParentNode() }
@@ -842,6 +857,11 @@ import simd
         invalidateReview(); poses = []
         tabletopEditing = false
         let index = presets.indexOfSelectedItem
+        if model.physicalSide == "right",index == 0 || index == 1 {
+            resetGhostToCurrentPose()
+            status.stringValue="Handoff and wave presets are left-arm gestures. Right arm remains at its current displayed pose; find a can for a right-arm preview."
+            return
+        }
         if index >= 3, saved.indices.contains(index - 3) {
             let value = saved[index - 3]; poses = value.poses; name.stringValue = value.name
             tabletopEditing = value.kind == "tabletop"
@@ -851,9 +871,9 @@ import simd
         } else if index == 1 {
             name.stringValue = "Above-shoulder wave"; ghost = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveRestIndex)!)
         } else {
-            name.stringValue = "My gesture"; ghost = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+            name.stringValue = "My gesture"; ghost = freshBaseline().map {model.positions(vendorLeft:$0.q)} ?? model.reference
         }
-        joints.selectItem(withTitle: index == 1 ? "left_joint2" : "left_joint6")
+        joints.selectItem(withTitle:model.armJointPrefix+(index == 1 ? "2":"6"))
         poseCount.stringValue = "\(poses.count) custom poses"; selectJoint(); updateGhost(ghost); review()
     }
     @objc private func selectJoint() {
@@ -1142,8 +1162,8 @@ import simd
             lastOriginalUpdate = now
             let baseline = freshBaseline()
             updateOriginal(baseline.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
-            referenceInfo.stringValue = (baseline == nil ? "Left: scan reference; fresh encoders unavailable."
-                : "Left: fresh encoders with upright mapping prior.") +
+            referenceInfo.stringValue = (baseline == nil ? "\(model.physicalSide.capitalized): scan reference; fresh encoders unavailable."
+                : "\(model.physicalSide.capitalized): fresh encoders with upright mapping prior.") +
                 (headEstimate == nil ? " Head: reference; command estimate unavailable." : " Head: accepted neck command estimate.") +
                 " Other joints: scan reference."
         }

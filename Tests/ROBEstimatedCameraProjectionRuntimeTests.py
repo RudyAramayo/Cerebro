@@ -43,6 +43,9 @@ struct Scope {
 @MainActor enum ROBNeckRGBPoseDisplay {
     struct ActualFrameSource {let cameraGeneration:UUID,actualDeviceMXID:String?,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?;let scope:Scope;let inertialJSON:Data?}
     static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Bool {lastSource=(actualFrame.cameraGeneration,actualFrame.runtimeCalibrationIdentity,actualFrame.cameraServiceSourceSHA256);return sourceAccepted}
+    static func estimatedProjectionSourceFailure(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Error? {
+        estimatedProjectionAcceptsSource(model:model,actualFrame:actualFrame) ? nil:ROBWorkspaceDepthMapError.invalidFrame
+    }
 
     static var identity:String?,photoHardwareOpticalOriginRequested=false,unavailable=false
     static var onResolve:(()->Void)?

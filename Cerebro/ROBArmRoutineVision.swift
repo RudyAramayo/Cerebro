@@ -1364,12 +1364,12 @@ struct ROBWorkspaceCanSelection {
         }
         let scope=try controller.scope(model:model,frame:frame)
         try scope.validate()
-        guard ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,actualFrame:.init(cameraGeneration:frame.cameraGeneration,
+        if let failure=ROBNeckRGBPoseDisplay.estimatedProjectionSourceFailure(model:model,actualFrame:.init(cameraGeneration:frame.cameraGeneration,
                 actualDeviceMXID:frame.intrinsics?.runtimeCalibration?.actualDeviceMXID,
                 runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
                 cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256,scope:scope,
-                inertialJSON:(frame.intrinsics?.inertial).flatMap{try?JSONEncoder().encode($0)})) else {
-            throw ROBWorkspaceDepthMapError.acquisition("The requested estimated camera refinement does not cover this actual RGB-D source.")
+                inertialJSON:(frame.intrinsics?.inertial).flatMap{try?JSONEncoder().encode($0)})) {
+            throw failure
         }
         let neck=controller.readNeck?() ?? [:],now=ProcessInfo.processInfo.systemUptime
         let captureUptime=now-(Date().timeIntervalSince1970*1000-frame.capturedAt)/1000
@@ -2595,6 +2595,10 @@ struct ROBWorkspaceCanSelection {
             try check() // Strict admission remains after the asynchronous pause.
         }
         let vision = ROBArmRoutineVision.shared
+        // Search-only ghost requests need the same actual camera contract as
+        // recycling. The source gate still checks the camera's real readback.
+        vision.ensureActiveForTaskObservation(stereoMode:ROBNeckRGBPoseDisplay.preferredFullHeightTaskStereoMode(model:model))
+        ROBArmRoutineCoordinator.shared.cameraDemand?(true)
         locatedObjects = [:]
         canCandidates = ROBWorkspaceCanCandidateSet()
         collisionSnapshotValue = nil
@@ -3136,6 +3140,11 @@ struct ROBWorkspaceCanSelection {
                     evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "attempt": attempt + 1,
                         "error": error.localizedDescription, "local_inference": cameraHealth["inspection"] ?? [:],
                         "camera_health":cameraHealth])
+                    if let rejection=error as? ROBNeckRGBPoseDisplay.EstimatedProjectionSourceFailure,!rejection.retryAfterSettling {
+                        persist("camera_projection_rejected",rejection.localizedDescription)
+                        finished=true
+                        throw rejection
+                    }
                     let transientCamera = ["camera", "settle", "stream", "view"].contains { error.localizedDescription.lowercased().contains($0) }
                     if !transientCamera || attempt == 1 { return }
                     progress("Camera pause; settling and retrying this view")
