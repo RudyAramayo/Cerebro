@@ -2601,9 +2601,17 @@ struct ROBWorkspaceCanSelection {
 
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
         surveyFrontTable: Bool = false,
-        permitsLocalCanShapePrior: () throws -> Bool = {false}, canReachBaseline:[String:Double]? = nil,
+        permitsLocalCanShapePrior physicalCanShapePrior: () throws -> Bool = {false}, canReachBaseline:[String:Double]? = nil,
         passiveFeedbackCheckpoint:(() async throws->Void)?=nil,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        func permitsLocalCanShapePrior() throws -> Bool {
+            // The front-table ghost survey can illustrate a known can-size
+            // estimate anchored to observed table depth. It is neck-only and
+            // cannot grant or dispatch an arm path. Physical trials retain
+            // their caller's explicit policy; raw wall-depth failures remain.
+            if surveyFrontTable { return true }
+            return try physicalCanShapePrior()
+        }
         func searchCheckpoint() async throws {
             if let passiveFeedbackCheckpoint {try await passiveFeedbackCheckpoint()}
             try check() // Strict admission remains after the asynchronous pause.

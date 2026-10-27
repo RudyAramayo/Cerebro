@@ -32,6 +32,10 @@ struct ROBWorkspaceCanSections {
 FIXTURE=r'''
 @main struct LocalPriorFixtures {
  static func main() throws {
+  let denied=try PriorPolicy(surveyFrontTable:false,physicalCanShapePrior:{false}).permitsLocalCanShapePrior()
+  let permitted=try PriorPolicy(surveyFrontTable:false,physicalCanShapePrior:{true}).permitsLocalCanShapePrior()
+  let ghost=try PriorPolicy(surveyFrontTable:true,physicalCanShapePrior:{fatalError("Ghost requested physical-trial policy")}).permitsLocalCanShapePrior()
+  precondition(!denied && permitted && ghost)
   if CommandLine.arguments.count>1 {
    let capture=URL(fileURLWithPath:CommandLine.arguments[1]),report=URL(fileURLWithPath:CommandLine.arguments[2]),output=URL(fileURLWithPath:CommandLine.arguments[3])
    let bytes=try Data(contentsOf:capture),m=try JSONSerialization.jsonObject(with:bytes) as! [String:Any]
@@ -95,11 +99,12 @@ def main():
  parser=argparse.ArgumentParser();parser.add_argument('--capture');parser.add_argument('--report');parser.add_argument('--output');a=parser.parse_args()
  source=(ROOT/'Cerebro/ROBArmRoutineVision.swift').read_text();helper=block(source,'enum ROBWorkspaceLocalCanShapePrior {')
  run=source[source.index('@MainActor @nonobjc func run(targets:'):]
- assert 'permitsLocalCanShapePrior: () throws -> Bool = {false}' in run
+ assert 'permitsLocalCanShapePrior physicalCanShapePrior: () throws -> Bool = {false}' in run
  assert run.count('try permitsLocalCanShapePrior()')>=2
  assert 'collisionEnrollment.capturedAtMilliseconds==frame.capturedAt' in run and 'measuredCamera==nil' in run
  with tempfile.TemporaryDirectory(prefix='rob-local-can-prior-') as folder:
-  p=Path(folder);swift=p/'Fixture.swift';binary=p/'fixture';swift.write_text(STUBS+'\n'+helper+'\n'+FIXTURE)
+  policy='struct PriorPolicy { let surveyFrontTable:Bool; let physicalCanShapePrior:()throws->Bool;\n'+block(run,'func permitsLocalCanShapePrior() throws -> Bool {')+'\n}'
+  p=Path(folder);swift=p/'Fixture.swift';binary=p/'fixture';swift.write_text(STUBS+'\n'+helper+'\n'+policy+'\n'+FIXTURE)
   subprocess.run(['xcrun','swiftc','-swift-version','5','-O','-parse-as-library','-module-cache-path','/private/tmp/cerebro-swift-module-cache',str(swift),'-o',str(binary)],check=True,timeout=60)
   subprocess.run([str(binary)],check=True,timeout=20)
   if a.capture:subprocess.run([str(binary),a.capture,a.report,a.output],check=True,timeout=30)

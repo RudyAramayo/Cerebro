@@ -413,16 +413,19 @@ final class ROBWorkspaceSearch {
 
     var fail = false
     var requiredDepth = true
+    var requestedFrontTableSurvey = false
     var requestedTargets: [ROBWorkspaceTarget] = []
     var localCanShapePriorPermissions:[Bool]=[]
     var objects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
     var onInspect: (() -> Void)?
     var afterInspect: (() -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
+        surveyFrontTable:Bool=false,
         permitsLocalCanShapePrior:() throws ->Bool={false},canReachBaseline:[String:Double]?=nil,
         passiveFeedbackCheckpoint:(() async throws->Void)?=nil,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
+        requestedFrontTableSurvey = surveyFrontTable
         localCanShapePriorPermissions.append(try permitsLocalCanShapePrior())
         requestedTargets = targets
         onInspect?()
@@ -1252,6 +1255,14 @@ final class ROBArmRoutineCoordinator {
                 "Only an explicit can search may skip waiting for the bucket")
             precondition(!ROBWorkspaceSearch.shared.requiredDepth && approvals == 0 && g.commands.isEmpty)
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
+        }
+        for side in ["right", "left"] {
+            let searched = await run("\(side)_search_workspace", target:"front_table_can")
+            precondition(searched["status"] as? String == "accepted_unverified", searched.description)
+            precondition(ROBWorkspaceSearch.shared.requestedFrontTableSurvey && ROBWorkspaceSearch.shared.requiredDepth)
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can])
+            precondition(approvals == 0 && g.commands.isEmpty && ROBAmberArmMotionArbiter.shared.owners.isEmpty,
+                "A front-table ghost survey requested arm authority or issued an actuator command")
         }
         ROBWorkspaceSearch.shared.fail = true
         let failedSearch = await run("left_search_workspace",target:"can")

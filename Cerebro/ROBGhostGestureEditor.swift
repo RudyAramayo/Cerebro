@@ -404,7 +404,10 @@ import simd
         let request = UUID(); canRequestID = request
         ROBArmRoutineCoordinator.shared.performCommand("\(side)_search_workspace", target: "front_table_can") { [weak self] result in
             guard let self, self.canRequestID == request else { return }
-            guard let map = ROBWorkspaceSearch.shared.collisionSnapshot else {
+            guard result["status"] as? String == "accepted_unverified",
+                  let report = result["workspace_search"] as? NSDictionary,
+                  report["front_table_survey"] as? Bool == true,
+                  let map = ROBWorkspaceSearch.shared.collisionSnapshot else {
                 self.resetGhostToCurrentPose()
                 self.canInfo.stringValue = "Can target: no current RGB-D survey"
                 self.status.stringValue = result["detail"] as? String ?? "The table survey did not complete."
@@ -660,8 +663,10 @@ import simd
         guard let can = displayedCan else { canInfo.stringValue = "Can target: not measured"; return }
         let point = can.point
         let age = max(0, (Date().timeIntervalSince1970 * 1000 - can.capturedAt) / 1000)
+        let estimatedShape = can.sections?.shapePriorEvidence != nil
         canInfo.stringValue = String(format: "Coke can · X %.3f / Y %.3f / Z %.3f m\nLast seen %.0f s ago", point.x, point.y, point.z, age) +
-            (age > 60 ? " · historical target; rescan" : " · RGB-D position")
+            (age > 60 ? " · historical target; rescan" : estimatedShape ? " · estimated can position" : " · RGB-D position") +
+            (estimatedShape ? "\nTable depth + assumed 120 × 66 mm upright can · ghost only" : "")
     }
     private func clearCanVisuals() {
         canOverlay.childNodes.forEach{$0.removeFromParentNode()}
