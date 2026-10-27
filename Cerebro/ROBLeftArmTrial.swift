@@ -1816,21 +1816,38 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
+    /// Geometry review is nonactuating even after position mode is prepared.
+    /// Keep the requested350ms tolerance only while that empty held pose is
+    /// unchanged. Camera-ready dispatch and any travel/jaw/lease retain250ms.
+    private var selectedFeedbackMaximumAgeMilliseconds:Double {
+        guard localReceiptCommand != nil,!cameraReady,positionReady,!leased,leaseRenewals.isEmpty,
+              !armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,
+              !recyclingGripDispatched,!servoPossiblePayloadUncertain,
+              let held=sceneHold[arm],let sample=gateway.telemetry(forArm:arm) else {return 250}
+        let fields=ROBHeldArmFeedbackGuard.failures(present:true,
+            motorAge:sample.effectiveSampleAgeMilliseconds,gripperAge:sample.effectiveGripperFeedbackAgeMilliseconds,
+            q:sample.positionsRadians.map(\.doubleValue),expectedQ:held.positions,
+            gatewayModes:gateway.modes(forArm:arm).map(\.intValue),reportedModes:sample.statuses.map(\.intValue),
+            expectedModes:Array(repeating:2,count:7),maximumAgeMilliseconds:ROBHeldArmFeedbackGuard.stationaryScanMaximumAgeMilliseconds)
+        return fields.isEmpty ? ROBHeldArmFeedbackGuard.stationaryScanMaximumAgeMilliseconds:250
+    }
+
     private func measured() throws -> ROBAmberGatewayTelemetry {
+        let maximumAge=selectedFeedbackMaximumAgeMilliseconds
         let current = gateway.telemetry(forArm: arm)
         guard let sample = current, sample.sequence > 0,
-              sample.effectiveSampleAgeMilliseconds <= 250, sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+              sample.effectiveSampleAgeMilliseconds <= maximumAge, sample.effectiveGripperFeedbackAgeMilliseconds <= maximumAge,
               sample.positionsRadians.count == 7, sample.currents.count == 7,
               sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }), sample.currents.allSatisfy({ $0.doubleValue.isFinite }) else {
             if localReceiptCommand != nil,!recyclingGripDispatched,!jawSetupDispatchUncertain,
-               current==nil || current.map({$0.effectiveSampleAgeMilliseconds>250 || $0.effectiveGripperFeedbackAgeMilliseconds>250})==true {
+               current==nil || current.map({$0.effectiveSampleAgeMilliseconds>maximumAge || $0.effectiveGripperFeedbackAgeMilliseconds>maximumAge})==true {
                 localCampaignRecoveryReason = .feedbackLost
             }
             let detail = current.map {
                 String(format: " Motor age %.0f ms, gripper age %.0f ms, sequence %llu.",
                     $0.effectiveSampleAgeMilliseconds, $0.effectiveGripperFeedbackAgeMilliseconds, $0.sequence)
             } ?? " No telemetry sample is available."
-            throw ROBArmRoutineError.blocked("Fresh left-arm motor and gripper feedback is required." + detail)
+            throw ROBArmRoutineError.blocked("Fresh \(physicalSide)-arm motor and gripper feedback is required." + detail)
         }
         if localCampaignRecoveryReason == .feedbackLost {localCampaignRecoveryReason=nil}
         return sample
@@ -4464,7 +4481,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               sample.currents.count == 7, sample.currents.allSatisfy({ $0.doubleValue.isFinite }) else {
             throw ROBArmRoutineError.blocked("Invalid or stale left-arm current recording; hold requested.")
         }
-        if deliveredAge > 250 {
+        if deliveredAge > selectedFeedbackMaximumAgeMilliseconds {
             // Notifications carry the packet captured on the gateway queue,
             // not necessarily the latest packet after a busy UI resumes.
             // Retain that historical current sample only if actual live motor
