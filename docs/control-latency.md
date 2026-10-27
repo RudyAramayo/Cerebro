@@ -15,6 +15,14 @@ timing gap stop the local request immediately. The Arduino deadman remains in
 place. The selected profile applies to the local mouse/keyboard controls;
 remote controller shaping is a separate path.
 
+For room navigation, use RPLidar's native metric occupancy map and its live
+SLAM pose as the planning reference. Satellite overlay scale and north rotation
+only align the display. Cerebro already receives authenticated pose/scan frames;
+the accumulated map raster remains local to RPLidar. The manual buttons above
+are open-loop requests, so their percentage or press duration must not be
+reported as measured displacement. Confirm movement with fresh SLAM pose and
+check RGB-D for obstacles above or below the scan plane.
+
 Torso rotation requires both arms held above the tread envelope, including the
 open-gripper allowance. Fresh measured feedback and the mechanical model are
 checked before and during a turn; a hanging arm must be raised first. A body
