@@ -260,8 +260,7 @@ extension Notification.Name {
     private func freshNonParkedReason() -> String? {
         for arm in arms {
             guard let sample = gateway.telemetry(forArm: arm),
-                  sample.effectiveSampleAgeMilliseconds <= 250,
-                  sample.effectiveGripperFeedbackAgeMilliseconds <= 250 else { continue }
+                  sample.effectiveSampleAgeMilliseconds <= 250 else { continue }
             if !ROBArmRoutinePlan.near(sample.positionsRadians.map(\.doubleValue), Array(repeating: 0, count: 7)) {
                 return "both EMPTY arms must be hanging before stationary setup"
             }
@@ -309,22 +308,44 @@ extension Notification.Name {
         defer { expectedCommand = nil; commandResults.removeValue(forKey: id) }
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while commandResults[id] != true {
-            try check()
+            // The command has already been sent. Await its acknowledgement
+            // without replay; the following settle wait reacquires feedback.
+            try checkPassiveWait()
             guard ProcessInfo.processInfo.systemUptime < deadline else {
                 throw ROBArmRoutineError.blocked("Gripper setup acknowledgement timed out; no automatic retry")
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try checkPassiveWait()
+    }
+
+    @MainActor private func pause(_ seconds: TimeInterval) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + seconds
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            // This is a passive wait for an already accepted jaw command.
+            // No arm or jaw command is issued while telemetry is unavailable.
+            // A brief delivery gap must not force another calibration cycle.
+            try checkPassiveWait()
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let feedbackDeadline = ProcessInfo.processInfo.systemUptime + 2
+        while parkedSamples() == nil {
+            try checkPassiveWait()
+            guard ProcessInfo.processInfo.systemUptime < feedbackDeadline else {
+                throw ROBArmRoutineError.blocked("Gripper setup held without another jaw command: fresh inactive hanging feedback did not return within two seconds")
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try check()
     }
 
-    @MainActor private func pause(_ seconds: TimeInterval) async throws {
-        let deadline = ProcessInfo.processInfo.systemUptime + seconds
-        while ProcessInfo.processInfo.systemUptime < deadline {
-            try check()
-            try await Task.sleep(nanoseconds: 50_000_000)
+    /// Stop, connection/ownership loss and a freshly observed changed arm pose
+    /// still cancel immediately. Freshness is required again before dispatch.
+    private func checkPassiveWait() throws {
+        try check(parked: false)
+        if let reason = freshNonParkedReason() {
+            throw ROBArmRoutineError.blocked("Gripper setup cancelled: " + reason)
         }
-        try check()
     }
 
     private func finish() {

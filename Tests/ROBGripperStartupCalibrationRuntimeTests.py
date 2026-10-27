@@ -82,6 +82,10 @@ extension ROBGripperStartupCalibration {
     fileprivate func fixtureLoseOwnership() {
         if let arbiterOwner { ROBAmberArmMotionArbiter.shared.release(.left, owner: arbiterOwner) }
     }
+    @MainActor fileprivate func fixturePassiveWait() async throws {
+        generation = currentGeneration
+        try await pause(0.4)
+    }
 }
 
 @main struct StartupFixtures {
@@ -110,6 +114,8 @@ extension ROBGripperStartupCalibration {
         client.fixtureReady(); startup.gatewayBecameReady()
         pump(client, seconds: 0.9, acknowledge: false)
         expect(client.fixturePhysical.count == 1, "Startup did not serialize its first calibration")
+        pump(client, seconds: 0.5, fresh: false, acknowledge: false)
+        expect(startup.isRunning && client.fixturePhysical.count == 1, "A feedback gap while awaiting acknowledgement cancelled or replayed calibration")
         client.fixtureRejectPending(); pump(client, seconds: 0.15)
         expect(!startup.isRunning && !startup.calibrationReady(forArm: "left"), "Rejected startup claimed readiness")
         startup.gatewayBecameReady(); pump(client, seconds: 0.1)
@@ -126,7 +132,13 @@ extension ROBGripperStartupCalibration {
         expect(client.calibrateGripper(forArm: "right") == 0, "Another calibration bypassed startup ownership")
         expect(client.controlGripper(forArm: "left", action: "hold", force: 20) == 0, "Another jaw action bypassed startup ownership")
         expect(client.priorityHold(forArm: "left") > 0, "Priority Stop lane was blocked")
-        pump(client, seconds: 27)
+        // Lose delivery across the calibration settle boundary. The wait must
+        // retain ownership, dispatch nothing, then require fresh parked samples
+        // before the fixed close/open sequence can continue.
+        pump(client, seconds: 10.2, fresh: false)
+        expect(startup.isRunning, "A passive calibration wait treated a delivery gap as a failed calibration")
+        expect(client.fixturePhysical.count == 2, "A jaw command was sent without fresh feedback after settling")
+        pump(client, seconds: 17)
         expect(!startup.isRunning, "Startup did not complete within its bounded sequence")
         expect(startup.calibrationReady(forArm: "left") && startup.calibrationReady(forArm: "right"), "Current-generation initialized readiness missing")
         expect(manualFailure == nil, "Explicit stationary retry failed")
@@ -145,7 +157,7 @@ extension ROBGripperStartupCalibration {
         expect(client.fixturePhysical.count == 7, "Trivial reconnect replayed physical setup")
         client.fixtureDisconnect()
 
-        for kind in ["stale", "held", "active", "stop", "disconnect", "ownership", "legacy", "possible_payload"] {
+        for kind in ["stale", "held", "active", "stop", "disconnect", "ownership", "legacy", "possible_payload", "moved_during_wait"] {
             let next = ROBAmberGatewayClient()
             let policy = ROBGripperStartupCalibration(gateway: next)
             ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload = kind == "possible_payload"
@@ -163,6 +175,10 @@ extension ROBGripperStartupCalibration {
                 expect(!policy.isRunning && policy.status.contains("possible held object"), "Durable possible payload did not defer startup despite fresh hanging zeros")
             } else {
                 pump(next, seconds: 0.8)
+                if kind == "moved_during_wait" {
+                    pump(next, seconds: 0.25, position: 0.5)
+                    expect(!policy.isRunning, "A fresh changed arm pose was ignored during the passive wait")
+                }
                 if kind == "stop" { policy.stop(reason: "Operator Stop") }
                 if kind == "disconnect" { next.fixtureDisconnect() }
                 if kind == "ownership" {
@@ -188,7 +204,19 @@ extension ROBGripperStartupCalibration {
             next.fixtureDisconnect(); pump(next, seconds: 0.03, fresh: false)
             ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload = false
         }
-        print("Startup gripper fixtures passed: hanging/inactive/fresh admission; serialized calibration and close2/open10; no arm activation, duplicate or reconnect replay; rejection needs explicit manual retry; Stop/disconnect/ownership cancellation, retry settle cooldown and unverified readiness")
+        let missing = ROBAmberGatewayClient()
+        missing.fixtureReady(); missing.fixtureFresh(sequence: 1)
+        let waiting = ROBGripperStartupCalibration(gateway: missing)
+        var waitFailure: String?
+        Task { @MainActor in
+            do { try await waiting.fixturePassiveWait() }
+            catch { waitFailure = error.localizedDescription }
+        }
+        pump(missing, seconds: 2.8, fresh: false)
+        expect(waitFailure?.contains("did not return within two seconds") == true, "Missing feedback did not end the passive wait at its deadline: \(waitFailure ?? "no failure")")
+        expect(missing.fixturePhysical.isEmpty && missing.fixtureArmMotion.isEmpty, "Passive timeout issued a physical command")
+        missing.fixtureDisconnect()
+        print("Startup gripper fixtures passed: hanging/inactive/fresh admission; serialized calibration and close2/open10; passive delivery-gap recovery without dispatch, bounded feedback timeout and immediate observed-pose rejection; no arm activation, duplicate or reconnect replay; rejection needs explicit manual retry; Stop/disconnect/ownership cancellation, retry settle cooldown and unverified readiness")
     }
 }
 '''
@@ -212,7 +240,7 @@ def main():
         subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-parse-as-library",
                         "-module-cache-path", "/private/tmp/cerebro-swift-module-cache",
                         str(source), "-o", str(binary)], check=True, timeout=90)
-        subprocess.run([str(binary)], check=True, timeout=45)
+        subprocess.run([str(binary)], check=True, timeout=70)
 
 
 if __name__ == "__main__":
