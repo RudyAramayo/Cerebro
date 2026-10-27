@@ -313,7 +313,7 @@ final class ROBGhostRobotModel {
 /// These are physical-side Amber encoder radians, not mirrored URDF angles.
 /// Saving a target does not grant motion or certify camera registration.
 enum ROBCanRecyclingReadyPose {
-    static let revision = "operator_taught_ready_20261027_v3"
+    static let revision = "operator_taught_ready_20261027_v4"
     static let jointTolerance = 0.015
     static func target(physicalSide:String)throws->[Double] {
         switch physicalSide {

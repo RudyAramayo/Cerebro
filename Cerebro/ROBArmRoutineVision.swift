@@ -2185,15 +2185,17 @@ struct ROBWorkspaceCanSelection {
         let settleStatus:(ROBWorkspaceView,Bool,Bool)->Void = {view,prepared,ready in
             currentView=view;lastPrepareAccepted=prepared;lastViewReady=ready
         }
-        var views=try await preparedCollisionScanViews(check:stagingCheck,status:settleStatus)
+        var views:[ROBWorkspaceView]
         if initialEmptyRightLift {
-            guard model.physicalSide=="right" else {throw ROBWorkspaceDepthMapError.invalidFrame}
-            // The fixed operator-cleared RIGHT preparation treats unseen
-            // space as advisory. Observe its arm/table side now; search the
-            // remaining scene from the raised pose instead of spending most
-            // of the map's freshness budget scanning the opposite side.
-            views=Array(views.filter{$0.upperTarget==5650 && $0.panDegrees<=0}.prefix(2))
-            guard !views.isEmpty else {throw ROBWorkspaceDepthMapError.invalidFrame}
+            // Retain the operator-selected useful view for the initial lift.
+            // The old5650 staging/sweep pointed into the torso on this setup.
+            let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+            guard model.physicalSide=="right",neck["known"]as?Bool==true,
+                  let pan=neck["pan_degrees"]as?Double,pan.isFinite,
+                  let upper=neck["upper"]as?Int else {throw ROBWorkspaceDepthMapError.invalidFrame}
+            views=[ROBWorkspaceView(panDegrees:pan,upperTarget:upper)]
+        } else {
+            views=try await preparedCollisionScanViews(check:stagingCheck,status:settleStatus)
         }
         // A local fixed-pose proof cannot be stretched across an unmeasured sweep.
         if let fixed=registeredCurrentView(model:model) {views=[fixed]}

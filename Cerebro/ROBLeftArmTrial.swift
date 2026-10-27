@@ -19,12 +19,16 @@ struct ROBReviewedArmDispatchStart {
     static let maximumStartPointDriftMeters = 0.002
     static let maximumAdmissionDelaySeconds = 0.250
     func matches(proposalID: UUID, index: Int, generation: UInt64, mapFingerprint: String,
-                 positions actual: [Double], sequence: UInt64, nowUptime: Double) -> Bool {
+                 positions actual: [Double], sequence: UInt64, nowUptime: Double,
+                 coordinatedReadyPose:Bool=false) -> Bool {
         guard self.proposalID == proposalID, self.index == index, self.generation == generation, generation > 0,
               self.mapFingerprint == mapFingerprint, !mapFingerprint.isEmpty,
               self.positions.count == 7, actual.count == 7, (self.positions+actual).allSatisfy(\.isFinite),
               self.sequence > 0, sequence >= self.sequence, nowUptime.isFinite, reviewCompletedAtUptime.isFinite,
               (0...Self.maximumAdmissionDelaySeconds).contains(nowUptime-reviewCompletedAtUptime) else { return false }
+        if coordinatedReadyPose {
+            return ROBCanRecyclingReadyPose.reached(actual,goal:self.positions)
+        }
         let pointDriftBound = 1.5*zip(self.positions,actual).reduce(0.0) { $0+abs($1.0-$1.1) }
         return pointDriftBound <= Self.maximumStartPointDriftMeters
     }
@@ -683,7 +687,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               let sample = try? measured(),
               review.matches(proposalID:id,index:index,generation:generation,mapFingerprint:map.fingerprint,
                 positions:sample.positionsRadians.map(\.doubleValue),sequence:sample.sequence,
-                nowUptime:ProcessInfo.processInfo.systemUptime) else { return nil }
+                nowUptime:ProcessInfo.processInfo.systemUptime,
+                coordinatedReadyPose:proposal.kind=="staged_empty_lift" && activeCameraCollisionAdvisory &&
+                    activeStagedEmptyLift?.operatorReadyPoseRevision==ROBCanRecyclingReadyPose.revision) else { return nil }
         if proposal.kind=="recycling_carry_release" {
             guard Thread.isMainThread,MainActor.assumeIsolated({
                 guard let attachment=nativeCanAttachment,let ticket=nativeCarryDispatchTicket,let model=collisionModel,
@@ -3348,7 +3354,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 positions:q,sequence:actual.sequence,reviewCompletedAtUptime:ProcessInfo.processInfo.systemUptime)
             let admission=try measured()
             guard dispatch.matches(proposalID:path.id,index:index,generation:session,mapFingerprint:map.fingerprint,
-                positions:admission.positionsRadians.map(\.doubleValue),sequence:admission.sequence,nowUptime:ProcessInfo.processInfo.systemUptime) else {
+                positions:admission.positionsRadians.map(\.doubleValue),sequence:admission.sequence,nowUptime:ProcessInfo.processInfo.systemUptime,
+                coordinatedReadyPose:operatorReadyPose) else {
                 throw ROBArmRoutineError.blocked("The actual staged-lift start changed after review; no next step sent.")
             }
             proposalStep=index;phase=step.stage ?? "Staged empty lift";update("\(phase): \(index+1)/\(proof.steps.count)")

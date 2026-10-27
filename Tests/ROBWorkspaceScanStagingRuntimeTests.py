@@ -109,6 +109,10 @@ def main():
     scan = method(source, "    @MainActor @nonobjc func scanCollisionScene(")
     assert scan.index("return try await captureRegisteredCurrentScene") < scan.index("preparedCollisionScanViews(")
     assert "requestedViews.map" not in scan
+    lift_view = method(scan, "        if initialEmptyRightLift {")
+    assert 'neck["pan_degrees"]' in lift_view and 'neck["upper"]' in lift_view
+    assert 'views=[ROBWorkspaceView(panDegrees:pan,upperTarget:upper)]' in lift_view
+    assert 'preparedCollisionScanViews(' not in lift_view
     assert "try await settleCollisionScanView(view,check:stagingCheck,status:settleStatus)" in scan
     assert prepare.index("try await settleCollisionScanView") < prepare.index("boundedPan?(request.panDegrees)")
     start = source.index("        var candidates:[ROBWorkspaceBlockerCoverageCandidate]=[]", source.index("func captureBlockerCoverage("))
