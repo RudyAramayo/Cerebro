@@ -2614,6 +2614,7 @@ struct ROBWorkspaceCanSelection {
 
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
         surveyFrontTable: Bool = false,
+        armAlreadyAtGraspReady: Bool = false,
         permitsLocalCanShapePrior physicalCanShapePrior: () throws -> Bool = {false}, canReachBaseline:[String:Double]? = nil,
         passiveFeedbackCheckpoint:(() async throws->Void)?=nil,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
@@ -3272,10 +3273,10 @@ struct ROBWorkspaceCanSelection {
             }
         }
         // A visible/confirmed can may belong to the opposite arm. Try only
-        // two current selected-side boxes before ending this can-only search.
+        // two current selected-side boxes before ending this can search.
         // Existing inspect requires two advancing exposures and enrolls their
         // exact RGB-D source frames into the same map before inference.
-        if requireDepth,targets == [.can],fixedRegisteredView==nil,let reachBaseline=canReachBaseline,
+        if requireDepth,targets.contains(.can),fixedRegisteredView==nil,let reachBaseline=canReachBaseline,
            try permitsLocalCanShapePrior(),collisionMap != nil {
             guard (1...7).allSatisfy({reachBaseline[model.physicalSide+"_joint\($0)"]?.isFinite==true}) else {
                 throw ROBArmRoutineError.blocked("The targeted can search needs the unchanged measured selected-arm baseline.")
@@ -3335,7 +3336,7 @@ struct ROBWorkspaceCanSelection {
         // inference, self masks, occupied returns and free-space gates are unchanged.
         // Use lateral parallax: tilting at one pan kept the hanging forearm
         // behind the same shoulder in the recorded failed entry scans.
-        if requireDepth,collectCollisionDepth,fixedRegisteredView==nil,
+        if !armAlreadyAtGraspReady,requireDepth,collectCollisionDepth,fixedRegisteredView==nil,
            found[.can] != nil,(found[.orangeBucket] != nil || targets == [.can]),try permitsLocalCanShapePrior(),
            let originalMap=collisionMap,originalMap.estimatedCameraProjectionIdentity != nil {
             let started=ProcessInfo.processInfo.systemUptime,deadline=started+20
@@ -3387,6 +3388,11 @@ struct ROBWorkspaceCanSelection {
             evidence.append(["depth_only_arm_coverage_summary":true,"captured_views":capturedViews,"maximum_views":3,
                 "elapsed_seconds":ProcessInfo.processInfo.systemUptime-started,"budget_seconds":20.0,
                 "scene_id":sceneID.uuidString,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true])
+        }
+        if armAlreadyAtGraspReady {
+            evidence.append(["depth_only_arm_coverage_summary":true,"captured_views":0,
+                "skipped_reason":"already_at_measured_grasp_ready_pose","table_depth_retained":true,
+                "occupied_returns_preserved":true,"motion_authority":false])
         }
         if localReachSelectionRequired {found[.can]=localReachSelection?.object}
         // Coverage is a temporary glance, not the task's resting attention.

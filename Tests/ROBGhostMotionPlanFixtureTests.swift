@@ -37,6 +37,47 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last=="ready-horizontal" {
+            let now=Date().timeIntervalSince1970*1000
+            for side in ["right","left"] {
+                let arm=try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
+                let q=try ROBCanRecyclingReadyPose.target(physicalSide:side)
+                let baseline=arm.positions(vendorLeft:q)
+                let can=ROBWorkspaceLocatedObject(target:.can,position:[0.43,side=="right" ? -0.105:0.105,0.81],
+                    confidence:0.9,capturedAt:now,sequence:100,view:.init(panDegrees:side=="right" ? -15:15,upperTarget:6000))
+                let preview=try ROBCanGrabPreview.make(can:can,model:arm,baseline:baseline,side:side,now:now)
+                if side=="left" {
+                    precondition(preview.dynamicEntryStepCount==4 && preview.steps.contains{$0.stage.contains("Corkscrew")},
+                        "A mirrored LEFT target acquired the physical RIGHT taught-ready shortcut")
+                    print("PASS unmeasured mirrored LEFT pose retains its existing entry")
+                    continue
+                }
+                precondition(preview.dynamicEntryStepCount==1 && preview.dynamicEntryWaypoints.count==1)
+                precondition(preview.steps.first!.pose==baseline && !preview.steps.contains{$0.stage.contains("Corkscrew")})
+                precondition(preview.reachesCan && preview.graspError<=0.012 && preview.gripperTiltDegrees<=5,
+                    "Ready horizontal grasp failed: \(side) error=\(preview.graspError) tilt=\(preview.gripperTiltDegrees)")
+                let start=arm.toolPosition(baseline)!,approach=arm.toolPosition(preview.steps[1].pose)!
+                let bearing=simd_normalize(SIMD3(start.x-can.point.x,start.y-can.point.y,0))
+                let target=can.point+bearing*0.12
+                precondition(simd_distance(approach,target)<=0.012,"Ready pregrasp did not stay beside the can")
+                var lastDistance=simd_distance(approach,can.point)
+                for step in preview.steps.dropFirst(2).prefix(4) {
+                    let point=arm.toolPosition(step.pose)!,distance=simd_distance(point,can.point)
+                    precondition(abs(point.z-can.point.z)<=0.012 && distance<lastDistance,
+                        "Ready grasp descended from above or backed away")
+                    lastDistance=distance
+                }
+                let bounds=ROBWorkspaceCollisionPlan.jointBounds(model:arm)
+                for step in preview.steps {
+                    precondition(zip(arm.vendorLeft(step.pose),bounds).allSatisfy{$1.contains($0)})
+                }
+                var perturbed=q;perturbed[0]+=0.01
+                let fresh=try ROBCanGrabPreview.make(can:can,model:arm,baseline:arm.positions(vendorLeft:perturbed),side:side,now:now)
+                precondition(fresh.dynamicEntryStepCount==1 && ROBArmRoutinePlan.near(arm.vendorLeft(fresh.baseline),perturbed,tolerance:1e-12))
+                print("PASS \(side) taught-ready horizontal approach: one coordinated pregrasp,12cm planar entry, monotonic horizontal grasp, fresh measured baseline and native joint bounds; no hardware")
+            }
+            return
+        }
         if CommandLine.arguments.last=="grasp-hold" || CommandLine.arguments.last=="carry-release" {
             let carryingFixture=CommandLine.arguments.last=="carry-release"
             let arm=try ROBGhostRobotModel(directory:model.directory,physicalSide:"right"),now=Date().timeIntervalSince1970*1000
@@ -652,6 +693,21 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
             var boundedViews: [ROBWorkspaceView] = []
             while let view = boundedSurvey.next(confirmed: [.can]) { boundedViews.append(view) }
             precondition(boundedViews.map(\.panDegrees) == [-15, 0, 15, 15, -15], "Survey bypassed the native neck envelope")
+            var recyclingSurvey = ROBWorkspaceSearchSchedule(targets: [.can,.orangeBucket], recall: recall,
+                now: now, frontTableSide: "right")
+            var firstViews: [ROBWorkspaceView] = []
+            for _ in 0..<5 {firstViews.append(recyclingSurvey.next(confirmed:[.can])!)}
+            precondition(firstViews.map(\.panDegrees)==[-30,0,30,15,-15],
+                "Full recycling skipped the near RIGHT/LEFT table survey")
+            precondition(recyclingSurvey.next(confirmed:[.can])==bucketHint.view,
+                "Full recycling lost its destination search after surveying cans")
+            precondition(recyclingSurvey.next(confirmed:[.can,.orangeBucket])==nil,
+                "Confirmed destination did not stop the bucket-only search tail")
+            var alreadyFound = ROBWorkspaceSearchSchedule(targets: [.can,.orangeBucket], recall: recall,
+                now: now, frontTableSide: "right")
+            var requiredFrontViews: [ROBWorkspaceView] = []
+            while let view=alreadyFound.next(confirmed:[.can,.orangeBucket]) {requiredFrontViews.append(view)}
+            precondition(requiredFrontViews==firstViews,"A remembered bucket skipped the fresh near-can survey")
             let onlyCanRecall=ROBWorkspaceRecall(modelID:model.modelID,geometryID:model.geometryID,sightings:[canHint])
             var sideSearch=ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:onlyCanRecall,now:now,
                 boundedPan:{max(-60,min(60,$0))})

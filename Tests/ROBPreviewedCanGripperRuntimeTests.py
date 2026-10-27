@@ -56,8 +56,11 @@ final class Gateway {
 struct Vision {let cameraGeneration=UUID()}
 struct Sample {let positionsRadians:[NSNumber]}
 @MainActor final class Harness {
- let gateway=Gateway(),vision=Vision(),arm="left",physicalSide="right"
- var generation:UInt64=5,previewedGripperReadyGeneration:UInt64?
+ let gateway=Gateway(),vision=Vision(),arm="left"
+ var physicalSide="right",localReceiptCommand:String?="right_recycle_cans"
+ var activeCameraCollisionAdvisory=false,activeHoldAfterInitialEmptyLift=false
+ var nominalEmptyCommissioningStepEnabled=false,oneDegreeEmptyCalibrationStepEnabled=false
+ var generation:UInt64=5,heldGripperReadyGeneration:UInt64?
  var activePreviewedCanGrasp:Int?=1
  var recyclingGripDispatched=false,jawSetupDispatchUncertain=false,servoPossiblePayloadUncertain=false
  var authorized=true,held=false
@@ -78,7 +81,7 @@ struct Sample {let positionsRadians:[NSNumber]}
  // The inert fixture records dispatch order; wall-clock settling is covered
  // by the existing real executor fixture, not replaced in production.
  func wait(_ seconds:Double,_ condition:()->Bool)async throws {}
- func run()async throws {try await preparePreviewedCanGripper(model:.init(),map:.init())}
+ func run()async throws {try await prepareHeldCanGripper(model:.init(),map:.init())}
  var ready:Bool {taskGripperReady}
 '''
 
@@ -91,8 +94,14 @@ FIXTURE = r'''
   precondition(normal.ready && !normal.jawSetupDispatchUncertain && normal.taskJawTarget==nil)
   try await normal.run();precondition(normal.gateway.commands.count==5,"Prepared jaws repeated initialization")
   normal.generation+=1;precondition(!normal.ready,"Readiness survived a new connection generation")
-  for kind in ["payload","unauthorized","release-rejected"] {
+  let recycling=Harness();recycling.activePreviewedCanGrasp=nil;recycling.activeCameraCollisionAdvisory=true
+  try await recycling.run()
+  precondition(recycling.gateway.commands==["query","calibrate","hold:2","release:10","query"] && recycling.ready)
+  for kind in ["payload","unauthorized","release-rejected","ordinary","wrong-arm","lift-only"] {
    let h=Harness()
+   if kind=="ordinary" {h.activePreviewedCanGrasp=nil}
+   if kind=="wrong-arm" {h.physicalSide="left"}
+   if kind=="lift-only" {h.activeHoldAfterInitialEmptyLift=true}
    ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload=kind=="payload"
    h.authorized=kind != "unauthorized";h.gateway.failRelease=kind=="release-rejected"
    do {try await h.run();fatalError("Admitted \(kind)")} catch {}
@@ -101,8 +110,8 @@ FIXTURE = r'''
     precondition(h.jawSetupDispatchUncertain && h.gateway.commands==["query","calibrate","hold:2","release:10"])
    } else {precondition(h.gateway.commands.isEmpty)}
   }
-  precondition(ROBWorkspaceCollisionPlan.reviews==2)
-  print("PASS held empty-gripper preparation: stationary review/hold precede genuine calibration-close-open; no replay, no readiness on rejected opening, payload/authority/generation guards retained; no arm transport")
+  precondition(ROBWorkspaceCollisionPlan.reviews==3)
+  print("PASS preview and full RIGHT recycling prepare EMPTY jaws at the held pose: checked hold then calibration-close-open, no parking/arm travel, no replay; ordinary/LEFT/lift-only/payload/authority/generation failures remain blocked")
  }
 }
 '''
@@ -110,9 +119,13 @@ FIXTURE = r'''
 source = (ROOT / "Cerebro/ROBLeftArmTrial.swift").read_text()
 methods = "\n".join(block(source, marker) for marker in [
     "@MainActor private func requireGripperCalibration(",
+    "private var usesHeldCanPreparation:",
     "private var taskGripperReady:",
-    "@MainActor private func preparePreviewedCanGripper(",
+    "@MainActor private func prepareHeldCanGripper(",
 ])
+assert "!activeHoldAfterInitialEmptyLift,!usesHeldCanPreparation,!ROBGripperStartupCalibration" in source
+assert "surveyFrontTable:usesHeldCanPreparation" in source
+assert "if usesHeldCanPreparation {try await prepareHeldCanGripper" in source
 with tempfile.TemporaryDirectory(prefix="rob-previewed-gripper-") as folder:
     swift = Path(folder) / "fixture.swift"
     binary = Path(folder) / "fixture"

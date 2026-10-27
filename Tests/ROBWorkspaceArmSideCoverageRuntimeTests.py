@@ -30,7 +30,8 @@ final class ROBAmberGatewayClient {
 final class Vision {
  var cameraGeneration=UUID(),next:UInt64=2
  var mode="normal"
- func settledDepthFrame(deadlineUptime:Double?)async throws->Frame {
+ func settledPassiveMappingFrame(deadlineUptime:Double?,check:()throws->Void)async throws->Frame {
+  try check()
   precondition(deadlineUptime==120.0)
   if mode=="frame_unavailable" {throw ROBWorkspaceDepthMapError.acquisition}
   if mode=="deadline" {ProcessInfo.processInfo.systemUptime=121}
@@ -38,11 +39,13 @@ final class Vision {
   let frame=Frame(sequence:next,capturedAt:1000+Double(next)*100);next+=1
   return frame
  }
+ func healthSnapshot()->[String:Any] {[: ]}
 }
 struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let captured:[Frame];let map:Map?}
-@MainActor func exercise(side:String="right",permit:Bool=true,fixed:Bool=false,objects:Bool=true,canOnly:Bool=false,mode:String="normal")async throws->Result {
+@MainActor func exercise(side:String="right",permit:Bool=true,fixed:Bool=false,objects:Bool=true,canOnly:Bool=false,ready:Bool=false,mode:String="normal")async throws->Result {
  ProcessInfo.processInfo.systemUptime=100;ROBFixedHeadBodyMotionIdentity.currentIdentity="body"
  let requireDepth=true,collectCollisionDepth=true,fixedRegisteredView:ROBWorkspaceView?=fixed ? .init(panDegrees:0,upperTarget:6306):nil
+ let armAlreadyAtGraspReady=ready
  let found:[Target:Int]=objects ? [.can:1,.orangeBucket:2]:[.can:1]
  let targets:[Target]=canOnly ? [.can]:[.can,.orangeBucket]
  let model=Model(physicalSide:side),vision=Vision();vision.mode=mode
@@ -53,6 +56,7 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
  let boundedPan:((Double)->Double)?={max(-60,min(60,$0))}
  func permitsLocalCanShapePrior()throws->Bool {permit}
  func check()throws {}
+ func searchCheckpoint()async throws {try check()}
  func requireSceneProjectionIdentity()throws {}
  func progress(_ value:String) {}
  func moveView(_ view:ROBWorkspaceView,deadlineUptime:Double?)async throws->Bool {
@@ -81,6 +85,10 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
   let left=try await exercise(side:"left");precondition(left.views==[.init(panDegrees:35,upperTarget:5650),.init(panDegrees:55,upperTarget:5650),.init(panDegrees:45,upperTarget:5300)])
   let firstGrasp=try await exercise(objects:false,canOnly:true)
   precondition(firstGrasp.views.count==3 && firstGrasp.captured.count==3,"Can-only grasp must retain whole-arm coverage without finding a bucket first")
+  let ready=try await exercise(ready:true)
+  precondition(ready.views.isEmpty && ready.captured.isEmpty && ready.map != nil)
+  precondition(ready.evidence.count==1 && ready.evidence[0]["skipped_reason"] as? String=="already_at_measured_grasp_ready_pose")
+  precondition(ready.evidence[0]["table_depth_retained"] as? Bool==true && ready.evidence[0]["motion_authority"] as? Bool==false)
   for mode in 0..<3 {
    let x=try await exercise(permit:mode != 0,fixed:mode==1,objects:mode != 2)
    precondition(x.views.isEmpty && x.captured.isEmpty && x.evidence.isEmpty)
@@ -101,8 +109,8 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
 
 def main():
  source=(ROOT/'Cerebro/ROBArmRoutineVision.swift').read_text()
- marker='        if requireDepth,collectCollisionDepth,fixedRegisteredView==nil,'
- tail=block(source,marker)
+ marker='        if !armAlreadyAtGraspReady,requireDepth,collectCollisionDepth,fixedRegisteredView==nil,'
+ tail=block(source,marker)+'\n'+block(source,'        if armAlreadyAtGraspReady {')
  assert source.index(marker)<source.index('        let missing = targets.filter { found[$0] == nil }')
  assert source.index(marker)<source.index('let frozen = await Task.detached(priority:.userInitiated) { collisionMap.snapshot() }')
  assert 'observeWorkspace' not in tail and 'accumulateCollisionDepth(view,capturedFrame:frame,preservingSceneID:sceneID)' in tail

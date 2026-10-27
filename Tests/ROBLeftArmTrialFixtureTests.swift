@@ -427,6 +427,7 @@ final class ROBWorkspaceSearch {
     var fail = false
     var requiredDepth = true
     var requestedFrontTableSurvey = false
+    var requestedAlreadyGraspReady = false
     var requestedTargets: [ROBWorkspaceTarget] = []
     var localCanShapePriorPermissions:[Bool]=[]
     var objects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
@@ -434,11 +435,13 @@ final class ROBWorkspaceSearch {
     var afterInspect: (() -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
         surveyFrontTable:Bool=false,
+        armAlreadyAtGraspReady:Bool=false,
         permitsLocalCanShapePrior:() throws ->Bool={false},canReachBaseline:[String:Double]?=nil,
         passiveFeedbackCheckpoint:(() async throws->Void)?=nil,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
         requestedFrontTableSurvey = surveyFrontTable
+        requestedAlreadyGraspReady = armAlreadyAtGraspReady
         localCanShapePriorPermissions.append(try permitsLocalCanShapePrior())
         requestedTargets = targets
         onInspect?()
@@ -964,6 +967,8 @@ final class ROBArmRoutineCoordinator {
                 precondition(!preparedPreviewViews.isEmpty && preparedPreviewViews.allSatisfy{$0.panDegrees == -15 && $0.upperTarget==6000},
                     "Preview preparation did not restore the selected can's view")
                 precondition(ROBWorkspaceSearch.shared.requestedFrontTableSurvey)
+                precondition(ROBWorkspaceSearch.shared.requestedAlreadyGraspReady,
+                    "The measured ready hold repeated the hanging-arm shoulder survey")
                 precondition(output["requested_grasp_and_hold"] as?Bool==true && output["batch_completed"] as?Int==0 &&
                     output["transfer_completed"] as?Bool==false,output.description)
                 precondition(broker.standingLocalCanCampaignActive,"A no-target grasp attempt consumed the standing campaign")

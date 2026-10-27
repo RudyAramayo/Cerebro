@@ -1197,7 +1197,7 @@ struct ROBCanGrabPreview {
             let connector=try ROBWorkspaceCollisionPlan.make(from:previous,to:goal,map:map,model:model,
                 generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
             segments += connector.steps.map { .init(positions:$0.positions,seconds:$0.seconds,
-                jawAction:nil,stage:"Corkscrew entry from measured start") }
+                jawAction:nil,stage:"Can approach from measured start") }
             previous=goal
         }
         return try ROBWorkspaceCollisionPlan.review(baseline:start,steps:segments,map:map,model:model,
@@ -1280,20 +1280,41 @@ struct ROBCanGrabPreview {
             let name=side+"_joint\(index)",range=allowed[name]!
             var result=pose;result[name]=max(range.lowerBound,min(range.upperBound,pose[name,default:0]+delta));return result
         }
-        let outwardJ2=outwardJoint2Direction(model:model,baseline:baseline,side:side)
-        let outwardLift=shifted(baseline,joint:2,delta:outwardJ2*0.10)
-        append(outwardLift,"Corkscrew: small J2 outward lift (clearance unverified)")
-        let rearward=rearwardJoint1Direction(model:model,baseline:outwardLift,side:side)
-        let forwardJ3=forwardJoint3Direction(model:model,baseline:outwardLift,side:side)
-        var spiral=shifted(outwardLift,joint:1,delta:rearward*rearwardJoint1Radians)
-        spiral=shifted(spiral,joint:2,delta:outwardJ2*0.10)
-        spiral=shifted(spiral,joint:3,delta:forwardJ3*rearwardJoint1Radians*0.75)
-        append(spiral,"Corkscrew: J1 rearward + J2 outward + J3 forearm forward (clearance unverified)")
-        let spiralTip=tip(spiral),outward=side=="left" ? 1.0 : -1.0
-        let liftTarget=SIMD3(spiralTip.x,spiralTip.y+outward*0.02,max(spiralTip.z+0.18,graspPoint.z+0.12))
-        let raised=closest(liftTarget,spiral)
-        append(raised,"Corkscrew: lift and level forearm (clearance unverified)")
-        let approachTarget = graspPoint + SIMD3(0, 0, 0.12)
+        // Only the physical RIGHT pose has been taught and exercised in this
+        // campaign. A mirrored LEFT model target is not a measured ready pose.
+        let alreadyReady=side=="right" && model.physicalSide==side &&
+            ROBCanRecyclingReadyPose.matches(model.vendorLeft(baseline),physicalSide:side)
+        let raised:[String:Double]
+        let approachOffset:SIMD3<Double>
+        if alreadyReady {
+            // The taught ready hold already completed the shoulder lift.
+            // Enter beside the can at its grasp height, then approach through
+            // the horizontal plane with horizontal jaws. Every connector still
+            // receives the caller's full-arm geometry and timing review.
+            raised=baseline
+            let towardArm=SIMD3(tip(baseline).x-graspPoint.x,tip(baseline).y-graspPoint.y,0)
+            let distance=simd_length(towardArm)
+            guard distance.isFinite,distance>0.001 else {
+                throw ROBGhostMotionError.blocked("The horizontal ready approach needs a distinct can-to-gripper bearing.")
+            }
+            approachOffset=towardArm/distance*0.12
+        } else {
+            let outwardJ2=outwardJoint2Direction(model:model,baseline:baseline,side:side)
+            let outwardLift=shifted(baseline,joint:2,delta:outwardJ2*0.10)
+            append(outwardLift,"Corkscrew: small J2 outward lift (clearance unverified)")
+            let rearward=rearwardJoint1Direction(model:model,baseline:outwardLift,side:side)
+            let forwardJ3=forwardJoint3Direction(model:model,baseline:outwardLift,side:side)
+            var spiral=shifted(outwardLift,joint:1,delta:rearward*rearwardJoint1Radians)
+            spiral=shifted(spiral,joint:2,delta:outwardJ2*0.10)
+            spiral=shifted(spiral,joint:3,delta:forwardJ3*rearwardJoint1Radians*0.75)
+            append(spiral,"Corkscrew: J1 rearward + J2 outward + J3 forearm forward (clearance unverified)")
+            let spiralTip=tip(spiral),outward=side=="left" ? 1.0 : -1.0
+            let liftTarget=SIMD3(spiralTip.x,spiralTip.y+outward*0.02,max(spiralTip.z+0.18,graspPoint.z+0.12))
+            raised=closest(liftTarget,spiral)
+            append(raised,"Corkscrew: lift and level forearm (clearance unverified)")
+            approachOffset=SIMD3(0,0,0.12)
+        }
+        let approachTarget = graspPoint + approachOffset
         var approach = closest(approachTarget, raised)
         // A cross-body target can trap the numerical solver in a local
         // minimum. Compare bounded shoulder seeds; never move the target.
@@ -1306,7 +1327,7 @@ struct ROBCanGrabPreview {
         let entryStepCount=steps.count-1
         var grasp = approach
         for index in 1...4 {
-            grasp = closest(graspPoint + SIMD3(0, 0, 0.12 * (1 - Double(index)/4)), grasp)
+            grasp = closest(graspPoint + approachOffset * (1 - Double(index)/4), grasp)
             if index < 4 { append(grasp, "Final approach — horizontal jaws") }
         }
         let error = simd_distance(tip(grasp), graspPoint)
@@ -1653,6 +1674,16 @@ struct ROBWorkspaceSearchSchedule {
             pending = [(sign * 30, 6306), (0.0, 6306), (-sign * 30, 6306),
                        (-sign * 15, 6000), (sign * 15, 6000)].map { pan, upper in
                 Job(view: .init(panDegrees: boundedPan(pan), upperTarget: upper), target: nil)
+            }
+            // Full recycling keeps the same near-table can survey, then
+            // searches the destination only if it is still unconfirmed.
+            // Tag every destination view so a confirmed bucket ends this tail.
+            if targets.contains(.orangeBucket) {
+                var destination = ROBWorkspaceSearchSchedule(targets: [.orangeBucket], recall: recall,
+                    now: now, boundedPan: boundedPan)
+                while let view = destination.next(confirmed: []) {
+                    pending.append(Job(view: view, target: .orangeBucket))
+                }
             }
             plannedViewCount = pending.count
             return

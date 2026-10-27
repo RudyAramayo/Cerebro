@@ -115,11 +115,14 @@ struct Outcome {let views:[ROBWorkspaceView];let selection:ROBWorkspaceCanSelect
   precondition(invalid.reasons.count==3 && invalid.evidence.allSatisfy{$0["path_admitted"]as?Bool==false})
   let already=try await s.exercise(mode:"already_reachable");precondition(already.views.isEmpty && already.selection?.object != nil)
   let stale=try await s.exercise(mode:"stale_boxes");precondition(stale.views.isEmpty && stale.selection?.object==nil)
+  let full=try await s.exercise(canOnly:false)
+  precondition(full.required && full.views.count==1 && full.selection?.object != nil,
+   "Full recycling used the first across-table can instead of selected-side ranking")
   for mode in ["source_changed","body_changed","gateway_changed"] {
    do {_ = try await s.exercise(mode:mode);preconditionFailure("Context replacement admitted")}
    catch {precondition(error is ROBWorkspaceDepthMapError)}
   }
-  for flags in [(false,true,true,false),(true,false,true,false),(true,true,false,false),(true,true,true,true)] {
+  for flags in [(false,true,true,false),(true,false,true,false),(true,true,true,true)] {
    let x=try await s.exercise(permission:flags.0,baseline:flags.1,canOnly:flags.2,fixed:flags.3)
    precondition(!x.required && x.views.isEmpty,"Ordinary/fixed/unpermitted search changed")
   }
@@ -137,9 +140,9 @@ def main():
     actual+='\n'+'\n'.join(base.block(plan,x) for x in ['enum ROBWorkspaceTarget:','struct ROBWorkspaceLocatedObject:','struct ROBWorkspaceLocationConfirmation {'])
     actual+='\nenum ROBWorkspaceRecall {\n'+base.block(plan,'struct Sighting: Codable {')+'\n}'
     selection=base.block(vision,'@MainActor private func selectReachableCan(')
-    tail=base.block(vision,'if requireDepth,targets == [.can],fixedRegisteredView==nil,let reachBaseline=canReachBaseline,')
+    tail=base.block(vision,'if requireDepth,targets.contains(.can),fixedRegisteredView==nil,let reachBaseline=canReachBaseline,')
     run=vision[vision.index('@MainActor @nonobjc func run(targets:'):]
-    assert run.index('if requireDepth,targets == [.can],fixedRegisteredView==nil,let reachBaseline=canReachBaseline,')<run.index('// The fast object search need not see')
+    assert run.index('if requireDepth,targets.contains(.can),fixedRegisteredView==nil,let reachBaseline=canReachBaseline,')<run.index('// The fast object search need not see')
     assert '"nearest_reachable_can_selections":reachSelections' in run
     assert 'let noReachableCan=localReachSelectionRequired && localReachSelection?.object==nil' in run
     assert '"no_reachable_can"' in run and "a can with valid geometry and a reachable grasp" in run

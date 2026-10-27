@@ -347,7 +347,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         previewedCanGrasp != nil && standingPreparationTask != nil && !isRunning &&
             ROBControllerArmApproval.shared.standingLocalCanCampaignActive
     }
-    private var previewedGripperReadyGeneration: UInt64?
+    private var heldGripperReadyGeneration: UInt64?
     private var initialEmptyLiftHeldEvidence: NSDictionary?
     var localVisualTrialAssumedSpatialErrorMeters = 0.05
     @nonobjc private var sceneHold: [String:(positions:[Double],modes:[Int])] = [:]
@@ -1746,7 +1746,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         activeApproachCanThenHold = localReceiptCommand != nil && approachCanThenHoldEnabled
         activeHoldAfterInitialEmptyLift = localReceiptCommand != nil && holdAfterInitialEmptyLiftEnabled
         activePreviewedCanGrasp = localReceiptCommand == "right_recycle_cans" ? previewedCanGrasp : nil
-        previewedGripperReadyGeneration = nil
+        heldGripperReadyGeneration = nil
         initialEmptyLiftHeldEvidence = nil
         collisionMap = command == "left_estimated_calibration" ? activeEstimated?.map : nil
         collisionModel = command == "left_estimated_calibration" ? activeEstimated?.model : nil
@@ -1886,7 +1886,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         if cameraReady {
             let fresh=vision.fresh,stationary=ROBArmRoutineCoordinator.shared.viewIsStationary?() == true
             guard (fresh || defersOneDegreeCameraInspection || defersInitialLiftCameraInspection),stationary else {
-                throw ROBArmRoutineError.blocked("Live camera or stationary body view lost; \(physicalSide)-arm hold requested. camera_fresh=\(fresh), body_stationary=\(stationary).")
+                throw ROBArmRoutineError.blocked("Live camera or stationary body view lost; \(physicalSide)-arm hold requested. camera_fresh=\(fresh), body_stationary=\(stationary). \(vision.readinessDescription)")
             }
             if !activeCameraCollisionAdvisory && (fresh || !defersOneDegreeCameraInspection) && !vision.handsClear {
                 throw ROBArmRoutineError.blocked("Person or hand clearance was lost; an arm hold was requested.")
@@ -2752,7 +2752,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             update("Holding the arms still while searching and mapping the current workspace")
             let calibrationFile = selectedCanReachCalibrationFile
             var objects = try await ROBWorkspaceSearch.shared.run(targets: (activeHoldAfterInitialEmptyLift || activeApproachCanThenHold || activePreviewedCanGrasp != nil) ? [.can]:ROBWorkspaceTarget.allCases,
-                model: model, requireDepth: true,surveyFrontTable:activePreviewedCanGrasp != nil,permitsLocalCanShapePrior:{
+                model: model, requireDepth: true,surveyFrontTable:usesHeldCanPreparation,
+                armAlreadyAtGraspReady:usesHeldCanPreparation && ROBCanRecyclingReadyPose.matches(searchBaseline,physicalSide:physicalSide),
+                permitsLocalCanShapePrior:{
                     guard self.localReceiptCommand != nil else {return false}
                     _ = try self.requireLocalReceipt()
                     return true
@@ -2825,7 +2827,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 guard collisionMap != nil, let owner else {
                     throw ROBArmRoutineError.blocked("The workspace map or arm ownership changed before planning.")
                 }
-                if !activeHoldAfterInitialEmptyLift,activePreviewedCanGrasp == nil,!ROBGripperStartupCalibration.shared.calibrationReady(forArm:arm) {
+                if !activeHoldAfterInitialEmptyLift,!usesHeldCanPreparation,!ROBGripperStartupCalibration.shared.calibrationReady(forArm:arm) {
                     _ = try await parkEmptyArmForSearch(q)
                     try await beginHeldSceneObservation()
                     if localReceiptCommand != nil {jawSetupDispatchUncertain=true}
@@ -2839,7 +2841,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     throw ROBArmRoutineError.blocked("Measure the complete can and current environment before planning a payload sweep.")
                 }
                 try await prepareLocalCanObservationView(can,map:map)
-                if activePreviewedCanGrasp != nil {try await preparePreviewedCanGripper(model:model,map:map)}
+                if usesHeldCanPreparation {try await prepareHeldCanGripper(model:model,map:map)}
                 if try await performInitialLocalRetreatIfNeeded(map:map,model:model) {
                     if activeHoldAfterInitialEmptyLift {return try initialEmptyLiftHoldResult(performed:true)}
                     // One declared-empty corrective step, then fresh targets
@@ -4027,20 +4029,26 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
+    private var usesHeldCanPreparation: Bool {
+        physicalSide == "right" && localReceiptCommand == "right_recycle_cans" &&
+            !activeHoldAfterInitialEmptyLift && !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled &&
+            (activePreviewedCanGrasp != nil || activeCameraCollisionAdvisory)
+    }
+
     private var taskGripperReady: Bool {
         ROBGripperStartupCalibration.shared.calibrationReady(forArm:arm) ||
-            (activePreviewedCanGrasp != nil && previewedGripperReadyGeneration == generation && generation > 0 &&
+            (usesHeldCanPreparation && heldGripperReadyGeneration == generation && generation > 0 &&
              gateway.gripperSnapshot(forArm:arm)["calibrationState"] as? String == "command_accepted_unverified")
     }
 
     /// Explicit grasp preparation, distinct from automatic hanging startup.
     /// Reconnect never manufactures calibration or moves the arm to obtain it.
-    @MainActor private func preparePreviewedCanGripper(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot) async throws {
+    @MainActor private func prepareHeldCanGripper(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot) async throws {
         if taskGripperReady {return}
-        guard activePreviewedCanGrasp != nil,physicalSide == "right",!recyclingGripDispatched,
+        guard usesHeldCanPreparation,!recyclingGripDispatched,
               !jawSetupDispatchUncertain,!servoPossiblePayloadUncertain,
               !ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload else {
-            throw ROBArmRoutineError.blocked("The previewed grasp cannot initialize jaws with a possible held object.")
+            throw ROBArmRoutineError.blocked("Held can preparation needs its current right-arm scope and empty jaws.")
         }
         _ = try requireLocalReceipt()
         let q=try measured().positionsRadians.map(\.doubleValue),session=generation,camera=vision.cameraGeneration
@@ -4068,7 +4076,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let end=ProcessInfo.processInfo.systemUptime+1.5
         try await wait(3){ProcessInfo.processInfo.systemUptime>=end}
         try await requireGripperCalibration(allowEmptyCalibration:false)
-        previewedGripperReadyGeneration=generation
+        heldGripperReadyGeneration=generation
         jawSetupDispatchUncertain=false // Accepted sequence; physical opening remains unmeasured.
     }
 
