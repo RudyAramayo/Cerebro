@@ -53,6 +53,9 @@ struct Sample {let positionsRadians:[NSNumber]}
   try await normal.task();precondition(!normal.events.contains("move") && !normal.events.contains("plan ready"),"A historical ready endpoint was inserted")
   let outward=Trial();outward.retreat=true;try await outward.task()
   precondition(outward.events.filter{$0=="workspace"}.count==1 && outward.events.last=="target search" && outward.collisionMap==nil && outward.q[3] != 0,"Lift endpoint was replaced or old map survived")
+  let resumed=Trial();resumed.activeCameraCollisionAdvisory=true;resumed.q[5]=0.03
+  try await resumed.task()
+  precondition(resumed.events.contains("staged path"),"Interrupted taught move required a return to hanging")
   for failure in ["receipt","feedback","stop","map","retreat","endpoint","possession"] {
    let t=Trial();t.failureAt=failure
    do {try await t.task();preconditionFailure("Rejected preparation continued: \(failure)")}catch{}

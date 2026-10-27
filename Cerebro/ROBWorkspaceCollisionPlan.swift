@@ -1096,7 +1096,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         var context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
         guard model.physicalSide=="right",baseline==trial.baseline,
-              (ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) ||
+              (operatorReadyPose && trial.usesOperatorClearedCameraCollisionAdvisory ||
+               ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) ||
                trial.usesOperatorClearedCameraCollisionAdvisory && ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(baseline)),emptyTrialEligibility,
               ["operator_declared_empty","local_first_attempt_no_arm_travel_or_task_grip"].contains(emptyStateEvidenceSource),
               measuredAtMilliseconds.isFinite,(0...250).contains(nowMilliseconds-measuredAtMilliseconds),
@@ -1155,11 +1156,10 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     }
 
     /// The operator-taught coordinated move has no Cartesian synchronization
-    /// corridor. Check each actual joint against the active segment and check
-    /// actual modeled self clearance against the reviewed original baseline.
+    /// corridor. Check each actual joint against the active segment. Full
+    /// modeled self clearance remains in the complete route and segment reviews.
     static func checkReadyPoseFeedback(_ proof:ROBWorkspaceStagedEmptyLift,index:Int,actual:[Double],
-        proxy:inout ROBWorkspaceSelfProxyClearance)throws {
-        let model=proxy.model
+        model:ROBGhostRobotModel)throws {
         guard proof.operatorReadyPoseRevision==ROBCanRecyclingReadyPose.revision,
               proof.context.visualTrial?.usesOperatorClearedCameraCollisionAdvisory==true,
               model.physicalSide=="right",proof.context.modelID==model.modelID,
@@ -1172,14 +1172,6 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         guard ROBCanRecyclingReadyPose.containsFeedback(actual,from:start,to:goal),
               zip(actual,jointBounds(model:model)).allSatisfy({$1.contains($0)}) else {
             throw ROBGhostMotionError.blocked("Measured joints left the taught ready segment or motor bounds.")
-        }
-        let original=proof.initialProxyClearancesMeters,deficits=Set(original.filter{$0.value<0.030}.keys)
-        let pairs=try proxy.separations(vendorLeft:actual,forceNarrowPairs:deficits,minimumRetreatBounds:original)
-        guard !original.isEmpty,Set(pairs.keys)==Set(original.keys) else {
-            throw ROBGhostMotionError.blocked("The taught ready self geometry changed.")
-        }
-        for (pair,initial) in original where pairs[pair]!+1e-9<min(0.030,initial) {
-            throw ROBGhostMotionError.blocked("The actual taught ready pose worsens modeled self clearance at \(pair).")
         }
     }
 

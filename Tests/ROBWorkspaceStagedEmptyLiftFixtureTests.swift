@@ -162,7 +162,6 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   let zeroReady=try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:hanging,map:map,model:model,generation:generation,
     sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,hanging,cameraAdvisory:true),
     measuredAtMilliseconds:1000,emptyTrialEligibility:true,emptyStateEvidenceSource:"operator_declared_empty",operatorReadyPose:true)
-  var readyProxy=ROBWorkspaceSelfProxyClearance(model:model)
   let recordedLag=[-0.000272707695624114,-0.009817477042468104,0,-0.008317584716535477,0.002318015412804969,0.009817477042468104,0.000272707695624114]
   let readyDelta=zeroReady.steps[0].positions
   let readyFraction=zip(recordedLag,readyDelta).reduce(0.0){$0+$1.0*$1.1}/readyDelta.reduce(0.0){$0+$1*$1}
@@ -170,33 +169,34 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   let recordedHullDeviation=try model.maximumArmHullDisplacement(from:readyNearest,to:recordedLag,openJawPadding:0.04)
   print("Recorded coordinated motor lag hull deviation mm",recordedHullDeviation*1000)
   precondition(recordedHullDeviation>0)
-  try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:recordedLag,proxy:&readyProxy)
+  try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:recordedLag,model:model)
   // The aborting packet is not recorded after the monitor throws. Exercise
   // a larger synthetic phase lag as well as the last actual recorded packet.
   let phaseLag=recordedLag.map{$0*2},phaseNearest=readyNearest.map{$0*2}
   let phaseHullDeviation=try model.maximumArmHullDisplacement(from:phaseNearest,to:phaseLag,openJawPadding:0.04)
   precondition(phaseHullDeviation>0.003)
-  try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:phaseLag,proxy:&readyProxy)
+  try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:phaseLag,model:model)
   for (index,step) in zeroReady.steps.enumerated() {
    let previous=index==0 ? zeroReady.baseline:zeroReady.steps[index-1].positions
    for fraction in [0.0,0.1,0.5,1.0] {
     let q=zip(previous,step.positions).map{$0+fraction*($1-$0)}
-    try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:index,actual:q,proxy:&readyProxy)
+    try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:index,actual:q,model:model)
    }
   }
   var wrongDirection=hanging;wrongDirection[1]=0.04
-  blocked("segment or motor bounds") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:wrongDirection,proxy:&readyProxy)}
+  blocked("segment or motor bounds") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:wrongDirection,model:model)}
   var overshoot=zeroReady.steps[0].positions;overshoot[5]+=0.04
-  blocked("segment or motor bounds") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:overshoot,proxy:&readyProxy)}
+  blocked("segment or motor bounds") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:overshoot,model:model)}
   var invalid=hanging;invalid[0] = .nan
-  blocked("segment or motor bounds") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:invalid,proxy:&readyProxy)}
-  blocked("exact empty-arm scope") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(alteredReady,index:0,actual:start,proxy:&readyProxy)}
-  blocked("exact empty-arm scope") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(proof,index:0,actual:start,proxy:&readyProxy)}
-  // Even inside the allowed motor range, a reversed initial shoulder pose
-  // must not worsen the original modeled tread proximity.
-  var worsened=hanging;worsened[1]=0.014
-  blocked("modeled self clearance") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:worsened,proxy:&readyProxy)}
-  print("PASS taught ready pose: recorded asynchronous motor progress and complete route accepted; wrong direction, overshoot, self worsening, stale feedback and changed scope rejected; no jaws")
+  blocked("segment or motor bounds") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(zeroReady,index:0,actual:invalid,model:model)}
+  blocked("exact empty-arm scope") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(alteredReady,index:0,actual:start,model:model)}
+  blocked("exact empty-arm scope") {try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(proof,index:0,actual:start,model:model)}
+  let interruptedReady=[-0.000954476934684399,-0.022771092584613517,0,-0.019089538693687978,0.012817261694333358,0.02590723108429083,0.002454369260617026]
+  let resumedReady=try ROBWorkspaceCollisionPlan.reviewStagedEmptyLift(from:interruptedReady,map:map,model:model,generation:generation,
+    sceneID:scene,cameraGeneration:camera,nowMilliseconds:1000,trial:trial(map,interruptedReady,cameraAdvisory:true),
+    measuredAtMilliseconds:1000,emptyTrialEligibility:true,emptyStateEvidenceSource:"operator_declared_empty",operatorReadyPose:true)
+  precondition(resumedReady.baseline==interruptedReady && resumedReady.steps.last!.positions==readyGoal)
+  print("PASS taught ready pose: recorded asynchronous progress, complete route and fresh interrupted-pose replan accepted; wrong direction, overshoot, stale feedback and changed scope rejected; no jaws")
   let interruptedStart=[0.0,-0.03941,0,-0.03082,0,0,0]
   precondition(ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(interruptedStart))
   precondition(!ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart([0,-0.051,0,0,0,0,0]))

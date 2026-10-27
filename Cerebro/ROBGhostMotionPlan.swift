@@ -313,7 +313,7 @@ final class ROBGhostRobotModel {
 /// These are physical-side Amber encoder radians, not mirrored URDF angles.
 /// Saving a target does not grant motion or certify camera registration.
 enum ROBCanRecyclingReadyPose {
-    static let revision = "operator_taught_ready_20261027_v2"
+    static let revision = "operator_taught_ready_20261027_v3"
     static let jointTolerance = 0.015
     static func target(physicalSide:String)throws->[Double] {
         switch physicalSide {
@@ -330,7 +330,7 @@ enum ROBCanRecyclingReadyPose {
         ROBArmRoutinePlan.near(measured,goal,tolerance:jointTolerance)
     }
     /// Motors share a destination and duration, but their measured progress
-    /// need not be identical. Actual self geometry is checked separately.
+    /// need not be identical. Full path geometry is reviewed separately.
     static func containsFeedback(_ measured:[Double],from start:[Double],to goal:[Double])->Bool {
         guard measured.count==7,start.count==7,goal.count==7,
               (measured+start+goal).allSatisfy(\.isFinite) else{return false}

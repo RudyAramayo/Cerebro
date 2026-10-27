@@ -281,7 +281,6 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     @nonobjc private var activeLocalRetreat: ROBWorkspaceInitialEmptyRetreat?
     @nonobjc private var activeStagedEmptyLift:ROBWorkspaceStagedEmptyLift?
     @nonobjc private var activeStagedEmptyLiftSegment=0
-    @nonobjc private var activeReadyPoseClearance:ROBWorkspaceSelfProxyClearance?
     @nonobjc private var activeNominalRetreat: ROBWorkspaceNominalEmptyCommissioningRetreat?
     @nonobjc var nominalEmptyCommissioningStepEnabled = false
     @nonobjc var nominalModelAssumedSelfEnabled = false
@@ -1542,10 +1541,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             let index=activeStagedEmptyLiftSegment,start=index==0 ? lift.baseline:lift.steps[index-1].positions
             let goal=lift.steps[index].positions,q=try measured().positionsRadians.map(\.doubleValue),delta=zip(start,goal).map{$1-$0}
             if lift.operatorReadyPoseRevision != nil {
-                guard activeCameraCollisionAdvisory,activeReadyPoseClearance != nil else {
+                guard activeCameraCollisionAdvisory else {
                     throw ROBArmRoutineError.blocked("The taught ready tracking context is unavailable.")
                 }
-                try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(lift,index:index,actual:q,proxy:&activeReadyPoseClearance!)
+                try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(lift,index:index,actual:q,model:model)
                 return
             }
             let length=delta.reduce(0.0){$0+$1*$1}
@@ -3008,12 +3007,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             throw ROBArmRoutineError.blocked("Empty preparation cannot restart after travel, a jaw operation or possible possession.")
         }
         let start=try measured().positionsRadians.map(\.doubleValue)
-        guard referencedGeneration == generation || ROBArmRoutinePlan.near(start,Array(repeating:0,count:7)) ||
-              activeCameraCollisionAdvisory && ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(start) else {
+        guard referencedGeneration == generation || activeCameraCollisionAdvisory ||
+              ROBArmRoutinePlan.near(start,Array(repeating:0,count:7)) else {
             throw ROBArmRoutineError.blocked("Empty preparation needs the current joint reference; no blind return or encoder reset.")
         }
         phase="empty preparation: workspace clearance"
-        update(activeCameraCollisionAdvisory ? "Checking the taught ready pose from current measured hanging feedback" : "Checking a J2/J4 empty lift from the current arm pose before searching for cans")
+        update(activeCameraCollisionAdvisory ? "Checking the taught ready pose from current measured feedback" : "Checking a J2/J4 empty lift from the current arm pose before searching for cans")
         try await beginHeldSceneObservation()
         try await ensureCollisionScene(model:model,initialEmptyRightLift:true)
         guard let map=collisionMap else {throw ROBArmRoutineError.blocked("Empty preparation has no current workspace map.")}
@@ -3276,8 +3275,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
 
     @MainActor private func performStagedEmptyLiftIfNeeded(map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) async throws->Bool {
         let sample=try measured(),baseline=sample.positionsRadians.map(\.doubleValue)
-        guard ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) ||
-              activeCameraCollisionAdvisory && ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(baseline) else {return false}
+        if activeCameraCollisionAdvisory,ROBCanRecyclingReadyPose.matches(baseline,physicalSide:physicalSide) {return false}
+        guard activeCameraCollisionAdvisory || ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) else {return false}
         guard map.registrationID==nil else {return false}
         guard localReceiptCommand != nil,physicalSide=="right",!armTravelDispatched,!jawCommandDispatched,
               !jawSetupDispatchUncertain,!recyclingGripDispatched,!servoPossiblePayloadUncertain,
@@ -3329,15 +3328,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             try await refreshInitialEmptyDispatchView(map:map,model:model,trial:trial,baseline:baseline,reference:reference)
         }
         guard path.steps==proof.steps else {throw ROBArmRoutineError.blocked("The staged lift changed during clearance review.")}
-        if operatorReadyPose {
-            activeReadyPoseClearance=try await Task.detached(priority:.userInitiated) {
-                var proxy=ROBWorkspaceSelfProxyClearance(model:model)
-                try ROBWorkspaceCollisionPlan.checkReadyPoseFeedback(proof,index:0,actual:baseline,proxy:&proxy)
-                return proxy
-            }.value
-        }
         activeStagedEmptyLift=proof;activeStagedEmptyLiftSegment=0;proposal=path;collisionReviewProposal=path
-        defer {activeStagedEmptyLift=nil;activeStagedEmptyLiftSegment=0;activeReadyPoseClearance=nil;proposal=nil;proposalStep = -1;reviewedDispatchStart=nil}
+        defer {activeStagedEmptyLift=nil;activeStagedEmptyLiftSegment=0;proposal=nil;proposalStep = -1;reviewedDispatchStart=nil}
         inactiveWorkspaceSearch=false
         try await prepareCameraAndMode(stationaryJaw:false)
         sentPath=[baseline]
