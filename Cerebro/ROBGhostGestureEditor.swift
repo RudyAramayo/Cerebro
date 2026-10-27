@@ -360,7 +360,7 @@ import simd
         currentHelp.textColor = .secondaryLabelColor
         currentPlot.heightAnchor.constraint(equalToConstant: 75).isActive = true
         let stack = NSStackView(views: [title, help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, angleText, xyzLabels, targets, nudgeRow,
-            row([canArm, button("Find Coke can + ghost grab", #selector(findAndPreviewCan))]), canInfo,
+            row([canArm, button("Scan front table + ghost grab", #selector(findAndPreviewCan))]), canInfo,
             collisionControls, inspectCollision, collisionInfo,
             button("Teach can → bucket task", #selector(newTabletopTask)), posesRow, poseCount, preview, timeline, identity, executeButton,
             row([stop, button("Review stopped return", #selector(recover))]),
@@ -399,35 +399,30 @@ import simd
         resetGhostToCurrentPose()
         clearCanVisuals()
         displayedCan = nil
-        canInfo.stringValue = "Finding a fresh RGB-D can target…"
-        status.stringValue = "Neck-camera search, then ghost rehearsal. Arms and jaws stay unchanged."
+        canInfo.stringValue = "Scanning the immediate right, center and left of the table…"
+        status.stringValue = "Complete both sides, compare fresh cans, then preview the nearest reachable grasp."
         let request = UUID(); canRequestID = request
-        ROBArmRoutineCoordinator.shared.performCommand("\(side)_search_workspace", target: "can") { [weak self] result in
+        ROBArmRoutineCoordinator.shared.performCommand("\(side)_search_workspace", target: "front_table_can") { [weak self] result in
             guard let self, self.canRequestID == request else { return }
-            guard let can = ROBWorkspaceSearch.shared.locatedObjects[.can] else {
+            guard let map = ROBWorkspaceSearch.shared.collisionSnapshot else {
                 self.resetGhostToCurrentPose()
-                self.canInfo.stringValue = "Can target: no confirmed RGB-D position"
-                self.status.stringValue = result["detail"] as? String ?? "The can was not localized."
+                self.canInfo.stringValue = "Can target: no current RGB-D survey"
+                self.status.stringValue = result["detail"] as? String ?? "The table survey did not complete."
                 return
             }
             let baseline = self.freshBaseline().map { model.positions(vendorLeft: $0.q) } ?? model.reference
-            let projectionIdentity=ROBWorkspaceSearch.shared.collisionSnapshot?.estimatedCameraProjectionIdentity ?? ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
-            self.status.stringValue = "Can measured. Computing the ghost reach…"
+            self.status.stringValue = "Comparing measured cans by distance from the \(side) arm and calculating ghost grasps…"
             self.canPlanTask = Task { @MainActor [weak self] in
-                do {
-                    let preview = try await Task.detached(priority: .userInitiated) {
-                        try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: side,
-                            reachOffset:side == "left" ? ROBLeftCanReachCalibration.load(model:model,can:can,
-                                estimatedCameraProjectionIdentity:projectionIdentity) : .zero)
-                    }.value
-                    guard let self, !Task.isCancelled, self.canRequestID == request else { return }
-                    self.showCanPreview(preview)
-                    self.play()
-                    if let message = preview.helpRequest { ROBWorkspaceSearch.shared.announce?(message) }
-                } catch {
-                    guard let self, self.canRequestID == request else { return }
-                    self.status.stringValue = error.localizedDescription
+                let selection = await ROBWorkspaceSearch.shared.nearestReachableCan(model: model, baseline: baseline, map: map)
+                guard let self, !Task.isCancelled, self.canRequestID == request else { return }
+                guard let preview = selection.preview else {
+                    self.resetGhostToCurrentPose()
+                    self.canInfo.stringValue = "Can target: no confirmed reachable can in this survey"
+                    self.status.stringValue = selection.diagnostics.compactMap { $0["detail"] as? String ?? $0["status"] as? String }.joined(separator: "\n")
+                    return
                 }
+                self.showCanPreview(preview)
+                self.play()
             }
         }
     }
@@ -657,7 +652,7 @@ import simd
             ? String(format: "Grasp model error %.1f mm; gripper tilt %.1f° from horizontal. Jaw closure/retention simulated; tool mounting and table clearance unverified.", preview.graspError * 1000, preview.gripperTiltDegrees)
             : String(format: "Hand gap %.1f cm; gripper tilt %.1f° from horizontal. No grasp or lift is claimed.", preview.graspError * 100, preview.gripperTiltDegrees))
         if let message = preview.helpRequest {
-            status.stringValue += "\n" + message + " Then use Find Coke can + ghost grab to check again."
+            status.stringValue += "\n" + message + " Then use Scan front table + ghost grab to check again."
         }
     }
 

@@ -1634,11 +1634,25 @@ struct ROBWorkspaceSearchSchedule {
     private(set) var attempted: [ROBWorkspaceView] = []
     let recallViews: [ROBWorkspaceView]
     let plannedViewCount: Int
+    let surveysFrontTable: Bool
 
     init(targets: [ROBWorkspaceTarget], recall: ROBWorkspaceRecall,
          now: Double = Date().timeIntervalSince1970 * 1000,
+         frontTableSide: String? = nil,
          boundedPan: (Double) -> Double = { max(-45,min(45,$0)) }) {
         requested = Set(targets)
+        surveysFrontTable = frontTableSide != nil
+        if let side = frontTableSide {
+            // Preview the immediate table on BOTH sides before choosing a can.
+            // Recall cannot jump this survey to an old across-table target.
+            let sign = side == "right" ? -1.0 : 1.0
+            recallViews = []
+            pending = [sign * 30, 0, -sign * 30].map {
+                Job(view: .init(panDegrees: boundedPan($0), upperTarget: 6306), target: nil)
+            }
+            plannedViewCount = pending.count
+            return
+        }
         var recalled: [Job] = [], nearby: [Job] = []
         for target in targets {
             guard let sighting = recall.sightings.first(where: {
@@ -1714,7 +1728,7 @@ struct ROBWorkspaceSearchSchedule {
         if !hasAttempted(view) { attempted.append(view) }
     }
     mutating func next(confirmed: Set<ROBWorkspaceTarget>) -> ROBWorkspaceView? {
-        if !requested.isEmpty && requested.isSubset(of:confirmed) { return nil }
+        if !surveysFrontTable && !requested.isEmpty && requested.isSubset(of:confirmed) { return nil }
         while !pending.isEmpty {
             let job = pending.removeFirst()
             if let target = job.target, confirmed.contains(target) { continue }

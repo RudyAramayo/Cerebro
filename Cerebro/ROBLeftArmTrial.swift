@@ -247,6 +247,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         "right_estimated_preview", "right_estimated_trial", "right_recycle_can", "right_recycle_two_cans", "right_recycle_three_cans", "left_recycle_two_cans", "right_search_workspace", "right_scan_clearance"] + ROBRecyclingBatchRequest.configuredCommands
     private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging", "left_scan_clearance", "left_estimated_preview"]
     @nonobjc private var workspaceSearchTargets = ROBWorkspaceTarget.allCases
+    @nonobjc private var workspaceFrontTableSurvey = false
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
     var isNeckOnlyInspection: Bool { isRunning && Self.neckOnlyCommands.contains(activeCommand) }
@@ -967,8 +968,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         requestedCanCount = canCount
         let canonical = requestedCommand.hasPrefix("right_") ? "left_" + requestedCommand.dropFirst(6) : requestedCommand
         let command = ["left_recycle_two_cans","left_recycle_three_cans","left_recycle_cans"].contains(canonical) ? "left_recycle_can" : canonical == "left_estimated_trial" ? "left_estimated_calibration" : canonical
+        let searchTarget = target.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        workspaceFrontTableSurvey = command == "left_search_workspace" && searchTarget == "front_table_can"
         workspaceSearchTargets = command == "left_search_workspace"
-            && target.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "can"
+            && ["can", "front_table_can"].contains(searchTarget)
             ? [.can] : ROBWorkspaceTarget.allCases
         if command == "left_estimated_calibration" { performEstimatedCalibration(completion:completion); return }
         if !isRunning { invalidateEstimatedPreview(reason:"Another operation replaced the estimated preview") }
@@ -2598,7 +2601,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         if command == "left_search_workspace" || command == "left_check_hanging" {
             let model = try workspaceModel()
             _ = try await ROBWorkspaceSearch.shared.run(targets: command == "left_check_hanging" ? [] : workspaceSearchTargets,
-                model: model, requireDepth: false, check: { try self.check() }, progress: { self.update($0) })
+                model: model, requireDepth: workspaceFrontTableSurvey, surveyFrontTable: workspaceFrontTableSurvey,
+                check: { try self.check() }, progress: { self.update($0) })
             return ["status": "accepted_unverified", "measured": false, "arm_motion_sent": false,
                 "detail": ROBWorkspaceSearch.shared.lastReport["detail"] ?? "Local workspace search ended.",
                 "workspace_search": ROBWorkspaceSearch.shared.lastReport]

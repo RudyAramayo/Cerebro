@@ -2600,6 +2600,7 @@ struct ROBWorkspaceCanSelection {
     }
 
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
+        surveyFrontTable: Bool = false,
         permitsLocalCanShapePrior: () throws -> Bool = {false}, canReachBaseline:[String:Double]? = nil,
         passiveFeedbackCheckpoint:(() async throws->Void)?=nil,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
@@ -2638,7 +2639,7 @@ struct ROBWorkspaceCanSelection {
         var livePointing: (hint: ROBWorkspacePointingHint, view: ROBWorkspaceView, capturedAt: Double)?
         var followedLivePointing = false
         var recall = ROBWorkspaceRecall.load(model: model)
-        let fixedRegisteredView = registeredCurrentView(model:model)
+        let fixedRegisteredView = surveyFrontTable ? nil : registeredCurrentView(model:model)
         let fixedContext = fixedRegisteredView.flatMap { _ in
             vision.snapshot()["face"].flatMap { registeredCameraContext(frame:$0,model:model) }
         }
@@ -2666,6 +2667,7 @@ struct ROBWorkspaceCanSelection {
         var localReachSelection:ROBWorkspaceCanSelection?
         var localReachSelectionRequired=false
         var schedule = ROBWorkspaceSearchSchedule(targets:targets,recall:recall,
+            frontTableSide: surveyFrontTable ? model.physicalSide : nil,
             boundedPan:boundedPan ?? { max(-45,min(45,$0)) })
         let recalledViews = schedule.recallViews
         var bestRecallQuality: [ROBWorkspaceTarget: Double] = [:]
@@ -2690,6 +2692,8 @@ struct ROBWorkspaceCanSelection {
                 "announcements": announcements,
                 "settle_seconds_per_view": 1.5,
                 "depth_required": requireDepth,
+                "front_table_survey": surveyFrontTable,
+                "front_table_views": surveyFrontTable ? schedule.attempted.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] } : [],
                 "recall_views": recalledViews.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] },
                 "historical_positions_used_for_motion": false,
                 "nearest_reachable_can_selections":reachSelections,
@@ -2890,7 +2894,7 @@ struct ROBWorkspaceCanSelection {
                 // when the photo-origin option is disabled.
                 let cameraTransform=measuredCamera?.registration.cameraToRobot ??
                     (estimatedCamera?.identity != nil ? estimatedCamera?.matrix:nil)
-                for target in targets where found[target] == nil {
+                for target in targets where surveyFrontTable || found[target] == nil {
                     var detection = observation[target]
                     var measurement: ROBWorkspaceLocatedObject?
                     if target == .can, let depth = frame.depth, let k = frame.intrinsics {
@@ -3133,7 +3137,9 @@ struct ROBWorkspaceCanSelection {
                     }
                 }
                 evidence.append(entry)
-                if !targets.isEmpty && targetsConfirmed() { break }
+                // Each survey view needs its own two fresh exposures, even
+                // after a different view has already confirmed another can.
+                if !targets.isEmpty && targetsConfirmed() && (!surveyFrontTable || attempt >= 1) { break }
                 if targets.isEmpty && leftHanging && rightHanging { break }
             }
             if let message = speech.confirmed(visuallyFound, targets: targets) {
@@ -3185,7 +3191,7 @@ struct ROBWorkspaceCanSelection {
             try await inspectWithRetry(view)
             // A partial object at the image edge warrants looking directly
             // at it before continuing the raster, especially a bucket rim.
-            while fixedRegisteredView == nil, !targetsConfirmed(), !recenterViews.isEmpty, recenteredViews.count < 4 {
+            while !surveyFrontTable, fixedRegisteredView == nil, !targetsConfirmed(), !recenterViews.isEmpty, recenteredViews.count < 4 {
                 let candidate = recenterViews.removeFirst(), centered = candidate.view
                 guard found[candidate.target] == nil, !schedule.hasAttempted(centered),
                       !recenteredViews.contains(where: { abs($0.panDegrees - centered.panDegrees) < 5 && abs($0.upperTarget - centered.upperTarget) < 150 }) else { continue }
@@ -3193,7 +3199,7 @@ struct ROBWorkspaceCanSelection {
                 try await inspectWithRetry(centered)
                 persist("searching", "Centered a remembered or partially visible object; taking new measurements")
             }
-            if fixedRegisteredView == nil, !targets.isEmpty, !followedLivePointing, let pointing = livePointing,
+            if !surveyFrontTable, fixedRegisteredView == nil, !targets.isEmpty, !followedLivePointing, let pointing = livePointing,
                Date().timeIntervalSince1970 * 1000 - pointing.capturedAt < 15_000,
                targets.contains(where: { !visuallyFound.contains($0) }) {
                 followedLivePointing = true
@@ -3201,9 +3207,9 @@ struct ROBWorkspaceCanSelection {
                 try await followPointing(pointing.hint, from: pointing.view)
             }
             persist("searching", "Completed search view \(viewIndex); confirmed targets skip their remaining attention hints")
-            if targets.isEmpty ? leftHanging && rightHanging : targetsConfirmed() { break }
+            if !surveyFrontTable && (targets.isEmpty ? leftHanging && rightHanging : targetsConfirmed()) { break }
         }
-        if fixedRegisteredView == nil, validObservations > 0, !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {
+        if !surveyFrontTable, fixedRegisteredView == nil, validObservations > 0, !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {
             let missing = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName).joined(separator: " and ")
             let humanView = nearest?.view ?? ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
             if try await moveView(humanView) {
