@@ -244,8 +244,8 @@ extension Notification.Name {
         var result: [String: ROBAmberGatewayTelemetry] = [:]
         for arm in arms {
             guard let sample = gateway.telemetry(forArm: arm),
-                  sample.effectiveSampleAgeMilliseconds <= 250,
-                  sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+                  sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                  sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
                   ROBArmRoutinePlan.near(sample.positionsRadians.map(\.doubleValue), Array(repeating: 0, count: 7)),
                   sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 0 }),
                   gateway.modes(forArm: arm).count == 7,
@@ -260,7 +260,7 @@ extension Notification.Name {
     private func freshNonParkedReason() -> String? {
         for arm in arms {
             guard let sample = gateway.telemetry(forArm: arm),
-                  sample.effectiveSampleAgeMilliseconds <= 250 else { continue }
+                  sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds else { continue }
             if !ROBArmRoutinePlan.near(sample.positionsRadians.map(\.doubleValue), Array(repeating: 0, count: 7)) {
                 return "both EMPTY arms must be hanging before stationary setup"
             }

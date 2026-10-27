@@ -893,7 +893,7 @@ final class ROBArmRoutineCoordinator {
             if previewedHold {
                 g.q["left"]=try ROBCanRecyclingReadyPose.target(physicalSide:"right")
                 g.mode["left"]=2
-                trial.diagnosticProcessingActive={true}
+                UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
                 // Reproduce the real inactive-LEFT delivery delay while the
                 // physical RIGHT arm is already raised and held.
                 ROBWorkspaceSearch.shared.onInspect={g.queuedFeedbackMilliseconds["right"]=398}
@@ -970,8 +970,8 @@ final class ROBArmRoutineCoordinator {
                 precondition(previewApprovalRequests==0 && previewApprovalPrompts==0,"Preview execution requested redundant arm authorization")
                 let policyURL=URL(fileURLWithPath:trial.lastRecordingPath).deletingPathExtension().appendingPathExtension("feedback-policy.json")
                 let policy=try JSONSerialization.jsonObject(with:Data(contentsOf:policyURL)) as! [String:Any]
-                precondition(policy["diagnostic_stationary_timing"] as?Bool==true && policy["stationary_maximum_age_ms"] as?Double==1_000)
-                precondition(policy["moving_arm_maximum_age_ms"] as?Int==250)
+                precondition(policy["debug_feedback_timing"] as?Bool==true && policy["stationary_maximum_age_ms"] as?Double==500)
+                precondition(policy["moving_arm_maximum_age_ms"] as?Int==500)
                 print("PASS previewed grasp: selected-can neck view restored, reset camera sequence accepted, stationary398ms diagnostic delay tolerated and audited, no bucket/batch/transfer credit, no redundant approval, no motion when the target is absent")
             }
             precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("position_mode") || $0.hasPrefix("gripper") || $0.hasPrefix("activate")})

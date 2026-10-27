@@ -114,7 +114,7 @@ extension Notification.Name {
         let telemetry = ROBAmberGatewayClient.shared.telemetry(forArm: normalizedArm)
         guard let telemetry,
               telemetry.effectiveSampleAgeMilliseconds.isFinite,
-              telemetry.effectiveSampleAgeMilliseconds <= 250,
+              telemetry.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               telemetry.positionsRadians.count == 7 else { return false }
         guard let positions = ROBAmberArmReferenceStore.shared.modelPositions(
             fromVendor: telemetry.positionsRadians.map(\.doubleValue),

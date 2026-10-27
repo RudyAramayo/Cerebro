@@ -321,7 +321,7 @@ final class ROBArmControllerBridge {
 
         guard ROBAmberGatewayClient.shared.isReady(),
               let telemetry = latestTelemetry[intent.arm],
-              telemetry.effectiveAgeMilliseconds <= 250,
+              telemetry.effectiveAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               telemetry.positionsRadians.count == ROBArmControlProtocol.jointCount else {
             sendAuthorityState(
                 for: intent,
@@ -633,7 +633,7 @@ final class ROBArmControllerBridge {
         guard let run = runs[arm], run.gatewayAcknowledged,
               let telemetry = latestTelemetry[arm],
               telemetry.sequence != run.lastEvaluatedTelemetrySequence,
-              telemetry.effectiveAgeMilliseconds <= 250 else { return }
+              telemetry.effectiveAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds else { return }
         run.lastEvaluatedTelemetrySequence = telemetry.sequence
         let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm.rawValue)
         guard reference.isReady,
@@ -827,7 +827,7 @@ final class ROBArmControllerBridge {
                 continue
             }
             guard let telemetry = latestTelemetry[arm],
-                  telemetry.effectiveAgeMilliseconds <= 250,
+                  telemetry.effectiveAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
                   gatewayModes(for: arm).allSatisfy({ $0 == 2 }) else {
                 requestRunHold(
                     arm: arm,

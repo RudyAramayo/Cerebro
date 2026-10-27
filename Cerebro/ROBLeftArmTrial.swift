@@ -213,17 +213,17 @@ private struct ROBSourcePixelArchiveInputs {
     }
 }
 
-/// Diagnostic rendering may delay stationary observations. It never changes
-/// the moving-arm limit or treats an old packet as newly received.
+/// Stationary and moving checks share the operator-selected DEBUG budget.
+/// Normal stationary observations retain350ms; normal motion retains250ms.
 private enum ROBHeldArmFeedbackGuard {
-    static let stationaryScanMaximumAgeMilliseconds = 350.0
-    static let diagnosticStationaryMaximumAgeMilliseconds = 1_000.0
-    static func scanMaximumAge(modes:[Int],diagnosticProcessing:Bool = false)->Double {
-        guard [0,2].contains(where:{modes == Array(repeating:$0,count:7)}) else {return 250}
-        return diagnosticProcessing ? diagnosticStationaryMaximumAgeMilliseconds : stationaryScanMaximumAgeMilliseconds
+    static func scanMaximumAge(modes:[Int])->Double {
+        guard [0,2].contains(where:{modes == Array(repeating:$0,count:7)}) else {
+            return ROBArmFeedbackTiming.maximumAgeMilliseconds
+        }
+        return ROBArmFeedbackTiming.stationaryMaximumAgeMilliseconds
     }
     static func failures(present:Bool,motorAge:Double,gripperAge:Double,q:[Double],expectedQ:[Double],
-        gatewayModes:[Int],reportedModes:[Int],expectedModes:[Int],maximumAgeMilliseconds:Double=250)->[String] {
+        gatewayModes:[Int],reportedModes:[Int],expectedModes:[Int],maximumAgeMilliseconds:Double=ROBArmFeedbackTiming.maximumAgeMilliseconds)->[String] {
         var fields:[String]=[]
         if !present {fields.append("telemetry_missing")}
         if !(motorAge<=maximumAgeMilliseconds) {fields.append("motor_age_ms")}
@@ -353,20 +353,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     @nonobjc private var sceneHold: [String:(positions:[Double],modes:[Int])] = [:]
     @nonobjc private var reviewedDispatchStart: ROBReviewedArmDispatchStart?
 
-    /// Native UI supplies actual Development Mode + diagnostic-window state.
-    /// Headless/default operation has no extra feedback allowance.
-    var diagnosticProcessingActive:(() -> Bool)?
-    private var diagnosticStationaryFeedbackEnabled:Bool {
-        #if DEBUG
-        return diagnosticProcessingActive?() == true && !leased && leaseRenewals.isEmpty &&
-            !armTravelDispatched && !jawCommandDispatched && !jawSetupDispatchUncertain &&
-            !recyclingGripDispatched && !servoPossiblePayloadUncertain
-        #else
-        return false
-        #endif
-    }
     private func stationaryFeedbackMaximumAge(modes:[Int])->Double {
-        ROBHeldArmFeedbackGuard.scanMaximumAge(modes:modes,diagnosticProcessing:diagnosticStationaryFeedbackEnabled)
+        ROBHeldArmFeedbackGuard.scanMaximumAge(modes:modes)
     }
 
     private(set) var physicalSide = "left"
@@ -601,7 +589,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             throw ROBArmRoutineError.blocked("Measured LEFT joints left the approved estimated retreat corridor; hold requested.")
         }
         let held = value.otherArmHold, otherGatewayArm = arm == "right" ? "left" : "right"
-        guard let sample = gateway.telemetry(forArm:otherGatewayArm), sample.effectiveSampleAgeMilliseconds <= 250,
+        guard let sample = gateway.telemetry(forArm:otherGatewayArm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
               gateway.modes(forArm:otherGatewayArm).map(\.intValue) == held.modes,
               sample.statuses.map(\.intValue) == held.modes,
@@ -790,7 +778,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         sampleObserver = NotificationCenter.default.addObserver(forName: .ROBAmberGatewayTelemetryDidUpdate,
             object: gateway, queue: .main) { [weak self] note in
                 guard let self,let sample=note.userInfo?["telemetry"] as? ROBAmberGatewayTelemetry else{return}
-                if self.isRunning,sample.arm==self.arm,sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds<=250 {
+                if self.isRunning,sample.arm==self.arm,sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds {
                     let current=(self.gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
                     if self.servoTelemetryHistory.last?.generation != current {self.servoTelemetryHistory=[]}
                     if self.servoTelemetryHistory.last?.sample.sequence != sample.sequence {
@@ -798,7 +786,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                         if self.servoTelemetryHistory.count>80 {self.servoTelemetryHistory.removeFirst(self.servoTelemetryHistory.count-80)}
                     }
                 }
-                if self.isRunning,self.usesFixedCommissioningKeyframes,sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds<=250 {
+                if self.isRunning,self.usesFixedCommissioningKeyframes,sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds {
                     let current=(self.gateway.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value ?? 0
                     var history=self.nominalBothArmHistory[sample.arm] ?? []
                     if history.last?.generation != current {history=[]}
@@ -1055,7 +1043,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 let model = try workspaceModel()
                 guard let saved = ROBTabletopPickPlace.saved(), saved.modelID == model.modelID,
                       saved.referenceID == model.referenceID, saved.geometryID == model.geometryID,
-                      let sample = gateway.telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250,
+                      let sample = gateway.telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
                       let session = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value else {
                     throw ROBGhostMotionError.blocked("Save a five-position tabletop task in Ghost gestures and connect fresh arm feedback first.")
                 }
@@ -1548,7 +1536,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         // arms have actually settled before any neck/depth capture begins.
         // Position mode alone is not proof that an earlier move has stopped.
         let started = ProcessInfo.processInfo.systemUptime
-        let settlingDeadlineSeconds = diagnosticStationaryFeedbackEnabled ? 5.0 : 2.0
+        let settlingDeadlineSeconds = ROBArmFeedbackTiming.debugEnabled ? 5.0 : 2.0
         var distinctSamples = ["left":0,"right":0]
         while ProcessInfo.processInfo.systemUptime-started < 0.25 || distinctSamples.values.contains(where: { $0 < 3 }) {
             try check()
@@ -1943,8 +1931,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 if self.gateway.isReady(),self.vision.fresh,ROBArmRoutineCoordinator.shared.viewIsStationary?()==true {
                     var next:[String:[Double]]=[:],seq:[String:UInt64]=[:],healthy=true
                     for side in ["left","right"] {
-                        guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
-                              sample.effectiveGripperFeedbackAgeMilliseconds<=250,sample.positionsRadians.count==7,
+                        guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                              sample.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,sample.positionsRadians.count==7,
                               sample.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),sample.sequence>(last[side] ?? 0),
                               sample.statuses.count==7,sample.statuses.allSatisfy({[0,2].contains($0.intValue)}) else {healthy=false;break}
                         let q=sample.positionsRadians.map(\.doubleValue)
@@ -1972,23 +1960,23 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
-    /// Scanning/planning is nonactuating even in position mode. Use the normal
-    /// 350ms budget, or 1s with diagnostic processing, only at the unchanged
-    /// initial empty hold. Travel/jaw/lease state restores250ms before dispatch.
+    /// Development Mode uses500ms throughout planning, jaw setup and motion.
+    /// Normal operation retains350ms only for unchanged empty planning and250ms
+    /// for travel/jaw/lease state. Pose, mode, ownership and Stop stay enforced.
     private var selectedFeedbackMaximumAgeMilliseconds:Double {
         guard localReceiptCommand != nil,!leased,leaseRenewals.isEmpty,
               !armTravelDispatched,!jawCommandDispatched,!jawSetupDispatchUncertain,
               !recyclingGripDispatched,!servoPossiblePayloadUncertain,
-              let held=sceneHold[arm],let sample=gateway.telemetry(forArm:arm) else {return 250}
+              let held=sceneHold[arm],let sample=gateway.telemetry(forArm:arm) else {return ROBArmFeedbackTiming.maximumAgeMilliseconds}
         let expectedModes=positionReady ? Array(repeating:2,count:7):held.modes
-        guard [0,2].contains(where:{expectedModes == Array(repeating:$0,count:7)}) else{return 250}
+        guard [0,2].contains(where:{expectedModes == Array(repeating:$0,count:7)}) else{return ROBArmFeedbackTiming.maximumAgeMilliseconds}
         let maximumAge=stationaryFeedbackMaximumAge(modes:expectedModes)
         let fields=ROBHeldArmFeedbackGuard.failures(present:true,
             motorAge:sample.effectiveSampleAgeMilliseconds,gripperAge:sample.effectiveGripperFeedbackAgeMilliseconds,
             q:sample.positionsRadians.map(\.doubleValue),expectedQ:held.positions,
             gatewayModes:gateway.modes(forArm:arm).map(\.intValue),reportedModes:sample.statuses.map(\.intValue),
             expectedModes:expectedModes,maximumAgeMilliseconds:maximumAge)
-        return fields.isEmpty ? maximumAge:250
+        return fields.isEmpty ? maximumAge:ROBArmFeedbackTiming.maximumAgeMilliseconds
     }
 
     private func measured() throws -> ROBAmberGatewayTelemetry {
@@ -3788,8 +3776,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         try await wait(2) {
             ["left","right"].allSatisfy {side in
-                guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
-                      sample.effectiveGripperFeedbackAgeMilliseconds<=250,sample.positionsRadians.count==7,
+                guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                      sample.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,sample.positionsRadians.count==7,
                       sample.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),sample.statuses.count==7,
                       let first=sample.statuses.first?.intValue,[0,1,2].contains(first),
                       sample.statuses.allSatisfy({$0.intValue==first}) else {return false}
@@ -3810,8 +3798,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         var baselines: [String:[Double]] = [:]
         var sequences: [String:UInt64] = [:]
         for side in ["left","right"] {
-            guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
-                  sample.effectiveGripperFeedbackAgeMilliseconds<=250,sample.positionsRadians.count==7,
+            guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                  sample.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,sample.positionsRadians.count==7,
                   sample.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),
                   sample.statuses.count==7,let first=sample.statuses.first?.intValue,[0,1,2].contains(first),
                   sample.statuses.allSatisfy({$0.intValue==first}),
@@ -3825,7 +3813,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             guard ProcessInfo.processInfo.systemUptime-heldSince>=0.3 else{return false}
             return ["left","right"].allSatisfy { side in
                 guard let sample=self.gateway.telemetry(forArm:side),sample.sequence>(sequences[side] ?? 0),
-                      sample.effectiveSampleAgeMilliseconds<=250,let q=baselines[side] else{return false}
+                      sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,let q=baselines[side] else{return false}
                 return sample.positionsRadians.count==7 && 1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
             }
         }
@@ -3834,8 +3822,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         if allowDeferredJawSetup,!ROBGripperStartupCalibration.shared.calibrationReady(forArm:arm),
            baselines.values.allSatisfy({ROBArmRoutinePlan.near($0,Array(repeating:0,count:7))}) {
             for side in ["left","right"] where gateway.modes(forArm:side).contains(where:{$0.intValue != 0}) {
-                guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
-                      sample.effectiveGripperFeedbackAgeMilliseconds<=250,
+                guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                      sample.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
                       ROBArmRoutinePlan.near(sample.positionsRadians.map(\.doubleValue),Array(repeating:0,count:7)),
                       gateway.modes(forArm:side).map(\.intValue)==sample.statuses.map(\.intValue) else {
                     throw ROBArmRoutineError.blocked("An arm left its measured hanging state before stationary jaw setup; torque remains unchanged.")
@@ -3853,8 +3841,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         for side in ["left","right"] {
             if gateway.modes(forArm:side).map(\.intValue)==Array(repeating:1,count:7) {
-                guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
-                      sample.effectiveGripperFeedbackAgeMilliseconds<=250,let q=baselines[side],
+                guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                      sample.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,let q=baselines[side],
                       sample.statuses.map(\.intValue)==Array(repeating:1,count:7),
                       sample.positionsRadians.count==7,
                       1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
@@ -3862,7 +3850,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 }
                 try await accepted { gateway.enterPositionMode(forArm:side) }
                 try await wait(2) {
-                    guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
+                    guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
                           sample.statuses.map(\.intValue)==Array(repeating:2,count:7),let q=baselines[side] else{return false}
                     return self.gateway.modes(forArm:side).map(\.intValue)==Array(repeating:2,count:7) &&
                         1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
@@ -4136,7 +4124,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
 
     private func exposureMatchedServoFeedback(_ frame:ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry? {
         let now=Date().timeIntervalSince1970*1000
-        return servoTelemetryHistory.filter{$0.generation==generation && $0.sample.sampleAgeAtReceiptMilliseconds<=250 &&
+        return servoTelemetryHistory.filter{$0.generation==generation && $0.sample.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds &&
             $0.sample.effectiveSampleAgeMilliseconds<=700}.min {
                 abs(now-$0.sample.effectiveSampleAgeMilliseconds-frame.capturedAt)<abs(now-$1.sample.effectiveSampleAgeMilliseconds-frame.capturedAt)
             }.flatMap { entry in
@@ -4758,9 +4746,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         if let active = activeEstimated { try writeEstimatedRecording(proof:active.proof,proposal:active.proposal) }
         lastSequence = 0; previousCurrents = nil; peakJump = 0; sampleCount = 0
         delayedSampleCount = 0; maxDelayedSampleAge = 0
-        let feedbackPolicy:[String:Any] = ["diagnostic_stationary_timing":diagnosticStationaryFeedbackEnabled,
+        let feedbackPolicy:[String:Any] = ["debug_feedback_timing":ROBArmFeedbackTiming.debugEnabled,
             "stationary_maximum_age_ms":stationaryFeedbackMaximumAge(modes:Array(repeating:2,count:7)),
-            "moving_arm_maximum_age_ms":250,"packet_timestamps_preserved":true]
+            "moving_arm_maximum_age_ms":ROBArmFeedbackTiming.maximumAgeMilliseconds,"packet_timestamps_preserved":true]
         try JSONSerialization.data(withJSONObject:feedbackPolicy,options:.sortedKeys)
             .write(to:url.deletingPathExtension().appendingPathExtension("feedback-policy.json"),options:.atomic)
     }
@@ -4768,7 +4756,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private func record(_ sample: ROBAmberGatewayTelemetry) throws {
         guard log != nil, sample.sequence > lastSequence else { return }
         let deliveredAge = sample.effectiveSampleAgeMilliseconds
-        guard sample.sampleAgeAtReceiptMilliseconds <= 250, deliveredAge.isFinite, sample.positionsRadians.count == 7,
+        guard sample.sampleAgeAtReceiptMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds, deliveredAge.isFinite, sample.positionsRadians.count == 7,
               sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
               sample.currents.count == 7, sample.currents.allSatisfy({ $0.doubleValue.isFinite }) else {
             throw ROBArmRoutineError.blocked("Invalid or stale left-arm current recording; hold requested.")
@@ -4888,8 +4876,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 do {
                     try check();_ = try requireLocalReceipt()
                     for side in ["left","right"] {
-                        guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
-                              sample.effectiveGripperFeedbackAgeMilliseconds<=250 else {throw ROBArmRoutineError.blocked("Feedback lost before retaining the receipt.")}
+                        guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                              sample.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds else {throw ROBArmRoutineError.blocked("Feedback lost before retaining the receipt.")}
                     }
                     preserveLocalReceipt=true
                 }catch{}

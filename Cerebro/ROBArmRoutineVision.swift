@@ -2498,7 +2498,7 @@ struct ROBWorkspaceCanSelection {
         let gateway = ROBAmberGatewayClient.shared
         let reference = ROBAmberArmReferenceStore.shared
         guard let left = gateway.telemetry(forArm:"right"), let right = gateway.telemetry(forArm:"left"),
-              left.effectiveSampleAgeMilliseconds <= 250, right.effectiveSampleAgeMilliseconds <= 250,
+              left.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds, right.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               reference.readiness(forArm:"right").isReady, reference.readiness(forArm:"left").isReady,
               let rightModel = reference.modelPositions(fromVendor:right.positionsRadians.map(\.doubleValue),forArm:"left") else { return [] }
         var positions = model.positions(vendorLeft:left.positionsRadians.map(\.doubleValue))

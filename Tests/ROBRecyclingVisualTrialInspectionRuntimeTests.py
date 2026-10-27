@@ -131,6 +131,7 @@ final class ROBGhostRobotModel {
     static func provisionalCameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {matrix}
 }
 @MainActor enum ROBWorkspaceCollisionPlan {
+    nonisolated static let maximumMapAgeMilliseconds=60_000.0
     static var validMap=true
     static func jointBounds(model:ROBGhostRobotModel)->[ClosedRange<Double>] {Array(repeating:-3...3,count:7)}
     static func validateVisualCalibrationTrialMap(_ map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,generation:UInt64,
@@ -162,7 +163,8 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
         (observation,Frame(sequence:1,capturedAt:Date().timeIntervalSince1970*1000-50,cameraGeneration:scene.camera,intrinsics:intrinsics))
     }
     func makeGripperVisualServoFrame(frame:Frame,scopeIdentity:String,jointPositions:[Double],jointCapturedAtMilliseconds:Double,
-        poseHeldDuringCapture:Bool,openingCommandAtMilliseconds:Double?=nil,nowMilliseconds:Double=Date().timeIntervalSince1970*1000)throws->ROBGripperVisualServo.Frame {
+        poseHeldDuringCapture:Bool,openingCommandAtMilliseconds:Double?=nil,nowMilliseconds:Double=Date().timeIntervalSince1970*1000,
+        cameraCollisionAdvisoryTrial:ROBWorkspaceVisualCalibrationTrial?=nil)throws->ROBGripperVisualServo.Frame {
         var f=ROBGripperVisualServo.Frame(width:320,height:240,rgb:Data(repeating:128,count:320*240*3),depthMillimeters:Array(repeating:750,count:320*240),
             fx:100,fy:100,cx:160,cy:120,sequence:frame.sequence,capturedAtMilliseconds:frame.capturedAt,scopeIdentity:scopeIdentity,
             jointPositions:jointPositions,jointCapturedAtMilliseconds:jointCapturedAtMilliseconds,poseHeldDuringCapture:poseHeldDuringCapture)
@@ -339,5 +341,5 @@ struct Feedback {var sampleAgeAtReceiptMilliseconds=0.0;var effectiveSampleAgeMi
 
 with tempfile.TemporaryDirectory(prefix='rob-visual-trial-inspection-', dir='/private/tmp') as folder:
     root=Path(folder); path=root/'Fixture.swift';path.write_text(fixture)
-    subprocess.run(['xcrun','swiftc','-swift-version','5','-parse-as-library',str(ROOT/'Cerebro/ROBVisualGraspVerifier.swift'),str(ROOT/'Cerebro/ROBGripperVisualServo.swift'),str(inspection),str(path),'-o',str(root/'fixture')],check=True,timeout=60)
+    subprocess.run(['xcrun','swiftc','-swift-version','5','-parse-as-library',str(ROOT/'Cerebro/ROBVisualGraspVerifier.swift'),str(ROOT/'Cerebro/ROBGripperVisualServo.swift'),str(ROOT/'Cerebro/ROBArmJointLimits.swift'),str(inspection),str(path),'-o',str(root/'fixture')],check=True,timeout=60)
     subprocess.run([str(root/'fixture')],check=True,timeout=15)

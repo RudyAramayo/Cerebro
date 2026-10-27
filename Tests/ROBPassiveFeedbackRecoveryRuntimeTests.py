@@ -10,8 +10,8 @@ guard=braced_declaration(source,'private enum ROBHeldArmFeedbackGuard {').replac
 pause=braced_declaration(source,'private struct ROBPassiveFeedbackPause:').replace('private struct','struct',1)
 check=braced_declaration(source,'    private func check() throws {')
 fullCheck=check.replace('private func','func',1)
-diagnostics='\n'.join(braced_declaration(source,m).replace('private ','',1)for m in [
- '    private var diagnosticStationaryFeedbackEnabled:Bool {','    private func stationaryFeedbackMaximumAge(modes:'])
+timing=(root/'Cerebro/ROBArmJointLimits.swift').read_text()
+diagnostics=braced_declaration(source,'    private func stationaryFeedbackMaximumAge(modes:').replace('private ','',1)
 methods='\n'.join(braced_declaration(source,m).replace('private func','func',1)for m in ['    @MainActor private func passiveFeedbackCheckpoint()','    @MainActor private func wait(_ seconds:','    @MainActor private func accepted('])
 enroll=braced_declaration(source,'    @nonobjc func performUsingLocalRecyclingReceipt(').replace('@nonobjc func','func',1)
 batch=braced_declaration((root/'Cerebro/ROBWorkspaceSearchPlan.swift').read_text(),'enum ROBRecyclingBatchRequest {')
@@ -24,6 +24,7 @@ fixture=r'''
 import Foundation
 enum ROBArmRoutineError:Error {case blocked(String)}
 enum ROBGhostMotionError:Error {case blocked(String)}
+/* TIMING */
 /* GUARD */
 /* PAUSE */
 /* BATCH */
@@ -44,7 +45,7 @@ final class Gateway {
  var inactiveWorkspaceSearch=true,leased=false,positionReady=false,armTravelDispatched=false,jawCommandDispatched=false,jawSetupDispatchUncertain=false,recyclingGripDispatched=false
  var sceneHold:[String:(positions:[Double],modes:[Int])]=["left":(Array(repeating:0,count:7),Array(repeating:0,count:7)),"right":(Array(repeating:0,count:7),Array(repeating:0,count:7))]
  var passiveFeedbackPauseStarted:Double?,lastHeldFeedbackDiagnostic:String?,lastRecordingPath="",phase="passive search"
- var diagnosticProcessingActive:(()->Bool)?,servoPossiblePayloadUncertain=false
+ var servoPossiblePayloadUncertain=false
  /* DIAGNOSTICS */
  var waiting=Set<UInt64>(),acks:[UInt64:Bool]=[:],holdConfirmations:[UInt64:Bool]=[:],dispatches=0
  static let neckOnlyCommands=Set<String>()
@@ -153,19 +154,20 @@ final class ROBWorkspaceSearch {
   ROBControllerArmApproval.shared.onAuthorize=nil
   // The real failure had a raised RIGHT arm and inactive LEFT arm. Exercise
   // both check() branches and make sure diagnostics never excuse a mode fault,
-  // pose drift, missing packet, active lease, or more than1second of age.
-  let diagnostic=Hold();diagnostic.diagnosticProcessingActive={true}
+  // pose drift, missing packet, or more than500ms of age; leases share500ms.
+  UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
+  let diagnostic=Hold()
   diagnostic.sceneHold["left"]!.modes=Array(repeating:2,count:7)
   diagnostic.gateway.mode["left"]=2;diagnostic.gateway.samples["left"]!.statuses=Array(repeating:2,count:7)
   #if DEBUG
-  for age in [398.0,750.0,1_000.0] {
+  for age in [398.0,499.0,500.0] {
    for side in ["left","right"] {
     diagnostic.gateway.samples[side]!.effectiveSampleAgeMilliseconds=age
     diagnostic.gateway.samples[side]!.effectiveGripperFeedbackAgeMilliseconds=age
    }
    try diagnostic.check()
   }
-  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=1_001;fatal(diagnostic,"motor_age_ms")
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=501;fatal(diagnostic,"motor_age_ms")
   for side in ["left","right"] {
    diagnostic.gateway.samples[side]!.effectiveSampleAgeMilliseconds=398
    diagnostic.gateway.samples[side]!.effectiveGripperFeedbackAgeMilliseconds=398
@@ -173,13 +175,16 @@ final class ROBWorkspaceSearch {
   diagnostic.gateway.samples["right"]!.positionsRadians[0]=0.01;fatal(diagnostic,"position_drift_m")
   diagnostic.gateway.samples["right"]!.positionsRadians[0]=0
   diagnostic.gateway.mode["right"]=1;fatal(diagnostic,"gateway_modes");diagnostic.gateway.mode["right"]=0
-  diagnostic.inactiveWorkspaceSearch=false;diagnostic.leased=true;fatal(diagnostic,"motor_age_ms")
+  diagnostic.inactiveWorkspaceSearch=false;diagnostic.leased=true;try diagnostic.check()
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=501;fatal(diagnostic,"motor_age_ms")
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=398
   diagnostic.leased=false;diagnostic.inactiveWorkspaceSearch=true
-  diagnostic.diagnosticProcessingActive={false};fatal(diagnostic,"motor_age_ms")
+  UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":false],forName:UserDefaults.argumentDomain);fatal(diagnostic,"motor_age_ms")
   #else
-  precondition(!diagnostic.diagnosticStationaryFeedbackEnabled)
+  precondition(!ROBArmFeedbackTiming.debugEnabled)
   diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=398;fatal(diagnostic,"motor_age_ms")
   #endif
+  UserDefaults.standard.removeVolatileDomain(forName:UserDefaults.argumentDomain)
   do{try agedDuringAuthorization.check();preconditionFailure("Next checkpoint must detect stale feedback")}catch is ROBPassiveFeedbackPause{}
   let nonlocal=Hold();nonlocal.localReceiptCommand=nil
   ROBControllerArmApproval.shared.onAuthorize={nonlocal.gateway.samples["left"]!.effectiveSampleAgeMilliseconds=351}
@@ -221,7 +226,7 @@ final class ROBWorkspaceSearch {
   print("PASS stationary inactive/position holds accept350ms; complete actual local/nonlocal/active check; inactive age-only same-q/mode defers≤2s; q/mode/missing/active-age/timeout fatal; direct local Prepare enrolls then waits fresh; source expiry capped2; no hardware")
  }
 }
-'''.replace('/* GUARD */',guard).replace('/* PAUSE */',pause).replace('/* BATCH */',batch).replace('/* FULL CHECK */',fullCheck).replace('/* METHODS */',methods).replace('/* ENROLL */',enroll).replace('/* DIAGNOSTICS */',diagnostics)
+'''.replace('/* TIMING */',timing).replace('/* GUARD */',guard).replace('/* PAUSE */',pause).replace('/* BATCH */',batch).replace('/* FULL CHECK */',fullCheck).replace('/* METHODS */',methods).replace('/* ENROLL */',enroll).replace('/* DIAGNOSTICS */',diagnostics)
 with tempfile.TemporaryDirectory(prefix='rob-passive-feedback-',dir='/private/tmp')as folder:
  p=Path(folder);(p/'Fixture.swift').write_text(fixture)
  for flags in [[],['-D','DEBUG']]:

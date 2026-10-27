@@ -820,7 +820,7 @@ import simd
     private func freshBaseline() -> (q: [Double], generation: UInt64)? {
         let gateway = ROBAmberGatewayClient.shared
         let gatewayArm = model?.physicalSide == "right" ? "left" : "right"
-        guard gateway.isReady(), let sample = gateway.telemetry(forArm: gatewayArm), sample.effectiveSampleAgeMilliseconds <= 250,
+        guard gateway.isReady(), let sample = gateway.telemetry(forArm: gatewayArm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
               let generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value,
               generation > 0 else { return nil }

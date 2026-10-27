@@ -22,7 +22,7 @@ def block(source, marker):
     return source[start:index]
 
 
-FIXTURE = r'''
+FIXTURE = (ROOT / 'Cerebro/ROBArmJointLimits.swift').read_text() + r'''
 import Foundation
 
 enum ROBArmRoutineError:LocalizedError {

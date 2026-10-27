@@ -14,3 +14,17 @@ enum ROBArmJointLimits {
         -3.05 ... 3.05,
     ]
 }
+
+/// Host feedback admission uses a bounded commissioning budget only while the
+/// DEBUG app's existing Development Mode is enabled. Packet ages remain real.
+enum ROBArmFeedbackTiming {
+    static var debugEnabled: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "ROBDevelopmentMode")
+        #else
+        return false
+        #endif
+    }
+    static var maximumAgeMilliseconds: Double { debugEnabled ? 500 : 250 }
+    static var stationaryMaximumAgeMilliseconds: Double { debugEnabled ? 500 : 350 }
+}

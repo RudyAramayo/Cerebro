@@ -886,8 +886,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
               ["left", "right"].contains(arm),
               let target = leftTrial ? ROBLeftArmInteractionPlan.target(index: index)
                 : ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right"),
-              let sample = telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250,
-              sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+              let sample = telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               leftTrial ? ROBLeftArmInteractionPlan.allowsDirectMove(from: sample.positionsRadians.map(\.doubleValue), to: index)
                 : ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right")
                     .map({ abs($0 - Double(index)) <= 1.05 }) == true,
@@ -913,8 +913,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         guard Thread.isMainThread,
               let target = ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index,
                 seconds: duration, generation: expectedSessionGeneration),
-              let sample = telemetry(forArm: selectedArm), sample.effectiveSampleAgeMilliseconds <= 250,
-              sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+              let sample = telemetry(forArm: selectedArm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }),
               modes(forArm: selectedArm).count == 7, modes(forArm: selectedArm).allSatisfy({ $0.intValue == 2 }),
               let minimum = ROBLeftArmInteractionPlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
@@ -1016,8 +1016,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         ["left", "right"].allSatisfy { arm in
             guard let sample = arm == "left" ? leftTelemetry : rightTelemetry else { return false }
             let modes = arm == "left" ? leftModes : rightModes
-            return sample.effectiveSampleAgeMilliseconds <= 250
-                && sample.effectiveGripperFeedbackAgeMilliseconds <= 250
+            return sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds
+                && sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds
                 && sample.positionsRadians.count == 7
                 && sample.positionsRadians.allSatisfy { $0.doubleValue.isFinite && abs($0.doubleValue) <= ROBArmRoutinePlan.tolerance }
                 && sample.statuses.count == 7 && sample.statuses.allSatisfy { $0.intValue == 0 }
@@ -1097,7 +1097,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 reason = "Gateway session changed; the delayed manual command was discarded"
             } else if telemetry?.jointFeedbackAgeMilliseconds.count != 7 {
                 reason = "Per-motor CAN feedback is unavailable; update the Amber gateway"
-            } else if telemetry!.effectiveSampleAgeMilliseconds > 250 {
+            } else if telemetry!.effectiveSampleAgeMilliseconds > ROBArmFeedbackTiming.maximumAgeMilliseconds {
                 let sample = telemetry!
                 let localAge = max(0, ProcessInfo.processInfo.systemUptime - sample.receivedAtUptime) * 1_000
                 let canAge = sample.jointFeedbackAgeMilliseconds.map(\.doubleValue).max() ?? .infinity
@@ -1107,7 +1107,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 reason = "Arm feedback is missing or stale; motion blocked. "
                     + "At gateway: controller \(age(sample.controllerSampleAgeMilliseconds)), "
                     + "oldest joint CAN \(age(canAge)); local time since receipt \(age(localAge))."
-            } else if telemetry!.effectiveGripperFeedbackAgeMilliseconds > 250 {
+            } else if telemetry!.effectiveGripperFeedbackAgeMilliseconds > ROBArmFeedbackTiming.maximumAgeMilliseconds {
                 reason = "Gripper CAN feedback is missing or stale; check the arm connection"
             } else {
                 reason = nil

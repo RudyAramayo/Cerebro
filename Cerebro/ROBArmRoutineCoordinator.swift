@@ -421,8 +421,8 @@ enum ROBArmRoutineError: LocalizedError {
 
     private func measured(_ arm: String) throws -> [Double] {
         guard let sample = gateway.telemetry(forArm: arm), sample.sequence > 0,
-              sample.effectiveSampleAgeMilliseconds <= 250,
-              sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+              sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               sample.positionsRadians.count == 7 else { throw ROBArmRoutineError.blocked("Fresh per-motor feedback is missing on \(arm == "left" ? "ROB-right" : "ROB-left").") }
         return sample.positionsRadians.map(\.doubleValue)
     }
@@ -547,7 +547,7 @@ enum ROBArmRoutineError: LocalizedError {
             arms.allSatisfy { arm in
                 guard let sample = gateway.telemetry(forArm: arm),
                       sample.sequence > modeSequences[arm]!,
-                      sample.effectiveSampleAgeMilliseconds <= 250,
+                      sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
                       sample.statuses.count == 7,
                       sample.statuses.allSatisfy({ $0.intValue == 2 }) else { return false }
                 let modes = gateway.modes(forArm: arm)
@@ -683,7 +683,7 @@ enum ROBArmRoutineError: LocalizedError {
         var settlers = Dictionary(uniqueKeysWithValues: arms.map { ($0, ROBArmRoutineSettler()) })
         try await wait(seconds: 2) {
             arms.allSatisfy { arm in
-                guard let sample = gateway.telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250 else { return false }
+                guard let sample = gateway.telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds else { return false }
                 return settlers[arm]!.observe(sequence: sample.sequence,
                     positions: sample.positionsRadians.map(\.doubleValue), target: Array(repeating: 0, count: 7),
                     now: ProcessInfo.processInfo.systemUptime)

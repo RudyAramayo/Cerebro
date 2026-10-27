@@ -265,7 +265,7 @@ import CoreImage
         let baseline=ServoBaseline(projection:.visualTrial(projection),scope:scope,targetIdentity:"can-\(can.sequence)-\(trial.receiptID)",viewIdentity:view)
         let result=ServoContext(baseline:baseline,can:can,model:model,box:detections[0].box)
         result.cameraCollisionAdvisoryTrial=trial.usesOperatorClearedCameraCollisionAdvisory ? trial:nil
-        guard let seedFeedback=feedbackForFrame(reference),seedFeedback.sampleAgeAtReceiptMilliseconds<=250 else {
+        guard let seedFeedback=feedbackForFrame(reference),seedFeedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds else {
             throw ROBGhostMotionError.blocked("Pre-approach can appearance needs its actual exposure-matched held feedback.")
         }
         let seedNow=Date().timeIntervalSince1970*1000
@@ -301,8 +301,8 @@ import CoreImage
         let now=Date().timeIntervalSince1970*1000
         let historicalTime=now-feedback.effectiveSampleAgeMilliseconds
         guard frame.sequence>context.lastSequence,frame.capturedAt>=heldSinceMilliseconds,
-              feedback.sampleAgeAtReceiptMilliseconds<=250,currentFeedback.effectiveSampleAgeMilliseconds<=250,
-              currentFeedback.effectiveGripperFeedbackAgeMilliseconds<=250,
+              feedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,currentFeedback.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              currentFeedback.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
               1.5*zip(feedback.positionsRadians,currentFeedback.positionsRadians).reduce(0.0,{$0+abs($1.0.doubleValue-$1.1.doubleValue)})<=0.003,
               let image=servoImageContext.createCGImage(frame.image,from:frame.image.extent) else {
             throw ROBGhostMotionError.blocked("Servo needs an advancing held-pose image and actual exposure-matched CAN history, plus fresh current feedback.")
@@ -528,7 +528,7 @@ import CoreImage
             try validateVisualProjection(value,scope:scope,frame:frame,model:model)
             guard gatewayArm == (model.physicalSide == "right" ? "left" : "right"),
                   let feedback=feedbackForFrame?(frame) ?? ROBAmberGatewayClient.shared.telemetry(forArm:gatewayArm),
-                  feedback.effectiveSampleAgeMilliseconds <= (feedbackForFrame == nil ? 150:700),feedback.sampleAgeAtReceiptMilliseconds<=250,
+                  feedback.effectiveSampleAgeMilliseconds <= (feedbackForFrame == nil ? 150:700),feedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
                   feedback.positionsRadians.count==7,feedback.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),
                   feedback.statuses.count==7,feedback.statuses.allSatisfy({$0.intValue==2}),
                   let k=frame.intrinsics,let depth=frame.depth,

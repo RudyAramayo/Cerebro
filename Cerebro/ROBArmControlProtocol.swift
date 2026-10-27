@@ -882,7 +882,7 @@ struct ROBArmTargetGateDecision: Equatable {
 }
 
 struct ROBArmTargetExecutionContext: Equatable {
-    static let maximumTelemetryAgeMilliseconds = 250.0
+    static var maximumTelemetryAgeMilliseconds: Double { ROBArmFeedbackTiming.maximumAgeMilliseconds }
     static let requiredPositionMode = 2
     static let maximumUpdateDeltaRadians = 0.10
     static let maximumAverageSpeedRadiansPerSecond = 0.20
@@ -963,7 +963,7 @@ enum ROBArmTargetGateEvaluator {
                 .contains(telemetryAge) else {
             return ROBArmTargetGateDecision(
                 disposition: .rejectedTelemetryStale,
-                detail: "Fresh seven-joint measured telemetry (250 ms or newer) is required.",
+                detail: "Fresh seven-joint measured telemetry (\(Int(ROBArmTargetExecutionContext.maximumTelemetryAgeMilliseconds)) ms or newer) is required.",
                 advancesSequence: true,
                 passedExecutionPreflight: false
             )
