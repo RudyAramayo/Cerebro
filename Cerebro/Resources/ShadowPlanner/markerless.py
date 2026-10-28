@@ -5,8 +5,10 @@ fits, and the data-only surface Jacobian decide what can be observed. Priors
 and scan seeds never contribute to the observability test.
 """
 import base64
+import hashlib
 import json
 import math
+import re
 import sys
 import time
 
@@ -14,6 +16,35 @@ import numpy as np
 from scipy.optimize import least_squares
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
+
+
+def runtime_calibration_identity(frame):
+    """Validate the optional provenance group emitted by CameraRuntimeCalibration.
+
+    This identifies the actual capture configuration; it does not establish a
+    camera-to-robot registration or supply evidence for a fitted pose.
+    """
+    if "runtimeCalibration" not in frame:
+        return None
+    runtime = frame["runtimeCalibration"]
+    fields = ("actualDeviceMXID", "cameraRole", "sdkVersion", "factoryEEPROMSHA256",
+              "effectiveRuntimeCalibrationSHA256", "stereoPolicySHA256", "candidateSHA256", "profileSHA256")
+    def matches(pattern, value):
+        return isinstance(value, str) and re.fullmatch(pattern, value) is not None
+    if not isinstance(runtime, dict) or set(runtime) != {"schemaVersion", *fields}:
+        raise ValueError("Invalid runtime calibration fields")
+    if (type(runtime["schemaVersion"]) is not int or runtime["schemaVersion"] != 1
+            or runtime["cameraRole"] != frame["camera"]
+            or any(not matches(r"[A-Za-z0-9+._-]{1,128}", runtime[key]) for key in ("actualDeviceMXID", "sdkVersion"))
+            or any(not matches(r"[A-Fa-f0-9]{64}", runtime[key]) for key in fields[3:6])
+            or (runtime["candidateSHA256"] is None) != (runtime["profileSHA256"] is None)
+            or any(runtime[key] is not None and not matches(r"[A-Fa-f0-9]{64}", runtime[key]) for key in fields[6:])):
+        raise ValueError("Invalid runtime calibration provenance")
+    canonical = "\n".join(["runtime-camera-calibration-v1"] + [runtime[key] or "-" for key in fields])
+    identity = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if frame["runtimeCalibrationIdentity"] != identity:
+        raise ValueError("Runtime calibration identity mismatch")
+    return identity
 
 
 def rank_and_uncertainty(jacobian, noise=.004):
@@ -58,8 +89,11 @@ class MarkerlessEstimator:
             raise ValueError("Markerless fit exceeded its computation budget; pose unconfirmed")
 
     def cloud(self, frame):
-        if set(frame) != {"camera", "streamID", "sequence", "timestampNanoseconds", "capturedAtMilliseconds", "width", "height", "intrinsics", "depth"}:
+        required = {"camera", "streamID", "sequence", "timestampNanoseconds", "capturedAtMilliseconds", "width", "height", "intrinsics", "depth"}
+        provenance = {"runtimeCalibrationIdentity", "runtimeCalibration"}
+        if set(frame) not in (required, required | provenance):
             raise ValueError("Invalid depth frame fields")
+        runtime_identity = runtime_calibration_identity(frame)
         w, h = frame["width"], frame["height"]
         if frame["camera"] not in ("face", "belly") or not isinstance(w, int) or not isinstance(h, int) or not (16 <= w <= 512 and 16 <= h <= 512):
             raise ValueError("Invalid camera or dimensions")
@@ -67,11 +101,13 @@ class MarkerlessEstimator:
         if not 0 <= age <= 400:
             raise ValueError("Stale camera frame")
         key = (frame["camera"], frame["streamID"])
-        previous = self.last_frames.get(key, (0, 0))
+        previous = self.last_frames.get(key, (0, 0, runtime_identity))
+        if previous[2] != runtime_identity:
+            raise ValueError("Runtime calibration changed without a new capture stream")
         if (not isinstance(frame["sequence"], int) or frame["sequence"] <= previous[0]
                 or not isinstance(frame["timestampNanoseconds"], int) or frame["timestampNanoseconds"] <= previous[1]):
             raise ValueError("Repeated or reordered camera frame")
-        self.last_frames[key] = (frame["sequence"], frame["timestampNanoseconds"])
+        self.last_frames[key] = (frame["sequence"], frame["timestampNanoseconds"], runtime_identity)
         if len(self.last_frames) > 8:
             self.last_frames = {key: self.last_frames[key]}
         data = base64.b64decode(frame["depth"], validate=True)
@@ -259,6 +295,8 @@ class MarkerlessEstimator:
                       frame="base_link", arms={}, status="unavailable", detail="No usable depth")
         try:
             cloud, depth, intrinsics = self.cloud(frame)
+            if "runtimeCalibrationIdentity" in frame:
+                result["runtimeCalibrationIdentity"] = frame["runtimeCalibrationIdentity"]
             camera, registration_error = self.register_camera(frame["camera"], cloud, depth, intrinsics)
             result.update(cameraRegistrationRMS=registration_error, status="partial", detail="Visible surfaces fitted to the approved scan")
             # Preserve the actual camera registration with each observation.

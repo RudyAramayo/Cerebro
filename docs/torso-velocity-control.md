@@ -62,6 +62,12 @@ the SDK's own host clock, as described in [Luxonis' clock documentation](https:/
 Unknown-age or already-delayed frames cannot authorize motion. An older camera
 service without this timestamp can still display video but cannot confirm joints.
 
+The depth worker accepts the paired runtime calibration metadata sent by
+Cerebro, validates its canonical identity and retains that identity in the
+observation. A calibration change requires a new capture stream. This corrects
+the former `Invalid depth frame fields` failure with current camera packets;
+calibration provenance alone does not confirm a torso angle or camera pose.
+
 An onboard camera looking only out into the room cannot infer torso-versus-base
 rotation through this fitting method. The required self-view has not yet been
 validated on ROB. Such a view reports **Unconfirmed** and prevents arming; an
@@ -99,8 +105,10 @@ no printed markers. Synthetic scan fits are not measurements of real accuracy.
   authority while releasing power; faults require explicit re-arming. Only a
   fresh authorized movement request clears the intentional idle safe start.
   Ordinary updates never automatically resume a fault.
-- The existing scale is 36,800 pulses per torso revolution. Physical polarity
-  and scale still require a supervised low-speed camera comparison. The live
+- The current operator-derived estimate is 35,996 counts per torso revolution,
+  with left rotation decreasing counts (0 to −8907 for approximately 90° left,
+  approximately +9091 for 90° right). Counts do not establish a live heading;
+  physical polarity and scale still require a camera comparison. The live
   UI does not certify cable freedom, clearance or unlimited physical turns.
 
 The existing Vision Pro torso demand now becomes a circular heading offset from

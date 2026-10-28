@@ -161,6 +161,8 @@ class TorsoEstimator(MarkerlessEstimator):
                       status="unavailable", detail="Torso angle unavailable")
         try:
             cloud, depth, intrinsics = self.cloud(frame)
+            if "runtimeCalibrationIdentity" in frame:
+                result["runtimeCalibrationIdentity"] = frame["runtimeCalibrationIdentity"]
             result["torso"] = self.fit_body(role, cloud, depth, intrinsics)
             result["status"] = result["torso"]["status"]
             result["detail"] = "Camera-confirmed torso yaw" if result["status"] == "confirmed" else "Checking visual agreement"

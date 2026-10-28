@@ -4,6 +4,7 @@ repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 python_bin="${ROB_SHADOW_TEST_PYTHON:-$HOME/Library/Application Support/Cerebro/ShadowPlanner/venv/bin/python3}"
 fixture_dir="$(mktemp -d /private/tmp/rob-torso-fixture.XXXXXX)"
 trap 'rm -r "$fixture_dir"' EXIT
+"$python_bin" -B "$repo_dir/Tests/ROBMarkerlessDepthFrameTests.py"
 "$python_bin" -B "$repo_dir/Tests/ROBTorsoMarkerlessTests.py"
 xcrun swiftc -swift-version 5 -warnings-as-errors \
   "$repo_dir/Cerebro/ROBTorsoMotionPolicy.swift" "$repo_dir/Cerebro/ROBTicVelocityTransport.swift" \
