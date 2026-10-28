@@ -251,6 +251,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging", "left_scan_clearance", "left_estimated_preview"]
     @nonobjc private var workspaceSearchTargets = ROBWorkspaceTarget.allCases
     @nonobjc private var workspaceFrontTableSurvey = false
+    private var frontTablePreviewCameraTimer: Timer?
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
     var isNeckOnlyInspection: Bool { isRunning && Self.neckOnlyCommands.contains(activeCommand) }
@@ -1236,6 +1237,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     }
 
     func cancel(reason: String) {
+        releaseFrontTablePreviewCamera()
         sourcePixelCurrentView=nil;sourcePixelCurrentEvidenceSHA256=nil;sourcePixelCurrentMapFingerprint=nil;sourcePixelCurrentSourceMapJSON=nil
         localCameraPreparationTask?.cancel();localCameraPreparationTask=nil;sourcePixelPreparationTask?.cancel();sourcePixelPreparationTask=nil;sourcePixelPreparationID=nil;localCampaignRecoveryTask?.cancel();localCampaignRecoveryTask=nil;standingPreparationTask?.cancel();standingPreparationTask=nil;localCampaignRecoveryReason=nil
         abort(reason)
@@ -1243,6 +1245,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
 
     func depthAlignmentDidChange() {
         precondition(Thread.isMainThread)
+        releaseFrontTablePreviewCamera()
         abort("Head depth alignment changed; review a fresh scene.")
         collisionMap = nil; collisionModel = nil; collisionReviewProposal = nil
         collisionReviewStatus = ["status":"not_scanned", "detail":"Head depth alignment changed; capture a fresh scene."]
@@ -1777,6 +1780,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ROBAmberArmMotionArbiter.shared.release(.left, owner: id)
             completion(["status": "blocked", "detail": "Another controller owns the right arm."]); return
         }
+        // Transfer the preview's camera to this new operation without changing
+        // its resolution/source in between. This carries no motion permission.
+        frontTablePreviewCameraTimer?.invalidate(); frontTablePreviewCameraTimer=nil
         if command != "left_estimated_calibration" {
             invalidateEstimatedPreview(reason:"Another operation replaced the estimated preview",stopCamera:false)
             activeEstimated = nil
@@ -5070,9 +5076,11 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         let keepEstimatedPreview = activeCommand == "left_estimated_preview" &&
             output["status"] as? String == "accepted_unverified" && pendingEstimated != nil
+        let keepFrontTablePreview = activeCommand == "left_search_workspace" && workspaceFrontTableSurvey &&
+            output["status"] as? String == "accepted_unverified"
         if !keepEstimatedPreview {
             estimatedCameraRetained = false
-            if !preserveLocalReceipt {vision.setActive(false);ROBArmRoutineCoordinator.shared.cameraDemand?(false)}
+            if !preserveLocalReceipt && !keepFrontTablePreview {vision.setActive(false);ROBArmRoutineCoordinator.shared.cameraDemand?(false)}
             invalidateEstimatedPreview(reason:"Estimated trial ended",stopCamera:false)
         }
         activeEstimated = nil
@@ -5090,6 +5098,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         if !preserveLocalReceipt {localReceiptModel=nil}
         localReceiptPerceptionFailure=false
         if keepEstimatedPreview { retainEstimatedPreviewCamera() }
+        if keepFrontTablePreview { retainFrontTablePreviewCamera() }
         if preserveLocalReceipt {retainLocalReceiptCamera()}
         update(output["detail"] as? String ?? "Left-arm trial ended")
         completion(output as NSDictionary)
@@ -5098,5 +5107,22 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 Task { @MainActor [weak self] in self?.restartCampaignAfterFreshObservation(command:recoveryCommand,campaignID:recoveryCampaignID) }
             }
         }
+    }
+
+    /// Keep the full-height source stable while a nonactuating ghost/floor
+    /// proposal is reviewed. Original observation expiry is never extended.
+    private func retainFrontTablePreviewCamera() {
+        frontTablePreviewCameraTimer?.invalidate()
+        ROBArmRoutineCoordinator.shared.cameraDemand?(true)
+        let timer=Timer(timeInterval:60,repeats:false) { [weak self] _ in self?.releaseFrontTablePreviewCamera() }
+        frontTablePreviewCameraTimer=timer;RunLoop.main.add(timer,forMode:.common)
+    }
+
+    private func releaseFrontTablePreviewCamera() {
+        guard frontTablePreviewCameraTimer != nil else {return}
+        frontTablePreviewCameraTimer?.invalidate();frontTablePreviewCameraTimer=nil
+        guard !isRunning,!ROBArmRoutineCoordinator.shared.isRunning,!ROBShowMotionCoordinator.shared.isRunning,
+              !ROBAmberGestureExecutor.shared.isExecuting else {return}
+        vision.setActive(false);ROBArmRoutineCoordinator.shared.cameraDemand?(false)
     }
 }

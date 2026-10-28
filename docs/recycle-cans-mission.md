@@ -35,6 +35,10 @@ frames do not expire that target early. This does not revive the collision map;
 arm execution retains its complete-scene checks and reacquires before grasping.
 The front-table ghost scan also recognizes a fresh position-mode grasp-ready
 hold and skips the hanging-arm shoulder survey, keeping its captures on the table.
+The completed preview keeps the task camera stream for at most 60 seconds, until
+Stop, or until another operation takes it over. Finishing a survey therefore
+does not immediately change resolution and invalidate its source. Observation
+ages and all motion checks still apply during that preview period.
 
 Tread rotation sensors are not connected. Travel progress is checked from SLAM,
 with Gentle acceleration; PWM and elapsed time are not treated as odometry.

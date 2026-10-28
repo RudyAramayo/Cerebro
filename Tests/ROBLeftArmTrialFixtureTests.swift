@@ -1348,6 +1348,9 @@ final class ROBArmRoutineCoordinator {
         let readySurvey = await run("right_search_workspace",target:"front_table_can")
         precondition(readySurvey["status"] as? String == "accepted_unverified" && ROBWorkspaceSearch.shared.requestedAlreadyGraspReady,
             "The ghost survey repeated shoulder coverage from the measured right grasp-ready hold")
+        precondition(ROBArmRoutineVision.shared.activationHistory.last == true,"Finishing a ghost survey released and changed its camera source")
+        trial.cancel(reason:"Fixture closes preview")
+        precondition(ROBArmRoutineVision.shared.activationHistory.last == false,"Closing the preview retained its camera demand")
         g.stale = true
         _ = await run("right_search_workspace",target:"front_table_can")
         precondition(!ROBWorkspaceSearch.shared.requestedAlreadyGraspReady,"Stale feedback skipped hanging-arm coverage")
