@@ -921,6 +921,24 @@ struct ROBLidarScanFrame: Equatable, Sendable {
     return frame
   }
 
+  /// Display-only compatibility payload for existing ROBController clients.
+  /// Input must already have passed the publisher's authentication, freshness,
+  /// sequence and rate checks. Pose values remain metres and radians on wire.
+  func controllerDisplayArchive() throws -> Data {
+    let position = [x, y, z].map { String($0) }.joined(separator: ":")
+    let rotation = [yaw, pitch, roll].map { String($0) }.joined(separator: ":")
+    let returns = points.map { "\($0.distanceMeters):\($0.angleRadians)" }
+    let message = ([position, rotation] + returns).joined(separator: "\n")
+    return try NSKeyedArchiver.archivedData(withRootObject: [
+      "sender": "rpLidar",
+      "message": message,
+      "lidar.poseUnits": "metres/radians",
+      "lidar.sentAtMilliseconds": String(sentAtMilliseconds),
+      "lidar.deviceID": deviceID.uuidString.lowercased(),
+      "lidar.sequence": String(sequence)
+    ], requiringSecureCoding: true)
+  }
+
   private static func normalizedAngle(_ angle: Float) -> Float {
     var result = angle.truncatingRemainder(dividingBy: .pi * 2)
     if result < 0 { result += .pi * 2 }

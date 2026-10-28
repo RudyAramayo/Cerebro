@@ -39,6 +39,8 @@ public final class AutoNetServerConnection {
     private var didStop = false
     private var networkProbeWorkItem: DispatchWorkItem?
     private var pendingNetworkProbe: Data?
+    private var pendingLidarDisplay: Data?
+    private var lidarDisplayInFlight = false
     private var pendingNetworkProbeSentUptime: TimeInterval?
     private var networkProbeSupported = false
     private var sessionLiveness = ROBControlSessionLiveness()
@@ -395,6 +397,37 @@ public final class AutoNetServerConnection {
             }
         }
         return true
+    }
+
+    /// Keep at most the newest pending scan so a slow controller never queues
+    /// a history of poses. Only authenticated operator QUIC sessions receive it.
+    func sendLatestLidarDisplay(_ data: Data) {
+        guard case .v2 = transportMode, authenticatedRole == .operatorController,
+              canReceiveApplicationMessage(type: .sendData) else {
+            pendingLidarDisplay = nil
+            return
+        }
+        pendingLidarDisplay = data
+        flushLidarDisplay()
+    }
+
+    private func flushLidarDisplay() {
+        guard !lidarDisplayInFlight, let data = pendingLidarDisplay else { return }
+        pendingLidarDisplay = nil
+        guard case .v2 = transportMode, authenticatedRole == .operatorController,
+              canReceiveApplicationMessage(type: .sendData) else { return }
+        lidarDisplayInFlight = true
+        sendFrame(type: .sendData, data: data) { [weak self] error in
+            guard let self else { return }
+            self.lidarDisplayInFlight = false
+            if let error {
+                self.pendingLidarDisplay = nil
+                self.stop(error: error)
+            } else {
+                self.noteSentApplicationPayload(byteCount: data.count)
+                self.flushLidarDisplay()
+            }
+        }
     }
 
     /// Claims the reserved capability/echo payloads before they can reach the
