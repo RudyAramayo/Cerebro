@@ -18,7 +18,6 @@ import Foundation
     private var usedMissions = Set<UUID>()
     private var timer: Timer?
     private var task: Task<Void,Never>?
-    private var assembler = ROBRoomMapAssembler()
     private var map: ROBRoomMissionMap?
     private var mapDevice: UUID?
     private var pose: ROBRoomMissionPoint?
@@ -124,9 +123,14 @@ import Foundation
     func updateLidarScanData(_ data: Data) {
         precondition(Thread.isMainThread)
         guard let frame=try? ROBLidarScanFrame.decode(data) else { return }
+        guard ROBRoomSpatialStore.shared.consume(frame) else { return }
+        if map != nil, ROBRoomSpatialStore.shared.map == nil {
+            map=nil;planner=nil
+            if active { pause("The lidar publisher or map frame changed; waiting for a new complete room map.") }
+        }
         let now=ProcessInfo.processInfo.systemUptime, next=ROBRoomMissionPoint(x:Double(frame.x),y:Double(frame.y))
         let sourceChanged=mapDevice != nil && mapDevice != frame.deviceID
-        if sourceChanged { map=nil;assembler=ROBRoomMapAssembler();if active { pause("The authenticated lidar publisher changed; replan in its own map frame.") } }
+        if sourceChanged { map=nil;if active { pause("The authenticated lidar publisher changed; replan in its own map frame.") } }
         mapDevice=frame.deviceID
         if active, let previous=pose, now-poseAt < 1,
            sourceChanged || previous.distance(to:next)>0.35 || abs(Self.angle(Double(frame.yaw)-yaw))>0.4 {
@@ -144,7 +148,7 @@ import Foundation
             if active { pause("The room map was replaced. Replan within the new map frame.") }
             map=nil;planner=nil
         }
-        if let fragment=frame.mapFragment,let complete=assembler.consume(fragment,device:frame.deviceID,now:ROBRecycleMissionMessage.now) {
+        if let complete=ROBRoomSpatialStore.shared.map {
             if active,let old=map,old.epoch != complete.epoch {
                 pause("The room map was replaced. The prior search area is no longer in this coordinate frame.")
             }

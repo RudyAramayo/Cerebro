@@ -26,6 +26,7 @@ xcrun swiftc -swift-version 5 -parse-as-library \
   "$repo_dir/Cerebro/ROBRecycleMissionProtocol.swift" \
   "$repo_dir/Cerebro/ROBRoomMapFragment.swift" \
   "$repo_dir/Cerebro/ROBRoomMissionPlanner.swift" \
+  "$repo_dir/Cerebro/ROBRoomSpatialStore.swift" \
   "$repo_dir/Cerebro/ROBTreadMotionRamp.swift" \
   "$repo_dir/Cerebro/ROBRecycleMissionCoordinator.swift" \
   "$fixture_dir/ScanCodec.swift" \

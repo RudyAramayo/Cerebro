@@ -19,6 +19,12 @@ trigger a fresh survey. Traction is measured from pose changes, not inferred
 from PWM duration. The model envelope and RGB-D checks are not a certified
 collision system or a measured mounting calibration.
 
+Cerebro's [Controller Input Scene](controller-depth-cloud.md#room-map-and-laser-layers)
+shows this same accumulated map and SLAM pose under the depth scan, with live
+laser points at scanner height. It preserves the distinction between a lidar-free
+floor cell and an elevated table obstacle. The overlay is diagnostic; it does not
+replace the mission's depth admission with floor-map clearance.
+
 The mission currently delegates **stationary can-to-bucket transfers** to the
 native arm executor. It does not add a body-motion continuation while carrying
 a can. If pickup leaves a possible payload or the destination cannot be reached

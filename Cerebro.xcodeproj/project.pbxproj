@@ -268,6 +268,8 @@
 		8785202BB489F05A8B0C1F69 /* ROBRoomMissionPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C645FBBE3A83F642F5FE7E /* ROBRoomMissionPlanner.swift */; };
 		C92F938B176EF9926FCF60B9 /* ROBRoomMapFragment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71D89DEBC4517C38BC505788 /* ROBRoomMapFragment.swift */; };
 		5D75BE358B59D99F303CFAC8 /* ROBRecycleMissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A872E2C464D3943C96F1E1 /* ROBRecycleMissionCoordinator.swift */; };
+		AC0FA0C9AA00DBAE89305849 /* ROBRoomSpatialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10F05B3CF4D8A1E9737F12DC /* ROBRoomSpatialStore.swift */; };
+		D7133394FCE468D7AD29DF89 /* ROBRoomDiagnosticsLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C45B90FD8E870F8CF914483 /* ROBRoomDiagnosticsLayer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -576,6 +578,8 @@
 		15C645FBBE3A83F642F5FE7E /* ROBRoomMissionPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRoomMissionPlanner.swift; sourceTree = "<group>"; };
 		71D89DEBC4517C38BC505788 /* ROBRoomMapFragment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRoomMapFragment.swift; sourceTree = "<group>"; };
 		F3A872E2C464D3943C96F1E1 /* ROBRecycleMissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecycleMissionCoordinator.swift; sourceTree = "<group>"; };
+		10F05B3CF4D8A1E9737F12DC /* ROBRoomSpatialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRoomSpatialStore.swift; sourceTree = "<group>"; };
+		7C45B90FD8E870F8CF914483 /* ROBRoomDiagnosticsLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRoomDiagnosticsLayer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -706,6 +710,8 @@
 				D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */,
 				F3A872E2C464D3943C96F1E1 /* ROBRecycleMissionCoordinator.swift */,
 				71D89DEBC4517C38BC505788 /* ROBRoomMapFragment.swift */,
+				10F05B3CF4D8A1E9737F12DC /* ROBRoomSpatialStore.swift */,
+				7C45B90FD8E870F8CF914483 /* ROBRoomDiagnosticsLayer.swift */,
 				15C645FBBE3A83F642F5FE7E /* ROBRoomMissionPlanner.swift */,
 				5A5AF6FBBEEA366573495AE2 /* ROBRecycleMissionProtocol.swift */,
 				D4E300012F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift */,
@@ -1160,6 +1166,8 @@
 				D4E200022F00000100000001 /* ROBAutonomyCoordinator.swift in Sources */,
 				5D75BE358B59D99F303CFAC8 /* ROBRecycleMissionCoordinator.swift in Sources */,
 				C92F938B176EF9926FCF60B9 /* ROBRoomMapFragment.swift in Sources */,
+				AC0FA0C9AA00DBAE89305849 /* ROBRoomSpatialStore.swift in Sources */,
+				D7133394FCE468D7AD29DF89 /* ROBRoomDiagnosticsLayer.swift in Sources */,
 				8785202BB489F05A8B0C1F69 /* ROBRoomMissionPlanner.swift in Sources */,
 				9956D8DABB63FD50AA8C3B45 /* ROBRecycleMissionProtocol.swift in Sources */,
 				D4E300022F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift in Sources */,

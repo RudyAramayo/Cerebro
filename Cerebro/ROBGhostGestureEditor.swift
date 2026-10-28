@@ -53,6 +53,7 @@ import simd
     private var playing = false
     private var animationStarted = 0.0
     private var lastOriginalUpdate = 0.0
+    private var lastIdleDisplayUpdate = 0.0
     private var timer: Timer?
     private let presets = NSPopUpButton()
     private let name = NSTextField(string: "My gesture")
@@ -155,6 +156,11 @@ import simd
     }
 
     func setHeadCommandEstimate(_ estimate: ROBHeadCameraPoseEstimator?) {
+        if let old=acceptedHeadTargets, let estimate,
+           old.panRadians==estimate.panRadians, old.lowerPitch==estimate.lowerPitch,
+           old.upperPitch==estimate.upperPitch, old.lowerTarget==estimate.lowerTarget,
+           old.upperTarget==estimate.upperTarget { return }
+        if acceptedHeadTargets == nil, estimate == nil { return }
         acceptedHeadTargets = estimate
         setHeadCommand(pan: estimate?.panRadians ?? 0, lowerPitch: estimate?.lowerPitch ?? 0,
             upperPitch: estimate?.upperPitch ?? 0, known: estimate != nil)
@@ -285,6 +291,21 @@ import simd
         let transform:simd_double4x4
         if !belly,let fitted { transform=basis*fitted.depthCloudCameraToModel }
         else { transform=basis*(fitted?.modelToDisplay ?? matrix_identity_double4x4)*alignedFrame }
+        return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
+    }
+
+    /// Same display gauge and scale as the depth overlay. Neither the gauge
+    /// nor the reference lidar mount is measured sensor registration.
+    func roomBaseToSceneTransform() -> [NSNumber] {
+        guard model != nil else { return [] }
+        let basis = simd_double4x4(columns: (SIMD4<Double>(modelBasis.columns.0), SIMD4<Double>(modelBasis.columns.1),
+            SIMD4<Double>(modelBasis.columns.2), SIMD4<Double>(modelBasis.columns.3)))
+        let transform = basis * (fittedHeadPose()?.modelToDisplay ?? matrix_identity_double4x4)
+        return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
+    }
+
+    func roomLidarToBaseTransform() -> [NSNumber] {
+        guard let model, let transform = model.frames(model.reference)["rplidar_link"] else { return [] }
         return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
     }
 
@@ -1132,13 +1153,19 @@ import simd
     }
     private func tick() {
         guard let model else { return }
+        // Idle diagnostics need current evidence, not 30 repeated profile-file
+        // reads and SceneKit-lock acquisitions per second. Ghost playback
+        // retains its animation cadence; sensor/control watchdogs are separate.
+        let now = ProcessInfo.processInfo.systemUptime
+        if !playing, now-lastIdleDisplayUpdate<0.2 { return }
+        lastIdleDisplayUpdate=now
         refreshInteractionStage()
         let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
         if let sceneView {
             if sceneView.isHidden { sceneView.isHidden = false }
             if !sceneView.rendersContinuously { sceneView.rendersContinuously = true }
             if !sceneView.isPlaying { sceneView.isPlaying = true }
-            let framesPerSecond = busy ? 15 : 30
+            let framesPerSecond = busy || !playing ? 15 : 30
             if sceneView.preferredFramesPerSecond != framesPerSecond { sceneView.preferredFramesPerSecond = framesPerSecond }
         }
         for view in [presets, joints, angle, name] as [NSControl] where view.isEnabled == busy { view.isEnabled = !busy }
@@ -1164,7 +1191,6 @@ import simd
         let meshOffset=simd_float4x4(columns:(SIMD4<Float>(presentation.columns.0),SIMD4<Float>(presentation.columns.1),
             SIMD4<Float>(presentation.columns.2),SIMD4<Float>(presentation.columns.3)))
         if robotPresentationRoot.simdTransform != meshOffset {robotPresentationRoot.simdTransform=meshOffset}
-        let now = ProcessInfo.processInfo.systemUptime
         if now - lastCanInfoUpdate >= 1 {
             lastCanInfoUpdate = now; refreshCanInfo(); refreshCollisionScene(force: false)
         }

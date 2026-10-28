@@ -12,8 +12,6 @@ static NSTimeInterval const ROBControllerDiagnosticStaleInterval = 0.5;
 static NSTimeInterval const ROBIRDiagnosticStaleInterval = 0.75;
 static NSTimeInterval const ROBLegacyIRWarningDisplayInterval = 3.0;
 static NSInteger const ROBIRBlockedDistanceCentimeters = 25;
-static CGFloat const ROBDiagnosticMaximumTreadSpeed = 0.9;
-static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 static NSUInteger const ROBMaximumDisplayedCloudPoints = 20000;
 static NSUInteger const ROBMaximumFloorCandidatePoints = 2048;
 static NSTimeInterval const ROBFloorNoiseHoldInterval = 0.25;
@@ -115,6 +113,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, retain) SCNNode *rightControllerNode;
 @property (readwrite, retain) SCNNode *robotNode;
 @property (readwrite, strong) ROBGhostGestureEditor *ghostGestureEditor;
+@property (strong) ROBRoomDiagnosticsLayer *roomDiagnostics;
+@property (strong) SCNNode *depthDisplayRoot;
 @property (readwrite, retain) SCNNode *leftTreadNode;
 @property (readwrite, retain) SCNNode *rightTreadNode;
 @property (readwrite, retain) SCNNode *neckPanNode;
@@ -148,6 +148,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, assign) BOOL receivedLegacyIRWarning;
 @property (readwrite, retain) NSTimer *freshnessTimer;
 @property (readwrite, assign) NSTimeInterval lastReceivedUptime;
+@property NSTimeInterval lastSceneHUDRefreshUptime;
 @property (readwrite, copy) NSString *lastSender;
 @property (readwrite, assign) BOOL leftPoseValid;
 @property (readwrite, assign) BOOL rightPoseValid;
@@ -161,7 +162,6 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, assign) BOOL gripperCommandIsActive;
 @property (readwrite, assign) BOOL leftGripperClosed;
 @property (readwrite, assign) BOOL rightGripperClosed;
-@property (readwrite, assign) NSTimeInterval lastRobotIntegrationUptime;
 @property (readwrite, retain) SCNNode *liveRGBCloudNode;
 @property (readwrite, retain) SCNNode *liveBellyRGBCloudNode;
 @property (readwrite, strong) dispatch_queue_t cloudQueue;
@@ -203,6 +203,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         self.lastSender = @"No controller";
         [self loadScene];
         self.ghostGestureEditor = [[ROBGhostGestureEditor alloc] initWithSceneView:scnView originalRobot:self.robotNode];
+        self.roomDiagnostics = [[ROBRoomDiagnosticsLayer alloc] initWithSceneView:scnView depthRoot:self.depthDisplayRoot];
         self.cloudQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.live-rgb-cloud", DISPATCH_QUEUE_SERIAL);
         self.cloudDisplayMailbox = [[ROBSCNDepthCloudDisplayMailbox alloc] init];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(receivedDepthCloudFrame:)
@@ -230,6 +231,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 - (void)invalidate
 {
     [self.cloudDisplayMailbox close];
+    [self.roomDiagnostics invalidate];
     [self.ghostGestureEditor invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBDepthCloudFrame" object:nil];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBLeftArmTrialViewPrepared" object:nil];
@@ -364,10 +366,13 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     fillLight.light.intensity = 120;
     [scene.rootNode addChildNode:fillLight];
 
+    SCNNode *referenceGround = [SCNNode node];
+    referenceGround.name = @"Diagnostic reference ground";
+    [scene.rootNode addChildNode:referenceGround];
     SCNFloor *floor = [SCNFloor floor];
-    floor.reflectivity = 0.08;
+    floor.reflectivity = 0;
     floor.firstMaterial.diffuse.contents = [NSColor colorWithWhite:0.08 alpha:1];
-    [scene.rootNode addChildNode:[SCNNode nodeWithGeometry:floor]];
+    [referenceGround addChildNode:[SCNNode nodeWithGeometry:floor]];
 
     // A simple ground grid makes translation and rotation obvious without requiring robot art.
     SCNMaterial *gridMaterial = [self materialWithColor:[NSColor colorWithWhite:0.22 alpha:1]
@@ -377,28 +382,32 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         lineX.firstMaterial = gridMaterial;
         SCNNode *lineXNode = [SCNNode nodeWithGeometry:lineX];
         lineXNode.position = SCNVector3Make(0, 0.003, index * 0.5);
-        [scene.rootNode addChildNode:lineXNode];
+        [referenceGround addChildNode:lineXNode];
 
         SCNBox *lineZ = [SCNBox boxWithWidth:0.008 height:0.004 length:6 chamferRadius:0];
         lineZ.firstMaterial = gridMaterial;
         SCNNode *lineZNode = [SCNNode nodeWithGeometry:lineZ];
         lineZNode.position = SCNVector3Make(index * 0.5, 0.003, 0);
-        [scene.rootNode addChildNode:lineZNode];
+        [referenceGround addChildNode:lineZNode];
     }
 
     self.robotNode = [ROBScanVisualModel makeRobot];
     [scene.rootNode addChildNode:self.robotNode];
 
+    self.depthDisplayRoot = [SCNNode node];
+    self.depthDisplayRoot.name = @"Depth observations · independent of lidar occupancy";
+    [scene.rootNode addChildNode:self.depthDisplayRoot];
+
     self.liveRGBCloudNode = [SCNNode node];
     self.liveRGBCloudNode.name = @"Live OAK RGB point cloud";
-    [scene.rootNode addChildNode:self.liveRGBCloudNode];
+    [self.depthDisplayRoot addChildNode:self.liveRGBCloudNode];
 
     self.liveBellyRGBCloudNode = [SCNNode node];
     self.liveBellyRGBCloudNode.name = @"Live Belly RGB point cloud";
-    [scene.rootNode addChildNode:self.liveBellyRGBCloudNode];
+    [self.depthDisplayRoot addChildNode:self.liveBellyRGBCloudNode];
     self.headSurfaceNode=[SCNNode node];self.headSurfaceNode.name=@"HEAD surface history · unverified registration";
     self.bellySurfaceNode=[SCNNode node];self.bellySurfaceNode.name=@"BELLY surface history · unverified registration";
-    [scene.rootNode addChildNode:self.headSurfaceNode];[scene.rootNode addChildNode:self.bellySurfaceNode];
+    [self.depthDisplayRoot addChildNode:self.headSurfaceNode];[self.depthDisplayRoot addChildNode:self.bellySurfaceNode];
 
     // All three products consume the same scan-informed mesh hierarchy.
     self.leftTreadNode = [self.robotNode childNodeWithName:@"Left Tri-Wheel Tread" recursively:YES];
@@ -543,8 +552,6 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.leftGripperClosed = model.leftGripperClosed;
     self.rightGripperClosed = model.rightGripperClosed;
 
-    [self integrateRobotAtUptime:model.receivedAtUptime];
-
     [SCNTransaction begin];
     [SCNTransaction setAnimationDuration:0.08];
     [self applyModel:model toNode:self.leftControllerNode left:YES];
@@ -555,36 +562,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     [self refreshFreshness:nil];
 }
 
-- (void)integrateRobotAtUptime:(NSTimeInterval)uptime
-{
-    NSTimeInterval previous = self.lastRobotIntegrationUptime;
-    self.lastRobotIntegrationUptime = uptime;
-    if (!self.treadCommandsAreActive || previous <= 0 || uptime <= previous) { return; }
-
-    // Clamp integration time so a delayed packet can never teleport the diagnostic robot.
-    NSTimeInterval deltaTime = MIN(uptime - previous, ROBControllerDiagnosticStaleInterval);
-    CGFloat leftVelocity = self.leftTreadDemand * 2.0 * ROBDiagnosticMaximumTreadSpeed;
-    CGFloat rightVelocity = self.rightTreadDemand * 2.0 * ROBDiagnosticMaximumTreadSpeed;
-    CGFloat linearVelocity = (leftVelocity + rightVelocity) * 0.5;
-    // SceneKit's local forward direction is -Z and positive yaw rotates it toward -X.
-    // A faster left tread therefore produces positive SceneKit yaw.
-    CGFloat angularVelocity = (leftVelocity - rightVelocity) / ROBDiagnosticTrackWidth;
-    CGFloat previousHeading = self.robotNode.eulerAngles.y;
-    CGFloat headingDelta = angularVelocity * deltaTime;
-    CGFloat midpointHeading = previousHeading + headingDelta * 0.5;
-    CGFloat heading = previousHeading + headingDelta;
-    SCNVector3 position = self.robotNode.position;
-    // Integrating at the midpoint heading follows the differential-drive arc instead of
-    // translating along the final angle for the entire packet interval.
-    position.x -= sin(midpointHeading) * linearVelocity * deltaTime;
-    position.z -= cos(midpointHeading) * linearVelocity * deltaTime;
-
-    [SCNTransaction begin];
-    [SCNTransaction setAnimationDuration:MIN(deltaTime, 0.1)];
-    self.robotNode.position = position;
-    self.robotNode.eulerAngles = SCNVector3Make(0, heading, 0);
-    [SCNTransaction commit];
-}
+// Robot-centred diagnostics: tread demand is a highlight, never odometry.
+// The room layer is placed using authenticated measured SLAM instead.
 
 - (void)applyModel:(ROBBaseControllerModel *)model toNode:(SCNNode *)node left:(BOOL)left
 {
@@ -620,6 +599,23 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)refreshFreshness:(NSTimer *)timer
 {
+    NSTimeInterval displayNow=NSProcessInfo.processInfo.systemUptime;
+    if (displayNow-self.lastSceneHUDRefreshUptime<0.2) return;
+    self.lastSceneHUDRefreshUptime=displayNow;
+    if ([self.roomDiagnostics refreshWithBaseToScene:[self.ghostGestureEditor roomBaseToSceneTransform]
+                                       lidarToBase:[self.ghostGestureEditor roomLidarToBaseTransform]]) {
+        // A manual move, localization correction, source change or telemetry
+        // gap ends stationary depth history, including pending projections.
+        [self resetAccumulatedSurfaces:nil];
+        self.headCloudSourceEpoch++; self.bellyCloudSourceEpoch++;
+        self.cloudUpdatePending=NO; self.bellyCloudUpdatePending=NO;
+        self.liveRGBCloudNode.geometry=nil; self.liveBellyRGBCloudNode.geometry=nil;
+        self.headFloorCloudContext=nil; self.bellyFloorCloudContext=nil;
+        self.headFloorAlignmentEstablished=NO; self.bellyFloorAlignmentEstablished=NO;
+        self.headFloorHoldingAcceptedFrame=NO; self.bellyFloorHoldingAcceptedFrame=NO;
+        self.headFloorSummary=@"HEAD: reacquiring after measured base movement or SLAM gap";
+        self.bellyFloorSummary=@"BELLY: reacquiring after measured base movement or SLAM gap";
+    }
     [self refreshIRState];
     [self refreshHeadModelEstimate];
     NSTimeInterval cloudNow = NSProcessInfo.processInfo.systemUptime;
@@ -990,8 +986,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     // Keep display live with one pending background job per camera. Reduce
     // publication during all trials, including neck scans; capture/watchdogs are separate.
     BOOL trialBusy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning;
-    BOOL surfaceDisplay=belly ? self.bellyUsesSurfaces : self.headUsesSurfaces;
-    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (trialBusy ? 0.5 : (surfaceDisplay ? 0.25 : 0.125))) return;
+    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (trialBusy ? 0.5 : 0.25)) return;
     if (belly) self.lastBellyCloudSubmission = now; else self.lastHeadCloudSubmission = now;
     [self refreshHeadModelEstimate];
     NSArray<NSNumber *> *affine = [self.ghostGestureEditor depthCloudCameraTransform:belly];

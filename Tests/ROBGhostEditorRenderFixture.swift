@@ -31,6 +31,7 @@ final class ROBAmberGatewayTunnel {
 final class ROBControllerArmApproval {
     static let shared = ROBControllerArmApproval()
     let isPending = false
+    let standingLocalCanCampaignActive = false
     func cancel(reason: String) {}
 }
 final class ROBArmRoutineCoordinator {
@@ -41,7 +42,7 @@ final class ROBArmRoutineCoordinator {
     func cancel(reason: String) {}
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(["left_search_workspace","right_search_workspace"].contains(command), "Ghost can search attempted a motion command")
-        precondition(target == "can", "Ghost can preview waited for unrelated bucket search")
+        precondition(target == "front_table_can", "Ghost can preview left the front-table camera survey")
         searchRequests += 1
         searchCommands.append(command)
         completion(["detail":"Fixture camera only"])
@@ -54,6 +55,10 @@ final class ROBWorkspaceSearch {
     private(set) var collisionPreviewSnapshot: ROBWorkspaceCollisionSnapshot?
     var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
         didSet { if let collisionSnapshot { collisionPreviewSnapshot = collisionSnapshot } }
+    }
+    @MainActor func nearestReachableCan(model: ROBGhostRobotModel, baseline: [String:Double],
+        map: ROBWorkspaceCollisionSnapshot) async -> (preview: ROBCanGrabPreview?, diagnostics: [[String:Any]]) {
+        (nil, [["detail":"No measured can in the isolated render fixture"]])
     }
 }
 final class ROBAmberGestureExecutor {
@@ -77,6 +82,9 @@ final class ROBLeftArmTrial {
     }
     func perform(proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel, completion: @escaping (NSDictionary) -> Void) {
         preconditionFailure("A preview or editing action attempted physical execution")
+    }
+    func performPreviewedCanGrasp(_ can: ROBWorkspaceLocatedObject, completion: @escaping (NSDictionary) -> Void) {
+        preconditionFailure("A render fixture attempted a physical can grasp")
     }
     func recoveryProposal(model: ROBGhostRobotModel) throws -> ROBLeftGestureProposal {
         throw ROBGhostMotionError.blocked("No hardware in this fixture")
@@ -376,7 +384,7 @@ final class GhostFixtureSnapshotView: NSView {
         assertAcceptedHead(6011, 6306, pan: .pi / 12)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let controls = descendants(editor.panelView)
-        let findCan = controls.compactMap { $0 as? NSButton }.first { $0.title == "Find Coke can + ghost grab" }!
+        let findCan = controls.compactMap { $0 as? NSButton }.first { $0.title == "Scan front table + ghost grab" }!
         NSApp.sendAction(findCan.action!, to: findCan.target, from: findCan)
         precondition(ROBArmRoutineCoordinator.shared.searchRequests == 1,
             "Ghost preview did not enter the existing neck-only coordinator lane")
