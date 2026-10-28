@@ -57,11 +57,12 @@ enum ROBRecycleMissionOutcome: Equatable {
     case verifiedTransfer, emptyPerceptionMiss, hold(possiblePayload: Bool)
     static func classify(_ result: NSDictionary) -> Self {
         if result["placement_verified"] as? Bool == true,
-           result["empty_verified"] as? Bool == true,result["transfer_completed"] as? Bool == true {
+           result["empty_verified"] as? Bool == true,result["transfer_completed"] as? Bool == true,
+           result["possible_payload_held"] as? Bool != true,result["requires_intervention"] as? Bool != true {
             return .verifiedTransfer
         }
         let possible=(result["possible_payload_held"] as? Bool ?? false) ||
-            (result["grasp_attempted"] as? Bool ?? false) || (result["jaw_command_sent"] as? Bool ?? false)
+            (result["grasp_attempted"] as? Bool ?? false) || result["jaw_command_sent"] as? Bool != false
         if result["arm_motion_sent"] as? Bool == false,result["jaw_command_sent"] as? Bool == false,
            !possible,["not_reachable","no_reachable_can","not_found","needs_help"].contains(result["status"] as? String ?? "") {
             return .emptyPerceptionMiss

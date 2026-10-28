@@ -68,11 +68,13 @@ import Foundation
             "batch_completed":8]) == .hold(possiblePayload:true),"legacy path count credited as recycling")
         try check(ROBRecycleMissionOutcome.classify(["placement_verified":true,"transfer_completed":true]) != .verifiedTransfer,
             "placement without empty-jaw evidence credited")
+        try check(ROBRecycleMissionOutcome.classify(["placement_verified":true,"transfer_completed":true,"empty_verified":true,"possible_payload_held":true]) != .verifiedTransfer,
+            "contradictory payload evidence credited")
         try check(ROBRecycleMissionOutcome.classify(["placement_verified":true,"transfer_completed":true,"empty_verified":true]) == .verifiedTransfer,
             "verified transfer not accepted")
         try check(ROBRecycleMissionOutcome.classify(["status":"not_reachable","arm_motion_sent":false,"jaw_command_sent":false]) == .emptyPerceptionMiss,
             "safe perception miss did not permit another observation stop")
-        try check(ROBRecycleMissionOutcome.classify(["status":"not_reachable","arm_motion_sent":false,"jaw_command_sent":NSNull()]) != .emptyPerceptionMiss,
+        try check(ROBRecycleMissionOutcome.classify(["status":"not_reachable","arm_motion_sent":false,"jaw_command_sent":NSNull()]) == .hold(possiblePayload:true),
             "uncertain jaw dispatch permitted base search")
 
         // Actual scan codec with an embedded SDK map fragment. V1 remains
