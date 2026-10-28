@@ -3272,6 +3272,10 @@ struct ROBWorkspaceCanSelection {
                 catch { try await searchCheckpoint(); evidence.append(["refresh_error": error.localizedDescription]) }
             }
         }
+        // Keep the observed subject as an attention hint if reach selection
+        // later rejects it. Losing a reachable target must not leave the head
+        // at the last diagnostic view. This hint cannot authorize a reach.
+        let lastObservedObjectForAttention=found[.can] ?? found[.orangeBucket]
         // A visible/confirmed can may belong to the opposite arm. Try only
         // two current selected-side boxes before ending this can search.
         // Existing inspect requires two advancing exposures and enrolls their
@@ -3399,7 +3403,7 @@ struct ROBWorkspaceCanSelection {
         // Return to the selected object while this search still owns the neck.
         // Keep measured fixed-head contexts unchanged and never freshen the
         // object's earlier coordinates merely because the camera looked back.
-        if fixedRegisteredView==nil,let focus=found[.can] ?? found[.orangeBucket] {
+        if fixedRegisteredView==nil,let focus=found[.can] ?? lastObservedObjectForAttention ?? found[.orangeBucket] {
             try await searchCheckpoint()
             progress("Returning the camera to the \(focus.target.spokenName).")
             guard try await moveView(focus.view) else {
@@ -3409,6 +3413,7 @@ struct ROBWorkspaceCanSelection {
             evidence.append(["object_focus_return":true,"target":focus.target.rawValue,
                 "pan":focus.view.panDegrees,"upper":focus.view.upperTarget,
                 "neck_settled":true,"object_observation_refreshed":false,
+                "reachable_target_available":found[focus.target] != nil,
                 "source_sequence":NSNumber(value:focus.sequence),"source_captured_at_ms":focus.capturedAt])
         }
         let missing = targets.filter { found[$0] == nil }.map(\.spokenName)

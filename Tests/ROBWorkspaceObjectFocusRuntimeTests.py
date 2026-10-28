@@ -6,7 +6,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / 'Cerebro/ROBArmRoutineVision.swift').read_text()
-marker = '        if fixedRegisteredView==nil,let focus=found[.can] ?? found[.orangeBucket] {'
+marker = '        if fixedRegisteredView==nil,let focus=found[.can] ?? lastObservedObjectForAttention ?? found[.orangeBucket] {'
 start = source.index(marker)
 end = source.index('{', start) + 1
 depth = 1
@@ -16,6 +16,7 @@ while depth:
 actual = source[start:end]
 assert source.index('if localReachSelectionRequired {found[.can]=localReachSelection?.object}') < start
 assert start < source.index('        let missing = targets.filter { found[$0] == nil }')
+assert source.index('let lastObservedObjectForAttention=found[.can] ?? found[.orangeBucket]') < source.index('localReachSelection=try await rankCurrentCans("before_targeted_reobservation")')
 
 fixture = r'''
 import Foundation
@@ -24,9 +25,10 @@ struct View:Equatable {let panDegrees:Double;let upperTarget:Int}
 struct Object {let target:Target;let view:View;let sequence:UInt64;let capturedAt:Double}
 enum ROBArmRoutineError:Error {case blocked(String)}
 enum Failure:Error {case cancelled,projectionChanged}
-@MainActor func exercise(objects:[Target:Object],fixed:Bool=false,mode:String="normal")async throws->([View],[[String:Any]]) {
+@MainActor func exercise(objects:[Target:Object],observed:Object?=nil,fixed:Bool=false,mode:String="normal")async throws->([View],[[String:Any]]) {
  let fixedRegisteredView:View?=fixed ? View(panDegrees:0,upperTarget:6306):nil
  let found=objects
+ let lastObservedObjectForAttention=observed
  var moves:[View]=[],evidence:[[String:Any]]=[]
  func searchCheckpoint()async throws {if mode=="cancelled" {throw Failure.cancelled}}
  func requireSceneProjectionIdentity()throws {if mode=="projectionChanged" {throw Failure.projectionChanged}}
@@ -46,6 +48,10 @@ enum Failure:Error {case cancelled,projectionChanged}
   let bucketOnly=try await exercise(objects:[.orangeBucket:bucket]);precondition(bucketOnly.0==[bucket.view])
   let fixed=try await exercise(objects:[.can:can],fixed:true);precondition(fixed.0.isEmpty && fixed.1.isEmpty)
   let absent=try await exercise(objects:[:]);precondition(absent.0.isEmpty && absent.1.isEmpty)
+  let unreachable=try await exercise(objects:[:],observed:can)
+  precondition(unreachable.0==[can.view] && unreachable.1[0]["reachable_target_available"] as? Bool==false)
+  precondition(unreachable.1[0]["object_observation_refreshed"] as? Bool==false)
+  let preferred=try await exercise(objects:[.can:can],observed:bucket);precondition(preferred.0==[can.view])
   do {_=try await exercise(objects:[.can:can],mode:"unavailable");preconditionFailure("Unavailable focus reported success")}
   catch ROBArmRoutineError.blocked {}
   for mode in ["cancelled","projectionChanged"] {
