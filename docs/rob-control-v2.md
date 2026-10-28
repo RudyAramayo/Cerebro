@@ -153,7 +153,7 @@ generic keyed-archive controller data. Its network-order `RLS1` layout has a
 yaw/pitch/roll. Each valid return adds four bytes: UInt16 millimeters and a
 UInt16 fraction of a full turn. A normal 720-point scan is therefore 2,948
 bytes, or about 14.7 KB/s at the publisher's 5 Hz rate before transport
-overhead. The hard bound is 8,192 points and 32,836 bytes.
+overhead. The V1 bound is 8,192 points and 32,836 bytes. Scan version 2 retains the `RLS1` magic, sets version/flags to 2/1, and appends one bounded JSON map fragment after the binary samples. The complete payload is at most 60,836 bytes, below the local IPC limit. The fragment carries at most 20,000 original SDK cell bytes plus epoch, revision, dimensions, metric origin/resolution and capture time. The same HMAC and replay checks cover the entire scan and its fragment.
 
 Cerebro validates the binary version, exact length, authenticated device UUID,
 monotonically increasing publisher sequence, capture time, finite pose, and
@@ -162,8 +162,11 @@ malformed telemetry is rejected. Samples more than two seconds old or more
 than five seconds in the future are rejected. The publisher keeps only one
 unsent latest scan while either local IPC or QUIC is busy, so congestion drops
 superseded sensor state instead of accumulating stale frames.
-Occupancy/composite map rasters remain local to the RPLidar app and are never
-transmitted. Loss of fresh Lidar input continues to make roaming stop and wait;
+The accumulated occupancy raster is now transmitted in bounded fragments for
+the Recycle Cans mission; composite archives remain local. Only complete, recent,
+consistent snapshots enter room planning. Unknown cells remain unknown. Update
+Cerebro together with RPLidar: older receivers reject scan version 2. Loss of
+fresh Lidar input continues to make roaming stop and wait;
 a sensor credential cannot directly drive the treads.
 
 During migration, run the legacy adapter only as an explicit compatibility
@@ -224,6 +227,7 @@ Allow about eleven seconds for the actual expiry timer.
 
 ```sh
 swiftc -swift-version 5 -D ROB_CONTROL_SESSION_FIXTURE \
+  Cerebro/ROBRoomMapFragment.swift \
   Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift \
   Cerebro/AutoNet/AutoNetServer/AutoNetServerConnection.swift \
   Tests/ROBControlSessionReconnectTests.swift \
@@ -249,6 +253,7 @@ xcrun swiftc -swift-version 5 \
   -module-cache-path "$robctl_fixture_dir/module-cache" \
   -parse-as-library \
   -D ROB_CONTROL_IDENTITY_FIXTURE \
+  Cerebro/ROBRoomMapFragment.swift \
   Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift \
   Tests/ROBControlTransportIntegrationTests.swift \
   -o "$robctl_fixture_dir/robcontrol-transport-fixture"

@@ -3052,6 +3052,40 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.robotActionSenderID = [NSString stringWithFormat:@"Cerebro:%@", hostName];
     self.autonomyCoordinator = [[ROBAutonomyCoordinator alloc] initWithRobotID:self.robotActionSenderID];
     self.autonomyCoordinator.delegate = self;
+    __weak ROBMainViewController *missionOwner = self;
+    [ROBRecycleMissionCoordinator shared].sendStatus = ^(NSData *data, NSUUID *device, NSUUID *session) {
+        [missionOwner.autoNetServer sendFollowTargetMessage:data toDeviceID:device sessionID:session];
+    };
+    [ROBRecycleMissionCoordinator shared].stopBase = ^{
+        ROBBaseControllerModel *stopped = [ROBBaseControllerModel new];
+        stopped.touchPadPointL = CGPointMake(-1000, -1000);
+        stopped.touchPadPointR = CGPointMake(-1000, -1000);
+        stopped.tredBrakeLock = YES; stopped.flipperBrakeLock = YES;
+        stopped.speed = 0; stopped.textInput = @"";
+        [missionOwner.serialBox controllerId:@"Recycle Cans" controllerModelData:stopped];
+        [missionOwner.serialBox stopBaseMotionAndDropHeartbeat];
+    };
+    [ROBRecycleMissionCoordinator shared].setCameraDemand = ^(BOOL active) {
+        [missionOwner ensureBellyCameraRuntime];
+        [missionOwner.bellyCameraWindowController setNavigationDemandActive:
+            active || missionOwner.autonomyCoordinator.active || missionOwner.followPersonCoordinator.active];
+    };
+    [ROBRecycleMissionCoordinator shared].takeControl = ^{
+        [missionOwner.autonomyCoordinator stopWithReason:@"Recycle Cans mission started"];
+        [missionOwner.followPersonCoordinator stopWithReason:@"Recycle Cans mission started"];
+        [missionOwner.serialBox switchToMasterControllerID:@"Recycle Cans"];
+        [missionOwner publishControlAuthorityState];
+    };
+    [ROBRecycleMissionCoordinator shared].driveTreads = ^(NSInteger left, NSInteger right) {
+        if (![ROBRecycleMissionCoordinator shared].active) { return; }
+        ROBBaseControllerModel *model = [ROBBaseControllerModel new];
+        model.touchPadPointL = CGPointMake(0, MAX(-255, MIN(255, left)) / 510.0);
+        model.touchPadPointR = CGPointMake(0, MAX(-255, MIN(255, right)) / 510.0);
+        model.speed = 100; // The mission already ramped and bounded signed demand.
+        model.flipperBrakeLock = YES;
+        model.textInput = @"";
+        [missionOwner.serialBox controllerId:@"Recycle Cans" controllerModelData:model];
+    };
     self.followPersonCoordinator = [[ROBFollowPersonCoordinator alloc] initWithRobotID:self.robotActionSenderID];
     self.followPersonCoordinator.delegate = self;
     self.stageShowCoordinator = [[ROBStageShowCoordinator alloc] init];
@@ -3318,6 +3352,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (self.stageShowCoordinator.isRunning) {
         [self.stageShowCoordinator cancelWithReason:@"Cerebro is shutting down"];
     }
+    [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Cerebro shutting down"];
     [self.autonomyCoordinator shutdown];
     [self.followPersonCoordinator shutdown];
     [self.bellyCameraWindowController setNavigationDemandActive:NO];
@@ -3328,6 +3363,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)applyPrioritySoftwareStopWithReason:(NSString *)reason
 {
+    [[ROBRecycleMissionCoordinator shared] stopWithReason:reason];
     [[ROBShowMotionCoordinator shared] stop];
     [[ROBArmRoutineCoordinator shared] cancelWithReason:reason];
     self.currentPersonTrackingID = -1;
@@ -3581,6 +3617,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (!coordinator.active || self.serialBox == nil) {
         return NO;
     }
+    [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Visual follow mode was authorized"];
     if (self.autonomyCoordinator.active) {
         [self.autonomyCoordinator stopWithReason:@"Visual follow mode was authorized"];
     }
@@ -5098,6 +5135,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)didReceiveLidarTelemetry:(NSData *)data deviceID:(NSString *)deviceID
 {
     dispatch_async(dispatch_get_main_queue(), ^{
+        [[ROBRecycleMissionCoordinator shared] updateLidarScanData:data];
         [self.autonomyCoordinator updateLidarScanData:data];
         [self.followPersonCoordinator updateLidarScanData:data];
     });
@@ -5508,6 +5546,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (self.stageShowCoordinator.isRunning) {
             [self.stageShowCoordinator cancelWithReason:@"Manual controller requested motion authority"];
         }
+        [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Manual controller requested motion authority"];
         if (self.autonomyCoordinator.active) {
             [self.autonomyCoordinator stopWithReason:@"Manual controller requested motion authority"];
         }

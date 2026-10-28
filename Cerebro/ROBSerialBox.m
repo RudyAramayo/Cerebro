@@ -5928,6 +5928,9 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 //Sent by the controller to authorize autonomous mode or become the masterController input
 - (void) switchToMasterControllerID:(NSString *)controllerID
 {
+    if (![controllerID isEqualToString:@"Recycle Cans"]) {
+        [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Motion control changed to another controller"];
+    }
     if (![self.masterControllerID isEqualToString:controllerID] && self.masterControllerInputWasFresh) {
         [self stopBaseMotionAndDropHeartbeat];
     }

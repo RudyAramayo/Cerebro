@@ -871,6 +871,7 @@ struct ROBTableRelayInitialEmptyEvidence {
         var started: Date?
         let executionLimit: TimeInterval
         var voiceAuthorized = false
+        var recycleMissionAuthorization: (() -> Bool)?
         var armSessionID: String? = nil
         var manualArmSessionID: String? = nil
         var attentionReminders = 0
@@ -1020,6 +1021,7 @@ struct ROBTableRelayInitialEmptyEvidence {
 
     private func authorizationIsLive(_ p: Pending) -> Bool {
         guard let started = p.started, (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
+        if let authorized=p.recycleMissionAuthorization { return authorized() }
         if let scope=p.tableRelayScope {
             guard tableRelayAuditFailure==nil,let approval=tableRelayApproval,approval.pendingID==p.id,
                   approval.scope==scope,approval.currentContext()==scope.contextIdentity else{return false}
@@ -1280,7 +1282,19 @@ struct ROBTableRelayInitialEmptyEvidence {
             || (p.action == "play_gesture" && p.summary == Self.supervisedGreetingName)
     }
 
+    /// Called only by the authenticated Recycle Cans mission adapter. The
+    /// closure binds this one native transfer to its live mission and peer.
+    @nonobjc func requestRecycleMissionTask(summary: String, authorization: @escaping () -> Bool,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        guard authorization() else { completion(["status":"blocked","detail":"Recycling mission authorization ended."]);return }
+        request(action:"arm_operation",arguments:["operation":"manual","arm":"right","summary":summary],
+            summary:summary,executionLimit:600,recycleMissionAuthorization:authorization,
+            execute:execute,cancel:cancel,completion:completion)
+    }
+
     private func request(action: String, arguments: NSDictionary, summary: String, executionLimit: TimeInterval = 120,
+                         recycleMissionAuthorization: (() -> Bool)? = nil,
                          allowArmSession: Bool = false,
                          allowManualArmSession: Bool = false,
                          localRecyclingScope: LocalRecyclingScope? = nil,
@@ -1297,11 +1311,19 @@ struct ROBTableRelayInitialEmptyEvidence {
         guard probe.validationError == nil else {
             completion(["status": "rejected", "detail": "Invalid controller motion approval request."]); return
         }
+        if recycleMissionAuthorization != nil,localRecyclingApproval != nil {
+            revokeLocalApproval(reason:"A controller mission replaced the idle local job context.")
+        }
         // An object observation cannot span an intervening arm operation,
         // even if that unrelated operation leaves campaign counters unchanged.
         pendingEmptyObservation=nil
         pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
             created: now(), execute: execute, cancel: cancel, completion: completion, executionLimit: executionLimit)
+        if let authorization=recycleMissionAuthorization {
+            guard authorization() else { finish(["status":"blocked","detail":"Mission authorization expired"],state:.failed);return }
+            pending?.recycleMissionAuthorization=authorization
+            startTimer();beginAcceptedOperation();return
+        }
         pending?.localRecyclingScope = localRecyclingScope
         pending?.tableRelayScope = tableRelayScope
         pending?.localContextIdentity = localContextIdentity
@@ -1514,7 +1536,7 @@ struct ROBTableRelayInitialEmptyEvidence {
             // is missed. Repeat the SAME scope without extending its deadline.
             announceApproval?("Hey! Can I move my arms?")
         }
-        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil || p.tableRelayScope != nil {
+        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil || p.tableRelayScope != nil || p.recycleMissionAuthorization != nil {
             if !authorizationIsLive(p) { pauseOrCancelLostOperation("Authorized arm operation expired; hold requested.") }
             return
         }

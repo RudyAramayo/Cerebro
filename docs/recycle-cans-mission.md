@@ -1,0 +1,57 @@
+# Recycle Cans mission
+
+Open **ROBController → Map → Missions → Recycle Cans**. The saved destination is
+**Orange bucket**. Choose a search radius (1–10 m) and up to eight cans. Start
+authorizes one 30-minute mission, with gentle acceleration and a 40% maximum
+tread demand. It does not request another arm approval at each stop or waypoint.
+
+The mission surveys the immediate right and left table areas, then uses the
+existing right-arm recycling executor when it finds a can. If perception proves
+that no arm or jaw command was sent and no payload is possible, it can move to
+another observation stop and search again. Stops come from reachable free cells
+in the accumulated RPLidar room map. The radius remains anchored to the initial
+SLAM position; satellite-overlay rotation/scale and GPS are not used.
+
+Movement checks the measured model envelope of both arms and the base, inflated
+map clearance, live lidar and fresh RGB-D availability. Unknown cells remain
+blocked. New grid revisions replan the route; SLAM jumps stop tread output and
+trigger a fresh survey. Traction is measured from pose changes, not inferred
+from PWM duration. The model envelope and RGB-D checks are not a certified
+collision system or a measured mounting calibration.
+
+The mission currently delegates **stationary can-to-bucket transfers** to the
+native arm executor. It does not add a body-motion continuation while carrying
+a can. If pickup leaves a possible payload or the destination cannot be reached
+by that checked arm route, the mission holds and reports the native result.
+The native executor still reports bucket landing as unverified; this result
+pauses the mission and credits zero transfers. The mission advances its count
+only when placement, empty jaws and transfer completion are all verified.
+These are explicit manipulation capability limits, not additional permission
+prompts. Room-wide pickup/carry/drop completion has not been physically validated.
+
+**Stop and hold** cancels the native phase, replaces the cached tread command
+with stopped/braked input and ends the grant. Manual tread/controller takeover,
+disconnect, timeout, sleep or shutdown also end it. Reconnection restores status
+and Stop access; it cannot replay the old path. A controller's explicit
+**I inspected the gripper: it is empty** records an operator observation after
+intervention; it cannot actuate, credit a transfer or resume a route.
+
+## Transport and runtime
+
+- `ROBRecycleMission.v1` carries bounded Start, Stop, query, status and explicit
+  empty-gripper observations through authenticated operator sessions only.
+  The server consumes these before legacy motor parsing and returns status only
+  to the requesting peer. Duplicate/replayed Start messages cannot execute again.
+- `ROBRoomMapFragment` copies the native SDK occupancy raster into 20,000-byte
+  chunks within authenticated RLS2 scans. V1 scan encoding remains unchanged.
+  Device identity, existing replay/freshness checks and the telemetry-only role
+  remain enforced. Complete maps require matching epoch, revision, dimensions,
+  resolution, origin and capture time; incomplete or mixed maps cannot plan.
+- Update RPLidar and Cerebro together. An old Cerebro does not understand RLS2.
+  The controller mission requires the new Cerebro runtime. Publishing a map
+  never authorizes motion, and an app restart never starts a mission.
+
+Run `bash Scripts/test-recycle-mission.sh` and
+`bash Scripts/test-controller-arm-approval.sh`. Fixtures use socket-free adapters
+for lifecycle tests, production map/scan/protocol codecs, metric route planning,
+and the production arm approval broker. No fixture sends a hardware command.

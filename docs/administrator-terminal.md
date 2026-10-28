@@ -33,6 +33,7 @@ affected shells.
 
 ```sh
 swiftc Tests/ROBVideoTransportCompileStub.swift \
+  Cerebro/ROBRoomMapFragment.swift \
   Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift \
   Tests/ROBAdministratorTerminalProtocolFixtureTests.swift \
   -o /tmp/ROBAdministratorTerminalProtocolFixtureTests

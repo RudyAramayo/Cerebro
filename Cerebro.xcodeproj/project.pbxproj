@@ -264,6 +264,10 @@
 		885DBCA98293841F6B44D92D /* ROBShadowPlanningProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CCC75D97C538DD6A8F34256 /* ROBShadowPlanningProtocol.swift */; };
 		B291B99A5C63A9A985786591 /* ROBShadowPlannerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */; };
 		1D117594B57441161B454028 /* ShadowPlanner in Resources */ = {isa = PBXBuildFile; fileRef = 62224F54B1E408ED04F979A3 /* ShadowPlanner */; };
+		9956D8DABB63FD50AA8C3B45 /* ROBRecycleMissionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5AF6FBBEEA366573495AE2 /* ROBRecycleMissionProtocol.swift */; };
+		8785202BB489F05A8B0C1F69 /* ROBRoomMissionPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C645FBBE3A83F642F5FE7E /* ROBRoomMissionPlanner.swift */; };
+		C92F938B176EF9926FCF60B9 /* ROBRoomMapFragment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71D89DEBC4517C38BC505788 /* ROBRoomMapFragment.swift */; };
+		5D75BE358B59D99F303CFAC8 /* ROBRecycleMissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A872E2C464D3943C96F1E1 /* ROBRecycleMissionCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -568,6 +572,10 @@
 		2CCC75D97C538DD6A8F34256 /* ROBShadowPlanningProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ROBShadowPlanningProtocol.swift"; sourceTree = "<group>"; };
 		49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ROBShadowPlannerBridge.swift"; sourceTree = "<group>"; };
 		62224F54B1E408ED04F979A3 /* ShadowPlanner */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Resources/ShadowPlanner"; sourceTree = "<group>"; };
+		5A5AF6FBBEEA366573495AE2 /* ROBRecycleMissionProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecycleMissionProtocol.swift; sourceTree = "<group>"; };
+		15C645FBBE3A83F642F5FE7E /* ROBRoomMissionPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRoomMissionPlanner.swift; sourceTree = "<group>"; };
+		71D89DEBC4517C38BC505788 /* ROBRoomMapFragment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRoomMapFragment.swift; sourceTree = "<group>"; };
+		F3A872E2C464D3943C96F1E1 /* ROBRecycleMissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecycleMissionCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -696,6 +704,10 @@
 				C0B009012F4C000900000001 /* ROBAppleMusicService.swift */,
 				D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */,
 				D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */,
+				F3A872E2C464D3943C96F1E1 /* ROBRecycleMissionCoordinator.swift */,
+				71D89DEBC4517C38BC505788 /* ROBRoomMapFragment.swift */,
+				15C645FBBE3A83F642F5FE7E /* ROBRoomMissionPlanner.swift */,
+				5A5AF6FBBEEA366573495AE2 /* ROBRecycleMissionProtocol.swift */,
 				D4E300012F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift */,
 				D4E3000B2F00000100000001 /* ROBBellyCameraWindowController.swift */,
 				C0A110012F4C011000000001 /* ROBOpenStreetMapService.swift */,
@@ -1146,6 +1158,10 @@
 				C0B009022F4C000900000001 /* ROBAppleMusicService.swift in Sources */,
 				D4E100022F00000100000001 /* ROBRobotActionProtocol.swift in Sources */,
 				D4E200022F00000100000001 /* ROBAutonomyCoordinator.swift in Sources */,
+				5D75BE358B59D99F303CFAC8 /* ROBRecycleMissionCoordinator.swift in Sources */,
+				C92F938B176EF9926FCF60B9 /* ROBRoomMapFragment.swift in Sources */,
+				8785202BB489F05A8B0C1F69 /* ROBRoomMissionPlanner.swift in Sources */,
+				9956D8DABB63FD50AA8C3B45 /* ROBRecycleMissionProtocol.swift in Sources */,
 				D4E300022F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift in Sources */,
 				D4E3000C2F00000100000001 /* ROBBellyCameraWindowController.swift in Sources */,
 				C0A110022F4C011000000001 /* ROBOpenStreetMapService.swift in Sources */,

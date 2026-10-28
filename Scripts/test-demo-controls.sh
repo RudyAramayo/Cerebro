@@ -13,6 +13,7 @@ xcrun swiftc "${common[@]}" Cerebro/ROBStageShowProtocol.swift Cerebro/ROBStageS
 xcrun swiftc "${common[@]}" Tests/ROBFoundationImprovisationFixtureTests.swift -o "$test_dir/foundation"
 "$test_dir/foundation"
 xcrun swiftc -module-cache-path /private/tmp/cerebro-swift-module-cache \
+  Cerebro/ROBRoomMapFragment.swift \
   Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift Cerebro/ROBRobotActionProtocol.swift \
   Cerebro/ROBAutonomyCoordinator.swift Tests/ROBRobotActionProtocolFixtureTests.swift -o "$test_dir/autonomy"
 "$test_dir/autonomy"

@@ -425,6 +425,14 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 }
                 return
             }
+            if ROBRecycleMissionMessage.claims(data) {
+                if sendingConnection.authenticatedRole == .operatorController,
+                   let controllerID = sendingConnection.authenticatedDeviceID,
+                   let sessionID = sendingConnection.authenticatedSessionUUID {
+                    ROBRecycleMissionCoordinator.shared.consume(data, controller: controllerID, networkSession: sessionID)
+                }
+                return // Never relay mission commands or feed the legacy actuator parser.
+            }
             if ROBShadowProtocol.claims(data) {
                 if sendingConnection.authenticatedRole == .operatorController,
                    let controllerID = sendingConnection.authenticatedDeviceID,

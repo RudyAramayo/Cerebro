@@ -48,6 +48,31 @@ final class ROBAmberGatewayClient: NSObject {
             precondition(condition(), detail); checks += 1
         }
 
+        // A real mission Start covers each native can phase once. It never
+        // manufactures voice/peer responses or leaks into unrelated operations.
+        do {
+            let b=broker()
+            var authorized=true,executed=0,announcements=0,cancelled=0
+            var finish:((NSDictionary)->Void)?
+            b.announceApproval={_ in announcements += 1}
+            b.requestRecycleMissionTask(summary:"Mission can to orange bucket",authorization:{authorized},
+                execute:{executed += 1;finish=$0},cancel:{cancelled += 1},completion:{_ in})
+            check(executed==1 && announcements==0,"Mission phase asked for another approval")
+            check(b.authorizesRightArmTrial("Mission can to orange bucket"),"Exact mission phase not authorized")
+            check(!b.authorizesRightArmTrial("Unrelated wave"),"Mission grant escaped exact phase")
+            check(!b.authorizesLeftArmTrial("Mission can to orange bucket"),"Mission grant authorized other arm")
+            b.tick();check(executed==1 && announcements==0,"Tick reissued mission operation")
+            finish?(["status":"completed"])
+            b.requestRecycleMissionTask(summary:"Next freshly observed can",authorization:{authorized},
+                execute:{_ in executed += 1},cancel:{cancelled += 1},completion:{_ in})
+            check(executed==2 && announcements==0,"Same live mission did not cover the next phase")
+            authorized=false;b.tick()
+            check(cancelled==1 && !b.isPending,"Mission stop/disconnect did not revoke active arm phase")
+            b.requestRecycleMissionTask(summary:"Stale phase",authorization:{authorized},
+                execute:{_ in executed += 1},cancel:{},completion:{_ in})
+            check(executed==2,"Expired mission executed another phase")
+        }
+
         // No controller, unauthenticated hello, or old client can authorize.
         do {
             let b = broker()

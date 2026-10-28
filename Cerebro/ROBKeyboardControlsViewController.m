@@ -242,6 +242,9 @@ static NSInteger const kROBLocalTreadMaximumCommand = 255;
 
 - (void)setLocalTreadTargetLeft:(NSInteger)left right:(NSInteger)right
 {
+    if (left != 0 || right != 0) {
+        [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Local tread control took over"];
+    }
     self.targetLeftTreadCommand = MAX(
         -kROBLocalTreadMaximumCommand,
         MIN(kROBLocalTreadMaximumCommand, left)

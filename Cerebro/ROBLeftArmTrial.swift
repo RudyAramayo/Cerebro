@@ -1035,7 +1035,20 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
-    private func performImpl(_ requestedCommand:String,target:String,localReceiptOnly:Bool,completion:@escaping(NSDictionary)->Void) {
+    /// One stationary transfer inside a real controller-started room mission.
+    /// No spoken prompt, fabricated response, persisted receipt or weaker guard.
+    private var missionTaskAuthorization:(()->Bool)?
+    @nonobjc func performRecycleMission(authorization:@escaping()->Bool,completion:@escaping(NSDictionary)->Void) {
+        guard !isRunning,missionTaskAuthorization==nil else { completion(["status":"busy","detail":"An arm task is already running."]);return }
+        missionTaskAuthorization=authorization
+        performImpl("right_recycle_can",target:"orange bucket",localReceiptOnly:false,
+                    missionAuthorization:authorization) { [weak self] result in
+            self?.missionTaskAuthorization=nil;completion(result)
+        }
+    }
+
+    private func performImpl(_ requestedCommand:String,target:String,localReceiptOnly:Bool,
+        missionAuthorization:(()->Bool)?=nil,completion:@escaping(NSDictionary)->Void) {
         precondition(Thread.isMainThread)
         guard Self.commands.contains(requestedCommand) else { completion(["status": "rejected"]); return }
         // Normalize shared task semantics only after preserving physical identity.
@@ -1168,7 +1181,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         let finished: (NSDictionary) -> Void = { [weak self] result in
             self?.update(result["detail"] as? String ?? "Left-arm operation ended"); completion(result)
         }
-        if localReceiptOnly {
+        if let missionAuthorization {
+            ROBControllerArmApproval.shared.requestRecycleMissionTask(summary:cameraAdvisorySummary,
+                authorization:missionAuthorization,execute:execute,cancel:cancel,completion:finished)
+        } else if localReceiptOnly {
             #if !DEBUG
             guard !holdAfterInitialEmptyLiftEnabled,!sourcePixelSelfReviewEnabled,!approachCanThenHoldEnabled,!approachUnknownAdvisoryEnabled else {
                 completion(["status":"rejected","detail":"Initial empty lift-and-hold is available only in DEBUG commissioning builds."]);return
@@ -2875,6 +2891,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     return try await executeSingle(command)
                 }
                 if activeHoldAfterInitialEmptyLift {return try initialEmptyLiftHoldResult(performed:false)}
+                if missionTaskAuthorization?()==true,ROBCanRecyclingReadyPose.matches(q,physicalSide:physicalSide),
+                   map.registrationID != nil {
+                    // The same measured taught ready hold and registered scene
+                    // establish this task's start; no hanging return or reset.
+                    referencedGeneration=generation
+                }
                 guard referencedGeneration == generation || ROBArmRoutinePlan.near(q,Array(repeating:0,count:7)) else {
                     throw ROBArmRoutineError.blocked("The arm joint reference must be verified before a dynamic approach from this held pose.")
                 }
@@ -4056,9 +4078,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     }
 
     private var usesHeldCanPreparation: Bool {
-        physicalSide == "right" && localReceiptCommand == "right_recycle_cans" &&
-            !activeHoldAfterInitialEmptyLift && !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled &&
-            (activePreviewedCanGrasp != nil || activeCameraCollisionAdvisory)
+        physicalSide == "right" && (missionTaskAuthorization?()==true ||
+            (localReceiptCommand == "right_recycle_cans" && !activeHoldAfterInitialEmptyLift &&
+             !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled &&
+             (activePreviewedCanGrasp != nil || activeCameraCollisionAdvisory)))
     }
 
     private var taskGripperReady: Bool {
@@ -4076,18 +4099,29 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               !ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload else {
             throw ROBArmRoutineError.blocked("Held can preparation needs its current right-arm scope and empty jaws.")
         }
-        _ = try requireLocalReceipt()
         let q=try measured().positionsRadians.map(\.doubleValue),session=generation,camera=vision.cameraGeneration
-        guard let trial=try visualTrial(map:map,model:model,baseline:q) else {
-            throw ROBArmRoutineError.blocked("Stationary grasp preparation needs the current local task context.")
+        let step=ROBLeftGestureProposal.Step(positions:q,seconds:0.8,stage:"Stationary empty grasp preparation")
+        if missionTaskAuthorization?()==true {
+            // Controller missions use the ordinary registered-scene admission;
+            // they do not manufacture a private commissioning receipt.
+            _ = try await Task.detached(priority:.userInitiated) {
+                try ROBWorkspaceCollisionPlan.review(baseline:q,steps:[step],map:map,model:model,
+                    generation:session,sceneID:map.sceneID,cameraGeneration:camera,
+                    nowMilliseconds:Date().timeIntervalSince1970*1000)
+            }.value
+            try check()
+        } else {
+            _ = try requireLocalReceipt()
+            guard let trial=try visualTrial(map:map,model:model,baseline:q) else {
+                throw ROBArmRoutineError.blocked("Stationary grasp preparation needs the current local task context.")
+            }
+            _ = try await Task.detached(priority:.userInitiated) {
+                try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:q,steps:[step],map:map,model:model,
+                    generation:session,sceneID:map.sceneID,cameraGeneration:camera,
+                    nowMilliseconds:Date().timeIntervalSince1970*1000,trial:trial)
+            }.value
+            try check();try requireLiveVisualTrial(trial,map:map,model:model)
         }
-        _ = try await Task.detached(priority:.userInitiated) {
-            try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:q,
-                steps:[.init(positions:q,seconds:0.8,stage:"Stationary empty grasp preparation")],map:map,model:model,
-                generation:session,sceneID:map.sceneID,cameraGeneration:camera,
-                nowMilliseconds:Date().timeIntervalSince1970*1000,trial:trial)
-        }.value
-        try check();try requireLiveVisualTrial(trial,map:map,model:model)
         try await holdTaskPosition(q)
         defer {taskJawTarget=nil}
         jawSetupDispatchUncertain=true

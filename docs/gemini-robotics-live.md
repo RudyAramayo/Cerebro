@@ -691,6 +691,7 @@ Run the standalone `ROBRobotActionProtocol` v1 envelope fixtures:
 
 ```bash
 swiftc \
+  Cerebro/ROBRoomMapFragment.swift \
   Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift \
   Cerebro/ROBRobotActionProtocol.swift \
   Cerebro/ROBAutonomyCoordinator.swift \
