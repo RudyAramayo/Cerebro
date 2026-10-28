@@ -10,6 +10,8 @@ import simd
     private let depthRoot: SCNNode
     private let mapNode = SCNNode()
     private let laserNode = SCNNode()
+    private let approachNode = SCNNode()
+    private let approachLabel = NSTextField(wrappingLabelWithString: "")
     private let mapToggle = NSButton(checkboxWithTitle: "Floor map", target: nil, action: nil)
     private let laserToggle = NSButton(checkboxWithTitle: "Laser hits", target: nil, action: nil)
     private let depthToggle = NSButton(checkboxWithTitle: "Depth scan", target: nil, action: nil)
@@ -34,6 +36,8 @@ import simd
         laserNode.name = "Live RPLidar returns · model-assumed scanner mount"
         sceneView.scene?.rootNode.addChildNode(mapNode)
         sceneView.scene?.rootNode.addChildNode(laserNode)
+        approachNode.name = "Can base approach · floor-map proposal"
+        sceneView.scene?.rootNode.addChildNode(approachNode)
         for toggle in [mapToggle, laserToggle, depthToggle] {
             toggle.state = .on; toggle.target = self; toggle.action = #selector(layersChanged)
             toggle.font = .systemFont(ofSize: 11)
@@ -52,7 +56,13 @@ import simd
             label.maximumNumberOfLines = 2
         }
         status.setAccessibilityIdentifier("ROB.Diagnostics.RoomSensors.Status")
-        let stack = NSStackView(views: [title, controls, status, poseLabel, legend, alignment])
+        let approach = NSButton(title: "Plan base approach to can", target: self, action: #selector(planApproach))
+        approach.setAccessibilityIdentifier("ROB.Diagnostics.PlanCanApproach")
+        approachLabel.font = .systemFont(ofSize: 11)
+        approachLabel.preferredMaxLayoutWidth = 460
+        approachLabel.maximumNumberOfLines = 5
+        approachLabel.setAccessibilityIdentifier("ROB.Diagnostics.CanApproach.Status")
+        let stack = NSStackView(views: [title, controls, status, poseLabel, legend, alignment, approach, approachLabel])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 4
         let panel = NSVisualEffectView()
         panel.material = .hudWindow; panel.blendingMode = .withinWindow; panel.state = .active
@@ -72,13 +82,16 @@ import simd
         layersChanged()
     }
 
-    func invalidate() { closed = true; mapNode.removeFromParentNode(); laserNode.removeFromParentNode() }
+    func invalidate() { closed = true; mapNode.removeFromParentNode(); laserNode.removeFromParentNode(); approachNode.removeFromParentNode() }
+    @objc private func planApproach() { ROBRoomSpatialStore.shared.requestCanApproachPreview?() }
 
     /// Returns true when depth history/in-flight projection must be discarded.
     /// Display-only affine matrices come from the SAME model basis as RGB-D.
     func refresh(baseToScene rows: [NSNumber], lidarToBase lidarRows: [NSNumber]) -> Bool {
         guard !closed else { return false }
         let store = ROBRoomSpatialStore.shared, now = ProcessInfo.processInfo.systemUptime
+        approachLabel.stringValue = store.canApproachDetail
+        approachNode.isHidden = !store.poseIsFresh(at: now) || !store.mapIsFresh(at: now) || store.canApproachPreview == nil
         let fresh = store.poseIsFresh(at: now)
         let clearDepth = depthGeneration != store.depthGeneration || (wasFresh && !fresh)
         depthGeneration = store.depthGeneration; wasFresh = fresh
@@ -121,6 +134,20 @@ import simd
             return clearDepth
         }
         mapNode.simdTransform = Self.floatMatrix(baseToScene * ROBRoomSpatialGeometry.mapToBase(scan: scan, lidarToBase: lidarToBase))
+        approachNode.simdTransform = mapNode.simdTransform
+        if let proposal = store.canApproachPreview {
+            var points = proposal.route.map { SCNVector3($0.x,$0.y,0.025) }
+            let goal = proposal.goal
+            // Direction arrow indicates the final BASE heading, not torso yaw.
+            points += [SCNVector3(goal.x,goal.y,0.025),
+                       SCNVector3(goal.x+0.25*cos(proposal.baseYaw),goal.y+0.25*sin(proposal.baseYaw),0.025)]
+            let indices = (0..<max(0,proposal.route.count-1)).flatMap { [UInt32($0),UInt32($0+1)] } +
+                [UInt32(points.count-2),UInt32(points.count-1)]
+            let geometry = SCNGeometry(sources:[SCNGeometrySource(vertices:points)],
+                elements:[SCNGeometryElement(indices:indices,primitiveType:.line)])
+            let material = SCNMaterial(); material.lightingModel = .constant; material.diffuse.contents = NSColor.systemPink
+            material.readsFromDepthBuffer = false; geometry.materials = [material]; approachNode.geometry = geometry
+        } else { approachNode.geometry = nil }
         let corners = Self.corners(map)
         roomCorners = corners.map { mapNode.convertPosition($0, to: nil) }
         let key = "\(scan.deviceID)/\(map.epoch)/\(map.revision)"

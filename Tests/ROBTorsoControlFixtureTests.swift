@@ -14,6 +14,23 @@ import Foundation
         try expect(condition(), "Asynchronous Tic fixture timed out")
     }
     static func main() throws {
+        var calibration = ROBTorsoCountCalibration()
+        try expect(calibration.heading(count:-8907)==90 && calibration.heading(count:9091)==(-90) && calibration.count(heading:0)==92,
+            "Observed quarter-turn counts are not mapped through midpoint 92")
+        try expect(calibration.heading(count:92-35996)==360, "Slipring full turns were clamped to calibration points")
+        calibration.align(count:1000,observedHeading:-90)
+        try expect(abs(calibration.count(heading:-90)-1000)<1e-8, "Software base alignment did not correct the count offset")
+        var cable = ROBTorsoMotionPolicy(); cable.debugCableMode = true
+        for i in 0...72 { cable.observe(sample(Double(i)*5,Double(i)*0.1+1,UInt64(i+1)),now:Double(i)*0.1+1) }
+        try expect(abs(cable.cableTravelDegrees!-360)<1e-6, "Wrapped heading discarded a debug cable revolution")
+        _ = cable.arm(at:8.2); cable.requestHeading(90)
+        try expect(cable.targetHeading==90 && cable.tick(at:8.25)<0, "Debug destination added twist instead of reversing the accumulated turn")
+        try expect(cable.requestUnwind() && cable.targetHeading==0, "Unwind did not return through the original turn")
+        cable.debugCableMode = false; cable.requestHeading(90)
+        try expect(cable.targetHeading==450, "Untethered operation lost shortest-route/full-turn behavior")
+        cable.observe(sample(0,10,99),now:10)
+        cable.debugCableMode = true
+        try expect(cable.cableTravelDegrees==nil && !cable.requestUnwind(), "Missing turn history fabricated a known cable reference")
         try expect(ROBTorsoMotionPolicy.wrap(361) == 1 && ROBTorsoMotionPolicy.wrap(-361) == -1, "Circular heading wrap failed")
         var p = ROBTorsoMotionPolicy()
         try expect(!p.arm(at: 10), "Missing camera observation armed")
@@ -92,6 +109,9 @@ import Foundation
         try expect(profile.accelerationUnits == 79991, "Acceleration must retain a positive magnitude with negative left polarity")
         try expect(profile.velocityUnits(.nan) == nil, "Non-finite velocity accepted")
         try ROBTicVelocityTransport.checkStatus(FakeTic.status(ready: true), starting: false)
+        // Match the real ticcmd 1.8.3 section layout (no blank separator).
+        let compactStatus = FakeTic.status(ready:false).replacingOccurrences(of:"\n\nErrors that occurred",with:"\nErrors that occurred")
+        try ROBTicVelocityTransport.checkStatus(compactStatus,starting:true)
         // Position uncertain is valid for camera-referenced velocity operation.
         try ROBTicVelocityTransport.checkStatus(FakeTic.status(ready: false), starting: true)
         var rejected = false
@@ -125,7 +145,7 @@ import Foundation
         let firstMotion = fake.calls.firstIndex(where: { FakeTic.velocity($0).map { $0 != 0 } == true })!
         try expect(FakeTic.velocity(fake.calls[firstWake]) == 0 && fake.calls[firstWake].contains("--exit-safe-start"),
                    "Wake did not clear the old target to zero before energizing")
-        try expect(firstWake < firstMotion && fake.calls[(firstWake + 1)..<firstMotion].contains(["--status"]),
+        try expect(firstWake < firstMotion && fake.calls[(firstWake + 1)..<firstMotion].contains(["--status", "--full"]),
                    "Nonzero movement preceded successful energized status verification")
         let releasedBeforeReversal = fake.calls.filter { $0.contains("--deenergize") }.count
         transport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2, releaseWhenStopped: false)

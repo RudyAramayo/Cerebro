@@ -1,7 +1,24 @@
 import Foundation
 
-/// Angles are camera-observed degrees relative to ROB's base. Tic counts never
-/// establish a reference. No hardware or UI dependency is permitted here.
+/// Operator-observed calibration, not mechanical end stops or an encoder.
+/// ROB-left is positive yaw and decreasing Tic counts. The slipring permits
+/// full turns; the temporary debugging cables are handled separately below.
+struct ROBTorsoCountCalibration {
+    static let leftCount = -8_907.0
+    static let rightCount = 9_091.0
+    static let nominalCenter = 92.0
+    static let countsPerTurn = 35_996.0
+    var centerCount = nominalCenter
+    func heading(count: Double) -> Double { (centerCount-count) * 360 / Self.countsPerTurn }
+    func count(heading: Double) -> Double { centerCount-heading * Self.countsPerTurn / 360 }
+    mutating func align(count: Double, observedHeading: Double) {
+        guard count.isFinite, observedHeading.isFinite else { return }
+        centerCount = count + observedHeading * Self.countsPerTurn / 360
+    }
+}
+
+/// Angles come from the caller's selected observation source. Raw Tic counts
+/// cannot establish physical base alignment. No hardware/UI dependency here.
 struct ROBTorsoMotionPolicy {
     enum Mode { case hold, velocity, heading }
     struct Observation {
@@ -15,6 +32,13 @@ struct ROBTorsoMotionPolicy {
     var maximumSpeed = 8.0
     var acceleration = 8.0
     var slowdownAngle = 25.0
+    var debugCableMode = false
+    private(set) var cableReferenceHeading: Double?
+    private(set) var cableTrackingInterrupted = false
+    var cableTravelDegrees: Double? {
+        guard let reference = cableReferenceHeading, let current = unwrappedHeading else { return nil }
+        return current-reference
+    }
     let maximumObservationAge = 0.75
     private(set) var observation: Observation?
     private(set) var unwrappedHeading: Double?
@@ -61,10 +85,12 @@ struct ROBTorsoMotionPolicy {
             if changedFrame || (armed && unexpected) {
                 invalidate(changedFrame ? "Camera reference changed; re-arm from the new estimate"
                            : "Torso moved differently from the request; camera estimate corrected, motion stopped")
+                cableReferenceHeading = nil; cableTrackingInterrupted = true
             }
             unwrappedHeading = changedFrame ? heading : oldHeading + delta
         } else {
             unwrappedHeading = heading
+            if !cableTrackingInterrupted { cableReferenceHeading = heading }
         }
         observation = Observation(heading: heading, capturedAt: value.capturedAt,
                                   uncertainty: value.uncertainty, stream: value.stream, sequence: value.sequence)
@@ -94,8 +120,19 @@ struct ROBTorsoMotionPolicy {
 
     mutating func requestHeading(_ heading: Double) {
         guard armed, heading.isFinite, let current = unwrappedHeading else { return }
-        targetHeading = current + Self.wrap(heading - Self.wrap(current))
+        // With the debugging tether, choose the equivalent heading near the
+        // tracked starting turn, so repeated requests unwind instead of ratchet.
+        // Untethered operation retains the shortest circular route, without stops.
+        let reference = debugCableMode ? cableReferenceHeading ?? current : current
+        targetHeading = reference + Self.wrap(heading - Self.wrap(reference))
         mode = .heading; status = "Turning to heading with a smooth slowdown"
+    }
+
+    @discardableResult mutating func requestUnwind() -> Bool {
+        guard armed, debugCableMode, let reference = cableReferenceHeading else { return false }
+        targetHeading = reference; mode = .heading
+        status = "Reversing the tracked debug turn to its starting orientation"
+        return true
     }
 
     mutating func hold() {
@@ -109,6 +146,7 @@ struct ROBTorsoMotionPolicy {
     }
 
     mutating func resetObservation() {
+        if observation != nil { cableReferenceHeading = nil; cableTrackingInterrupted = true }
         invalidate("Waiting for a camera-confirmed torso angle")
         observation = nil; unwrappedHeading = nil; targetHeading = nil
     }

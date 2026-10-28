@@ -21,6 +21,7 @@ def block(source, marker):
 STUBS = r'''
 import Foundation
 import simd
+enum ROBArmRoutineError: Error { case blocked(String) }
 struct ROBWorkspaceView: Codable { let panDegrees:Double; let upperTarget:Int }
 struct ROBWorkspaceCanSections: Codable { let valid:Bool; let heightMeters:Double; let diameterMeters:Double }
 final class ROBGhostRobotModel {
@@ -39,6 +40,7 @@ struct ROBWorkspaceCollisionSnapshot {
     var sessionGeneration:UInt64=1; var cameraGeneration:UUID; var bodyMotionIdentity="body"
     var estimatedCameraProjectionIdentity:String?="projection";var registrationID:String?=nil
     var observations:[ROBWorkspaceDepthObservation]
+    var oldestCapturedAtMilliseconds:Double=0
 }
 enum ROBFixedHeadBodyMotionIdentity { static var currentIdentity="body" }
 final class ROBArmRoutineVision { static let shared=ROBArmRoutineVision();var cameraGeneration=UUID() }
@@ -68,6 +70,9 @@ FIXTURE = r'''
 @MainActor final class SearchFixture {
     var canCandidates=ROBWorkspaceCanCandidateSet()
     var collisionSnapshot:ROBWorkspaceCollisionSnapshot?
+    var collisionSnapshotValue:ROBWorkspaceCollisionSnapshot?
+    var collisionSnapshotModel:ROBGhostRobotModel?
+    var locatedObjects:[ROBWorkspaceTarget:ROBWorkspaceLocatedObject]=[:]
     func estimatedCameraProjectionIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {
         model.projection==map.estimatedCameraProjectionIdentity
     }
@@ -115,6 +120,24 @@ FIXTURE = r'''
         precondition(shape.confirmed(nowMilliseconds:now).count==1)
         let model=ROBGhostRobotModel(),search=SearchFixture()
         ROBArmRoutineVision.shared.cameraGeneration=camera
+        let target=object(0.45)
+        search.locatedObjects[.can]=target;search.collisionSnapshotModel=model
+        let oldSurvey=ROBWorkspaceCollisionSnapshot(sceneID:scene,cameraGeneration:camera,
+            observations:[.init(sequence:target.sequence,capturedAtMilliseconds:target.capturedAt)],oldestCapturedAtMilliseconds:now-90_000)
+        search.collisionSnapshotValue=oldSurvey
+        precondition((try? search.canForBasePlanning())?.sequence==target.sequence && search.collisionSnapshot==nil,
+            "A fresh target in an old survey was rejected or revived collision authority")
+        for changed in ["expired","future","body","camera","gateway","projection","source","registration"] {
+            search.locatedObjects[.can]=object(0.45,time:changed=="expired" ? now-61_000:changed=="future" ? now+1000:target.capturedAt)
+            search.collisionSnapshotValue=oldSurvey
+            if changed=="body" {search.collisionSnapshotValue?.bodyMotionIdentity="other"}
+            if changed=="camera" {search.collisionSnapshotValue?.cameraGeneration=UUID()}
+            if changed=="gateway" {search.collisionSnapshotValue?.sessionGeneration=2}
+            if changed=="projection" {search.collisionSnapshotValue?.estimatedCameraProjectionIdentity="other"}
+            if changed=="source" {search.collisionSnapshotValue?.observations=[]}
+            if changed=="registration" {search.collisionSnapshotValue?.observations[0].registrationID="other"}
+            precondition((try? search.canForBasePlanning())==nil,"Invalid target/context passed floor planning: \(changed)")
+        }
         func enroll(_ points:[ROBWorkspaceLocatedObject]) {
             var set=ROBWorkspaceCanCandidateSet()
             set.observe(points,context:context,nowMilliseconds:now)
@@ -224,6 +247,7 @@ def main():
     plan = (ROOT / 'Cerebro/ROBWorkspaceSearchPlan.swift').read_text()
     selection = block(vision, '@MainActor @nonobjc func nearestReachableCan(').replace('@MainActor @nonobjc', '@MainActor')
     selection += '\n' + block(vision, '@MainActor private func selectReachableCan(')
+    selection += '\n' + block(vision, '@nonobjc func canForBasePlanning(').replace('@nonobjc ', '')
     actual = '\n'.join(block(vision, marker) for marker in [
         'struct ROBWorkspaceCanSceneIdentity:', 'struct ROBWorkspaceCanCandidateSet {', 'struct ROBWorkspaceCanSelection {'])
     actual += '\n' + block(plan, 'enum ROBWorkspaceTarget:')

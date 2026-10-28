@@ -1413,6 +1413,37 @@ struct ROBWorkspaceCanSelection {
         return value
     }
 
+    /// Target coordinates for a nonactuating floor-route proposal. A long
+    /// survey can contain expired earlier views while its selected can is
+    /// still fresh. Validate that exact observation and current source context;
+    /// do not expose the older map as collision-clearance evidence.
+    @nonobjc func canForBasePlanning() throws -> ROBWorkspaceLocatedObject {
+        precondition(Thread.isMainThread)
+        guard let can = locatedObjects[.can], can.position.count == 3,
+              can.position.allSatisfy(\.isFinite) else {
+            throw ROBArmRoutineError.blocked("No located can with valid depth coordinates; scan the front table.")
+        }
+        let age = Date().timeIntervalSince1970*1000-can.capturedAt
+        guard (0...60_000).contains(age) else {
+            throw ROBArmRoutineError.blocked(String(format: "Can observation is %.1f seconds old; reacquire it before base planning.", age/1000))
+        }
+        guard let map = collisionSnapshotValue, let model = collisionSnapshotModel,
+              map.cameraGeneration == ROBArmRoutineVision.shared.cameraGeneration,
+              (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == map.sessionGeneration,
+              estimatedCameraProjectionIsCurrent(model:model,map:map) else {
+            throw ROBArmRoutineError.blocked("The can's camera/arm source changed; refresh its depth observation.")
+        }
+        guard map.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity else {
+            throw ROBArmRoutineError.blocked("The body moved after the can capture; reacquire it at the current pose.")
+        }
+        guard map.observations.contains(where: {
+            $0.sequence == can.sequence && $0.capturedAtMilliseconds == can.capturedAt && $0.registrationID == can.registrationID
+        }) else {
+            throw ROBArmRoutineError.blocked("The selected can has no matching depth source frame; reacquire it.")
+        }
+        return can
+    }
+
     /// A trial keeps its own bounded evidence age. Revalidate the exact raw
     /// map against its proof and live source identities; never refresh capture
     /// timestamps or expose this allowance through the ordinary scene getter.

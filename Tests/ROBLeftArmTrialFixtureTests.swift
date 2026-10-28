@@ -1338,9 +1338,21 @@ final class ROBArmRoutineCoordinator {
             precondition(searched["status"] as? String == "accepted_unverified", searched.description)
             precondition(ROBWorkspaceSearch.shared.requestedFrontTableSurvey && ROBWorkspaceSearch.shared.requiredDepth)
             precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can])
+            precondition(!ROBWorkspaceSearch.shared.requestedAlreadyGraspReady,
+                "A hanging arm was treated as a raised grasp-ready hold")
             precondition(approvals == 0 && g.commands.isEmpty && ROBAmberArmMotionArbiter.shared.owners.isEmpty,
                 "A front-table ghost survey requested arm authority or issued an actuator command")
         }
+        let oldRight = g.q["left"]!, oldMode = g.mode["left"]!
+        g.q["left"] = try ROBCanRecyclingReadyPose.target(physicalSide:"right"); g.mode["left"] = 2
+        let readySurvey = await run("right_search_workspace",target:"front_table_can")
+        precondition(readySurvey["status"] as? String == "accepted_unverified" && ROBWorkspaceSearch.shared.requestedAlreadyGraspReady,
+            "The ghost survey repeated shoulder coverage from the measured right grasp-ready hold")
+        g.stale = true
+        _ = await run("right_search_workspace",target:"front_table_can")
+        precondition(!ROBWorkspaceSearch.shared.requestedAlreadyGraspReady,"Stale feedback skipped hanging-arm coverage")
+        g.stale = false; g.q["left"] = oldRight; g.mode["left"] = oldMode
+        precondition(approvals == 0 && g.commands.isEmpty,"Ready-pose scan detection actuated an arm or requested approval")
         ROBWorkspaceSearch.shared.fail = true
         let failedSearch = await run("left_search_workspace",target:"can")
         precondition(failedSearch["status"] as? String == "blocked")

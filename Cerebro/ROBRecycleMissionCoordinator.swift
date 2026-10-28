@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 /// The authenticated controller owns this mission. Perception and the existing
 /// arm executor are phase adapters; neither may extend its scope or drive treads.
@@ -36,6 +37,7 @@ import Foundation
     private var armBaseline: [String:[Double]] = [:]
     private let ramp = ROBTreadMotionRamp()
     private var arriving = false
+    private var canApproach: ROBRoomCanApproach?
     private var progressPoint: ROBRoomMissionPoint?
     private var progressYaw = 0.0
     private var progressAt = 0.0
@@ -45,6 +47,7 @@ import Foundation
     private let usedKey = "ROB.RecycleCans.UsedMissionIDs.v1"
     override private init() {
         super.init()
+        ROBRoomSpatialStore.shared.requestCanApproachPreview = { [weak self] in self?.previewCanReposition() }
         usedMissions=Set((UserDefaults.standard.stringArray(forKey:usedKey) ?? []).compactMap(UUID.init(uuidString:)))
         if let data=UserDefaults.standard.data(forKey:ledgerKey),
            let saved=try? JSONDecoder().decode(ROBRecycleMissionMessage.self,from:data),saved.valid {
@@ -109,7 +112,7 @@ import Foundation
         message?.searchedStops=0;message?.possiblePayloadHeld=false
         lastCommandSequence=incoming.sequence
         startDeadline=ROBRecycleMissionMessage.now+Double(incoming.configuration.durationSeconds)*1000
-        origin=nil;searched=[];goal=nil;route=[];planner=nil;routeEpoch=nil;armBaseline=[:]
+        origin=nil;searched=[];goal=nil;route=[];planner=nil;routeEpoch=nil;armBaseline=[:];canApproach=nil
         takeControl?();active=true;setCameraDemand?(true)
         ROBTraversabilityRuntime.shared.setAutonomousMotionActive(true)
         haltBase()
@@ -198,7 +201,7 @@ import Foundation
 
     private func beginSurvey() {
         guard active,task==nil,let at=pose,let id=message?.missionID else { return }
-        haltBase();goal=nil;route=[]
+        haltBase();goal=nil;route=[];canApproach=nil
         setPhase(.searching,"Scanning the immediate right and left table areas for cans and the orange bucket")
         task=Task { @MainActor [weak self] in
             guard let self else { return }
@@ -251,7 +254,9 @@ import Foundation
                     self.end(.finished,reason:"Requested cans verified in the orange bucket")
                 } else { self.beginSurvey() }
             case .emptyPerceptionMiss:
-                self.message?.possiblePayloadHeld=false;self.planNextStop()
+                self.message?.possiblePayloadHeld=false
+                if ROBWorkspaceSearch.shared.locatedObjects[.can] != nil { self.planCanReposition() }
+                else { self.planNextStop() }
             case .hold(let possiblePayload):
                 self.message?.possiblePayloadHeld=possiblePayload
                 self.pause(result["detail"] as? String ?? "The transfer was not verified. Holding for inspection.")
@@ -259,7 +264,97 @@ import Foundation
         }
     }
 
+    /// Native diagnostics entry point: plans and displays only, never starts
+    /// a mission, arms a motor, or dispatches a tread/torso demand.
+    func previewCanReposition() {
+        guard !active else { return }
+        let store = ROBRoomSpatialStore.shared
+        store.canApproachPreview = nil
+        do {
+            let (_, proposal) = try makeCanReposition()
+            store.canApproachPreview = proposal
+            store.canApproachClearance = envelopeRadius
+            store.canApproachDetail = approachDescription(proposal) + " Preview only; RGB-D travel corridor must be checked."
+        } catch { store.canApproachDetail = error.localizedDescription }
+    }
+
+    private func approachDescription(_ proposal: ROBRoomCanApproach) -> String {
+        let torso = ROBTorsoControlCenter.shared
+        let correction = torso.observedHeading.isFinite ? String(format: "%+.1f° → 0°", torso.observedHeading) : "unconfirmed → base front"
+        return String(format: "Can approach %.2f m to map (%.2f, %.2f), final base yaw %+.1f°. Torso %@ (front count %.0f).",
+            proposal.distance, proposal.goal.x, proposal.goal.y, proposal.baseYaw*180 / .pi, correction, torso.countReference)
+    }
+
+    /// The tool offset comes from the taught horizontal ready pose, with a
+    /// position-IK check at the observed can height. Full grasp/path admission
+    /// still happens from a new observation after the base finishes moving.
+    private func makeCanReposition() throws -> (ROBRoomMissionPlanner, ROBRoomCanApproach) {
+        let store = ROBRoomSpatialStore.shared, now = ProcessInfo.processInfo.systemUptime
+        guard store.poseIsFresh(at: now), store.mapIsFresh(at: now), let map = store.map, let scan = store.scan else {
+            throw ROBRoomMissionFailure("Can approach needs a fresh complete RPLidar map and live SLAM pose.")
+        }
+        let can = try ROBWorkspaceSearch.shared.canForBasePlanning()
+        if let failure = store.poseMatchFailure(capturedAtMilliseconds: can.capturedAt) {
+            throw ROBRoomMissionFailure(failure)
+        }
+        envelopeRadius = try measuredEnvelopeRadius()
+        guard let model = armModels["right"] else { throw ROBRoomMissionFailure("Right-arm model unavailable") }
+        var ready = model.positions(vendorLeft: try ROBCanRecyclingReadyPose.target(physicalSide: "right"))
+        ready["torso_yaw"] = 0
+        let frames = model.frames(ready)
+        guard let lidar = frames["rplidar_link"], let torsoFrame = frames["torso_link"],
+              let tool = model.toolPosition(ready) else { throw ROBRoomMissionFailure("Ready gripper/lidar frames unavailable") }
+        let torso = ROBTorsoControlCenter.shared
+        let heading = torso.navigationHeading
+        guard heading.isFinite else {
+            throw ROBRoomMissionFailure("Torso alignment is missing. In Torso Rotation, set the software reference from its physical angle to the tread base, or acquire live camera alignment. No homing/index signal is required.")
+        }
+        var point = can.point
+        if can.registrationID == nil {
+            // The unregistered source projection uses the zero-torso model.
+            // Rotate that model hypothesis about the actual torso pivot once.
+            let pivot = torsoFrame.columns.3, c = cos(heading * .pi/180), s = sin(heading * .pi/180)
+            let x = point.x-pivot.x, y = point.y-pivot.y
+            point.x = pivot.x+c*x-s*y; point.y = pivot.y+s*x+c*y
+        }
+        let canInLidar = simd_inverse(lidar)*SIMD4(point.x,point.y,point.z,1)
+        let c = cos(Double(scan.yaw)), s = sin(Double(scan.yaw))
+        let target = ROBRoomMissionPoint(x: Double(scan.x)+c*canInLidar.x-s*canInLidar.y,
+                                         y: Double(scan.y)+s*canInLidar.x+c*canInLidar.y)
+        let desired = SIMD3(tool.x, tool.y, point.z)
+        guard model.solveLeft(target: desired, from: ready, frontWorkspace: true) != nil else {
+            throw ROBRoomMissionFailure("The can's height is outside the modeled ready-grasp workspace; horizontal base motion alone cannot fix it.")
+        }
+        // Planner positions are scanner poses. Remove its fixed XY offset from
+        // the desired can location before choosing a final base orientation.
+        let offset = ROBRoomMissionPoint(x: desired.x-lidar.columns.3.x, y: desired.y-lidar.columns.3.y)
+        let at = ROBRoomMissionPoint(x: Double(scan.x), y: Double(scan.y))
+        guard let planner = ROBRoomMissionPlanner(map:map,clearanceMeters:envelopeRadius,
+            origin:origin ?? at,radius:message?.configuration.radiusMeters ?? 5),
+              let proposal = planner.canApproach(from:at,yaw:Double(scan.yaw),can:target,preferredOffset:offset) else {
+            throw ROBRoomMissionFailure("No mapped path brings this can into the ready workspace with both arm/gripper envelopes clear. Scan more floor/depth or select another can.")
+        }
+        return (planner, proposal)
+    }
+
+    private func planCanReposition() {
+        do {
+            let (planned, proposal) = try makeCanReposition()
+            ROBRoomSpatialStore.shared.canApproachPreview = proposal
+            ROBRoomSpatialStore.shared.canApproachClearance = envelopeRadius
+            ROBRoomSpatialStore.shared.canApproachDetail = approachDescription(proposal)
+            guard abs(ROBTorsoControlCenter.shared.navigationHeading) <= 3 else {
+                throw ROBRoomMissionFailure(approachDescription(proposal) + " Align torso to the tread-base front with both arms raised, then reacquire the can before travel.")
+            }
+            planner=planned;canApproach=proposal;goal=proposal.goal;route=proposal.route
+            routeRevision=planned.map.revision;routeEpoch=planned.map.epoch;arriving=false
+            progressPoint=pose;progressYaw=yaw;progressAt=ProcessInfo.processInfo.systemUptime
+            setPhase(.navigating, approachDescription(proposal) + " Checking live lidar + RGB-D before each movement; reacquire the can on arrival.")
+        } catch { pause(error.localizedDescription) }
+    }
+
     private func planNextStop() {
+        canApproach = nil
         guard let pose,let map,let origin,let config=message?.configuration else { return }
         do {
             envelopeRadius=try measuredEnvelopeRadius()
@@ -286,11 +381,14 @@ import Foundation
                 planner=updated;route=next;routeRevision=map.revision;routeEpoch=map.epoch;envelopeRadius=radius
             }
             guard let planner,planner.isFree(pose),let scan else { throw ROBRoomMissionFailure("Robot left the checked map corridor") }
-            if pose.distance(to:goal)<0.30 { arriving=true }
+            let atGoal = pose.distance(to:goal) < (canApproach == nil ? 0.30 : 0.08)
+            let finalTurn = atGoal && canApproach != nil
+            let headingError = canApproach.map { Self.angle($0.baseYaw-yaw) } ?? 0
+            if atGoal && abs(headingError)<0.08 { arriving=true }
             while route.count>1 && pose.distance(to:route[0])<0.18 { route.removeFirst() }
             guard let next=route.first,planner.segmentIsFree(pose,next) else { throw ROBRoomMissionFailure("Local path is no longer clear") }
-            let error=Self.angle(atan2(next.y-pose.y,next.x-pose.x)-yaw)
-            let turning=abs(error)>0.18
+            let error=finalTurn ? headingError : Self.angle(atan2(next.y-pose.y,next.x-pose.x)-yaw)
+            let turning=abs(error)>(finalTurn ? 0.08 : 0.18)
             // Live scan stops dynamic obstacles even between grid revisions.
             let relevant=scan.points.filter { turning || abs(Self.angle(Double($0.angleRadians)))<0.55 }
             guard relevant.count>=8,relevant.allSatisfy({ Double($0.distanceMeters)>envelopeRadius+0.15 }) else {
@@ -299,8 +397,8 @@ import Foundation
             // The belly camera turns with the torso. A clear side-looking
             // image is not forward clearance for the tread base.
             let torso=ROBTorsoControlCenter.shared
-            let cameraYaw=torso.observedHeading * .pi / 180
-            guard torso.usesLiveCamera,cameraYaw.isFinite,
+            let cameraYaw=torso.navigationHeading * .pi / 180
+            guard cameraYaw.isFinite,
                   let depth=ROBTraversabilityRuntime.shared.snapshot(),now-depth.receivedAtUptime<=0.75 else {
                 throw ROBRoomMissionFailure("Waiting for fresh RGB-D and measured torso-to-base alignment for navigation")
             }

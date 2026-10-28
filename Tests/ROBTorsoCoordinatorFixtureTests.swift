@@ -15,10 +15,10 @@ final class ROBArmRoutineCoordinator {
         if !value() { throw NSError(domain: "TorsoCoordinatorFixture", code: 1,
                                    userInfo: [NSLocalizedDescriptionKey: message]) }
     }
-    static func wait(_ condition: () -> Bool) throws {
+    static func wait(line: UInt = #line, _ condition: () -> Bool) throws {
         let deadline = Date().addingTimeInterval(3)
         while !condition() && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
-        try expect(condition(), "Coordinator callback timed out")
+        try expect(condition(), "Coordinator callback timed out at fixture line \(line)")
     }
     static func observation(sequence: UInt64 = 1, yaw: Double = 1, age: Double = 0,
                             camera: String = "face", confirmed: Bool = true) -> [String: Any] {
@@ -124,6 +124,25 @@ final class ROBArmRoutineCoordinator {
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         center.releaseLever(); center.closeControls()
         try expect(fake.calls.count == count, "Returning to rehearsal wrote to the motor")
+        center.setCountEstimate()
+        try wait { center.currentCount == 1000 && center.canArm }
+        try expect(!center.usesLiveCamera && center.navigationHeading.isNaN && !fake.energized,
+            "Selecting count estimates fabricated measured alignment or energized the motor")
+        let beforeReference = fake.calls.count
+        center.setSoftwareReference(0)
+        try wait { abs(center.observedHeading)<0.001 && center.hasSoftwareBaseReference }
+        try expect(center.countReference==1000 && center.navigationHeading==0,
+            "Software alignment did not bind the current stationary count to physical base front")
+        try expect(!fake.calls.dropFirst(beforeReference).contains(where: {$0.contains("--halt-and-set-position") || $0.contains("--home") || $0.contains("--energize")}),
+            "Software reference changed hardware position or moved the torso")
+        ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = "Raise both arms"
+        center.arm()
+        try expect(!center.isArmed, "Count control bypassed both-arm tread clearance")
+        ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = nil
+        center.arm(); try wait { center.isArmed }
+        center.turnToHeading(90); try wait { fake.currentVelocity<0 }
+        center.stop(); try wait { !fake.energized }
+        center.closeControls()
         print("Torso coordinator passed: rehearsal isolation, camera gates, idle arming, camera-referenced VR, target-preserving power updates, idle release/resume, visual-loss power release, explicit re-arm")
     }
 }
@@ -163,6 +182,7 @@ private final class FixtureMotor {
         Operation state: \(isEnergized && !safeStart ? "Normal" : "Soft error")
         Energized: \(isEnergized ? "Yes" : "No")
         Current velocity: \(measuredVelocity)
+        Current position: 1000
         Position uncertain: Yes
         Errors currently stopping the motor:
         \(errors.isEmpty ? "  None" : errors.map { "  - " + $0 }.joined(separator: "\n"))

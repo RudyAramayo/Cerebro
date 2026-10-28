@@ -2740,8 +2740,13 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         if command == "left_search_workspace" || command == "left_check_hanging" {
             let model = try workspaceModel()
+            let alreadyReady = workspaceFrontTableSurvey && (try? measured()).map {
+                $0.statuses.count == 7 && $0.statuses.allSatisfy { $0.intValue == 2 } &&
+                ROBCanRecyclingReadyPose.matches($0.positionsRadians.map(\.doubleValue),physicalSide:physicalSide)
+            } == true
             _ = try await ROBWorkspaceSearch.shared.run(targets: command == "left_check_hanging" ? [] : workspaceSearchTargets,
                 model: model, requireDepth: workspaceFrontTableSurvey, surveyFrontTable: workspaceFrontTableSurvey,
+                armAlreadyAtGraspReady:alreadyReady,
                 check: { try self.check() }, progress: { self.update($0) })
             return ["status": "accepted_unverified", "measured": false, "arm_motion_sent": false,
                 "detail": ROBWorkspaceSearch.shared.lastReport["detail"] ?? "Local workspace search ended.",

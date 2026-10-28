@@ -1,9 +1,8 @@
-# Camera-referenced torso rotation
+# Torso rotation and software alignment
 
 Cerebro's Keyboard Controls waist slider now commands **turn speed**. The
 **Torso Rotation…** button opens a panel with a spring-centered speed slider and
-a separate circular destination control. Tic counts and the slider's previous
-value never establish ROB's orientation. No homing, controller reset, or
+a separate circular destination control. Live camera estimates and supervised **TIC count estimate** control are separate sources. A count estimate is not measured physical orientation. No homing, controller reset, or
 synthetic position-zero command is issued by this control path.
 
 ## Try the controls
@@ -13,8 +12,8 @@ synthetic position-zero command is issued by this control path.
 2. Select **Arm rehearsal**. Hold and drag the speed slider to turn; releasing
    it returns the slider to zero and ramps the requested speed down.
 3. Set a destination with the circular dial or degree field, then select
-   **Turn to heading**. The shortest circular route is used: +179° to −179°
-   is a 2° turn. The heading display wraps; there are no slider end stops for
+   **Turn to heading**. Outside Development Mode, the shortest circular route is used: +179° to −179°
+   is a 2° turn. In Development Mode, equivalent destinations prefer the tracked starting turn to unwind the temporary monitor/keyboard cables. The heading display wraps; there are no slider end stops for
    torso position. The speed slider can continue rotating across this wrap.
 4. Adjust **Speed limit** to change the maximum rate. Changing the limit disarms
    the control and requires another explicit arm. The initial profile is 8°/s
@@ -29,6 +28,36 @@ local application focus drops motion authority. Releasing just the speed
 slider stops the turn while retaining arming. After the controller reports
 zero actual velocity, Cerebro de-energizes the stepper to save power. Reaching
 a destination follows the same stop-and-release sequence.
+
+## Software reference and debugging cables
+
+The calibrated count field/slider use −8907 for approximately 90° ROB-left,
++9091 for approximately 90° ROB-right, midpoint +92, and 35,996 counts per turn.
+These are calibration points, not mechanical stops. The slipring supports full
+rotation. The count field selects an orientation through this mapping; the
+circular heading/velocity controls remain available beyond the quarter turns.
+
+Choose **TIC count estimate** for supervised control when the camera cannot see
+the base. Selecting it only polls status; it does not energize or move the motor.
+**Physically observed base-relative angle → Set software reference** associates
+the current stationary count with an operator-observed angle (0° facing the tread
+base front, +90° left, −90° right). It updates a host offset, without homing,
+resetting counts, or asserting that the unverified index wire works. The count
+slider and front target follow this corrected offset. Counts remain estimates:
+a stalled stepper can lose physical alignment without changing reported counts.
+
+Both arm/gripper envelopes must be held above the treads before and throughout
+any torso turn, including count control. TIC status must be fresh within 500 ms.
+Counter discontinuity or feedback loss stops control and invalidates the software
+base reference. A new application/source session requires another actual base
+observation; it does not restore an old reference as measured evidence.
+
+Development Mode tracks continuous turns from the selected source and chooses
+heading routes toward that starting turn. **Unwind tracked debug turn** explicitly
+reverses to that reference, including across ±180°; no automatic extra motion is
+issued after a task. Existing cable twist before tracking, missed steps, and
+movement during a feedback gap remain unknown. Outside Development Mode, heading
+requests use shortest-route circular motion and rate control can keep rotating.
 
 ## Use live camera feedback
 
@@ -105,11 +134,14 @@ no printed markers. Synthetic scan fits are not measurements of real accuracy.
   authority while releasing power; faults require explicit re-arming. Only a
   fresh authorized movement request clears the intentional idle safe start.
   Ordinary updates never automatically resume a fault.
+- Status reads use `ticcmd --status --full`, because the abbreviated output
+  omits the step mode required by preflight. Current stopping errors are parsed
+  separately from historical errors even when ticcmd places the next heading
+  immediately afterward. Historical safe-start/timeout entries cannot block a
+  new request as though they were current faults.
 - The current operator-derived estimate is 35,996 counts per torso revolution,
   with left rotation decreasing counts (0 to −8907 for approximately 90° left,
-  approximately +9091 for 90° right). Counts do not establish a live heading;
-  physical polarity and scale still require a camera comparison. The live
-  UI does not certify cable freedom, clearance or unlimited physical turns.
+  approximately +9091 for 90° right). Counts do not establish a measured live heading. A software reference is explicitly operator observed and propagated by counts; it is invalidated on feedback loss/discontinuity. No cable-length-to-turn limit is inferred from the 16 ft cable length.
 
 The existing Vision Pro torso demand now becomes a circular heading offset from
 the fresh camera yaw at activation, rather than from the debug slider. It

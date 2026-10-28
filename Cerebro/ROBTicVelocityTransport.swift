@@ -3,14 +3,14 @@ import Darwin
 
 /// One USB owner, one current demand, and no queued motion history. The UI must
 /// explicitly arm again after any fault. This class never homes or assigns a
-/// synthetic Tic position; velocity control works with a camera-established zero.
+/// synthetic Tic position; the caller selects camera or software-referenced counts.
 final class ROBTicVelocityTransport {
     struct Profile {
         // Operator-observed quarter turns on2026-10-27: left-8907, right+9091,
         // both from the old count0. The midpoint+92 is diagnostic only:
         // missed steps invalidate counts as heading; never reset/home from it.
-        static let observedLeftQuarterTurnCount = -8_907.0
-        static let observedRightQuarterTurnCount = 9_091.0
+        static let observedLeftQuarterTurnCount = ROBTorsoCountCalibration.leftCount
+        static let observedRightQuarterTurnCount = ROBTorsoCountCalibration.rightCount
         static let observedCenterCount = (observedLeftQuarterTurnCount+observedRightQuarterTurnCount)/2
         var pulsesPerTurn = 2*(observedRightQuarterTurnCount-observedLeftQuarterTurnCount)
         var motorDirection = -1.0 // Positive base-relative yaw is ROB's left.
@@ -33,7 +33,13 @@ final class ROBTicVelocityTransport {
     }
 
     typealias Executor = ([String]) throws -> String
-    private enum Demand { case arm(Profile), velocity(Double, TimeInterval, Bool), stop }
+    struct PositionSample {
+        let count: Int32
+        let velocity: Int32
+        let uncertain: Bool
+        let capturedAt: TimeInterval
+    }
+    private enum Demand { case arm(Profile), velocity(Double, TimeInterval, Bool), read, stop }
     private struct Release {
         let id = UUID()
         let token: UInt64
@@ -54,6 +60,7 @@ final class ROBTicVelocityTransport {
     private var lastStatusAt = 0.0
     private let execute: Executor
     var onState: ((Bool, String) -> Void)?
+    var onPosition: ((PositionSample) -> Void)?
     /// Runs on the serialized USB queue immediately before an admitted nonzero
     /// velocity write. A failed/partial write still invalidates old geometry.
     var onMotionDispatch: (() -> Void)?
@@ -67,6 +74,8 @@ final class ROBTicVelocityTransport {
         enqueue(.velocity(degreesPerSecond, validUntil, releaseWhenStopped), interrupt: false)
     }
     func stop() { enqueue(.stop, interrupt: true) }
+    /// Read-only and lower priority than every motion/Stop request.
+    func readPosition() { enqueue(.read, interrupt: false) }
 
     /// Application termination must not exit before the USB queue finishes
     /// stopping and releasing the driver. Completion does not use main callbacks.
@@ -85,12 +94,13 @@ final class ROBTicVelocityTransport {
     private func enqueue(_ demand: Demand, interrupt: Bool) {
         lock.lock()
         if interrupt { generation &+= 1 }
+        if case .read = demand, pending != nil { lock.unlock(); return }
         // A speed update cannot replace a pending stop or explicit arm request.
         if case .velocity = demand {
             if let pending {
                 switch pending {
                 case .arm, .stop: lock.unlock(); return
-                case .velocity: break
+                case .velocity, .read: break
                 }
             }
         }
@@ -121,6 +131,11 @@ final class ROBTicVelocityTransport {
             lock.unlock()
             do {
                 switch demand {
+                case .read:
+                    let capturedAt = ProcessInfo.processInfo.systemUptime
+                    let status = try execute(["--status", "--full"])
+                    try Self.checkStatus(status, starting: !driveActive)
+                    try publishPosition(status, capturedAt: capturedAt, token: token)
                 case .stop:
                     let ownedMotor = armed || motorMayBeEnergized || release != nil
                     armed = false
@@ -147,7 +162,7 @@ final class ROBTicVelocityTransport {
                           let timeout = Int(settings["command_timeout"] ?? ""), (100 ... 1000).contains(timeout) else {
                         throw Self.error("Tic settings differ from the verified full-step, safe-start and watchdog profile")
                     }
-                    let status = try execute(["--status"])
+                    let status = try execute(["--status", "--full"])
                     motorMayBeEnergized = Self.fields(status)["Energized"] != "No"
                     try Self.checkStatus(status, starting: true)
                     guard current(token) else { continue }
@@ -176,7 +191,7 @@ final class ROBTicVelocityTransport {
                     if units == 0, !driveActive { continue }
                     if units != 0, !driveActive {
                         release = nil
-                        try Self.checkStatus(execute(["--status"]), starting: true)
+                        try Self.checkStatus(execute(["--status", "--full"]), starting: true)
                         guard current(token) else { continue }
                         guard ProcessInfo.processInfo.systemUptime <= validUntil else {
                             throw Self.error("Torso demand expired before energizing")
@@ -186,7 +201,7 @@ final class ROBTicVelocityTransport {
                         motorMayBeEnergized = true
                         _ = try execute(["--velocity", "0", "--energize", "--exit-safe-start"])
                         guard current(token) else { continue }
-                        try Self.checkStatus(execute(["--status"]), starting: false)
+                        try Self.checkStatus(execute(["--status", "--full"]), starting: false)
                         driveActive = true
                         lastStatusAt = ProcessInfo.processInfo.systemUptime
                         publish(true, "Torso motor energized for movement", token: token)
@@ -198,13 +213,27 @@ final class ROBTicVelocityTransport {
                     if units != 0 {onMotionDispatch?()}
                     _ = try execute(["--velocity", String(units)])
                     if current(token), ProcessInfo.processInfo.systemUptime - lastStatusAt >= 0.25 {
-                        try Self.checkStatus(execute(["--status"]), starting: false)
+                        try Self.checkStatus(execute(["--status", "--full"]), starting: false)
                         lastStatusAt = ProcessInfo.processInfo.systemUptime
                     }
                 }
             } catch {
                 fail(error.localizedDescription, token: token)
             }
+        }
+    }
+
+    private func publishPosition(_ status: String, capturedAt: TimeInterval, token: UInt64) throws {
+        let fields = Self.fields(status)
+        guard let count = fields["Current position"].flatMap(Int32.init),
+              let uncertain = fields["Position uncertain"], ["Yes", "No"].contains(uncertain) else {
+            throw Self.error("Tic position feedback is unavailable")
+        }
+        let sample = PositionSample(count: count, velocity: try Self.currentVelocity(status),
+            uncertain: uncertain == "Yes", capturedAt: capturedAt)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.current(token) else { return }
+            self.onPosition?(sample)
         }
     }
 
@@ -239,7 +268,7 @@ final class ROBTicVelocityTransport {
             guard ProcessInfo.processInfo.systemUptime <= state.deadline else {
                 throw Self.error("Timed out waiting for the torso motor to stop")
             }
-            let status = try execute(["--status"])
+            let status = try execute(["--status", "--full"])
             guard try Self.currentVelocity(status) == 0 else {
                 // Status reads do not renew the Tic command watchdog. Keep
                 // safe-start deceleration alive without restoring motion.
@@ -248,7 +277,7 @@ final class ROBTicVelocityTransport {
                 return
             }
             _ = try execute(["--deenergize"])
-            let offStatus = try execute(["--status"])
+            let offStatus = try execute(["--status", "--full"])
             guard Self.fields(offStatus)["Energized"] == "No",
                   try Self.currentVelocity(offStatus) == 0 else {
                 throw Self.error("Tic did not confirm motor power off at rest")
@@ -301,9 +330,12 @@ final class ROBTicVelocityTransport {
         }
         let section = text.components(separatedBy: "Errors currently stopping the motor:")
         guard section.count == 2 else { throw error("Tic error status could not be read") }
-        let lines = section[1].components(separatedBy: "\n\n")[0]
-            .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        // ticcmd 1.8.3 emits the historical-error heading immediately after
+        // current errors, without an empty separating line. Parse the indented
+        // section only; historical errors cannot masquerade as active faults.
+        let lines = section[1].components(separatedBy: "\n").dropFirst()
+            .prefix { $0.isEmpty || $0.hasPrefix(" ") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         guard lines == ["None"] || (!lines.isEmpty && lines.allSatisfy({ $0.hasPrefix("- ") })) else {
             throw error("Tic error status was truncated or malformed")
         }
@@ -313,8 +345,8 @@ final class ROBTicVelocityTransport {
               starting || (values["Operation state"] == "Normal" && values["Energized"] == "Yes") else {
             throw error("Tic fault: \(errors.isEmpty ? values["Operation state"] ?? "unknown" : errors.joined(separator: ", ")); re-arm explicitly")
         }
-        // Position uncertain is deliberately not a homing requirement. Camera
-        // angle is authoritative; no application target uses Tic position.
+        // Position uncertain is not a homing requirement. The caller labels
+        // count propagation as an estimate and owns its software base reference.
     }
 
     private static func error(_ detail: String) -> NSError {

@@ -12,6 +12,33 @@ another observation stop and search again. Stops come from reachable free cells
 in the accumulated RPLidar room map. The radius remains anchored to the initial
 SLAM position; satellite-overlay rotation/scale and GPS are not used.
 
+A visible but unreachable can now produces a **can-targeted base approach**,
+not an unrelated exploration stop. The planner searches reachable floor cells
+for a stopping pose and final base yaw that place the can beside the taught
+horizontal ready gripper. It checks position IK at the observed can height,
+uses the scanner's fixed offset, and keeps torso alignment separate from SLAM
+base yaw. A pink route and final heading appear under **Controller Input Scene
+→ Plan base approach to can**. This button only previews; it sends no motor command.
+
+The proposal reports the torso correction to the tread-base front. Alignment
+can come from live base-relative vision or an explicit stationary software base
+reference in Torso Rotation. An uncertain raw TIC count alone is insufficient.
+Both arms must be raised before that torso correction. Reacquire the can after
+any torso/base motion; source timestamps are matched against SLAM history so a
+manually moved base cannot reuse a can in the old frame. A new map revision
+rechecks the displayed floor corridor. Elevated RGB-D clearance remains required
+before live travel; a floor route is not a 3D clearance certificate.
+
+Floor planning validates the selected can's own timestamp, enrolled depth frame,
+camera, arm connection, projection and body identity. Older unrelated survey
+frames do not expire that target early. This does not revive the collision map;
+arm execution retains its complete-scene checks and reacquires before grasping.
+The front-table ghost scan also recognizes a fresh position-mode grasp-ready
+hold and skips the hanging-arm shoulder survey, keeping its captures on the table.
+
+Tread rotation sensors are not connected. Travel progress is checked from SLAM,
+with Gentle acceleration; PWM and elapsed time are not treated as odometry.
+
 Movement checks the measured model envelope of both arms and the base, inflated
 map clearance, live lidar and fresh RGB-D availability. Unknown cells remain
 blocked. New grid revisions replan the route; SLAM jumps stop tread output and

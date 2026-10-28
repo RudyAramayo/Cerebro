@@ -64,6 +64,19 @@ import Foundation
         let confined=ROBRoomMissionPlanner(map:map(grid),clearanceMeters:0.3,origin:start,radius:1)!
         try check(confined.path(from:start,to:goal)==nil,"route escaped authorized radius")
 
+        // The selected can drives the next stop, with a final base heading
+        // that places it at the taught right-gripper offset. Unknown remains
+        // blocked, even if a candidate itself would be kinematically suitable.
+        let open = ROBRoomMissionPlanner(map:map(Data(repeating:127,count:10_000)),clearanceMeters:0.3,origin:start,radius:8)!
+        let offset=ROBRoomMissionPoint(x:0.5,y:-0.25)
+        let approach=open.canApproach(from:start,yaw:0,can:goal,preferredOffset:offset)!
+        try check(approach.route.first==start && approach.route.allSatisfy(open.isFree),"can approach lost its measured start or floor corridor")
+        let dx=goal.x-approach.goal.x,dy=goal.y-approach.goal.y,c=cos(approach.baseYaw),s=sin(approach.baseYaw)
+        try check(hypot(c*dx+s*dy-offset.x,-s*dx+c*dy-offset.y)<0.08,"final yaw did not put the can beside the ready gripper")
+        try check(approach.distance>2 && approach.distance<4.5,"can approach wandered to an unrelated survey stop")
+        try check(confined.canApproach(from:start,yaw:0,can:goal,preferredOffset:offset)==nil,"approach escaped the mission radius")
+        try check(open.canApproach(from:start,yaw:.nan,can:goal,preferredOffset:offset)==nil,"invalid alignment produced a base route")
+
         try check(ROBRecycleMissionOutcome.classify(["status":"accepted_unverified","motion_completed":true,
             "batch_completed":8]) == .hold(possiblePayload:true),"legacy path count credited as recycling")
         try check(ROBRecycleMissionOutcome.classify(["placement_verified":true,"transfer_completed":true]) != .verifiedTransfer,

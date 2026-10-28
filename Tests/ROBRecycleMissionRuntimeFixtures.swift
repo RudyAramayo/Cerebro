@@ -8,9 +8,21 @@ enum ROBControlLiveSessionRegistry {
     static func isActiveOperator(controllerID:UUID,sessionID:UUID)->Bool { connected }
 }
 enum ROBWorkspaceTarget: Hashable { case can,orangeBucket }
-struct ROBWorkspaceLocatedObject {}
+struct ROBWorkspaceLocatedObject {
+    let position:[Double],capturedAt:Double,sequence:UInt64
+    let registrationID:String? = nil
+    var point:SIMD3<Double> { SIMD3(position[0],position[1],position[2]) }
+}
+enum ROBFixedHeadBodyMotionIdentity { static let currentIdentity=UUID() }
+struct FakeSceneObservation { let sequence:UInt64,capturedAtMilliseconds:Double;let registrationID:String? = nil }
+struct FakeScene { let bodyMotionIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity;let observations=[FakeSceneObservation]() }
 final class ROBWorkspaceSearch {
     static let shared=ROBWorkspaceSearch()
+    var locatedObjects=[ROBWorkspaceTarget:ROBWorkspaceLocatedObject]()
+    func canForBasePlanning() throws -> ROBWorkspaceLocatedObject {
+        guard let can = locatedObjects[.can] else { throw NSError(domain:"NoCan",code:1) }
+        return can
+    }
     @MainActor func run(targets:[ROBWorkspaceTarget],model:ROBGhostRobotModel,requireDepth:Bool=true,
         surveyFrontTable:Bool=false,armAlreadyAtGraspReady:Bool=false,
         check:()throws->Void,progress:(String)->Void) async throws ->[ROBWorkspaceTarget:ROBWorkspaceLocatedObject] { [:] }
@@ -20,6 +32,8 @@ struct ROBGhostRobotModel {
     func positions(vendorLeft:[Double])->[String:Double] { [:] }
     func worldCollisionBounds(positions:[String:Double])->[String:(low:SIMD3<Double>,high:SIMD3<Double>)] { [:] }
     func frames(_ positions:[String:Double])->[String:simd_double4x4] { [:] }
+    func toolPosition(_ positions:[String:Double])->SIMD3<Double>? { nil }
+    func solveLeft(target:SIMD3<Double>,from:[String:Double],frontWorkspace:Bool)->[String:Double]? { nil }
 }
 final class ROBLeftArmTrial {
     static let shared=ROBLeftArmTrial();var isRunning=false
@@ -41,10 +55,13 @@ final class ROBAmberGatewayClient {
     func telemetry(forArm:String)->FakeTelemetry? { FakeTelemetry() }
 }
 enum ROBArmFeedbackTiming { static let maximumAgeMilliseconds=500.0 }
-enum ROBCanRecyclingReadyPose { static func matches(_ q:[Double],physicalSide:String)->Bool { true } }
+enum ROBCanRecyclingReadyPose {
+    static func matches(_ q:[Double],physicalSide:String)->Bool { true }
+    static func target(physicalSide:String)throws->[Double] { Array(repeating:0,count:7) }
+}
 enum ROBArmRoutinePlan { static func near(_ q:[Double],_ r:[Double],tolerance:Double)->Bool { q==r } }
 struct FakeDepthDirection { let geometryConfidence=1.0,depthClearanceMeters=2.0,headingOffset=0.0 }
-final class ROBTorsoControlCenter { static let shared=ROBTorsoControlCenter();let observedHeading=0.0,usesLiveCamera=true }
+final class ROBTorsoControlCenter { static let shared=ROBTorsoControlCenter();let observedHeading=0.0,navigationHeading=0.0,countReference=92.0,usesLiveCamera=true }
 struct FakeDepth { let receivedAtUptime=0.0,directions=[FakeDepthDirection()] }
 final class ROBTraversabilityRuntime {
     static let shared=ROBTraversabilityRuntime()

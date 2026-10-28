@@ -9,11 +9,35 @@ final class ROBRoomSpatialStore {
     private(set) var scan: ROBLidarScanFrame?
     private(set) var map: ROBRoomMissionMap?
     private(set) var depthGeneration: UInt64 = 0
+    var requestCanApproachPreview: (() -> Void)?
+    var canApproachPreview: ROBRoomCanApproach?
+    var canApproachClearance = 0.0
+    var canApproachDetail = "Plan an approach after a fresh front-table scan. No tread commands."
     private var assembler = ROBRoomMapAssembler()
     private var epoch: UUID?
     private var anchor: ROBLidarScanFrame?
     private var poseAt = -Double.infinity
     private var mapAt = -Double.infinity
+    private struct PoseStamp { let time: Double, x: Double, y: Double, yaw: Double }
+    private var poseHistory = [PoseStamp]()
+
+    func poseStillMatches(capturedAtMilliseconds: Double) -> Bool {
+        poseMatchFailure(capturedAtMilliseconds: capturedAtMilliseconds) == nil
+    }
+
+    func poseMatchFailure(capturedAtMilliseconds: Double) -> String? {
+        guard let current = scan, let old = poseHistory.min(by: {
+            abs($0.time-capturedAtMilliseconds) < abs($1.time-capturedAtMilliseconds)
+        }), abs(old.time-capturedAtMilliseconds) <= 750 else {
+            return "No time-matched SLAM pose for the can observation; reacquire the can with live lidar."
+        }
+        let distance = hypot(old.x-Double(current.x),old.y-Double(current.y))
+        let turn = abs(atan2(sin(old.yaw-Double(current.yaw)),cos(old.yaw-Double(current.yaw))))
+        guard distance <= 0.05, turn <= 0.05 else {
+            return String(format: "SLAM changed by %.0f mm / %.1f° since the can observation; reacquire the can at the current base pose.", distance*1000, turn*180 / .pi)
+        }
+        return nil
+    }
 
     @discardableResult func consume(_ frame: ROBLidarScanFrame,
         now: Double = ProcessInfo.processInfo.systemUptime,
@@ -35,6 +59,7 @@ final class ROBRoomSpatialStore {
         if sourceChanged || epochChanged || restarted {
             map = nil; mapAt = -.infinity; assembler = ROBRoomMapAssembler()
             epoch = frame.mapFragment?.epoch
+            poseHistory = []
         }
         // Accumulate displacement against a fixed anchor: a succession of
         // small manual moves must also invalidate stationary RGB-D history.
@@ -46,13 +71,27 @@ final class ROBRoomSpatialStore {
         } ?? true
         if sourceChanged || epochChanged || restarted || moved || !poseIsFresh(at: now) {
             depthGeneration &+= 1; anchor = frame
+            if canApproachPreview != nil {
+                canApproachPreview = nil
+                canApproachDetail = "Base pose changed; replan the can approach from fresh observations."
+            }
         }
         scan = frame; poseAt = now - max(0, age) / 1000
+        poseHistory.append(.init(time:Double(frame.sentAtMilliseconds),x:Double(frame.x),y:Double(frame.y),yaw:Double(frame.yaw)))
+        if poseHistory.count>400 { poseHistory.removeFirst(poseHistory.count-400) }
         if let fragment = frame.mapFragment {
             epoch = fragment.epoch
             // Late chunks cannot replace a newer complete snapshot.
             if map == nil || fragment.revision >= map!.revision,
                let complete = assembler.consume(fragment, device: frame.deviceID, now: wallMilliseconds) {
+                if map?.revision != complete.revision, let proposal = canApproachPreview,
+                   let start = proposal.route.first {
+                    let checked = ROBRoomMissionPlanner(map:complete,clearanceMeters:canApproachClearance,origin:start,radius:10)
+                    if checked == nil || !zip(proposal.route,proposal.route.dropFirst()).allSatisfy({checked!.segmentIsFree($0.0,$0.1)}) {
+                        canApproachPreview = nil
+                        canApproachDetail = "Updated room map blocks the proposed approach; replan."
+                    }
+                }
                 map = complete
                 mapAt = now - max(0, wallMilliseconds-complete.capturedAtMilliseconds) / 1000
             }

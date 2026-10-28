@@ -25,6 +25,8 @@ import SceneKit
         let store = ROBRoomSpatialStore()
         check(store.consume(frame(1,fragment:fragment()),now:10,wallMilliseconds:wall), "accept sensor evidence")
         check(store.map != nil && store.poseIsFresh(at:10), "complete map + fresh pose")
+        check(store.poseStillMatches(capturedAtMilliseconds:wall), "can capture binds to contemporaneous SLAM")
+        check(!store.poseStillMatches(capturedAtMilliseconds:wall-751), "can timestamp without matching pose history accepted")
         check(!store.consume(frame(1),now:10.1,wallMilliseconds:wall), "duplicate scan cannot refresh age")
         check(!store.poseIsFresh(at:10.751), "pose expires without a renderer renewal")
         check(store.mapIsFresh(at:25) && !store.mapIsFresh(at:25.01), "map independently expires")
@@ -51,6 +53,11 @@ import SceneKit
         check(store.map == nil, "publisher restart cannot retain its previous map before a new epoch arrives")
         check(store.consume(frame(1,deviceID:UUID()),now:12.5,wallMilliseconds:wall), "authenticated source replacement")
         check(store.map == nil, "never attach old publisher map to new pose")
+        let alignmentStore = ROBRoomSpatialStore()
+        _ = alignmentStore.consume(frame(1),now:10,wallMilliseconds:wall)
+        _ = alignmentStore.consume(frame(2,x:0.20,sent:wall+200),now:10.2,wallMilliseconds:wall+200)
+        check(!alignmentStore.poseStillMatches(capturedAtMilliseconds:wall), "manual base travel reused a can from the old pose")
+        check(alignmentStore.poseStillMatches(capturedAtMilliseconds:wall+200), "new observation did not use realigned SLAM")
 
         let map = ROBRoomMissionMap(epoch:epoch,revision:1,capturedAtMilliseconds:wall,width:2,height:2,
             resolutionX:0.1,resolutionY:0.2,originX:-0.1,originY:-0.2,cells:Data([127,0,255,127]))

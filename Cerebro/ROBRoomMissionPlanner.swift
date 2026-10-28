@@ -56,6 +56,17 @@ struct ROBRoomMissionPoint: Equatable, Codable {
     func distance(to other: Self) -> Double { hypot(x - other.x, y - other.y) }
 }
 
+/// A ground-plane proposal. RGB-D swept clearance and a fresh can observation
+/// are still required before movement/manipulation; this is not a grasp proof.
+struct ROBRoomCanApproach {
+    let route: [ROBRoomMissionPoint]
+    let can: ROBRoomMissionPoint
+    let baseYaw: Double
+    let preferredCanOffset: ROBRoomMissionPoint
+    var goal: ROBRoomMissionPoint { route.last! }
+    var distance: Double { zip(route, route.dropFirst()).reduce(0) { $0 + $1.0.distance(to: $1.1) } }
+}
+
 /// Flood-fill route planning over an inflated accumulated SDK map. Returns a
 /// reachable observation stop and a checked path, not a time-to-distance guess.
 struct ROBRoomMissionPlanner {
@@ -135,5 +146,50 @@ struct ROBRoomMissionPlanner {
             let f=Double(i)/Double(count)
             return isFree(.init(x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f))
         }
+    }
+
+    /// Find a reachable base pose that brings the selected can beside the ready
+    /// gripper, instead of selecting an unrelated exploration stop. One BFS
+    /// checks all candidate cells; turn cost breaks near-equal travel choices.
+    func canApproach(from start: ROBRoomMissionPoint, yaw: Double,
+                     can: ROBRoomMissionPoint, preferredOffset: ROBRoomMissionPoint) -> ROBRoomCanApproach? {
+        let reach = hypot(preferredOffset.x, preferredOffset.y)
+        guard let first = index(start), free[first], yaw.isFinite,
+              can.x.isFinite, can.y.isFinite, reach.isFinite, (0.1...1.5).contains(reach) else { return nil }
+        let tolerance = max(0.025, hypot(map.resolutionX, map.resolutionY)/2)
+        let bearing = atan2(preferredOffset.y, preferredOffset.x)
+        var parent = [Int](repeating: -2, count: free.count)
+        var distances = [Double](repeating: .infinity, count: free.count)
+        var queue = [first], cursor = 0
+        parent[first] = -1; distances[first] = 0
+        var best: (index: Int, yaw: Double, score: Double)?
+        while cursor < queue.count {
+            let current = queue[cursor]; cursor += 1
+            let p = point(current), distance = p.distance(to: can)
+            if abs(distance-reach) <= tolerance {
+                let heading = atan2(can.y-p.y, can.x-p.x)-bearing
+                let turn = abs(atan2(sin(heading-yaw), cos(heading-yaw)))
+                let score = distances[current] + 0.2*turn + 2*abs(distance-reach)
+                if best == nil || score < best!.score { best = (current, heading, score) }
+            }
+            let x = current%map.width, y = current/map.width
+            for (nx,ny) in [(x+1,y),(x-1,y),(x,y+1),(x,y-1)] {
+                guard nx>=0, ny>=0, nx<map.width, ny<map.height else { continue }
+                let next = ny*map.width+nx
+                if free[next] && parent[next] == -2 {
+                    parent[next] = current
+                    distances[next] = distances[current] + (nx == x ? map.resolutionY : map.resolutionX)
+                    queue.append(next)
+                }
+            }
+        }
+        guard let best else { return nil }
+        var route = [point(best.index)], previous = parent[best.index]
+        while previous >= 0 { route.append(point(previous)); previous = parent[previous] }
+        route.reverse()
+        // Include the exact live pose, not only its grid-cell center.
+        route.insert(start, at: 0)
+        guard zip(route,route.dropFirst()).allSatisfy({segmentIsFree($0.0,$0.1)}) else { return nil }
+        return .init(route: route, can: can, baseYaw: atan2(sin(best.yaw), cos(best.yaw)), preferredCanOffset: preferredOffset)
     }
 }
