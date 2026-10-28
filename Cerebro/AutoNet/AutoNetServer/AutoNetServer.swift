@@ -485,6 +485,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 return
             }
             dataDelegate?.didReceiveLidarTelemetry?(data, deviceID: deviceID.uuidString.lowercased())
+            relayLidarDisplayTelemetry(data)
         default:
             sendingConnection.stop(error: AutoNetTransportError.authorizationFailed)
         }
@@ -589,6 +590,18 @@ struct ROBControlServerStatusSnapshot: Sendable {
             scanData,
             deviceID: message.deviceID.uuidString.lowercased()
         )
+        relayLidarDisplayTelemetry(scanData)
+    }
+
+    /// Both authenticated ingress routes reach this only after the same
+    /// publisher checks. Preserve the controller's existing display protocol;
+    /// full maps and any robot commands are deliberately absent.
+    private func relayLidarDisplayTelemetry(_ data: Data) {
+        guard let scan = try? ROBLidarScanFrame.decode(data),
+              let archive = try? scan.controllerDisplayArchive() else { return }
+        for connection in connectionsByID.values {
+            connection.sendLatestLidarDisplay(archive)
+        }
     }
 
     public func stateDidChange(to state: NWListener.State) {

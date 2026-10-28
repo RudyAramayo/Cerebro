@@ -80,6 +80,7 @@ private final class Peer {
     let corruptProof: Bool
     let completion: (DataMessageType, Data) -> Void
     var receivedAcceptance = false
+    var onLidarDisplay: ((Data) -> Void)?
 
     init(port: NWEndpoint.Port, credential: ROBControlCredential, corruptProof: Bool = false,
          completion: @escaping (DataMessageType, Data) -> Void) {
@@ -121,6 +122,9 @@ private final class Peer {
                 completion(type, data)
             } else {
                 precondition(receivedAcceptance && type == .sendData)
+                if !data.starts(with: Data("ROBNET-PROBE-V1:".utf8)) {
+                    onLidarDisplay?(data)
+                }
                 // Keep the socket open and read packets, but simulate an app
                 // that never answers heartbeats. QUIC/TCP readiness is not enough.
                 receive()
@@ -142,6 +146,7 @@ private final class ReconnectFixture {
     var checkedDuplicate = false
     var checkedInvalidProof = false
     var replacementAccepted = false
+    var displayCount = 0
 
     func start() throws {
         ROBControlPairing.installSessionFixturePeers([credential])
@@ -161,6 +166,14 @@ private final class ReconnectFixture {
         }
         server.onReady = { [self] connection in
             if first == nil { first = connection }
+            let scan = ROBLidarScanFrame(deviceID: UUID(), sequence: 7,
+                sentAtMilliseconds: UInt64(Date().timeIntervalSince1970 * 1000),
+                x: 1, y: -2, z: 0.25, yaw: 0.2, pitch: -0.1, roll: 0.05,
+                points: (0..<8).map { _ in ROBLidarWirePoint(distanceMeters: 2, angleRadians: 0) })
+            // Exercise the actual binary decoder, compatibility archive and
+            // authenticated output path, not a fabricated UI payload.
+            let decoded = try! ROBLidarScanFrame.decode(scan.encoded())
+            connection.sendLatestLidarDisplay(try! decoded.controllerDisplayArchive())
             continueWhenReady()
         }
         listener.stateUpdateHandler = { [self] state in
@@ -178,6 +191,22 @@ private final class ReconnectFixture {
 
     func connect(corruptProof: Bool = false, completion: @escaping (DataMessageType, Data) -> Void) {
         let peer = Peer(port: listener.port!, credential: credential, corruptProof: corruptProof, completion: completion)
+        peer.onLidarDisplay = { [self] data in
+            let archive = try! NSKeyedUnarchiver.unarchivedObject(
+                ofClasses: [NSDictionary.self, NSString.self], from: data) as! [String: String]
+            precondition(archive["sender"] == "rpLidar")
+            precondition(archive["lidar.poseUnits"] == "metres/radians")
+            precondition(archive["lidar.sequence"] == "7")
+            precondition(UUID(uuidString: archive["lidar.deviceID"]!) != nil)
+            precondition(UInt64(archive["lidar.sentAtMilliseconds"]!)! > 0)
+            let lines = archive["message"]!.components(separatedBy: "\n")
+            precondition(lines.count == 10)
+            precondition(lines[0] == "1.0:-2.0:0.25", "XYZ was lost in relay")
+            precondition(lines[1] == "0.2:-0.1:0.05", "Yaw/pitch/roll was lost in relay")
+            precondition(lines[2] == "2.0:0.0")
+            displayCount += 1
+            continueWhenReady()
+        }
         peers.append(peer)
         peer.start()
     }
@@ -198,9 +227,9 @@ private final class ReconnectFixture {
                 }
             }
         }
-        if replacementAccepted, server.connections.values.contains(where: { $0 !== first && $0.isReady }) {
+        if replacementAccepted, displayCount == 2, server.connections.values.contains(where: { $0 !== first && $0.isReady }) {
             precondition(ROBControlLiveSessionRegistry.active.count == 1)
-            print("ROBControl reconnect fixture passed: duplicate denied, invalid proof denied, silent session expired, replacement authenticated")
+            print("ROBControl reconnect fixture passed: duplicate denied, invalid proof denied, silent session expired, replacement authenticated; XYZ/yaw/pitch/roll relayed to both authenticated sessions")
             exit(0)
         }
     }

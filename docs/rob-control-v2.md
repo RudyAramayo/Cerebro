@@ -212,6 +212,24 @@ may be removed during this one-time maintenance, but preserve the tagged
 private key, server profile, and peer registry; subsequent launches must reuse
 the canonical leaf and fingerprint.
 
+## Lidar pose display relay
+
+After publisher authentication, freshness, sequence and rate validation,
+accepted RLS1 scans from either local IPC or QUIC are relayed to authenticated
+QUIC operator sessions. The relay uses the controller's existing `rpLidar`
+archive: XYZ in metres, yaw/pitch/roll in radians, then distance/angle returns.
+It preserves publisher identity, sequence and capture time as string metadata.
+No command authority is granted to the lidar publisher. Plaintext compatibility
+connections and publisher sessions do not receive this relay.
+
+Each operator has one scan in flight and one newest pending scan, so a slow
+connection does not build a pose backlog. ROBController converts angles to
+degrees for display and expires stale telemetry. This fixes the missing pose
+readouts after the publisher changed from text archives to binary telemetry.
+The loopback regression below verifies all six pose values through the actual
+binary decoder, compatibility archive and authenticated connection, including
+reconnect; it uses synthetic scans and sends no robot motion commands.
+
 ## Session reconnect regression fixture
 
 This fixture compiles the production server connection, framer, HMAC handshake,
