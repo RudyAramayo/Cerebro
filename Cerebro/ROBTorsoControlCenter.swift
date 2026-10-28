@@ -34,6 +34,9 @@ import Cocoa
     @nonobjc func count(forHeading heading: Double) -> Double { calibration.count(heading: heading) }
 
     private(set) var hardwareReady = false
+    private(set) var powerHoldRequested = false
+    private var powerRequestPending = false
+    private var lastCommandFailure: String?
     private(set) var hardwareDetail = "Rehearsal — no motor output"
     private(set) var visionDetail = "Simulated observation"
     @nonobjc private(set) var policy = ROBTorsoMotionPolicy()
@@ -48,6 +51,8 @@ import Cocoa
     private var motionUntil = 0.0
     private var lastTick = 0.0
     private var lastSent = 0.0
+    private var lastUIPublish = 0.0
+    private var uiPublishPending = false
     private var localLeverHeld = false
     private var arming = false
     private let modelID: String?
@@ -71,16 +76,19 @@ import Cocoa
         transport.onMotionDispatch = { ROBFixedHeadBodyMotionIdentity.invalidate() }
         transport.onState = { [weak self] ready, detail in
             guard let self else { return }
-            let unexpectedLoss = !ready && (self.hardwareReady || self.arming)
+            let unexpectedLoss = !ready && (self.hardwareReady || self.arming || self.powerRequestPending)
             self.hardwareReady = ready
             self.hardwareDetail = self.usesHardware ? detail : "Rehearsal — no motor output"
+            if ready { self.powerRequestPending = false }
             if ready && self.arming {
                 self.arming = false
                 if let reason = self.armClearance() {
                     self.stop(); self.policy.invalidate(reason)
                 } else if !self.usesHardware || !self.policy.arm(at: ProcessInfo.processInfo.systemUptime) { self.stop() }
             } else if self.usesHardware && unexpectedLoss {
-                self.arming = false; self.policy.invalidate(detail)
+                self.arming = false; self.powerRequestPending = false; self.powerHoldRequested = false
+                self.lastCommandFailure = detail
+                self.policy.invalidate(detail)
             }
             self.publish()
         }
@@ -105,16 +113,40 @@ import Cocoa
     var commandedVelocity: Double { policy.velocity }
     var isArmed: Bool { policy.armed }
     var status: String {
-        if usesHardware, let reason = armClearance() { return reason }
-        return arming ? "Checking Tic settings and confirming motor power off at rest…" : policy.status
+        let operation = lastCommandFailure.map { "Last command failed: " + $0 } ?? (powerRequestPending ? "Checking TIC and energizing a zero-speed hold…"
+            : arming ? "Checking Tic settings and preparing the motor…" : policy.status)
+        if usesHardware, let reason = armClearance() { return operation + "\n" + reason }
+        return operation
     }
     var maximumSpeed: Double { policy.maximumSpeed }
+    private var hasFreshTicFeedback: Bool {
+        ticPosition.map { (0...0.5).contains(ProcessInfo.processInfo.systemUptime-$0.capturedAt) } == true
+    }
+    var motorPowerDetail: String {
+        guard usesHardware else { return "Rehearsal — no motor output" }
+        guard let sample = ticPosition, hasFreshTicFeedback else { return "Motor power and count: awaiting fresh TIC feedback" }
+        return String(format: "Motor %@ • current count %d • controller speed %+.2f°/s • %@",
+            sample.energized ? "ENERGIZED" : "DE-ENERGIZED", sample.count,
+            -Double(sample.velocity)/10_000*360/ROBTorsoCountCalibration.countsPerTurn, sample.operationState)
+    }
+    var canEnergize: Bool {
+        usesHardware && !arming && !powerRequestPending && !powerHoldRequested && !isArmed &&
+            hasFreshTicFeedback && ticPosition?.velocity == 0 && !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion
+    }
+    var canSetSoftwareReference: Bool {
+        usesCountEstimate && hasFreshTicFeedback && ticPosition?.velocity == 0 && !arming && !powerRequestPending
+    }
+    var compactControlDetail: String {
+        let motion = String(format: "Requested %+.2f°/s", commandedVelocity)
+        return motorPowerDetail + " • " + motion + "\n" + (usesHardware
+            ? (hasFreshTicFeedback ? status : hardwareDetail)
+            : "Rehearsal selected — choose TIC count estimate in Torso Rotation for hardware control.")
+    }
     private var hasFreshFeedback: Bool {
         let now = ProcessInfo.processInfo.systemUptime
-        return policy.hasFreshObservation(at: now) && (!usesCountEstimate ||
-            ticPosition.map { (0...0.5).contains(now-$0.capturedAt) } == true)
+        return policy.hasFreshObservation(at: now) && (!usesCountEstimate || hasFreshTicFeedback)
     }
-    var canArm: Bool { !arming && hasFreshFeedback && (!usesHardware || armClearance() == nil) }
+    var canArm: Bool { !arming && !powerRequestPending && hasFreshFeedback && (!usesHardware || armClearance() == nil) }
 
     func showControls(_ sender: Any?) {
         precondition(Thread.isMainThread)
@@ -128,6 +160,7 @@ import Cocoa
     func setLiveCamera(_ live: Bool) {
         precondition(Thread.isMainThread)
         stop(); vision.stop(); usesLiveCamera = live; usesCountEstimate = false; ticPosition = nil
+        lastPositionRead = 0
         hasSoftwareBaseReference = false
         let speed = policy.maximumSpeed
         policy = ROBTorsoMotionPolicy(); policy.maximumSpeed = speed
@@ -142,7 +175,7 @@ import Cocoa
     }
 
     func reobserve() {
-        if usesCountEstimate { transport.readPosition() }
+        if usesCountEstimate { startTimer(); transport.readPosition() }
         else if usesLiveCamera { setLiveCamera(true) }
         else { stop(); policy.resetObservation(); startTimer() }
     }
@@ -163,9 +196,14 @@ import Cocoa
     /// Operator observation of the physical torso against the tread base.
     /// Only the host offset changes; no Tic reset, homing, or motion is issued.
     func setSoftwareReference(_ observedDegrees: Double) {
-        guard usesCountEstimate, observedDegrees.isFinite, (-180...180).contains(observedDegrees),
-              let sample = ticPosition, sample.velocity == 0,
-              (0...0.5).contains(ProcessInfo.processInfo.systemUptime-sample.capturedAt) else { return }
+        guard observedDegrees.isFinite, (-180...180).contains(observedDegrees) else {
+            stop()
+            policy.invalidate("Enter a finite observed angle between −180° and 180°"); publish(); return
+        }
+        guard canSetSoftwareReference, let sample = ticPosition else {
+            stop()
+            policy.invalidate("Software reference needs fresh TIC feedback at zero speed"); publish(); return
+        }
         stop()
         calibration.align(count: Double(sample.count), observedHeading: observedDegrees)
         hasSoftwareBaseReference = true
@@ -184,25 +222,57 @@ import Cocoa
     }
 
     @nonobjc private func acceptCount(_ sample: ROBTicVelocityTransport.PositionSample) {
-        guard usesCountEstimate else { return }
+        guard usesHardware else { return }
+        guard usesCountEstimate else { ticPosition = sample; publish(); return }
         if let previous = ticPosition {
             let gap = sample.capturedAt-previous.capturedAt
             let delta = abs(Double(sample.count)-Double(previous.count))*360/ROBTorsoCountCalibration.countsPerTurn
             if gap > 0.75 || delta > max(8, maximumSpeed*max(0,gap)+4) {
+                let preflight = arming || powerRequestPending
+                if !preflight && (policy.armed || powerHoldRequested) {
+                    lastCommandFailure = String(format: "TIC feedback interrupted (%.0f ms gap, %.2f° count change); stopped", gap*1000, delta)
+                }
                 hasSoftwareBaseReference = false
-                stop(); policy.resetObservation()
+                // Preflight owns the USB queue and issues only zero-speed
+                // setup. Rebase from its actual status without cancelling the
+                // setup because an idle poll waited behind it. No saved base
+                // alignment survives that gap, and no turn is dispatched here.
+                if !preflight { stop() }
+                policy.resetObservation()
             }
         }
         ticPosition = sample; countSequence &+= 1
         let now = ProcessInfo.processInfo.systemUptime
+        let wasArmed = policy.armed
         _ = policy.observe(.init(heading: calibration.heading(count: Double(sample.count)),
             capturedAt: sample.capturedAt, uncertainty: 0.05,
             stream: "tic-count-estimate-\(referenceRevision)", sequence: countSequence), now: now)
         visionDetail = String(format: "TIC %d • %@\n%@", sample.count,
             sample.uncertain ? "index/reference unconfirmed" : "controller reference set", countEstimateDetail)
-        if !policy.armed && hardwareReady { stopHardware() }
+        if (wasArmed && !policy.armed) || (!policy.armed && hardwareReady && !powerHoldRequested) { stopHardware() }
         publish()
     }
+
+    /// Explicit power control can verify the stationary stepper with hanging
+    /// arms. It cannot arm rotation or turn a saved target into motion.
+    func energize() {
+        precondition(Thread.isMainThread)
+        guard canEnergize else {
+            stop()
+            if !usesHardware { policy.invalidate("Choose TIC count estimate or Live camera before energizing") }
+            else { policy.invalidate("Energize requires fresh TIC feedback at zero speed and no active motion") }
+            publish(); return
+        }
+        localLeverHeld = false; remoteBaseline = nil; remoteUntil = 0; motionUntil = 0
+        lastCommandFailure = nil
+        policy.invalidate("Motor hold requested — rotation remains disarmed")
+        powerHoldRequested = true; powerRequestPending = true
+        transport.energize(profile: .init(maximumDegreesPerSecond: policy.maximumSpeed,
+            accelerationDegreesPerSecondSquared: policy.acceleration))
+        startTimer(); publish()
+    }
+
+    func deenergize() { stop() }
 
     func arm() {
         precondition(Thread.isMainThread)
@@ -218,9 +288,11 @@ import Cocoa
             policy.invalidate("Waiting for fresh torso feedback from the selected source"); publish(); return
         }
         if usesHardware {
-            arming = true
+            lastCommandFailure = nil
+            arming = true; hardwareReady = false
             transport.arm(profile: .init(maximumDegreesPerSecond: policy.maximumSpeed,
-                                        accelerationDegreesPerSecondSquared: policy.acceleration))
+                                        accelerationDegreesPerSecondSquared: policy.acceleration),
+                          energizedHold: powerHoldRequested)
         } else { _ = policy.arm(at: now) }
         publish()
     }
@@ -233,8 +305,8 @@ import Cocoa
     }
 
     private func stopHardware(retry: Bool = false) {
-        if hardwareReady || arming || (retry && usesHardware) { transport.stop() }
-        hardwareReady = false; arming = false
+        if hardwareReady || arming || powerRequestPending || powerHoldRequested || (retry && usesHardware) { transport.stop() }
+        hardwareReady = false; arming = false; powerRequestPending = false; powerHoldRequested = false
     }
 
     func releaseLever() {
@@ -246,7 +318,10 @@ import Cocoa
         precondition(Thread.isMainThread)
         startTimer()
         guard held else { releaseLever(); return }
-        guard remoteBaseline == nil, policy.armed else { return }
+        guard remoteBaseline == nil, policy.armed else {
+            if !policy.armed { publish() }
+            return
+        }
         localLeverHeld = true
         policy.requestRate(value); motionUntil = ProcessInfo.processInfo.systemUptime + 60
     }
@@ -317,10 +392,15 @@ import Cocoa
         if policy.debugCableMode != debug {
             policy.hold(); policy.debugCableMode = debug
         }
-        if usesCountEstimate {
-            if now-lastPositionRead >= 0.15 { lastPositionRead = now; transport.readPosition() }
-            if (policy.armed || arming), ticPosition.map({ now-$0.capturedAt > 0.5 }) != false {
-                stop(); policy.invalidate("Tic feedback expired; count-controlled motion stopped"); return
+        if usesHardware {
+            // Active velocity writes already return full status in the same
+            // transaction. Poll separately only when idle or preparing control.
+            let needsIdlePoll = !hardwareReady || (policy.mode == .hold && !powerHoldRequested)
+            if needsIdlePoll && now-lastPositionRead >= 0.15 { lastPositionRead = now; transport.readPosition() }
+            if usesCountEstimate && !arming && !powerRequestPending && (policy.armed || powerHoldRequested), ticPosition.map({ now-$0.capturedAt > 0.5 }) != false {
+                let detail = String(format: "TIC feedback expired during control (%.0f ms old); stopped", (now-(ticPosition?.capturedAt ?? now))*1000)
+                ROBTicVelocityTransport.trace(detail)
+                stop(); lastCommandFailure = detail; policy.invalidate(detail); publish(); return
             }
         }
         let dt = min(0.1, max(0, now - lastTick)); lastTick = now
@@ -332,16 +412,20 @@ import Cocoa
         }
         if remoteBaseline != nil && now > remoteUntil { remoteBaseline = nil; policy.hold() }
         if policy.armed && policy.mode != .hold && now > motionUntil { policy.hold() }
+        let wasArmed = policy.armed
         let velocity = policy.tick(at: now)
         if usesHardware {
-            if hardwareReady && !policy.armed { stopHardware() }
+            if wasArmed && !policy.armed { stopHardware() }
+            else if hardwareReady && !policy.armed && !powerHoldRequested { stopHardware() }
             else if hardwareReady && now - lastSent >= 0.09 {
                 lastSent = now
                 // Only settled hold requests release power; a brief zero at
                 // direction reversal retains drive until the turn finishes.
-                transport.velocity(velocity, validUntil: min(now + 0.2,
-                    (policy.observation?.capturedAt ?? 0) + policy.maximumObservationAge),
-                    releaseWhenStopped: policy.mode == .hold)
+                let feedbackDeadline = powerHoldRequested && !policy.armed
+                    ? (ticPosition?.capturedAt ?? 0) + 0.5
+                    : (policy.observation?.capturedAt ?? 0) + policy.maximumObservationAge
+                transport.velocity(velocity, validUntil: min(now + 0.2, feedbackDeadline),
+                    releaseWhenStopped: policy.mode == .hold && !powerHoldRequested)
             }
         }
         publish()
@@ -376,12 +460,29 @@ import Cocoa
         // registrations at every face/belly frame. On loss, a new source rebases.
         let key = camera + ":" + stream
         if let prior = policy.observation, prior.stream != key, policy.hasFreshObservation(at: now) { return }
+        let wasArmed = policy.armed
         _ = policy.observe(.init(heading: yaw * 180 / .pi, capturedAt: now - age,
                                  uncertainty: sigma * 180 / .pi, stream: key, sequence: sequence), now: now)
         visionDetail = String(format: "%@ camera • yaw uncertainty ±%.1f°", camera, sigma * 180 / .pi)
-        if !policy.armed && hardwareReady { stopHardware() }
+        if (wasArmed && !policy.armed) || (!policy.armed && hardwareReady && !powerHoldRequested) { stopHardware() }
         publish()
     }
 
-    private func publish() { NotificationCenter.default.post(name: Self.changed, object: self) }
+    private func publish() {
+        // Status and power callbacks can arrive together. Keep motor control at
+        // 20 Hz, but coalesce AppKit layout work to at most 10 Hz.
+        let now = ProcessInfo.processInfo.systemUptime
+        let delay = 0.1-(now-lastUIPublish)
+        if delay > 0 {
+            if !uiPublishPending {
+                uiPublishPending = true
+                DispatchQueue.main.asyncAfter(deadline: .now()+delay) { [weak self] in
+                    self?.uiPublishPending = false; self?.publish()
+                }
+            }
+            return
+        }
+        lastUIPublish = now
+        NotificationCenter.default.post(name: Self.changed, object: self)
+    }
 }

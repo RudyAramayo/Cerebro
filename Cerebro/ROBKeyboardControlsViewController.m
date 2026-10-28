@@ -67,6 +67,8 @@ static NSInteger const kROBLocalTreadMaximumCommand = 255;
 @property (readwrite, retain) IBOutlet NSSlider *waistRotationSlider;
 @property (readwrite, retain) IBOutlet NSButton *exitSafeStartWaistRotationButton;
 @property (readwrite, retain) IBOutlet NSButton *energizeWaistRotationButton;
+@property (readwrite, retain) NSButton *deenergizeTorsoButton;
+@property (readwrite, retain) NSTextField *torsoControlOutput;
 
 @property (readwrite, retain) NSTimer *localTreadRampTimer;
 @property (readwrite, assign) NSInteger currentLeftTreadCommand;
@@ -144,20 +146,25 @@ static NSInteger const kROBLocalTreadMaximumCommand = 255;
     self.exitSafeStartWaistRotationButton.title = @"Torso Rotation…";
     [self.exitSafeStartWaistRotationButton setButtonType:NSButtonTypeMomentaryPushIn];
     self.exitSafeStartWaistRotationButton.font = [NSFont systemFontOfSize:18];
-    self.energizeWaistRotationButton.title = @"Stop torso";
+    self.energizeWaistRotationButton.title = @"Energize";
     [self.energizeWaistRotationButton setButtonType:NSButtonTypeMomentaryPushIn];
     self.energizeWaistRotationButton.font = [NSFont systemFontOfSize:18];
     for (NSView *view in self.view.subviews) {
         if ([view isKindOfClass:[NSButton class]] && ((NSButton *)view).action == @selector(waistRotationResetAction:)) {
-            ((NSButton *)view).title = @"Reobserve";
+            self.deenergizeTorsoButton = (NSButton *)view;
+            ((NSButton *)view).title = @"De-energize";
+            ((NSButton *)view).action = @selector(deenergizeTorso:);
             ((NSButton *)view).font = [NSFont systemFontOfSize:18];
         }
     }
-    NSTextField *hint = [NSTextField labelWithString:@"Turn speed: slide left/right · release to stop · choose a destination in Torso Rotation"];
-    hint.frame = NSMakeRect(242, 40, 750, 17);
-    hint.font = [NSFont systemFontOfSize:12];
-    hint.textColor = [NSColor secondaryLabelColor];
-    [self.view addSubview:hint];
+    self.torsoControlOutput = [NSTextField wrappingLabelWithString:@""];
+    self.torsoControlOutput.frame = NSMakeRect(242, 39, 750, 44);
+    self.torsoControlOutput.font = [NSFont systemFontOfSize:11];
+    [self.torsoControlOutput setAccessibilityIdentifier:@"ROB.Torso.KeyboardStatus"];
+    [self.view addSubview:self.torsoControlOutput];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refreshTorsoControl:)
+        name:ROBTorsoControlCenter.changed object:ROBTorsoControlCenter.shared];
+    [self refreshTorsoControl:nil];
 
     self.robMainViewController.serialBox.exitSafeStartWaistRotationButton = self.exitSafeStartWaistRotationButton;
     self.robMainViewController.serialBox.energizeWaistRotationButton = self.energizeWaistRotationButton;
@@ -550,6 +557,25 @@ static NSInteger const kROBLocalTreadMaximumCommand = 255;
 - (IBAction)energizeToggle:(id)sender
 {
     [self.robMainViewController.serialBox energizeToggle:sender];
+}
+
+- (void)deenergizeTorso:(id)sender
+{
+    [[ROBTorsoControlCenter shared] deenergize];
+}
+
+- (void)refreshTorsoControl:(NSNotification *)notification
+{
+    ROBTorsoControlCenter *center = ROBTorsoControlCenter.shared;
+    self.waistRotationSlider.enabled = center.isArmed;
+    if (!center.isArmed) self.waistRotationSlider.doubleValue = 0;
+    self.energizeWaistRotationButton.enabled = center.canEnergize;
+    self.deenergizeTorsoButton.enabled = center.usesHardware;
+    NSString *detail = center.compactControlDetail;
+    if (![self.torsoControlOutput.stringValue isEqualToString:detail]) self.torsoControlOutput.stringValue = detail;
+    self.waistRotationSlider.toolTip = center.isArmed
+        ? @"Turn speed: hold and slide; release to slow to a stop."
+        : center.compactControlDetail;
 }
 
 @end

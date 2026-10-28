@@ -5,6 +5,8 @@
 
 ## Headless robot authorization
 
+- **Explicit torso power controls (2026-10-28):** Rudy reports both arms hanging and requests a stepper test through Cerebro, with distinct Energize and De-energize commands and visible slider results. A stationary zero-speed power test is separate from rotation authorization; it must not replay an old target. Show actual TIC power/count/speed and any unavailable rotation reason in the native controls. Both arms must still be held above the treads for a turn, and debug turns should be reversed to unwind the attached cables. TIC Control Center must release its USB connection before Cerebro controls the device; energizing in that app does not authorize or enable Cerebro's motion UI.
+
 - **Software torso reference and debug cable unwind (2026-10-27):** Rudy clarified the slipring permits full torso rotation; −8907/+9091 are calibration points, not stops. The temporary 16 ft monitor/keyboard cables should be unwound by reversing tracked debug turns. Outside Development Mode, unrestricted circular rotation is allowed. Track unwrapped turns; do not invent a cable turn limit from length or claim unknown prior twist is zero. The torso homing/index wiring is unconfirmed and tread encoders are disconnected. Use an explicitly observed software torso-to-base reference for now, label subsequent TIC propagation as an estimate, never reset/home the controller to manufacture alignment, and verify tread progress from authenticated SLAM. Both-arm raised clearance remains required for torso turns. The paused out-of-reach can needs a can-targeted floor route, a torso alignment correction and fresh RGB-D checking before movement, followed by can reacquisition.
 
 

@@ -14,6 +14,20 @@ import Foundation
         try expect(condition(), "Asynchronous Tic fixture timed out")
     }
     static func main() throws {
+        let echo = try ROBTicVelocityTransport.runCommand(executable: "/bin/echo", arguments: ["torso fixture"], operation: "fixture")
+        try expect(echo == "torso fixture\n", "Direct child completion lost output")
+        for (program, args, timeout, expected) in [
+            ("/usr/bin/false", [String](), 0.4, "Tic unavailable"),
+            ("/bin/sleep", ["2"], 0.03, "timed out"),
+            ("/usr/bin/yes", ["oversized fixture"], 0.4, "Oversized")
+        ] {
+            let began = ProcessInfo.processInfo.systemUptime
+            var detail = ""
+            do { _ = try ROBTicVelocityTransport.runCommand(executable: program, arguments: args, operation: "fixture", timeout: timeout) }
+            catch { detail = error.localizedDescription }
+            try expect(detail.contains(expected), "Child execution did not report \(expected): \(detail)")
+            try expect(ProcessInfo.processInfo.systemUptime-began < 1, "A failed child command blocked the USB queue")
+        }
         var calibration = ROBTorsoCountCalibration()
         try expect(calibration.heading(count:-8907)==90 && calibration.heading(count:9091)==(-90) && calibration.count(heading:0)==92,
             "Observed quarter-turn counts are not mapped through midpoint 92")
@@ -109,6 +123,17 @@ import Foundation
         try expect(profile.accelerationUnits == 79991, "Acceleration must retain a positive magnitude with negative left polarity")
         try expect(profile.velocityUnits(.nan) == nil, "Non-finite velocity accepted")
         try ROBTicVelocityTransport.checkStatus(FakeTic.status(ready: true), starting: false)
+        let healthy = FakeTic.status(ready: true)
+        try expect(healthy.contains("Errors currently stopping the motor: None"), "Fixture lost real ticcmd healthy formatting")
+        try ROBTicVelocityTransport.checkStatus(healthy.replacingOccurrences(of:
+            "Errors currently stopping the motor: None", with: "Errors currently stopping the motor:\n  None"), starting: false)
+        for malformed in ["Errors currently stopping the motor:", "Errors currently stopping the motor: None\n  - Motor driver error"] {
+            var rejected = false
+            do { try ROBTicVelocityTransport.checkStatus(healthy.replacingOccurrences(of:
+                "Errors currently stopping the motor: None", with: malformed), starting: false) }
+            catch { rejected = true }
+            try expect(rejected, "Empty or contradictory current error section was accepted")
+        }
         // Match the real ticcmd 1.8.3 section layout (no blank separator).
         let compactStatus = FakeTic.status(ready:false).replacingOccurrences(of:"\n\nErrors that occurred",with:"\nErrors that occurred")
         try ROBTicVelocityTransport.checkStatus(compactStatus,starting:true)
@@ -118,6 +143,35 @@ import Foundation
         do { try ROBTicVelocityTransport.checkStatus(FakeTic.status(ready: true, fault: true), starting: false) }
         catch { rejected = true }
         try expect(rejected, "Driver fault was accepted")
+
+        let powered = FakeTic()
+        let powerTransport = ROBTicVelocityTransport(execute: powered.execute)
+        var powerReady = false
+        var powerSample: ROBTicVelocityTransport.PositionSample?
+        powerTransport.onState = { value, _ in powerReady = value }
+        powerTransport.onPosition = { powerSample = $0 }
+        powerTransport.energize(profile: profile)
+        try wait { powerReady && powerSample?.energized == true }
+        try expect(powered.currentVelocity == 0 && powered.motionDispatchCount == 0,
+            "Explicit Energize moved the torso")
+        try expect(powerSample?.count == 0 && powerSample?.velocity == 0,
+            "Power hold did not publish actual count and speed")
+        for _ in 0..<3 {
+            powerTransport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2, releaseWhenStopped: false)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.04))
+        }
+        try expect(powered.energized && powerReady, "Explicit powered hold released itself at idle")
+        powerTransport.stop()
+        try wait { !powerReady && powerSample?.energized == false }
+        try expect(!powered.releasedWhileMoving, "De-energize skipped measured rest")
+
+        let external = FakeTic()
+        _ = try external.execute(["--velocity", "0", "--energize", "--exit-safe-start"])
+        let externalTransport = ROBTicVelocityTransport(execute: external.execute)
+        externalTransport.stop()
+        try wait { !external.energized }
+        try expect(external.calls.contains(["--deenergize"]),
+            "De-energize ignored a motor owned by the preceding app")
 
         let fake = FakeTic()
         let transport = ROBTicVelocityTransport(execute: fake.execute)
@@ -147,6 +201,8 @@ import Foundation
                    "Wake did not clear the old target to zero before energizing")
         try expect(firstWake < firstMotion && fake.calls[(firstWake + 1)..<firstMotion].contains(["--status", "--full"]),
                    "Nonzero movement preceded successful energized status verification")
+        try expect(fake.calls[firstMotion].contains("--status") && fake.calls[firstMotion].contains("--full"),
+                   "Active velocity dispatch did not return feedback in the same command process")
         let releasedBeforeReversal = fake.calls.filter { $0.contains("--deenergize") }.count
         transport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2, releaseWhenStopped: false)
         try wait { fake.targetVelocity == 0 }
@@ -386,12 +442,10 @@ private final class FakeTic {
         Operation state:              \(ready && !fault && !safeStart ? "Normal" : "Soft error")
         Energized:                    \(ready ? "Yes" : "No")
         Current velocity:             \(currentVelocity)
+        Current position:             0
         Position uncertain:           Yes
-        Errors currently stopping the motor:
-        \(errors.isEmpty ? "  None" : errors.map { "  - " + $0 }.joined(separator: "\n"))
-
-        Errors that occurred since last check:
-          None
+        Errors currently stopping the motor:\(errors.isEmpty ? " None" : "\n" + errors.map { "  - " + $0 }.joined(separator: "\n"))
+        Errors that occurred since last check: None
         """
     }
 }

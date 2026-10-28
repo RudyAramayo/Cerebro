@@ -119,6 +119,9 @@ final class ROBArmRoutineCoordinator {
         center.acceptObservation(observation(sequence: 5, yaw: -1))
         try expect(center.canArm && !center.isArmed, "New camera observation automatically resumed motion")
         center.setLiveCamera(false); center.advance()
+        // Switching away from hardware finishes an explicit stop, even if the
+        // motor was energized by another app. Drain that before rehearsal.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         let count = fake.calls.count
         center.arm(); center.setLever(-0.5, held: true)
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -138,8 +141,54 @@ final class ROBArmRoutineCoordinator {
         ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = "Raise both arms"
         center.arm()
         try expect(!center.isArmed, "Count control bypassed both-arm tread clearance")
+        try wait { center.canEnergize }
+        _ = NSApplication.shared
+        let window = ROBTorsoControlWindowController(center: center)
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let controls = views(window.window!.contentView!)
+        func control<T: NSView>(_ identifier: String, as type: T.Type) throws -> T {
+            guard let control = controls.first(where: { $0.accessibilityIdentifier() == identifier }) as? T else {
+                throw NSError(domain: "TorsoUIFixture", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Missing control \(identifier)"])
+            }
+            return control
+        }
+        let slider = try control("ROB.Torso.CalibratedCountRange", as: NSSlider.self)
+        let countField = try control("ROB.Torso.TargetCount", as: NSTextField.self)
+        let headingField = try control("ROB.Torso.TargetHeading", as: NSTextField.self)
+        let energize = try control("ROB.Torso.Energize", as: NSButton.self)
+        let deenergize = try control("ROB.Torso.Deenergize", as: NSButton.self)
+        let lever = try control("ROB.Torso.Velocity", as: NSSlider.self)
+        let powerLabel = try control("ROB.Torso.MotorPower", as: NSTextField.self)
+        slider.doubleValue = center.count(forHeading: 45)
+        _ = slider.sendAction(slider.action, to: slider.target)
+        try expect(slider.isContinuous && abs(headingField.doubleValue-45)<0.01 && abs(countField.doubleValue-slider.doubleValue)<0.51,
+            "Dragging the native count slider did not update the destination fields")
+        try expect(fake.currentVelocity == 0 && !center.isArmed && !lever.isEnabled,
+            "Editing a preview target moved or armed the hanging-arm robot")
+        // First AppKit initialization can outlast the feedback budget on a
+        // loaded build host. Await a new real fixture sample before clicking.
+        try wait { energize.isEnabled && deenergize.isEnabled }
+        // Serial preflight takes several USB commands. Its own fresh status
+        // must survive an idle poll waiting >500 ms behind zero-speed setup.
+        fake.commandDelay = 0.15
+        _ = energize.sendAction(energize.action, to: energize.target)
+        try wait { center.powerHoldRequested && center.hardwareReady && fake.energized && powerLabel.stringValue.contains("Motor ENERGIZED") }
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        try expect(fake.energized && fake.currentVelocity == 0 && !center.isArmed && !lever.isEnabled,
+            "Explicit power hold dropped out or bypassed rotation clearance")
+        try expect(powerLabel.stringValue.contains("current count 1000"), "Native UI omitted actual controller feedback")
+        _ = deenergize.sendAction(deenergize.action, to: deenergize.target)
+        try wait { !fake.energized && !center.powerHoldRequested && powerLabel.stringValue.contains("DE-ENERGIZED") }
+        fake.commandDelay = 0
+        try expect(!center.isArmed, "De-energize left rotation armed")
         ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = nil
+        try wait { center.canEnergize }
+        center.energize(); try wait { center.hardwareReady && fake.energized }
+        fake.commandDelay = 0.15
         center.arm(); try wait { center.isArmed }
+        fake.commandDelay = 0
+        try expect(fake.energized && center.powerHoldRequested, "Arming rotation discarded an explicit powered hold")
         center.turnToHeading(90); try wait { fake.currentVelocity<0 }
         center.stop(); try wait { !fake.energized }
         center.closeControls()
@@ -153,10 +202,17 @@ private final class FixtureMotor {
     private var isEnergized = false
     private var safeStart = true
     private var measuredVelocity: Int32 = 0
+    private var delay = 0.0
+    var commandDelay: Double {
+        get { lock.lock(); defer { lock.unlock() }; return delay }
+        set { lock.lock(); delay = newValue; lock.unlock() }
+    }
     var calls: [[String]] { lock.lock(); defer { lock.unlock() }; return recorded }
     var energized: Bool { lock.lock(); defer { lock.unlock() }; return isEnergized }
     var currentVelocity: Int32 { lock.lock(); defer { lock.unlock() }; return measuredVelocity }
     func execute(_ args: [String]) throws -> String {
+        let delay = commandDelay
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
         lock.lock(); defer { lock.unlock() }
         recorded.append(args)
         if args.first == "--get-settings" {
@@ -184,8 +240,8 @@ private final class FixtureMotor {
         Current velocity: \(measuredVelocity)
         Current position: 1000
         Position uncertain: Yes
-        Errors currently stopping the motor:
-        \(errors.isEmpty ? "  None" : errors.map { "  - " + $0 }.joined(separator: "\n"))
+        Errors currently stopping the motor:\(errors.isEmpty ? " None" : "\n" + errors.map { "  - " + $0 }.joined(separator: "\n"))
+        Errors that occurred since last check: None
 
         """
     }

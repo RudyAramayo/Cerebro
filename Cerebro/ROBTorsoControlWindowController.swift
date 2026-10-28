@@ -62,6 +62,9 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
     private let sourceDetail = NSTextField(wrappingLabelWithString: "")
     private let status = NSTextField(wrappingLabelWithString: "")
     private let motor = NSTextField(wrappingLabelWithString: "")
+    private let power = NSTextField(wrappingLabelWithString: "")
+    private let energizeButton = NSButton(title: "Energize", target: nil, action: nil)
+    private let deenergizeButton = NSButton(title: "De-energize", target: nil, action: nil)
     private let heading = NSTextField(string: "0")
     private let counts = NSTextField(string: "92")
     private let countSlider = NSSlider(value: 92, minValue: -8907, maxValue: 9091, target: nil, action: nil)
@@ -106,7 +109,7 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
 
     private func makeContent() {
         guard let content = window?.contentView else { return }
-        let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+        let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
@@ -118,8 +121,8 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         stack.addArrangedSubview(source)
 
         headingView.translatesAutoresizingMaskIntoConstraints = false
-        headingView.widthAnchor.constraint(equalToConstant: 244).isActive = true
-        headingView.heightAnchor.constraint(equalToConstant: 222).isActive = true
+        headingView.widthAnchor.constraint(equalToConstant: 210).isActive = true
+        headingView.heightAnchor.constraint(equalToConstant: 170).isActive = true
         let readouts = NSStackView(); readouts.orientation = .vertical; readouts.alignment = .leading; readouts.spacing = 10
         readouts.addArrangedSubview(label("Torso heading · positive is ROB-left", bold: true))
         observation.font = .monospacedDigitSystemFont(ofSize: 34, weight: .medium)
@@ -148,10 +151,14 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         counts.setAccessibilityIdentifier("ROB.Torso.TargetCount")
         countSlider.widthAnchor.constraint(equalToConstant: 310).isActive = true
         countSlider.target = self; countSlider.action = #selector(countSliderChanged)
+        countSlider.isContinuous = true
         countSlider.setAccessibilityIdentifier("ROB.Torso.CalibratedCountRange")
+        countSlider.setAccessibilityLabel("Destination TIC count preview")
+        countSlider.toolTip = "Select a destination; the count and degree fields update while dragging. Turn to heading starts the move."
         stack.addArrangedSubview(row([label("Count target"), counts, countSlider]))
         countRangeLabel.font = .systemFont(ofSize: 11)
         stack.addArrangedSubview(countRangeLabel)
+        stack.addArrangedSubview(label("Count slider previews a destination. Select Turn to heading to move after arming rotation.", size: 11))
         baseReference.widthAnchor.constraint(equalToConstant: 65).isActive = true
         baseReference.setAccessibilityIdentifier("ROB.Torso.SoftwareBaseReference")
         referenceButton.target = self; referenceButton.action = #selector(setReference)
@@ -167,6 +174,16 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         maximumSpeed.target = self; maximumSpeed.action = #selector(speedChanged); maximumSpeed.isContinuous = false
         maximumSpeed.widthAnchor.constraint(equalToConstant: 270).isActive = true
         stack.addArrangedSubview(row([label("Speed limit"), maximumSpeed, speedLabel]))
+
+        energizeButton.target = self; energizeButton.action = #selector(energize)
+        energizeButton.setAccessibilityIdentifier("ROB.Torso.Energize")
+        energizeButton.toolTip = "Power the stepper at zero speed. Rotation is armed separately once both arms clear the treads."
+        deenergizeButton.target = self; deenergizeButton.action = #selector(deenergize)
+        deenergizeButton.setAccessibilityIdentifier("ROB.Torso.Deenergize")
+        stack.addArrangedSubview(row([energizeButton, deenergizeButton, label("Energize holds at zero speed", size: 11)]))
+        power.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        power.preferredMaxLayoutWidth = 700; power.setAccessibilityIdentifier("ROB.Torso.MotorPower")
+        stack.addArrangedSubview(power)
 
         armButton.target = self; armButton.action = #selector(arm)
         armButton.setAccessibilityIdentifier("ROB.Torso.Arm")
@@ -215,28 +232,39 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
     @objc private func rateChanged() { center.setLever(lever.doubleValue, held: lever.isHeld) }
     @objc private func speedChanged() { center.setMaximumSpeed(maximumSpeed.doubleValue) }
     @objc private func arm() { center.isArmed ? center.stop() : center.arm() }
+    @objc private func energize() { center.energize() }
+    @objc private func deenergize() { lever.doubleValue = 0; center.deenergize() }
     @objc private func stopNow() { lever.doubleValue = 0; center.stop() }
     @objc private func reobserve() { center.reobserve() }
 
     @objc private func refresh() {
-        observation.stringValue = center.observedHeading.isFinite ? String(format: "%.1f°", center.observedHeading) : "Unconfirmed"
-        velocity.stringValue = String(format: "%+.2f°/s", center.commandedVelocity)
-        sourceDetail.stringValue = center.visionDetail
-        status.stringValue = center.usesCountEstimate ? center.status.replacingOccurrences(of: "Camera", with: "Count estimate").replacingOccurrences(of: "camera", with: "count estimate").replacingOccurrences(of: "visually", with: "in controller counts") : center.status
-        motor.stringValue = center.hardwareDetail + " • 35,996 counts/turn. No hardware homing or position reset."
-        armButton.title = center.isArmed ? "Disarm" : (center.usesHardware ? "Arm torso" : "Arm rehearsal")
+        func show(_ field: NSTextField, _ text: String) { if field.stringValue != text { field.stringValue = text } }
+        show(observation, center.observedHeading.isFinite ? String(format: "%.1f°", center.observedHeading) : "Unconfirmed")
+        show(velocity, String(format: "%+.2f°/s", center.commandedVelocity))
+        show(sourceDetail, center.visionDetail)
+        show(status, center.usesCountEstimate ? center.status.replacingOccurrences(of: "Camera", with: "Count estimate").replacingOccurrences(of: "camera", with: "count estimate").replacingOccurrences(of: "visually", with: "in controller counts") : center.status)
+        show(motor, center.hardwareDetail + " • 35,996 counts/turn. No hardware homing or position reset.")
+        show(power, center.motorPowerDetail)
+        energizeButton.isEnabled = center.canEnergize
+        deenergizeButton.isEnabled = center.usesHardware
+        let armTitle = center.isArmed ? "Disarm" : (center.usesHardware ? "Arm torso" : "Arm rehearsal")
+        if armButton.title != armTitle { armButton.title = armTitle }
         armButton.isEnabled = center.isArmed || center.canArm
         turnButton.isEnabled = center.isArmed
         lever.isEnabled = center.isArmed
+        if !center.isArmed { lever.doubleValue = 0 }
         headingView.observed = center.observedHeading; headingView.live = center.usesLiveCamera
-        referenceButton.isEnabled = center.usesCountEstimate
-        countSlider.minValue = center.count(forHeading: 90)
-        countSlider.maxValue = center.count(forHeading: -90)
-        countRangeLabel.stringValue = String(format: "Software targets: %.0f left 90° · %.0f front · %.0f right 90° · full rotation supported",
-            center.count(forHeading:90),center.countReference,center.count(forHeading:-90))
+        referenceButton.isEnabled = center.canSetSoftwareReference
+        if countSlider.minValue != center.count(forHeading: 90) || countSlider.maxValue != center.count(forHeading: -90) {
+            countSlider.minValue = center.count(forHeading: 90)
+            countSlider.maxValue = center.count(forHeading: -90)
+            selectHeading(selectedHeading)
+        }
+        show(countRangeLabel, String(format: "Software targets: %.0f left 90° · %.0f front · %.0f right 90° · full rotation supported",
+            center.count(forHeading:90),center.countReference,center.count(forHeading:-90)))
         unwind.isEnabled = center.canUnwind
-        cable.stringValue = !center.debugCableMode ? "Untethered: unrestricted rotation via slipring" : center.cableTravelDegrees.isFinite ? String(format: "Debug tether: %+.1f° since tracking began. Heading requests prefer unwinding. Earlier cable twist is unknown.", center.cableTravelDegrees) : "Debug tether: turn history unavailable; existing cable twist is unknown."
-        speedLabel.stringValue = String(format: "%.1f°/s maximum", center.maximumSpeed)
+        show(cable, !center.debugCableMode ? "Untethered: unrestricted rotation via slipring" : center.cableTravelDegrees.isFinite ? String(format: "Debug tether: %+.1f° since tracking began. Heading requests prefer unwinding. Earlier cable twist is unknown.", center.cableTravelDegrees) : "Debug tether: turn history unavailable; existing cable twist is unknown.")
+        show(speedLabel, String(format: "%.1f°/s maximum", center.maximumSpeed))
         source.selectedSegment = center.usesCountEstimate ? 2 : center.usesLiveCamera ? 1 : 0
     }
 

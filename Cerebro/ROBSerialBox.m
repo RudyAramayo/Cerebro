@@ -4745,11 +4745,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 
 - (NSString *)ticcmdExecutablePath
 {
-    NSString *configuredPath = [[NSUserDefaults standardUserDefaults]
-        stringForKey:kROBTiccmdExecutablePathDefaultsKey];
-    NSString *selection = configuredPath.length > 0
-        ? configuredPath
-        : @"/Applications/Pololu Tic Stepper Motor Controller.app/Contents/MacOS/ticcmd";
+    NSString *selection = ROBTicCommandConfiguration.executablePath;
     NSString *ticcmdPath = [[selection stringByExpandingTildeInPath] stringByStandardizingPath];
     return [[NSFileManager defaultManager] isExecutableFileAtPath:ticcmdPath]
         ? ticcmdPath
@@ -4851,7 +4847,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 
 - (IBAction)energizeToggle:(id)sender
 {
-    [[ROBTorsoControlCenter shared] stop];
+    [[ROBTorsoControlCenter shared] energize];
 }
 
 - (void)performSSHpassOperation:(NSString *)operation block:(dispatch_block_t)block
