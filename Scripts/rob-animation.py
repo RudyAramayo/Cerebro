@@ -10,6 +10,18 @@ import uuid
 
 DEFAULT = Path.home() / 'Documents/ROB Animations/library.json'
 
+def add_pack(library, pack):
+    """Append by stable ID; a previously installed/user-edited asset always wins."""
+    if pack.get('schemaVersion') != 1:
+        raise ValueError('Expected animation pack schemaVersion 1')
+    for table in ('poses', 'sequences'):
+        existing = {value['id'] for value in library[table]}
+        for value in pack[table]:
+            if value['id'] not in existing:
+                library[table].append(value)
+                existing.add(value['id'])
+    return library
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--library', type=Path, default=DEFAULT)
@@ -21,6 +33,9 @@ def main():
     apply.add_argument('input', type=Path)
     apply.add_argument('--expected-revision', type=int)
     apply.add_argument('--wait', type=float, default=10)
+    pack = sub.add_parser('add-pack', help='Append a gesture pack; preserve existing assets and edits by ID')
+    pack.add_argument('input', type=Path)
+    pack.add_argument('--wait', type=float, default=10)
     args = parser.parse_args()
     if args.command in ('read', 'export'):
         value = json.loads(args.library.read_text())
@@ -31,7 +46,15 @@ def main():
     data = args.input.read_bytes()
     if len(data) > 16_000_000: raise ValueError('Animation document exceeds 16 MB')
     value = json.loads(data)
-    revision = args.expected_revision if args.expected_revision is not None else value['revision']
+    if args.command == 'add-pack':
+        library = json.loads(args.library.read_text())
+        before = json.dumps(library, sort_keys=True)
+        value = add_pack(library, value)
+        if json.dumps(value, sort_keys=True) == before:
+            print(json.dumps({'ok': True, 'revision': value['revision'], 'detail': 'Pack already installed; existing edits preserved.'}))
+            return 0
+    revision = getattr(args, 'expected_revision', None)
+    if revision is None: revision = value['revision']
     if value.get('schemaVersion') != 1 or not isinstance(revision, int) or revision < 0:
         raise ValueError('Expected schemaVersion 1 and a nonnegative integer revision')
     if value['revision'] != revision: raise ValueError('The document revision must match --expected-revision')

@@ -43,6 +43,26 @@ Create new UUIDs for new poses, sequences, clips **and each clip's embedded pose
 
 The CLI writes a request into `inbox/`; the running controller validates and applies it on the same serialized path as UI edits. The `.result` file records acceptance/conflict and the actual resulting revision. Stale revisions reject the complete edit; re-export and merge by UUID. A timeout means pending, not saved. Import JSON edit uses the same identity/revision check. Neither path can execute a sequence. Unsaved UI drafts survive incoming edits, and a stale draft cannot overwrite the newer library.
 
+## Basic gesture pack
+
+`Animations/basic-gestures.json` contains five sequences and their reusable poses:
+
+- **Hands Folded Up:** raise both hands, bring them inward and hold in front of the chest.
+- **Wave · Right Hand:** raise, wave three times and return to the raised ready pose.
+- **Handshake · Right Hand:** offer the hand, make three small vertical gestures and withdraw. This is a mime; it does not sense contact or close the jaws.
+- **Kung Fu · Guard and Flow:** salute, alternate outward blocks and palm presses, then return.
+- **Sword Form · Right Hand · 60 cm:** salute, high guards, two diagonal sweeps, blade presentation and recovery. The left hand remains raised away from the blade path; jaw settings are unchanged.
+
+Install without replacing existing animations:
+
+```sh
+python3 Scripts/rob-animation.py add-pack Animations/basic-gestures.json
+```
+
+Repeated installation preserves existing edits by stable ID. The app still validates the whole merged document and its revision before saving. All five sequences contain arm tracks only. Clip timings use smooth easing and a nominal peak below 0.20 rad/s; the 18-second first clip is sized from hanging coordinates, and native playback checks the actual measured start. Each pose can be edited independently in the studio. The targets were authored with the bundled model's FK and each arm's own vendor-coordinate mapping; they are model-derived gestures, not physically commissioned motions.
+
+An optional pose field, `previewProp: {"kind":"sword", "arm":"right", "lengthMeters":0.6}`, draws a reference sword along the tool's +Z axis. It follows the ghost hand while scrubbing, survives pose/clip copies and JSON edits, and disappears for poses without the field. This is display geometry, not a measured grip transform, jaw command or payload-clearance model. Other values remain unchanged.
+
 ## Verification
 
 `Scripts/test-animation-studio.sh` runs the production model, native table/editor, and playback coordinator with inert hardware. It covers aliasing, duplicate names, row-selection errors, sparse tracks, timeline intervals, migrations, atomic revision conflicts, acknowledgements, Stop/takeover and reconnects. `Tests/ROBNeckOutputRuntimeTests.py` exercises the real Maestro gateway with recorded bytes; torso/gateway/ghost regression suites retain their hardware isolation. Physical multi-channel playback still needs commissioning on ROB; no robot movement is part of editor verification.

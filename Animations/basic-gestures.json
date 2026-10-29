@@ -1,0 +1,1735 @@
+{
+  "id": "3791E3FD-8C8E-5D48-B8C2-A1868BFFB06B",
+  "migrationNotes": [],
+  "poses": [
+    {
+      "id": "C38E35A3-565E-54B0-9B0A-D75F6D33B579",
+      "name": "Gesture \u00b7 Hands raised",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.158794,
+        "arm.right.j2": -0.401596,
+        "arm.right.j3": 1.193927,
+        "arm.right.j4": -0.708578,
+        "arm.right.j5": 1.195716,
+        "arm.right.j6": 1.488664,
+        "arm.right.j7": -0.099177
+      }
+    },
+    {
+      "id": "14767FE0-6070-5D7A-849F-6738CF53D7B6",
+      "name": "Gesture \u00b7 Hands folded up",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Both grippers raised inward in front of the chest; hands remain apart.",
+      "values": {
+        "arm.left.j1": -0.447038,
+        "arm.left.j2": 0.211655,
+        "arm.left.j3": -1.15488,
+        "arm.left.j4": 0.681495,
+        "arm.left.j5": -0.928289,
+        "arm.left.j6": -1.584354,
+        "arm.left.j7": 0.398228,
+        "arm.right.j1": 0.442427,
+        "arm.right.j2": -0.22269,
+        "arm.right.j3": 1.167138,
+        "arm.right.j4": -0.739951,
+        "arm.right.j5": 0.914902,
+        "arm.right.j6": 1.602561,
+        "arm.right.j7": -0.421177
+      }
+    },
+    {
+      "id": "DD121BF3-D664-50E1-8D82-1ABD3D970F29",
+      "name": "Kung fu \u00b7 Double guard",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.left.j1": -0.594637,
+        "arm.left.j2": 0.517219,
+        "arm.left.j3": -1.436758,
+        "arm.left.j4": 0.40252,
+        "arm.left.j5": -1.335812,
+        "arm.left.j6": -1.311842,
+        "arm.left.j7": 0.107936,
+        "arm.right.j1": 0.593449,
+        "arm.right.j2": -0.528707,
+        "arm.right.j3": 1.452981,
+        "arm.right.j4": -0.460917,
+        "arm.right.j5": 1.318995,
+        "arm.right.j6": 1.329384,
+        "arm.right.j7": -0.145758
+      }
+    },
+    {
+      "id": "A398B48C-BC56-5A11-962B-0365B913B355",
+      "name": "Kung fu \u00b7 Right outward block",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.left.j1": -0.594637,
+        "arm.left.j2": 0.517219,
+        "arm.left.j3": -1.436758,
+        "arm.left.j4": 0.40252,
+        "arm.left.j5": -1.335812,
+        "arm.left.j6": -1.311842,
+        "arm.left.j7": 0.107936,
+        "arm.right.j1": 0.503663,
+        "arm.right.j2": -0.680192,
+        "arm.right.j3": 1.654889,
+        "arm.right.j4": -0.145878,
+        "arm.right.j5": 1.562105,
+        "arm.right.j6": 1.156481,
+        "arm.right.j7": 0.188509
+      }
+    },
+    {
+      "id": "4E800C82-6FA3-5FF3-AB06-E56456028B6C",
+      "name": "Kung fu \u00b7 Left outward block",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.left.j1": -0.503124,
+        "arm.left.j2": 0.665998,
+        "arm.left.j3": -1.637638,
+        "arm.left.j4": 0.087376,
+        "arm.left.j5": -1.579438,
+        "arm.left.j6": -1.136508,
+        "arm.left.j7": -0.22629,
+        "arm.right.j1": 0.593449,
+        "arm.right.j2": -0.528707,
+        "arm.right.j3": 1.452981,
+        "arm.right.j4": -0.460917,
+        "arm.right.j5": 1.318995,
+        "arm.right.j6": 1.329384,
+        "arm.right.j7": -0.145758
+      }
+    },
+    {
+      "id": "793C5988-9047-50D7-BD27-452A4B651EBE",
+      "name": "Kung fu \u00b7 Right palm press",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.left.j1": -0.594637,
+        "arm.left.j2": 0.517219,
+        "arm.left.j3": -1.436758,
+        "arm.left.j4": 0.40252,
+        "arm.left.j5": -1.335812,
+        "arm.left.j6": -1.311842,
+        "arm.left.j7": 0.107936,
+        "arm.right.j1": 0.561045,
+        "arm.right.j2": -0.670298,
+        "arm.right.j3": 1.818932,
+        "arm.right.j4": -0.833192,
+        "arm.right.j5": -0.008576,
+        "arm.right.j6": -0.364034,
+        "arm.right.j7": -0.343019
+      }
+    },
+    {
+      "id": "294CC757-FFF8-50D6-B1EF-EB109A0C9726",
+      "name": "Kung fu \u00b7 Left palm press",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.left.j1": -0.561417,
+        "arm.left.j2": 0.647601,
+        "arm.left.j3": -1.820551,
+        "arm.left.j4": 0.774688,
+        "arm.left.j5": 0.006316,
+        "arm.left.j6": 0.391064,
+        "arm.left.j7": 0.347224,
+        "arm.right.j1": 0.593449,
+        "arm.right.j2": -0.528707,
+        "arm.right.j3": 1.452981,
+        "arm.right.j4": -0.460917,
+        "arm.right.j5": 1.318995,
+        "arm.right.j6": 1.329384,
+        "arm.right.j7": -0.145758
+      }
+    },
+    {
+      "id": "9B73E32C-9634-5330-BAF8-173175C61A4E",
+      "name": "Wave \u00b7 Right ready",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.right.j1": 0.158794,
+        "arm.right.j2": -0.401596,
+        "arm.right.j3": 1.193927,
+        "arm.right.j4": -0.708578,
+        "arm.right.j5": 1.195716,
+        "arm.right.j6": 1.488664,
+        "arm.right.j7": -0.099177
+      }
+    },
+    {
+      "id": "D70E4356-9077-5044-BDDC-35CE0C0A05F4",
+      "name": "Wave \u00b7 Raised greeting",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.right.j1": 0.889106,
+        "arm.right.j2": -0.997095,
+        "arm.right.j3": 0.955897,
+        "arm.right.j4": 0.452448,
+        "arm.right.j5": 1.754354,
+        "arm.right.j6": 1.154061,
+        "arm.right.j7": -0.649997
+      }
+    },
+    {
+      "id": "946BF9F4-4DD0-5D3F-BDC3-C0F2F3E18665",
+      "name": "Wave \u00b7 Sweep inward",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.right.j1": 0.880627,
+        "arm.right.j2": -1.071126,
+        "arm.right.j3": 0.891017,
+        "arm.right.j4": 0.346731,
+        "arm.right.j5": 1.665513,
+        "arm.right.j6": 1.256578,
+        "arm.right.j7": -0.629805
+      }
+    },
+    {
+      "id": "BAA126B4-FA30-598A-B2F2-82BDB3FF4B05",
+      "name": "Wave \u00b7 Sweep outward",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "values": {
+        "arm.right.j1": 0.950886,
+        "arm.right.j2": -0.941935,
+        "arm.right.j3": 1.008121,
+        "arm.right.j4": 0.63961,
+        "arm.right.j5": 1.805898,
+        "arm.right.j6": 0.980291,
+        "arm.right.j7": -0.617161
+      }
+    },
+    {
+      "id": "402C98DB-3C4F-5B3F-8401-48C17B2E3C9E",
+      "name": "Handshake \u00b7 Right ready",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+      "values": {
+        "arm.right.j1": 0.378598,
+        "arm.right.j2": -0.147754,
+        "arm.right.j3": 2.171133,
+        "arm.right.j4": -0.771826,
+        "arm.right.j5": -0.259371,
+        "arm.right.j6": 0.228098,
+        "arm.right.j7": -0.563257
+      }
+    },
+    {
+      "id": "8469535C-B430-5FA1-99FC-5A2948E29530",
+      "name": "Handshake \u00b7 Offer hand",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+      "values": {
+        "arm.right.j1": 0.504571,
+        "arm.right.j2": -0.840168,
+        "arm.right.j3": 1.55549,
+        "arm.right.j4": -0.86585,
+        "arm.right.j5": 0.329624,
+        "arm.right.j6": -0.427252,
+        "arm.right.j7": -0.370943
+      }
+    },
+    {
+      "id": "280D6245-4227-5406-8B8D-71FAD899B12A",
+      "name": "Handshake \u00b7 Small upstroke",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+      "values": {
+        "arm.right.j1": 0.541232,
+        "arm.right.j2": -1.057379,
+        "arm.right.j3": 1.462051,
+        "arm.right.j4": -0.827658,
+        "arm.right.j5": 0.449295,
+        "arm.right.j6": -0.388951,
+        "arm.right.j7": -0.255749
+      }
+    },
+    {
+      "id": "20A4B044-C835-5E51-825D-22C1BD336BD6",
+      "name": "Handshake \u00b7 Small downstroke",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+      "values": {
+        "arm.right.j1": 0.479581,
+        "arm.right.j2": -0.632615,
+        "arm.right.j3": 1.622739,
+        "arm.right.j4": -0.877211,
+        "arm.right.j5": 0.228393,
+        "arm.right.j6": -0.423133,
+        "arm.right.j7": -0.491419
+      }
+    },
+    {
+      "id": "A8932C4F-3AE1-56FC-83D9-EA4BDC3E68B0",
+      "name": "Sword \u00b7 Ready",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+      "previewProp": {
+        "arm": "right",
+        "kind": "sword",
+        "lengthMeters": 0.6
+      },
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.323089,
+        "arm.right.j2": -0.498098,
+        "arm.right.j3": 1.389377,
+        "arm.right.j4": -0.657709,
+        "arm.right.j5": 1.27275,
+        "arm.right.j6": 1.373295,
+        "arm.right.j7": 0.0
+      }
+    },
+    {
+      "id": "679C03B5-56F3-5C8F-B99D-45F700EB1A22",
+      "name": "Sword \u00b7 Salute",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+      "previewProp": {
+        "arm": "right",
+        "kind": "sword",
+        "lengthMeters": 0.6
+      },
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.964788,
+        "arm.right.j2": -0.502211,
+        "arm.right.j3": 1.498815,
+        "arm.right.j4": -0.385999,
+        "arm.right.j5": 1.32595,
+        "arm.right.j6": 1.368423,
+        "arm.right.j7": 0.0
+      }
+    },
+    {
+      "id": "F7BA8845-934C-537A-A1FC-D57C0642E7DD",
+      "name": "Sword \u00b7 High right guard",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+      "previewProp": {
+        "arm": "right",
+        "kind": "sword",
+        "lengthMeters": 0.6
+      },
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.509286,
+        "arm.right.j2": -0.991518,
+        "arm.right.j3": 1.579042,
+        "arm.right.j4": 0.006092,
+        "arm.right.j5": 1.324396,
+        "arm.right.j6": 1.033156,
+        "arm.right.j7": 0.0
+      }
+    },
+    {
+      "id": "050C888D-646A-502E-8B99-573555A2F5DD",
+      "name": "Sword \u00b7 Diagonal sweep left",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+      "previewProp": {
+        "arm": "right",
+        "kind": "sword",
+        "lengthMeters": 0.6
+      },
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 1.428226,
+        "arm.right.j2": -1.328725,
+        "arm.right.j3": 1.059808,
+        "arm.right.j4": -0.302568,
+        "arm.right.j5": 2.012508,
+        "arm.right.j6": -0.865631,
+        "arm.right.j7": 0.0
+      }
+    },
+    {
+      "id": "655018AF-AEDB-5ECE-A309-EF363A539E0C",
+      "name": "Sword \u00b7 Center recovery",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+      "previewProp": {
+        "arm": "right",
+        "kind": "sword",
+        "lengthMeters": 0.6
+      },
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.778072,
+        "arm.right.j2": -1.018389,
+        "arm.right.j3": 0.960012,
+        "arm.right.j4": -0.707081,
+        "arm.right.j5": 2.0938,
+        "arm.right.j6": 1.311886,
+        "arm.right.j7": 0.0
+      }
+    },
+    {
+      "id": "4A603E01-160D-5184-9F91-290ED985BD1F",
+      "name": "Sword \u00b7 High left guard",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+      "previewProp": {
+        "arm": "right",
+        "kind": "sword",
+        "lengthMeters": 0.6
+      },
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 1.366525,
+        "arm.right.j2": -0.904113,
+        "arm.right.j3": 1.108623,
+        "arm.right.j4": -0.629756,
+        "arm.right.j5": 2.146634,
+        "arm.right.j6": 1.253776,
+        "arm.right.j7": 0.0
+      }
+    },
+    {
+      "id": "355C0677-C2BB-5B85-980E-1DBB8F430901",
+      "name": "Sword \u00b7 Diagonal sweep right",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+      "previewProp": {
+        "arm": "right",
+        "kind": "sword",
+        "lengthMeters": 0.6
+      },
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.946087,
+        "arm.right.j2": -1.467027,
+        "arm.right.j3": 0.836975,
+        "arm.right.j4": -0.011849,
+        "arm.right.j5": 2.078381,
+        "arm.right.j6": -0.868722,
+        "arm.right.j7": 0.0
+      }
+    },
+    {
+      "id": "8250662B-CA52-5CA2-90A6-2A09FE924E80",
+      "name": "Sword \u00b7 Present blade",
+      "needsReview": false,
+      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+      "previewProp": {
+        "arm": "right",
+        "kind": "sword",
+        "lengthMeters": 0.6
+      },
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.484303,
+        "arm.right.j2": -0.680616,
+        "arm.right.j3": 1.830664,
+        "arm.right.j4": -0.843419,
+        "arm.right.j5": 0.001981,
+        "arm.right.j6": -0.30022,
+        "arm.right.j7": 0.0
+      }
+    }
+  ],
+  "revision": 0,
+  "schemaVersion": 1,
+  "sequences": [
+    {
+      "clips": [
+        {
+          "easing": "smooth",
+          "hold": 0.3,
+          "id": "4D76E5E2-A08C-5161-AD41-1A846067917C",
+          "pose": {
+            "id": "50105160-8B6B-5DD4-A499-8478FFF3AB70",
+            "name": "Gesture \u00b7 Hands raised",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.158794,
+              "arm.right.j2": -0.401596,
+              "arm.right.j3": 1.193927,
+              "arm.right.j4": -0.708578,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177
+            }
+          },
+          "sourcePoseID": "C38E35A3-565E-54B0-9B0A-D75F6D33B579",
+          "transition": 18.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 3,
+          "id": "A8A9ECDC-A6A1-55A2-BD29-29AB1147BE7D",
+          "pose": {
+            "id": "FD802908-0DC8-5D2D-AEB8-55F5A2C24C2B",
+            "name": "Gesture \u00b7 Hands folded up",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Both grippers raised inward in front of the chest; hands remain apart.",
+            "values": {
+              "arm.left.j1": -0.447038,
+              "arm.left.j2": 0.211655,
+              "arm.left.j3": -1.15488,
+              "arm.left.j4": 0.681495,
+              "arm.left.j5": -0.928289,
+              "arm.left.j6": -1.584354,
+              "arm.left.j7": 0.398228,
+              "arm.right.j1": 0.442427,
+              "arm.right.j2": -0.22269,
+              "arm.right.j3": 1.167138,
+              "arm.right.j4": -0.739951,
+              "arm.right.j5": 0.914902,
+              "arm.right.j6": 1.602561,
+              "arm.right.j7": -0.421177
+            }
+          },
+          "sourcePoseID": "14767FE0-6070-5D7A-849F-6738CF53D7B6",
+          "transition": 3.2
+        }
+      ],
+      "id": "3F5AB03C-6D29-5F85-9010-1065AA243CE6",
+      "name": "Hands Folded Up"
+    },
+    {
+      "clips": [
+        {
+          "easing": "smooth",
+          "hold": 0.3,
+          "id": "A8C22F37-116D-58EC-BBC5-7015BD5F0500",
+          "pose": {
+            "id": "5D56A3F0-14C8-5EF7-B895-BEB1788F52B8",
+            "name": "Wave \u00b7 Right ready",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.158794,
+              "arm.right.j2": -0.401596,
+              "arm.right.j3": 1.193927,
+              "arm.right.j4": -0.708578,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177
+            }
+          },
+          "sourcePoseID": "9B73E32C-9634-5330-BAF8-173175C61A4E",
+          "transition": 18.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.8,
+          "id": "5A4E7491-5507-54E8-8CCF-99241D5DB485",
+          "pose": {
+            "id": "C8EBA06A-6544-5A60-979C-A1232E32AF68",
+            "name": "Wave \u00b7 Raised greeting",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.889106,
+              "arm.right.j2": -0.997095,
+              "arm.right.j3": 0.955897,
+              "arm.right.j4": 0.452448,
+              "arm.right.j5": 1.754354,
+              "arm.right.j6": 1.154061,
+              "arm.right.j7": -0.649997
+            }
+          },
+          "sourcePoseID": "D70E4356-9077-5044-BDDC-35CE0C0A05F4",
+          "transition": 10.9
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.15,
+          "id": "62F1CF0E-4BAF-5264-AD81-87A39EF2A5A1",
+          "pose": {
+            "id": "F89A0723-5954-56D6-AAB0-C80EDEDAE791",
+            "name": "Wave \u00b7 Sweep inward",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.880627,
+              "arm.right.j2": -1.071126,
+              "arm.right.j3": 0.891017,
+              "arm.right.j4": 0.346731,
+              "arm.right.j5": 1.665513,
+              "arm.right.j6": 1.256578,
+              "arm.right.j7": -0.629805
+            }
+          },
+          "sourcePoseID": "946BF9F4-4DD0-5D3F-BDC3-C0F2F3E18665",
+          "transition": 1.2
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.15,
+          "id": "B2DCE602-BFA3-563B-BDE6-A9965231C176",
+          "pose": {
+            "id": "A24166E4-9E7D-536B-BBEB-1A4468586BE3",
+            "name": "Wave \u00b7 Sweep outward",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.950886,
+              "arm.right.j2": -0.941935,
+              "arm.right.j3": 1.008121,
+              "arm.right.j4": 0.63961,
+              "arm.right.j5": 1.805898,
+              "arm.right.j6": 0.980291,
+              "arm.right.j7": -0.617161
+            }
+          },
+          "sourcePoseID": "BAA126B4-FA30-598A-B2F2-82BDB3FF4B05",
+          "transition": 2.8
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.15,
+          "id": "BA27E749-181F-5ED2-BCF4-29DBD34D9F17",
+          "pose": {
+            "id": "6ED6EDB7-5852-5F0D-962E-EFB4A2801C1D",
+            "name": "Wave \u00b7 Sweep inward",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.880627,
+              "arm.right.j2": -1.071126,
+              "arm.right.j3": 0.891017,
+              "arm.right.j4": 0.346731,
+              "arm.right.j5": 1.665513,
+              "arm.right.j6": 1.256578,
+              "arm.right.j7": -0.629805
+            }
+          },
+          "sourcePoseID": "946BF9F4-4DD0-5D3F-BDC3-C0F2F3E18665",
+          "transition": 2.8
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.15,
+          "id": "7CAA0F87-38E9-5BBE-8D6E-9EA6F6D57E09",
+          "pose": {
+            "id": "B15F07F2-DB61-564D-8BFA-ADDD790231D6",
+            "name": "Wave \u00b7 Sweep outward",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.950886,
+              "arm.right.j2": -0.941935,
+              "arm.right.j3": 1.008121,
+              "arm.right.j4": 0.63961,
+              "arm.right.j5": 1.805898,
+              "arm.right.j6": 0.980291,
+              "arm.right.j7": -0.617161
+            }
+          },
+          "sourcePoseID": "BAA126B4-FA30-598A-B2F2-82BDB3FF4B05",
+          "transition": 2.8
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.15,
+          "id": "7F4C8500-D5F5-5550-9D1D-12731C0A5955",
+          "pose": {
+            "id": "312583C0-8F50-5F06-BDDA-FE82D977AFAF",
+            "name": "Wave \u00b7 Sweep inward",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.880627,
+              "arm.right.j2": -1.071126,
+              "arm.right.j3": 0.891017,
+              "arm.right.j4": 0.346731,
+              "arm.right.j5": 1.665513,
+              "arm.right.j6": 1.256578,
+              "arm.right.j7": -0.629805
+            }
+          },
+          "sourcePoseID": "946BF9F4-4DD0-5D3F-BDC3-C0F2F3E18665",
+          "transition": 2.8
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.6,
+          "id": "F6C77805-3565-5D1C-A961-A684433F4C2D",
+          "pose": {
+            "id": "064C9118-B8CA-5996-A76A-67375294BDAD",
+            "name": "Wave \u00b7 Raised greeting",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.889106,
+              "arm.right.j2": -0.997095,
+              "arm.right.j3": 0.955897,
+              "arm.right.j4": 0.452448,
+              "arm.right.j5": 1.754354,
+              "arm.right.j6": 1.154061,
+              "arm.right.j7": -0.649997
+            }
+          },
+          "sourcePoseID": "D70E4356-9077-5044-BDDC-35CE0C0A05F4",
+          "transition": 1.2
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "D50B1E61-DC35-5DBE-8445-0D8852F5E01F",
+          "pose": {
+            "id": "492D30E0-36C7-543C-9A0D-095F53171721",
+            "name": "Wave \u00b7 Right ready",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.right.j1": 0.158794,
+              "arm.right.j2": -0.401596,
+              "arm.right.j3": 1.193927,
+              "arm.right.j4": -0.708578,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177
+            }
+          },
+          "sourcePoseID": "9B73E32C-9634-5330-BAF8-173175C61A4E",
+          "transition": 10.9
+        }
+      ],
+      "id": "9D83C6BB-18E7-5A03-A606-90460521B0D1",
+      "name": "Wave \u00b7 Right Hand"
+    },
+    {
+      "clips": [
+        {
+          "easing": "smooth",
+          "hold": 0.3,
+          "id": "FADA16EA-B7F5-5232-9756-BA14DC442F76",
+          "pose": {
+            "id": "A95E29CA-44C5-51CD-909C-D4842F886D77",
+            "name": "Handshake \u00b7 Right ready",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.378598,
+              "arm.right.j2": -0.147754,
+              "arm.right.j3": 2.171133,
+              "arm.right.j4": -0.771826,
+              "arm.right.j5": -0.259371,
+              "arm.right.j6": 0.228098,
+              "arm.right.j7": -0.563257
+            }
+          },
+          "sourcePoseID": "402C98DB-3C4F-5B3F-8401-48C17B2E3C9E",
+          "transition": 18.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 2,
+          "id": "6434D2D7-5608-557C-9D17-C4125D1E0348",
+          "pose": {
+            "id": "108A71FE-1F26-56CA-A5D3-F43BA6EEF4B1",
+            "name": "Handshake \u00b7 Offer hand",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.504571,
+              "arm.right.j2": -0.840168,
+              "arm.right.j3": 1.55549,
+              "arm.right.j4": -0.86585,
+              "arm.right.j5": 0.329624,
+              "arm.right.j6": -0.427252,
+              "arm.right.j7": -0.370943
+            }
+          },
+          "sourcePoseID": "8469535C-B430-5FA1-99FC-5A2948E29530",
+          "transition": 6.5
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.1,
+          "id": "68F57D24-9C84-5B38-AEF1-2A9FA042E493",
+          "pose": {
+            "id": "9E7F7536-B6CC-56B7-96FE-8FC0D3566E4C",
+            "name": "Handshake \u00b7 Small upstroke",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.541232,
+              "arm.right.j2": -1.057379,
+              "arm.right.j3": 1.462051,
+              "arm.right.j4": -0.827658,
+              "arm.right.j5": 0.449295,
+              "arm.right.j6": -0.388951,
+              "arm.right.j7": -0.255749
+            }
+          },
+          "sourcePoseID": "280D6245-4227-5406-8B8D-71FAD899B12A",
+          "transition": 2.1
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.1,
+          "id": "0F28BCF2-00CA-5BA8-A640-8EF6B7F9D150",
+          "pose": {
+            "id": "CB09659C-F0BC-529B-84BB-425394B790AE",
+            "name": "Handshake \u00b7 Small downstroke",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.479581,
+              "arm.right.j2": -0.632615,
+              "arm.right.j3": 1.622739,
+              "arm.right.j4": -0.877211,
+              "arm.right.j5": 0.228393,
+              "arm.right.j6": -0.423133,
+              "arm.right.j7": -0.491419
+            }
+          },
+          "sourcePoseID": "20A4B044-C835-5E51-825D-22C1BD336BD6",
+          "transition": 4.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.1,
+          "id": "901D3226-6754-595A-A139-64B8E163C6D1",
+          "pose": {
+            "id": "378E87C0-36BF-5287-A7AC-F68022CEF655",
+            "name": "Handshake \u00b7 Small upstroke",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.541232,
+              "arm.right.j2": -1.057379,
+              "arm.right.j3": 1.462051,
+              "arm.right.j4": -0.827658,
+              "arm.right.j5": 0.449295,
+              "arm.right.j6": -0.388951,
+              "arm.right.j7": -0.255749
+            }
+          },
+          "sourcePoseID": "280D6245-4227-5406-8B8D-71FAD899B12A",
+          "transition": 4.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.1,
+          "id": "FA436583-8E2C-5DD9-9C4F-AC8967D9C8BA",
+          "pose": {
+            "id": "866F987C-4FB6-5B92-B966-B9EA21E5D88D",
+            "name": "Handshake \u00b7 Small downstroke",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.479581,
+              "arm.right.j2": -0.632615,
+              "arm.right.j3": 1.622739,
+              "arm.right.j4": -0.877211,
+              "arm.right.j5": 0.228393,
+              "arm.right.j6": -0.423133,
+              "arm.right.j7": -0.491419
+            }
+          },
+          "sourcePoseID": "20A4B044-C835-5E51-825D-22C1BD336BD6",
+          "transition": 4.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.1,
+          "id": "636B9754-AE28-53A3-9AE7-ED7B041CF50C",
+          "pose": {
+            "id": "2B0153B3-89D3-57E4-9804-7D3D7CBFD444",
+            "name": "Handshake \u00b7 Small upstroke",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.541232,
+              "arm.right.j2": -1.057379,
+              "arm.right.j3": 1.462051,
+              "arm.right.j4": -0.827658,
+              "arm.right.j5": 0.449295,
+              "arm.right.j6": -0.388951,
+              "arm.right.j7": -0.255749
+            }
+          },
+          "sourcePoseID": "280D6245-4227-5406-8B8D-71FAD899B12A",
+          "transition": 4.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 1,
+          "id": "1BFD94D3-9795-54AF-A97D-A179C9C82D99",
+          "pose": {
+            "id": "943074D2-AA7C-5D0E-84DD-CF3939C7B20B",
+            "name": "Handshake \u00b7 Offer hand",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.504571,
+              "arm.right.j2": -0.840168,
+              "arm.right.j3": 1.55549,
+              "arm.right.j4": -0.86585,
+              "arm.right.j5": 0.329624,
+              "arm.right.j6": -0.427252,
+              "arm.right.j7": -0.370943
+            }
+          },
+          "sourcePoseID": "8469535C-B430-5FA1-99FC-5A2948E29530",
+          "transition": 2.1
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "E6470E74-812B-52E2-9CDA-00AA6E91B802",
+          "pose": {
+            "id": "14635DD3-5EC6-50C8-8237-636C046ECE84",
+            "name": "Handshake \u00b7 Right ready",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Mime gesture; does not close the gripper or infer human contact.",
+            "values": {
+              "arm.right.j1": 0.378598,
+              "arm.right.j2": -0.147754,
+              "arm.right.j3": 2.171133,
+              "arm.right.j4": -0.771826,
+              "arm.right.j5": -0.259371,
+              "arm.right.j6": 0.228098,
+              "arm.right.j7": -0.563257
+            }
+          },
+          "sourcePoseID": "402C98DB-3C4F-5B3F-8401-48C17B2E3C9E",
+          "transition": 6.5
+        }
+      ],
+      "id": "BF9DA6A9-0D27-5762-8447-7F000A52E5AF",
+      "name": "Handshake \u00b7 Right Hand"
+    },
+    {
+      "clips": [
+        {
+          "easing": "smooth",
+          "hold": 0.3,
+          "id": "84A9E2DE-B1FB-572F-B4EF-A277CC8F5C43",
+          "pose": {
+            "id": "28AEC030-93FC-5A90-BA78-F746ED7C3FDA",
+            "name": "Gesture \u00b7 Hands raised",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.158794,
+              "arm.right.j2": -0.401596,
+              "arm.right.j3": 1.193927,
+              "arm.right.j4": -0.708578,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177
+            }
+          },
+          "sourcePoseID": "C38E35A3-565E-54B0-9B0A-D75F6D33B579",
+          "transition": 18.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.5,
+          "id": "8476F68A-C942-58C9-952F-424269AF29DB",
+          "pose": {
+            "id": "6FB68588-3469-56D7-8C96-3DD5C70C5B92",
+            "name": "Gesture \u00b7 Hands folded up",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Both grippers raised inward in front of the chest; hands remain apart.",
+            "values": {
+              "arm.left.j1": -0.447038,
+              "arm.left.j2": 0.211655,
+              "arm.left.j3": -1.15488,
+              "arm.left.j4": 0.681495,
+              "arm.left.j5": -0.928289,
+              "arm.left.j6": -1.584354,
+              "arm.left.j7": 0.398228,
+              "arm.right.j1": 0.442427,
+              "arm.right.j2": -0.22269,
+              "arm.right.j3": 1.167138,
+              "arm.right.j4": -0.739951,
+              "arm.right.j5": 0.914902,
+              "arm.right.j6": 1.602561,
+              "arm.right.j7": -0.421177
+            }
+          },
+          "sourcePoseID": "14767FE0-6070-5D7A-849F-6738CF53D7B6",
+          "transition": 3.2
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.7,
+          "id": "3281C23E-5BB6-5106-A997-7023ADE1E79A",
+          "pose": {
+            "id": "B7F6D5F2-B0DF-5CC0-9348-67E4E95513EE",
+            "name": "Kung fu \u00b7 Double guard",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.594637,
+              "arm.left.j2": 0.517219,
+              "arm.left.j3": -1.436758,
+              "arm.left.j4": 0.40252,
+              "arm.left.j5": -1.335812,
+              "arm.left.j6": -1.311842,
+              "arm.left.j7": 0.107936,
+              "arm.right.j1": 0.593449,
+              "arm.right.j2": -0.528707,
+              "arm.right.j3": 1.452981,
+              "arm.right.j4": -0.460917,
+              "arm.right.j5": 1.318995,
+              "arm.right.j6": 1.329384,
+              "arm.right.j7": -0.145758
+            }
+          },
+          "sourcePoseID": "DD121BF3-D664-50E1-8D82-1ABD3D970F29",
+          "transition": 3.9
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "7A4AD141-47EE-5033-99CC-624BE1C271E3",
+          "pose": {
+            "id": "171CEDDF-5643-562F-B6A9-4D97E7A0BDBA",
+            "name": "Kung fu \u00b7 Right outward block",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.594637,
+              "arm.left.j2": 0.517219,
+              "arm.left.j3": -1.436758,
+              "arm.left.j4": 0.40252,
+              "arm.left.j5": -1.335812,
+              "arm.left.j6": -1.311842,
+              "arm.left.j7": 0.107936,
+              "arm.right.j1": 0.503663,
+              "arm.right.j2": -0.680192,
+              "arm.right.j3": 1.654889,
+              "arm.right.j4": -0.145878,
+              "arm.right.j5": 1.562105,
+              "arm.right.j6": 1.156481,
+              "arm.right.j7": 0.188509
+            }
+          },
+          "sourcePoseID": "A398B48C-BC56-5A11-962B-0365B913B355",
+          "transition": 3.2
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.3,
+          "id": "6AF0A663-7DAD-525A-AD37-CC0513F88DBF",
+          "pose": {
+            "id": "D5626D14-64D5-56E4-BD7E-7F937DD4AD98",
+            "name": "Kung fu \u00b7 Double guard",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.594637,
+              "arm.left.j2": 0.517219,
+              "arm.left.j3": -1.436758,
+              "arm.left.j4": 0.40252,
+              "arm.left.j5": -1.335812,
+              "arm.left.j6": -1.311842,
+              "arm.left.j7": 0.107936,
+              "arm.right.j1": 0.593449,
+              "arm.right.j2": -0.528707,
+              "arm.right.j3": 1.452981,
+              "arm.right.j4": -0.460917,
+              "arm.right.j5": 1.318995,
+              "arm.right.j6": 1.329384,
+              "arm.right.j7": -0.145758
+            }
+          },
+          "sourcePoseID": "DD121BF3-D664-50E1-8D82-1ABD3D970F29",
+          "transition": 3.2
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "BBF07E17-12B2-5638-9A5A-EA59E4031C0C",
+          "pose": {
+            "id": "A57BA9ED-74D1-54EE-92ED-240F456198D0",
+            "name": "Kung fu \u00b7 Left outward block",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.503124,
+              "arm.left.j2": 0.665998,
+              "arm.left.j3": -1.637638,
+              "arm.left.j4": 0.087376,
+              "arm.left.j5": -1.579438,
+              "arm.left.j6": -1.136508,
+              "arm.left.j7": -0.22629,
+              "arm.right.j1": 0.593449,
+              "arm.right.j2": -0.528707,
+              "arm.right.j3": 1.452981,
+              "arm.right.j4": -0.460917,
+              "arm.right.j5": 1.318995,
+              "arm.right.j6": 1.329384,
+              "arm.right.j7": -0.145758
+            }
+          },
+          "sourcePoseID": "4E800C82-6FA3-5FF3-AB06-E56456028B6C",
+          "transition": 3.2
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.3,
+          "id": "0917F50F-F45E-559A-810D-2F3D57C17241",
+          "pose": {
+            "id": "D4670B62-B3ED-5319-B515-F90A39BFF94C",
+            "name": "Kung fu \u00b7 Double guard",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.594637,
+              "arm.left.j2": 0.517219,
+              "arm.left.j3": -1.436758,
+              "arm.left.j4": 0.40252,
+              "arm.left.j5": -1.335812,
+              "arm.left.j6": -1.311842,
+              "arm.left.j7": 0.107936,
+              "arm.right.j1": 0.593449,
+              "arm.right.j2": -0.528707,
+              "arm.right.j3": 1.452981,
+              "arm.right.j4": -0.460917,
+              "arm.right.j5": 1.318995,
+              "arm.right.j6": 1.329384,
+              "arm.right.j7": -0.145758
+            }
+          },
+          "sourcePoseID": "DD121BF3-D664-50E1-8D82-1ABD3D970F29",
+          "transition": 3.2
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.7,
+          "id": "CFFABFD2-FC9C-5BF8-ABF8-FF61A6A86C8E",
+          "pose": {
+            "id": "6215F169-8161-5F88-932E-0C974B3C6A78",
+            "name": "Kung fu \u00b7 Right palm press",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.594637,
+              "arm.left.j2": 0.517219,
+              "arm.left.j3": -1.436758,
+              "arm.left.j4": 0.40252,
+              "arm.left.j5": -1.335812,
+              "arm.left.j6": -1.311842,
+              "arm.left.j7": 0.107936,
+              "arm.right.j1": 0.561045,
+              "arm.right.j2": -0.670298,
+              "arm.right.j3": 1.818932,
+              "arm.right.j4": -0.833192,
+              "arm.right.j5": -0.008576,
+              "arm.right.j6": -0.364034,
+              "arm.right.j7": -0.343019
+            }
+          },
+          "sourcePoseID": "793C5988-9047-50D7-BD27-452A4B651EBE",
+          "transition": 15.9
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.3,
+          "id": "2B04C1B9-00BC-58BD-89A5-2FDB567CD26B",
+          "pose": {
+            "id": "ED6AD3C6-AAD9-5FCA-B4AA-A2C286C35841",
+            "name": "Kung fu \u00b7 Double guard",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.594637,
+              "arm.left.j2": 0.517219,
+              "arm.left.j3": -1.436758,
+              "arm.left.j4": 0.40252,
+              "arm.left.j5": -1.335812,
+              "arm.left.j6": -1.311842,
+              "arm.left.j7": 0.107936,
+              "arm.right.j1": 0.593449,
+              "arm.right.j2": -0.528707,
+              "arm.right.j3": 1.452981,
+              "arm.right.j4": -0.460917,
+              "arm.right.j5": 1.318995,
+              "arm.right.j6": 1.329384,
+              "arm.right.j7": -0.145758
+            }
+          },
+          "sourcePoseID": "DD121BF3-D664-50E1-8D82-1ABD3D970F29",
+          "transition": 15.9
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.7,
+          "id": "03F3376E-97D1-589B-91A8-A26F70736FE0",
+          "pose": {
+            "id": "CCA43137-9049-50A5-9AE3-1A93E6972624",
+            "name": "Kung fu \u00b7 Left palm press",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.561417,
+              "arm.left.j2": 0.647601,
+              "arm.left.j3": -1.820551,
+              "arm.left.j4": 0.774688,
+              "arm.left.j5": 0.006316,
+              "arm.left.j6": 0.391064,
+              "arm.left.j7": 0.347224,
+              "arm.right.j1": 0.593449,
+              "arm.right.j2": -0.528707,
+              "arm.right.j3": 1.452981,
+              "arm.right.j4": -0.460917,
+              "arm.right.j5": 1.318995,
+              "arm.right.j6": 1.329384,
+              "arm.right.j7": -0.145758
+            }
+          },
+          "sourcePoseID": "294CC757-FFF8-50D6-B1EF-EB109A0C9726",
+          "transition": 16.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "22845D69-FF21-546E-AF98-4BCAE9815811",
+          "pose": {
+            "id": "8AF436FF-2665-573C-9449-354D9810D109",
+            "name": "Kung fu \u00b7 Double guard",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.594637,
+              "arm.left.j2": 0.517219,
+              "arm.left.j3": -1.436758,
+              "arm.left.j4": 0.40252,
+              "arm.left.j5": -1.335812,
+              "arm.left.j6": -1.311842,
+              "arm.left.j7": 0.107936,
+              "arm.right.j1": 0.593449,
+              "arm.right.j2": -0.528707,
+              "arm.right.j3": 1.452981,
+              "arm.right.j4": -0.460917,
+              "arm.right.j5": 1.318995,
+              "arm.right.j6": 1.329384,
+              "arm.right.j7": -0.145758
+            }
+          },
+          "sourcePoseID": "DD121BF3-D664-50E1-8D82-1ABD3D970F29",
+          "transition": 16.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.5,
+          "id": "EB9699AA-6577-579A-9FC2-16DB7773530B",
+          "pose": {
+            "id": "9ECB18E1-C59D-5BD9-B406-FD68F05596B6",
+            "name": "Gesture \u00b7 Hands folded up",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. Both grippers raised inward in front of the chest; hands remain apart.",
+            "values": {
+              "arm.left.j1": -0.447038,
+              "arm.left.j2": 0.211655,
+              "arm.left.j3": -1.15488,
+              "arm.left.j4": 0.681495,
+              "arm.left.j5": -0.928289,
+              "arm.left.j6": -1.584354,
+              "arm.left.j7": 0.398228,
+              "arm.right.j1": 0.442427,
+              "arm.right.j2": -0.22269,
+              "arm.right.j3": 1.167138,
+              "arm.right.j4": -0.739951,
+              "arm.right.j5": 0.914902,
+              "arm.right.j6": 1.602561,
+              "arm.right.j7": -0.421177
+            }
+          },
+          "sourcePoseID": "14767FE0-6070-5D7A-849F-6738CF53D7B6",
+          "transition": 3.9
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "6C40513E-7C2C-54B4-8F82-248DDD1CE01B",
+          "pose": {
+            "id": "B4ACD23C-F0E5-5E78-A2CD-8415DCC8213D",
+            "name": "Gesture \u00b7 Hands raised",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.158794,
+              "arm.right.j2": -0.401596,
+              "arm.right.j3": 1.193927,
+              "arm.right.j4": -0.708578,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177
+            }
+          },
+          "sourcePoseID": "C38E35A3-565E-54B0-9B0A-D75F6D33B579",
+          "transition": 3.2
+        }
+      ],
+      "id": "F57AC2C7-7FD7-574A-B2B2-DB45404346DE",
+      "name": "Kung Fu \u00b7 Guard and Flow"
+    },
+    {
+      "clips": [
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "B99A5A38-B8C3-53E1-BE51-DA1F973954ED",
+          "pose": {
+            "id": "FC4B800E-0539-5BFC-BA02-78DD0CD55FE7",
+            "name": "Sword \u00b7 Ready",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.323089,
+              "arm.right.j2": -0.498098,
+              "arm.right.j3": 1.389377,
+              "arm.right.j4": -0.657709,
+              "arm.right.j5": 1.27275,
+              "arm.right.j6": 1.373295,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "A8932C4F-3AE1-56FC-83D9-EA4BDC3E68B0",
+          "transition": 18.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.5,
+          "id": "FE826315-3B66-5BD6-B793-158F33421338",
+          "pose": {
+            "id": "E02A178D-ADA8-5077-8B50-E93B0E907D12",
+            "name": "Sword \u00b7 Salute",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.964788,
+              "arm.right.j2": -0.502211,
+              "arm.right.j3": 1.498815,
+              "arm.right.j4": -0.385999,
+              "arm.right.j5": 1.32595,
+              "arm.right.j6": 1.368423,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "679C03B5-56F3-5C8F-B99D-45F700EB1A22",
+          "transition": 6.1
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.6,
+          "id": "26AEF430-B4C5-5500-8A79-D775A68FAD61",
+          "pose": {
+            "id": "7EDFF86C-7BB7-5C27-AE51-C35968D99CA3",
+            "name": "Sword \u00b7 High right guard",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.509286,
+              "arm.right.j2": -0.991518,
+              "arm.right.j3": 1.579042,
+              "arm.right.j4": 0.006092,
+              "arm.right.j5": 1.324396,
+              "arm.right.j6": 1.033156,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "F7BA8845-934C-537A-A1FC-D57C0642E7DD",
+          "transition": 4.6
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.6,
+          "id": "2F0EB2E3-7584-5792-853E-84DB9A6C5132",
+          "pose": {
+            "id": "22E04DAD-A4DB-5E8B-8DE0-88CCF4B85C32",
+            "name": "Sword \u00b7 Diagonal sweep left",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 1.428226,
+              "arm.right.j2": -1.328725,
+              "arm.right.j3": 1.059808,
+              "arm.right.j4": -0.302568,
+              "arm.right.j5": 2.012508,
+              "arm.right.j6": -0.865631,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "050C888D-646A-502E-8B99-573555A2F5DD",
+          "transition": 17.9
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "D473B22A-0186-5D32-9AF5-D998E4462C92",
+          "pose": {
+            "id": "91A438A1-5769-5D08-AD78-2E77B7FAC409",
+            "name": "Sword \u00b7 Center recovery",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.778072,
+              "arm.right.j2": -1.018389,
+              "arm.right.j3": 0.960012,
+              "arm.right.j4": -0.707081,
+              "arm.right.j5": 2.0938,
+              "arm.right.j6": 1.311886,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "655018AF-AEDB-5ECE-A309-EF363A539E0C",
+          "transition": 20.5
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.6,
+          "id": "15AB28E9-7E66-5A49-B0D6-FFCC3E77EAF0",
+          "pose": {
+            "id": "CC6BAD02-92F5-5DD7-80D2-18EBD7EF1FF7",
+            "name": "Sword \u00b7 High left guard",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 1.366525,
+              "arm.right.j2": -0.904113,
+              "arm.right.j3": 1.108623,
+              "arm.right.j4": -0.629756,
+              "arm.right.j5": 2.146634,
+              "arm.right.j6": 1.253776,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "4A603E01-160D-5184-9F91-290ED985BD1F",
+          "transition": 5.6
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.6,
+          "id": "70BCEE88-901D-53F7-B48C-339F9C93FDA3",
+          "pose": {
+            "id": "9C5AB766-4B57-5AB7-9754-67E587ED3FAF",
+            "name": "Sword \u00b7 Diagonal sweep right",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.946087,
+              "arm.right.j2": -1.467027,
+              "arm.right.j3": 0.836975,
+              "arm.right.j4": -0.011849,
+              "arm.right.j5": 2.078381,
+              "arm.right.j6": -0.868722,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "355C0677-C2BB-5B85-980E-1DBB8F430901",
+          "transition": 19.9
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.5,
+          "id": "9708F179-0FA3-55E6-B3E2-085EC9A825F5",
+          "pose": {
+            "id": "34725D38-106F-5254-B3F1-1831DB468096",
+            "name": "Sword \u00b7 Center recovery",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.778072,
+              "arm.right.j2": -1.018389,
+              "arm.right.j3": 0.960012,
+              "arm.right.j4": -0.707081,
+              "arm.right.j5": 2.0938,
+              "arm.right.j6": 1.311886,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "655018AF-AEDB-5ECE-A309-EF363A539E0C",
+          "transition": 20.5
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.2,
+          "id": "6515C4A4-7739-586B-963E-B47B0859076D",
+          "pose": {
+            "id": "ACE37BFF-D540-5B75-A4D6-0F32834E23C5",
+            "name": "Sword \u00b7 Present blade",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.484303,
+              "arm.right.j2": -0.680616,
+              "arm.right.j3": 1.830664,
+              "arm.right.j4": -0.843419,
+              "arm.right.j5": 0.001981,
+              "arm.right.j6": -0.30022,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "8250662B-CA52-5CA2-90A6-2A09FE924E80",
+          "transition": 19.7
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.2,
+          "id": "A5B5AF26-4FD8-5647-B9AB-1C53E38514E0",
+          "pose": {
+            "id": "D318F5EB-3E4E-5C0C-8259-FCB86D439591",
+            "name": "Sword \u00b7 Salute",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.964788,
+              "arm.right.j2": -0.502211,
+              "arm.right.j3": 1.498815,
+              "arm.right.j4": -0.385999,
+              "arm.right.j5": 1.32595,
+              "arm.right.j6": 1.368423,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "679C03B5-56F3-5C8F-B99D-45F700EB1A22",
+          "transition": 15.7
+        },
+        {
+          "easing": "smooth",
+          "hold": 1,
+          "id": "3F6964D9-5CAD-548E-8652-31B57B3319B3",
+          "pose": {
+            "id": "8822B7F3-AF9F-52B8-AEB1-68BBD6B1957F",
+            "name": "Sword \u00b7 Ready",
+            "needsReview": false,
+            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. 60 cm reference blade along the right tool +Z axis; visual prop only, not a measured grip transform or carried-object clearance.",
+            "previewProp": {
+              "arm": "right",
+              "kind": "sword",
+              "lengthMeters": 0.6
+            },
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.323089,
+              "arm.right.j2": -0.498098,
+              "arm.right.j3": 1.389377,
+              "arm.right.j4": -0.657709,
+              "arm.right.j5": 1.27275,
+              "arm.right.j6": 1.373295,
+              "arm.right.j7": 0.0
+            }
+          },
+          "sourcePoseID": "A8932C4F-3AE1-56FC-83D9-EA4BDC3E68B0",
+          "transition": 6.1
+        }
+      ],
+      "id": "1B6364EF-7AB9-5A79-8E60-CA281E5DD3B6",
+      "name": "Sword Form \u00b7 Right Hand \u00b7 60 cm"
+    }
+  ]
+}

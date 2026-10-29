@@ -399,21 +399,23 @@ import UniformTypeIdentifiers
     private func message(_ text: String) { status.stringValue = text; legacyPoseName?.toolTip = text }
     private func format(_ value: Double) -> String { String(format: "%.4f", value).replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression) }
 
-    private func output(_ values: [String: Double], title: String, time: Double, open: Bool) {
+    private func output(_ values: [String: Double], title: String, time: Double, open: Bool, prop: ROBAnimationPreviewProp? = nil) {
         if open { NotificationCenter.default.post(name: Notification.Name("ROBShowControllerInputDiagnostics"), object: self, userInfo: ["animationPreview": true]) }
-        NotificationCenter.default.post(name: Self.previewChanged, object: self, userInfo: ["values": values, "title": title, "time": time])
+        var info: [String: Any] = ["values": values, "title": title, "time": time]
+        if let prop { info["previewProp"] = ["kind": prop.kind, "arm": prop.arm, "lengthMeters": prop.lengthMeters] }
+        NotificationCenter.default.post(name: Self.previewChanged, object: self, userInfo: info)
     }
     private func showDraftPreview(open: Bool) {
         stopPreview()
         var values = (capture?() ?? [:]).mapValues(\.doubleValue)
         for (key, value) in draft.values { values[key] = value }
-        output(values, title: draft.name, time: 0, open: open)
+        output(values, title: draft.name, time: 0, open: open, prop: draft.previewProp)
     }
     private func startPreview(_ sequence: ROBAnimationSequence) {
         stopPreview(); previewSequence = sequence
         previewBaseline = (capture?() ?? [:]).mapValues(\.doubleValue)
         previewStart = ProcessInfo.processInfo.systemUptime
-        output(ROBAnimationDocument.sample(sequence, at: 0, baseline: previewBaseline), title: sequence.name, time: 0, open: true)
+        output(ROBAnimationDocument.sample(sequence, at: 0, baseline: previewBaseline), title: sequence.name, time: 0, open: true, prop: ROBAnimationDocument.previewProp(sequence, at: 0))
         previewTimer = Timer.scheduledTimer(withTimeInterval: 1/30, repeats: true) { [weak self] _ in
             guard let self, let sequence = self.previewSequence else { return }
             let time = min(sequence.duration, ProcessInfo.processInfo.systemUptime - self.previewStart)
@@ -431,7 +433,7 @@ import UniformTypeIdentifiers
     private func renderTime(_ time: Double, sequence: ROBAnimationSequence, baseline: [String: Double]) {
         scrubber.doubleValue = time; clock.stringValue = String(format: "%.2f / %.2f s", time, sequence.duration)
         timeline.time = time; timeline.needsDisplay = true
-        output(ROBAnimationDocument.sample(sequence, at: time, baseline: baseline), title: sequence.name, time: time, open: false)
+        output(ROBAnimationDocument.sample(sequence, at: time, baseline: baseline), title: sequence.name, time: time, open: false, prop: ROBAnimationDocument.previewProp(sequence, at: time))
     }
     @objc private func runRobot() {
         guard !draftDirty && !timingDirty else { message("Save or discard the draft before running the saved sequence."); return }

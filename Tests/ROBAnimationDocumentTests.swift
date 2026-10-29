@@ -46,6 +46,17 @@ import Foundation
         rejects("Legacy slider units accepted as radians") { try invalid.validate() }
         invalid = document; invalid.poses.append(invalid.poses[0])
         rejects("Duplicate IDs accepted") { try invalid.validate() }
+        var sword = ROBAnimationPose(name: "Sword", values: ["arm.right.j1": 0.2])
+        sword.previewProp = ROBAnimationPreviewProp()
+        let swordClip = ROBAnimationClip(pose: sword)
+        let propSequence = ROBAnimationSequence(name: "Prop preview", clips: [swordClip, second])
+        expect(ROBAnimationDocument.previewProp(propSequence, at: 0)?.lengthMeters == 0.6, "Reference sword is available at the start")
+        expect(ROBAnimationDocument.previewProp(propSequence, at: swordClip.duration) == nil, "Omitted prop clears at the clip boundary")
+        document.poses.append(sword)
+        let roundtrip = try ROBAnimationStore.decode(ROBAnimationStore.encode(document))
+        expect(roundtrip == document, "Preview prop survives JSON without becoming a motor channel")
+        invalid = document; invalid.poses[invalid.poses.count-1].previewProp?.lengthMeters = -1
+        rejects("Invalid prop dimensions accepted") { try invalid.validate() }
         let url = root.appendingPathComponent("library.json")
         let store = ROBAnimationStore(url: url)
         var initial = document; initial.id = store.document.id; initial.revision = store.document.revision

@@ -75,6 +75,8 @@ import simd
     @nonobjc private var record: [ROBGhostRecordingSample] = []
 
     private var animationOutputActive = false
+    private var animationPropNode: SCNNode?
+    private var animationPropIdentity = ""
     @nonobjc private var animationModels: [String: ROBGhostRobotModel] = [:]
 
     @objc private func animationPreviewChanged(_ notification: Notification) {
@@ -103,10 +105,33 @@ import simd
             positions.merge(head) { _, new in new }
         }
         ghost = positions; updateGhost(positions, updateFields: false)
+        updateAnimationProp(notification.userInfo?["previewProp"] as? [String: Any])
         executeButton.isEnabled = false
         let title = notification.userInfo?["title"] as? String ?? "Animation"
         let time = notification.userInfo?["time"] as? Double ?? 0
         status.stringValue = String(format: "Animation Studio · %@ · %.2f s\nGhost output only. Arm/head mappings are display priors. LACT is timed; no lean-angle feedback. Unmapped Maestro tracks are shown in the timeline.", title, time)
+    }
+
+    private func updateAnimationProp(_ prop: [String: Any]?) {
+        guard prop?["kind"] as? String == "sword", let side = prop?["arm"] as? String,
+              ["left", "right"].contains(side), let length = prop?["lengthMeters"] as? Double,
+              length.isFinite, (0.05...2).contains(length), let tool = ghostNodes[side + "_tool"] else {
+            animationPropNode?.removeFromParentNode(); animationPropNode = nil; animationPropIdentity = ""; return
+        }
+        let key = "\(side):\(length)"
+        if key == animationPropIdentity { animationPropNode?.simdTransform = tool.simdTransform; return }
+        animationPropNode?.removeFromParentNode()
+        let root = SCNNode(); root.name = "Animation reference sword · \(side) · \(length) m"
+        let material = SCNMaterial(); material.diffuse.contents = NSColor.systemCyan
+        material.lightingModel = .constant; material.transparency = 0.7
+        material.readsFromDepthBuffer = true; material.writesToDepthBuffer = false
+        let blade = SCNNode(geometry: SCNBox(width: 0.028, height: 0.006, length: CGFloat(length), chamferRadius: 0.002))
+        blade.position.z = CGFloat(length / 2); blade.geometry?.materials = [material]
+        let guardNode = SCNNode(geometry: SCNBox(width: 0.14, height: 0.012, length: 0.015, chamferRadius: 0.003))
+        guardNode.geometry?.materials = [material]
+        root.addChildNode(blade); root.addChildNode(guardNode)
+        root.simdTransform = tool.simdTransform; robotPresentationRoot.addChildNode(root)
+        animationPropNode = root; animationPropIdentity = key
     }
 
     init(sceneView: SCNView, originalRobot: SCNNode) {
@@ -911,6 +936,7 @@ import simd
     }
     @objc private func selectPreset() {
         animationOutputActive = false
+        updateAnimationProp(nil)
         guard let model else { return }
         invalidateReview(); poses = []
         tabletopEditing = false

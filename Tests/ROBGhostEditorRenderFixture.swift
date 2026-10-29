@@ -718,6 +718,18 @@ final class GhostFixtureSnapshotView: NSView {
         }
         precondition(!rightExecute.isEnabled, "Animation output must not enable old ghost execution")
         print("Animation output: both arms and torso update the blue ghost, originals unchanged, no actuator authority")
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["arm.right.j2": -0.4], "previewProp": ["kind": "sword", "arm": "right", "lengthMeters": 0.6]])
+        let sword = rightScene.rootNode.fixtureDescendants.first { $0.name?.hasPrefix("Animation reference sword") == true }!
+        let swordTool = rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost right_tool" }!
+        precondition(sword.simdTransform == swordTool.simdTransform && !sword.isHidden)
+        precondition(abs((sword.childNodes[0].geometry as! SCNBox).length-0.6) < 1e-9)
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["arm.right.j2": -0.6], "previewProp": ["kind": "sword", "arm": "right", "lengthMeters": 0.6]])
+        precondition(sword.simdTransform == swordTool.simdTransform && !rightExecute.isEnabled, "Reference sword follows the hand without actuator authority")
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: ["values": ["arm.right.j2": -0.6]])
+        precondition(sword.parent == nil, "A new gesture must clear the previous prop")
+        print("Animation sword: 60 cm reference, hand attachment, live movement and removal passed; no jaw output")
         rightEditor.invalidate();gateway.ready=false;gateway.samples=[:]
         trial.physicalSide="left";trial.collisionReviewProposal=historical
         editor.reviewPresetNamed("collision")

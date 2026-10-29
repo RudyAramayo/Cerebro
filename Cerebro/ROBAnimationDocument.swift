@@ -39,6 +39,13 @@ enum ROBAnimationEase: String, Codable, CaseIterable {
     }
 }
 
+/// A display prop only. It never supplies a jaw command or payload model.
+struct ROBAnimationPreviewProp: Codable, Equatable {
+    var kind = "sword"
+    var arm = "right"
+    var lengthMeters = 0.6
+}
+
 struct ROBAnimationPose: Codable, Equatable, Identifiable {
     var id = UUID()
     var name: String
@@ -46,6 +53,7 @@ struct ROBAnimationPose: Codable, Equatable, Identifiable {
     var role: String? = nil
     var note = ""
     var needsReview = false
+    var previewProp: ROBAnimationPreviewProp? = nil
 }
 
 struct ROBAnimationClip: Codable, Equatable, Identifiable {
@@ -91,6 +99,10 @@ struct ROBAnimationDocument: Codable, Equatable {
             try check(!value.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && value.name.count <= 200, "A pose needs a name of 1–200 characters.")
             try check(value.note.count <= 10000, "Pose note is too long.")
             try check(value.role == nil || Self.roles.contains(value.role!), "Unknown grasp-ready role.")
+            if let prop = value.previewProp {
+                try check(prop.kind == "sword" && ["right", "left"].contains(prop.arm)
+                    && prop.lengthMeters.isFinite && (0.05...2).contains(prop.lengthMeters), "Invalid preview prop.")
+            }
             for (id, number) in value.values {
                 guard let channel = ROBAnimationChannel.byID[id] else { throw ROBAnimationError.invalid("Unknown or reserved channel: \(id).") }
                 try check(number.isFinite && (channel.minimum...channel.maximum).contains(number), "\(channel.name) must be \(channel.minimum)…\(channel.maximum) \(channel.unit).")
@@ -145,6 +157,15 @@ struct ROBAnimationDocument: Codable, Equatable {
         }
         result["lact.speed"] = 0
         return result
+    }
+
+    static func previewProp(_ sequence: ROBAnimationSequence, at time: Double) -> ROBAnimationPreviewProp? {
+        var remaining = max(0, time)
+        for clip in sequence.clips {
+            if remaining < clip.duration { return clip.pose.previewProp }
+            remaining -= clip.duration
+        }
+        return sequence.clips.last?.pose.previewProp
     }
 }
 
