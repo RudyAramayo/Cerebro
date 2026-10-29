@@ -21,6 +21,15 @@ Missing channels are untouched by that pose. An arm trajectory fills omitted joi
 
 Use a stationary raised pose to inspect gripper alignment. Hanging arms can settle differently, so a hanging appearance is not a repeatable encoder-zero reference. Record fresh measured joint feedback alongside the camera view, make an observed adjustment from that hold, and save it as a separate taught pose. **Capture controls** copies targets, not measured feedback. A visual wrist trim applies to the inspected pose and startup datum; it does not establish all-joint calibration, camera registration, or a correction to every animation. Recheck alignment after a power cycle or changed startup pose.
 
+The raised alignment procedure is an observation/correction loop for the operator or agent using the existing native controls:
+
+1. Hold the raised arms and frame both grippers. Use the accepted reference pose and its recorded view; during initial teaching, explicitly select the held reference side. The current teaching session uses the left gripper to align the right.
+2. Compare physical orientation and fingertip alignment, alongside fresh measured joints. Correct the observed discrepancy, wait for measured arrival, then capture and compare again. Repeat until the observed pose matches; a fixed number of nudges or equal/opposite encoder values is not a completion condition.
+3. Keep an incomplete inspection checkpoint marked **review**. When matching is observed, save all fourteen measured joint values and record the reference pose ID, observation time, camera targets, startup/connection context, images and acceptance evidence. Distinguish an operator-observed match from a quantitatively validated calibration.
+4. Before later precision work, repeat the raised-pose comparison and correction when needed. A changed startup datum or power cycle requires a new comparison; replaying the stored target is insufficient. Retain the previous accepted reference separately from new inspection checkpoints.
+
+If camera evidence is too ambiguous to determine improvement, retain the hold and obtain the missing visual comparison. This procedure does not add an unattended camera servo loop to **Run on robot**, and it does not reset motor coordinates or copy a local wrist correction to unrelated poses.
+
 The role menu assigns a taught library pose to `grasp.horizontal.right`, `grasp.vertical.right`, `grasp.horizontal.left`, or `grasp.vertical.left`. Only one pose owns each role. Values must be taught or edited; no vertical posture is guessed. `graspReadyValues(physicalSide:vertical:)` exposes a read-only sparse lookup to native mission consumers. This release stores the profiles; it does not replace the recycling planner's measured path admission.
 
 ## Ghost output and robot playback
