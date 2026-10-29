@@ -47,7 +47,9 @@ selectors = [
     "prepareNeckForArmInspectionWithPanDegrees:", "isNeckReadyForArmInspectionWithPanDegrees:",
     "prepareNeckForArmInteraction", "isNeckReadyForArmInteraction",
     "stageNeckForArmViewWithPanDegrees:", "isNeckReadyForArmViewWithPanDegrees:",
-    "torso_controllerPassthrough_head_pan:",
+    "torso_controllerPassthrough_head_pan:", "animationMaestroSnapshot", "applyAnimationMaestroValues:",
+    "animationNeckReady", "endAnimationOutputs", "cancelNeckGestureAuthority", "upperNeckOperatorDemandTarget",
+
 ]
 methods = [method(selector) for selector in selectors]
 production = "\n".join(methods)
@@ -92,6 +94,15 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
     return coordinator;
 }
 @end
+@interface ROBAnimationPlayback : NSObject
+@property BOOL isRunning;
++ (instancetype)shared;
+- (void)stopWithReason:(NSString *)reason;
+@end
+@implementation ROBAnimationPlayback
++ (instancetype)shared { static ROBAnimationPlayback *value; if (!value) value = [self new]; return value; }
+- (void)stopWithReason:(NSString *)reason { self.isRunning = NO; }
+@end
 @class ROBServoCameraPosition;
 @interface ROBServoSequencePhase : NSObject
 @property NSInteger phaseIndex, panTarget, lowerTarget, upperTarget;
@@ -115,17 +126,19 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 }
 @end
 
-@interface NeckFixture : NSObject
+@interface NeckFixture : NSObject { int serialFileDescriptor_base; }
 /* PROPERTIES */
 @property(strong) NSMutableArray<NSData *> *writes;
 @property NSInteger failWriteNumber, attempts;
 @property double scheduledAt;
 /* DECLARATIONS */
 - (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length;
+- (void)writeString:(NSString *)value serialFileDescriptor:(int)fd;
 - (ROBNeckSafetyConfig)loadNeckSafetyConfiguration;
 - (void)scheduleSafeNeckStartupAdvanceForGeneration:(NSUInteger)generation atTime:(double)time;
 @end
 @implementation NeckFixture
+- (void)writeString:(NSString *)value serialFileDescriptor:(int)fd { assert(NO && "No base output expected in neck fixture"); }
 - (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length {
     self.attempts++;
     if (self.failWriteNumber == self.attempts) return NO;
@@ -562,6 +575,24 @@ int main(void) { @autoreleasepool {
         assert(![scan isNeckReadyForWorkspaceSearchWithPanDegrees:0 upperTarget:6100]);
         assert(![scan prepareNeckForWorkspaceSearchWithPanDegrees:0 upperTarget:6100]);
     }
+    box = activeNeck();
+    [ROBAnimationPlayback shared].isRunning = YES;
+    assert([box applyAnimationMaestroValues:@{@"maestro.4":@6200}]);
+    NSUInteger animationWrites = box.writes.count;
+    assert(![box applyAnimationMaestroValues:@{@"maestro.8":@6000}]);
+    assert(box.writes.count == animationWrites);
+    assert([box applyAnimationMaestroValues:@{@"maestro.0":@6000}]);
+    assert(box.animationNeckActive);
+    [box endAnimationOutputs];
+    assert(!box.animationNeckActive && box.torsoNeckAuthorityRequiresOperatorAction);
+    assert(!box.personTrackingMayUpdateNeck);
+    box.neckPanCommandKnown = NO;
+    assert([box animationMaestroSnapshot][@"maestro.0"] == nil);
+    box.lowerNeckTiltCommandKnown = NO;
+    assert(![box applyAnimationMaestroValues:@{@"maestro.0":@6000}]);
+    [ROBAnimationPlayback shared].isRunning = NO;
+    assert(![box applyAnimationMaestroValues:@{@"maestro.4":@6300}]);
+    puts("Animation Maestro gateway: reserved channels rejected, native run required, neck Stop discards future staging");
     puts("ROB neck output runtime fixtures passed: startup, pacing, deduplication, ownership, recovery, near-upright wide-pan pairs, forward-overlook endpoint/staging, tightening, unconfirmed automatic holds, OFF");
 } }
 '''

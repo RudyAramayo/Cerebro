@@ -2,6 +2,10 @@ import Cocoa
 import CoreMedia
 
 struct ROBChessPieceDetection {}
+final class ROBAnimationPlayback {
+    static let shared = ROBAnimationPlayback()
+    func authorizesTorsoHeading(_ heading: Double) -> Bool { false }
+}
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     var ownsPhysicalMotion = false

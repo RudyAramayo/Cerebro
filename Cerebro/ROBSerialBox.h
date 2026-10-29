@@ -314,6 +314,14 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 - (void)applyVisionGrippersActive:(BOOL)active leftClosed:(BOOL)leftClosed rightClosed:(BOOL)rightClosed;
 - (void)applyVisionTorsoActive:(BOOL)active rotation:(float)rotation;
 - (void)switchToMasterControllerID:(NSString *)controllerID;
+/// Animation Studio uses these only during explicit local sequence playback.
+@property (readonly) BOOL animationMaestroReady;
+@property (readonly) BOOL animationLACTReady;
+@property (readonly) BOOL animationNeckReady;
+- (NSDictionary<NSString *, NSNumber *> *)animationMaestroSnapshot;
+- (BOOL)applyAnimationMaestroValues:(NSDictionary<NSString *, NSNumber *> *)values;
+- (BOOL)applyAnimationLACTPercent:(double)percent;
+- (void)endAnimationOutputs;
 - (void)stopBaseMotionAndDropHeartbeat;
 
 - (IBAction)controllerPassthrough:(CGPoint)touchPadPointL

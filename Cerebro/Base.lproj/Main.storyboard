@@ -547,9 +547,9 @@ Brake
                                         </connections>
                                     </slider>
                                     <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="IoM-51-Ywd">
-                                        <rect key="frame" x="64" y="163" width="41" height="17"/>
+                                        <rect key="frame" x="44" y="163" width="82" height="17"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Laser" id="GVU-uK-Bd2">
+                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Maestro" id="GVU-uK-Bd2">
                                             <font key="font" metaFont="system"/>
                                             <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
@@ -2515,9 +2515,9 @@ Brake
                                         </connections>
                                     </slider>
                                     <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="XpN-vH-yiw">
-                                        <rect key="frame" x="28" y="220" width="40" height="17"/>
+                                        <rect key="frame" x="28" y="220" width="86" height="17"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="L Arm" id="Mo2-8f-6O5">
+                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Maestro" id="Mo2-8f-6O5">
                                             <font key="font" metaFont="system"/>
                                             <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
@@ -2851,8 +2851,6 @@ Brake
                                                 </tableColumn>
                                             </tableColumns>
                                             <connections>
-                                                <outlet property="dataSource" destination="cHj-5R-xNm" id="KLf-CK-PfW"/>
-                                                <outlet property="delegate" destination="cHj-5R-xNm" id="Kpb-rZ-OFj"/>
                                             </connections>
                                         </tableView>
                                     </subviews>
@@ -2873,7 +2871,7 @@ Brake
                             <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="G2C-PX-MP0">
                                 <rect key="frame" x="484" y="20" width="114" height="24"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="push" title="Play Animation" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="E4B-1g-Rhw">
+                                <buttonCell key="cell" type="push" title="Preview Pose" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="E4B-1g-Rhw">
                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                     <font key="font" metaFont="system"/>
                                 </buttonCell>
@@ -2986,8 +2984,6 @@ Brake
                                                 </tableColumn>
                                             </tableColumns>
                                             <connections>
-                                                <outlet property="dataSource" destination="cHj-5R-xNm" id="98T-aa-h2L"/>
-                                                <outlet property="delegate" destination="cHj-5R-xNm" id="tKU-oo-VTi"/>
                                             </connections>
                                         </tableView>
                                     </subviews>
@@ -3085,8 +3081,6 @@ Brake
                                                 </tableColumn>
                                             </tableColumns>
                                             <connections>
-                                                <outlet property="dataSource" destination="cHj-5R-xNm" id="tOx-aT-63e"/>
-                                                <outlet property="delegate" destination="cHj-5R-xNm" id="0ng-yg-Nmk"/>
                                             </connections>
                                         </tableView>
                                     </subviews>
@@ -3136,14 +3130,14 @@ Brake
                                 </customSpacing>
                             </stackView>
                             <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="4jJ-g5-M0U">
-                                <rect key="frame" x="803" y="20" width="114" height="24"/>
+                                <rect key="frame" x="803" y="20" width="148" height="24"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="push" title="Play Sequence" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="hL2-a5-wc8">
+                                <buttonCell key="cell" type="push" title="Preview Sequence" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="hL2-a5-wc8">
                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                     <font key="font" metaFont="system"/>
                                 </buttonCell>
                                 <connections>
-                                    <action selector="playCurrentlySelectedKeyframeAnimation:" target="cHj-5R-xNm" id="PGK-d9-DO4"/>
+                                    <action selector="playSelectedSequence:" target="cHj-5R-xNm" id="PGK-d9-DO4"/>
                                 </connections>
                             </button>
                             <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="IiD-sO-bOh">

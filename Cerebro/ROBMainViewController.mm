@@ -3193,7 +3193,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)showControllerInputDiagnostics:(NSNotification *)notification
 {
     if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey] &&
-        notification.userInfo[@"ghostPreset"] == nil) {
+        notification.userInfo[@"ghostPreset"] == nil && notification.userInfo[@"animationPreview"] == nil) {
         return;
     }
     if (self.controllerDiagnosticsWindowController == nil) {
@@ -3381,6 +3381,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)applyPrioritySoftwareStopWithReason:(NSString *)reason
 {
+    [[ROBAnimationPlayback shared] stopWithReason:reason];
     [[ROBRecycleMissionCoordinator shared] stopWithReason:reason];
     [[ROBShowMotionCoordinator shared] stop];
     [[ROBArmRoutineCoordinator shared] cancelWithReason:reason];

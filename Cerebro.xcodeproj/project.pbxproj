@@ -270,6 +270,9 @@
 		5D75BE358B59D99F303CFAC8 /* ROBRecycleMissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A872E2C464D3943C96F1E1 /* ROBRecycleMissionCoordinator.swift */; };
 		AC0FA0C9AA00DBAE89305849 /* ROBRoomSpatialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10F05B3CF4D8A1E9737F12DC /* ROBRoomSpatialStore.swift */; };
 		D7133394FCE468D7AD29DF89 /* ROBRoomDiagnosticsLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C45B90FD8E870F8CF914483 /* ROBRoomDiagnosticsLayer.swift */; };
+		AE261029A000000000000002 /* ROBAnimationDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE261029A000000000000001; };
+		AE261029A000000000000004 /* ROBAnimationStudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE261029A000000000000003; };
+		AE261029A000000000000006 /* ROBAnimationPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE261029A000000000000005; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -580,6 +583,9 @@
 		F3A872E2C464D3943C96F1E1 /* ROBRecycleMissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecycleMissionCoordinator.swift; sourceTree = "<group>"; };
 		10F05B3CF4D8A1E9737F12DC /* ROBRoomSpatialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRoomSpatialStore.swift; sourceTree = "<group>"; };
 		7C45B90FD8E870F8CF914483 /* ROBRoomDiagnosticsLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRoomDiagnosticsLayer.swift; sourceTree = "<group>"; };
+		AE261029A000000000000001 /* ROBAnimationDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAnimationDocument.swift; sourceTree = "<group>"; };
+		AE261029A000000000000003 /* ROBAnimationStudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAnimationStudio.swift; sourceTree = "<group>"; };
+		AE261029A000000000000005 /* ROBAnimationPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAnimationPlayback.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -685,6 +691,9 @@
 				C0D4B0022F00000100000001 /* ROBCameraH264Encoder.swift */,
 				C0D4B0032F00000100000001 /* ROBVideoServer.swift */,
 				D4AE00022F51000100000001 /* ROBRemoteDesktopCaptureService.swift */,
+				AE261029A000000000000001 /* ROBAnimationDocument.swift */,
+				AE261029A000000000000003 /* ROBAnimationStudio.swift */,
+				AE261029A000000000000005 /* ROBAnimationPlayback.swift */,
 				D4A2E9092E7A1D32002B5299 /* KeyframeAnimationManager.swift */,
 				D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */,
 				D49D755727FFD1AE00142E26 /* AutoNetServer.swift */,
@@ -1284,6 +1293,9 @@
 				D4CFB7D22287C81300F2403A /* JoinWifiTaskController.m in Sources */,
 				D4F136772325E39A0084A302 /* RTSPServer.m in Sources */,
 				D4A38F731FFC77CB00092A46 /* ROBKeyboardControlsViewController.m in Sources */,
+				AE261029A000000000000002 /* ROBAnimationDocument.swift in Sources */,
+				AE261029A000000000000004 /* ROBAnimationStudio.swift in Sources */,
+				AE261029A000000000000006 /* ROBAnimationPlayback.swift in Sources */,
 				D4A2E90A2E7A1D3D002B5299 /* KeyframeAnimationManager.swift in Sources */,
 				D4F642E22325E17F00DF71AE /* FreenectPCL.mm in Sources */,
 				D4F642E32325E17F00DF71AE /* TrackedPolyRect.m in Sources */,

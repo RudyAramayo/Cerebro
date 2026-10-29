@@ -7,6 +7,9 @@ private extension SCNNode {
     }
 }
 
+final class ROBAnimationStudio {
+    static let previewChanged = Notification.Name("ROBAnimationPreviewChanged")
+}
 // Deliberately no transport, arm driver, credential or real approval broker.
 final class ROBAmberGatewayClient {
     static let shared = ROBAmberGatewayClient()
@@ -704,6 +707,17 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(ROBArmRoutineCoordinator.shared.searchCommands.last=="right_search_workspace")
         assertRightGhostAtMeasuredPose()
         precondition(!rightExecute.isEnabled)
+        let animationLinks = ["right_tool", "left_tool", "torso_link"]
+        let beforeAnimation = animationLinks.map { link in rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform }
+        let originalAnimation = animationLinks.map { link in rightScene.rootNode.fixtureDescendants.first { $0.name == "Original URDF \(link)" }!.simdTransform }
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["arm.right.j1": 0.2, "arm.left.j1": -0.2, "torso.heading": 30.0, "lact.speed": 25.0], "title": "Both arms + torso", "time": 1.0])
+        for (index, link) in animationLinks.enumerated() {
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform != beforeAnimation[index])
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Original URDF \(link)" }!.simdTransform == originalAnimation[index])
+        }
+        precondition(!rightExecute.isEnabled, "Animation output must not enable old ghost execution")
+        print("Animation output: both arms and torso update the blue ghost, originals unchanged, no actuator authority")
         rightEditor.invalidate();gateway.ready=false;gateway.samples=[:]
         trial.physicalSide="left";trial.collisionReviewProposal=historical
         editor.reviewPresetNamed("collision")

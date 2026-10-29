@@ -874,6 +874,23 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         }
     }
 
+    /// Native Animation Studio owns a frozen local sequence and supplies only
+    /// its current segment. Draft/JSON/preview values cannot call this route.
+    @nonobjc func sendLocalAnimationStep(arm: String, expectedSessionGeneration: UInt64) -> UInt64 {
+        guard Thread.isMainThread,
+              let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration),
+              let sample = telemetry(forArm: arm),
+              sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.positionsRadians.count == 7, sample.statuses.count == 7,
+              sample.statuses.allSatisfy({ $0.intValue == 2 }),
+              modes(forArm: arm).count == 7, modes(forArm: arm).allSatisfy({ $0.intValue == 2 }),
+              step.values.count == 7, step.seconds >= ROBArmRoutinePlan.minimumLeasedTrajectorySeconds,
+              zip(step.values, sample.positionsRadians).allSatisfy({ abs($0-$1.doubleValue)/step.seconds <= ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond }) else { return 0 }
+        return sendVendorLeasedTrajectory(arm: arm, positionsRadians: step.values.map(NSNumber.init(value:)),
+            duration: step.seconds, leaseMilliseconds: 1500, expectedSessionGeneration: expectedSessionGeneration)
+    }
+
     /// Fixed hanging/front corridors only. The left trial alone may use its
     /// supervised front-only J3/J5 extension. No caller-supplied raw joint
     /// vectors, no model-reference promotion, and no replay across reconnects.

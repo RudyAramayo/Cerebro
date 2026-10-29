@@ -362,12 +362,34 @@ import Cocoa
         beginLocalDemand(.heading(heading))
     }
 
-    @nonobjc private func beginLocalDemand(_ demand: LocalDemand) {
+    var animationPreviewReferenceHeading: Double {
+        guard policy.debugCableMode else { return .nan }
+        return policy.cableReferenceHeading ?? observedHeading
+    }
+
+    @nonobjc func startAnimationTurn(to heading: Double) -> Bool {
+        guard ROBAnimationPlayback.shared.authorizesTorsoHeading(heading), usesHardware else { return false }
+        // The sequence already performed the single local ownership handoff.
+        beginLocalDemand(.heading(heading), announce: false)
+        return pendingLocalDemand != nil || arming || policy.armed
+    }
+    @nonobjc func animationTargetReached(_ heading: Double) -> Bool {
+        guard usesHardware, hasFreshFeedback, !arming, pendingLocalDemand == nil else { return false }
+        guard let resolved = policy.targetHeading,
+              abs(ROBTorsoMotionPolicy.wrap(resolved-heading)) < 0.00001, policy.mode == .hold else { return false }
+        if usesCountEstimate {
+            return currentCount == count(forHeading: resolved).rounded() && ticPosition?.velocity == 0
+        }
+        // Camera arrival uses the controller's uncertainty-aware tolerance.
+        return abs(commandedVelocity) < 0.01
+    }
+
+    @nonobjc private func beginLocalDemand(_ demand: LocalDemand, announce: Bool = true) {
         precondition(Thread.isMainThread)
         // Cancel the previous target before handing off other motion owners.
         // The main controller may synchronously call stop() during this event.
         stop()
-        NotificationCenter.default.post(name: Notification.Name("ROBLocalManualControlRequested"), object: self)
+        if announce { NotificationCenter.default.post(name: Notification.Name("ROBLocalManualControlRequested"), object: self) }
         pendingLocalDemand = demand
         localControlOwnsTorso = true
         if case .rate = demand { localLeverHeld = true }

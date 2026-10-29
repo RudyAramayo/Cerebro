@@ -74,11 +74,47 @@ import simd
     private let currentPlot = ROBGhostCurrentPlot()
     @nonobjc private var record: [ROBGhostRecordingSample] = []
 
+    private var animationOutputActive = false
+    @nonobjc private var animationModels: [String: ROBGhostRobotModel] = [:]
+
+    @objc private func animationPreviewChanged(_ notification: Notification) {
+        guard let values = notification.userInfo?["values"] as? [String: Double], let model,
+              let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else { return }
+        if !animationOutputActive { invalidateReview(); playing = false; proposal = nil; canPreview = nil }
+        animationOutputActive = true
+        var positions = model.reference
+        for side in ["right", "left"] {
+            if animationModels[side] == nil { animationModels[side] = try? ROBGhostRobotModel(directory: directory, physicalSide: side) }
+            guard let armModel = animationModels[side] else { continue }
+            var vendor = armModel.vendorLeft(armModel.reference)
+            for j in 1...7 { if let value = values["arm.\(side).j\(j)"] { vendor[j-1] = value } }
+            let converted = armModel.positions(vendorLeft: vendor)
+            for j in 1...7 { positions["\(side)_joint\(j)"] = converted["\(side)_joint\(j)"] }
+        }
+        if let heading = values["torso.heading"] { positions["torso_yaw"] = heading * .pi / 180 }
+        // Display mounting prior only. Uncalibrated generic Maestro and timed
+        // LACT commands remain visible in the timeline, not invented geometry.
+        let panCenter = values["preview.neckPanCenter"] ?? 6000
+        let panScale = values["preview.neckPanTargetsPerDegree"] ?? 33.3333333333
+        if let pan = values["maestro.0"], let lower = values["maestro.1"], let upper = values["maestro.2"], panScale != 0,
+           let estimate = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: (pan-panCenter) / panScale * .pi / 180,
+                lowerTarget: Int(lower), upperTarget: Int(upper), known: true),
+           let head = model.headPositions(pan: estimate.panRadians, lowerPitch: estimate.lowerPitch, upperPitch: estimate.upperPitch) {
+            positions.merge(head) { _, new in new }
+        }
+        ghost = positions; updateGhost(positions, updateFields: false)
+        executeButton.isEnabled = false
+        let title = notification.userInfo?["title"] as? String ?? "Animation"
+        let time = notification.userInfo?["time"] as? Double ?? 0
+        status.stringValue = String(format: "Animation Studio · %@ · %.2f s\nGhost output only. Arm/head mappings are display priors. LACT is timed; no lean-angle feedback. Unmapped Maestro tracks are shown in the timeline.", title, time)
+    }
+
     init(sceneView: SCNView, originalRobot: SCNNode) {
         scene = sceneView.scene!; capturedRobot = originalRobot; self.sceneView = sceneView
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(depthAlignmentDidChange),
             name: Notification.Name("ROBWorkspaceDepthAlignmentDidChange"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(animationPreviewChanged(_:)), name: ROBAnimationStudio.previewChanged, object: nil)
         buildPanel()
         do {
             guard let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
@@ -314,7 +350,7 @@ import simd
         for (joint, value) in headEstimate ?? [:] {
             // Live estimates are render-only: saved poses and execution hashes
             // keep their original values; an explicit ghost neck edit wins.
-            if !preview || positions[joint] == model?.reference[joint] { result[joint] = value }
+            if !preview || (!animationOutputActive && positions[joint] == model?.reference[joint]) { result[joint] = value }
         }
         return result
     }
@@ -874,6 +910,7 @@ import simd
         executeButton.isEnabled = false; identity.stringValue = "Unreviewed edits · no hardware output"
     }
     @objc private func selectPreset() {
+        animationOutputActive = false
         guard let model else { return }
         invalidateReview(); poses = []
         tabletopEditing = false
@@ -1080,7 +1117,10 @@ import simd
     private func updateNodes(_ nodes: [String: SCNNode], positions: [String: Double]) {
         guard let model else { return }
         var frames = model.frames(positions)
-        let fitted=fittedHeadPose()
+        let animationGhost = animationOutputActive && nodes.values.contains { $0.name?.hasPrefix("Blue ghost ") == true }
+        // A live fitted head pose is anchored to the observed torso. It must
+        // not pin the preview head in space when its proposed parent rotates.
+        let fitted = animationGhost ? nil : fittedHeadPose()
         if let fitted,["neck_pan","lower_neck","upper_neck"].allSatisfy({positions[$0]==headEstimate?[$0]}) {
             frames.merge(fitted.headFrames){_,new in new}
             if let hardware=fitted.hardwareFrames {frames.merge(hardware){_,new in new}}
@@ -1203,6 +1243,7 @@ import simd
                 (headEstimate == nil ? " Head: reference; command estimate unavailable." : " Head: accepted neck command estimate.") +
                 " Other joints: scan reference."
         }
+        if animationOutputActive { playing = false; executeButton.isEnabled = false; return }
         executeButton.title=canPreview == nil ? "Request execution of reviewed path" : "Grasp can + lift and hold"
         if let preview=canPreview,!busy,!ROBControllerArmApproval.shared.isPending,!replayingRecording {
             executeButton.isEnabled=preview.side=="right" && preview.reachesCan && freshBaseline() != nil &&

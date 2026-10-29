@@ -433,6 +433,27 @@ struct GatewayCompatibilityFixtures {
         expect(ghost() == 0, "A revoked physical-right proposal retained transport authority")
         trial.physicalSide = "left"
         print("Taught-waypoint admission: fixed five-leg handoff/eleven-leg wave, smooth midpoint recovery and legacy fallback retain corners, reversals, tolerance, timing, side, session and freshness bounds; paired adjacency unchanged")
+        let animation = ROBAnimationPlayback.shared
+        animation.expectedGeneration = generation; animation.expectedArm = "left"
+        try motorFeedback()
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
+            "Animation target without a local run was admitted")
+        animation.step = ([0,0.05,0,0,0,0,0], 1)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) > 0,
+            "Valid frozen local animation segment was rejected")
+        expect(taught.sendLocalAnimationStep(arm: "right", expectedSessionGeneration: generation) == 0,
+            "Animation admitted the wrong physical arm")
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation+1) == 0,
+            "Animation target replayed after reconnect")
+        animation.step = ([0,1,0,0,0,0,0], 1)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
+            "Animation exceeded existing transport rate")
+        animation.step = ([0,0.05,0,0,0,0,0], 1)
+        try motorFeedback(age: 501)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
+            "Animation admitted expired telemetry")
+        animation.step = nil
+        print("Animation gateway: frozen owner segment, physical arm, reconnect, rate and freshness checks passed")
         print("Amber gateway compatibility fixtures passed")
     }
 }
