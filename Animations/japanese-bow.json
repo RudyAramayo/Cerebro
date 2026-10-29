@@ -3,10 +3,54 @@
   "migrationNotes": [],
   "poses": [
     {
+      "id": "5EEB9329-06BE-54A2-A69B-F971F96620E0",
+      "name": "Bow · Lift before wrist rotation",
+      "needsReview": false,
+      "note": "Lift shoulders and elbows before any wrist rotation. J3 and wrist J5–J7 are omitted, retaining their measured starting positions. Reviewed from hanging zero; complete this raised hold before orienting the grippers.",
+      "previewLeanDegrees": 0,
+      "values": {
+        "arm.left.j1": -0.2,
+        "arm.left.j2": 1.6,
+        "arm.left.j4": 1.0,
+        "arm.right.j1": 0.2,
+        "arm.right.j2": -1.6,
+        "arm.right.j4": -1.0,
+        "lact.speed": 0,
+        "maestro.0": 6000.0,
+        "maestro.1": 6011.0,
+        "maestro.2": 6906.0
+      }
+    },
+    {
+      "id": "1344F967-06DB-562A-BB1D-D76C864F8A98",
+      "name": "Bow · Orient raised grippers",
+      "needsReview": false,
+      "note": "Keep the raised shoulder/elbow targets and retain J3. Rotate wrist J5–J7 only after measured arrival at the preceding lift keyframe, then approach the hands-raised pose.",
+      "previewLeanDegrees": 0,
+      "values": {
+        "arm.left.j1": -0.2,
+        "arm.left.j2": 1.6,
+        "arm.left.j4": 1.0,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.2,
+        "arm.right.j2": -1.6,
+        "arm.right.j4": -1.0,
+        "arm.right.j5": 1.195716,
+        "arm.right.j6": 1.488664,
+        "arm.right.j7": -0.099177,
+        "lact.speed": 0,
+        "maestro.0": 6000.0,
+        "maestro.1": 6011.0,
+        "maestro.2": 6906.0
+      }
+    },
+    {
       "id": "ED324749-8BB1-51F9-AC02-6BFF8D08C9D0",
       "name": "Bow · Hands raised",
       "needsReview": false,
-      "note": "Model-derived empty-hand gesture; first approach depends on measured start. Upright ghost lean is illustrative. No jaw or torso rotation commands.",
+      "note": "Raised hands after the separate lift and gripper-orientation clips. Both wrists are oriented above the treads before the arms approach this pose. No jaw or torso rotation commands.",
       "previewLeanDegrees": 0,
       "values": {
         "arm.left.j1": -0.164061,
@@ -107,13 +151,71 @@
       "clips": [
         {
           "easing": "smooth",
+          "hold": 0.2,
+          "id": "8028C78F-31EC-512B-8066-F99DE47029FD",
+          "pose": {
+            "id": "145323D0-35E2-59DB-A21C-9A5DD9CF181D",
+            "name": "Bow · Lift before wrist rotation",
+            "needsReview": false,
+            "note": "Lift shoulders and elbows before any wrist rotation. J3 and wrist J5–J7 are omitted, retaining their measured starting positions. Reviewed from hanging zero; complete this raised hold before orienting the grippers.",
+            "previewLeanDegrees": 0,
+            "values": {
+              "arm.left.j1": -0.2,
+              "arm.left.j2": 1.6,
+              "arm.left.j4": 1.0,
+              "arm.right.j1": 0.2,
+              "arm.right.j2": -1.6,
+              "arm.right.j4": -1.0,
+              "lact.speed": 0,
+              "maestro.0": 6000.0,
+              "maestro.1": 6011.0,
+              "maestro.2": 6906.0
+            }
+          },
+          "sourcePoseID": "5EEB9329-06BE-54A2-A69B-F971F96620E0",
+          "transition": 12.5
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.2,
+          "id": "8FF550BE-AA11-5485-B762-E90A60E29604",
+          "pose": {
+            "id": "C370D84A-7BBA-5D94-9D56-59A4178CE998",
+            "name": "Bow · Orient raised grippers",
+            "needsReview": false,
+            "note": "Keep the raised shoulder/elbow targets and retain J3. Rotate wrist J5–J7 only after measured arrival at the preceding lift keyframe, then approach the hands-raised pose.",
+            "previewLeanDegrees": 0,
+            "values": {
+              "arm.left.j1": -0.2,
+              "arm.left.j2": 1.6,
+              "arm.left.j4": 1.0,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.2,
+              "arm.right.j2": -1.6,
+              "arm.right.j4": -1.0,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177,
+              "lact.speed": 0,
+              "maestro.0": 6000.0,
+              "maestro.1": 6011.0,
+              "maestro.2": 6906.0
+            }
+          },
+          "sourcePoseID": "1344F967-06DB-562A-BB1D-D76C864F8A98",
+          "transition": 12.5
+        },
+        {
+          "easing": "smooth",
           "hold": 0.3,
           "id": "A702FE04-1735-5423-9BB9-DA936EDC6A93",
           "pose": {
             "id": "B1348B2B-42ED-5CB7-A551-9B8B8E2D1D0B",
             "name": "Bow · Hands raised",
             "needsReview": false,
-            "note": "Model-derived empty-hand gesture; first approach depends on measured start. Upright ghost lean is illustrative. No jaw or torso rotation commands.",
+            "note": "Raised hands after the separate lift and gripper-orientation clips. Both wrists are oriented above the treads before the arms approach this pose. No jaw or torso rotation commands.",
             "previewLeanDegrees": 0,
             "values": {
               "arm.left.j1": -0.164061,
@@ -137,7 +239,7 @@
             }
           },
           "sourcePoseID": "ED324749-8BB1-51F9-AC02-6BFF8D08C9D0",
-          "transition": 18
+          "transition": 9.3
         },
         {
           "easing": "smooth",
