@@ -66,7 +66,8 @@ struct ROBTorsoMotionPolicy {
         return (0 ... maximumObservationAge).contains(now - observation.capturedAt)
     }
 
-    @discardableResult mutating func observe(_ value: Observation, now: TimeInterval) -> Bool {
+    @discardableResult mutating func observe(_ value: Observation, now: TimeInterval,
+        continuousStationaryCounter: Bool = false) -> Bool {
         guard value.heading.isFinite, value.uncertainty.isFinite,
               (0 ... 2).contains(value.uncertainty), value.capturedAt.isFinite,
               (0 ... maximumObservationAge).contains(now - value.capturedAt),
@@ -84,7 +85,8 @@ struct ROBTorsoMotionPolicy {
         if let previous = observation, let oldHeading = unwrappedHeading {
             let delta = Self.wrap(heading - previous.heading)
             let gap = value.capturedAt - previous.capturedAt
-            let changedFrame = value.stream != previous.stream || gap > maximumObservationAge
+            let stationaryContinuity = continuousStationaryCounter && !armed && mode == .hold && velocity == 0 && delta == 0
+            let changedFrame = value.stream != previous.stream || (gap > maximumObservationAge && !stationaryContinuity)
             let unexpected = abs(delta) > max(8, maximumSpeed * max(0, gap) + 4)
             if changedFrame || (armed && unexpected) {
                 invalidate(changedFrame ? "Camera reference changed; re-arm from the new estimate"

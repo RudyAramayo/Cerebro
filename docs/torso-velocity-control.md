@@ -300,3 +300,9 @@ Energize/De-energize buttons, a stationary powered hold with both-arm rotation
 blocked, live count/heading updates from the destination slider, and releasing
 a motor energized before the transport acquired ownership. They verify that
 power-only requests never emit a nonzero velocity.
+
+### Observed forward counter reset, 2026-10-29
+
+The operator confirmed the stopped torso at count −90 was facing forward relative to the treads and explicitly requested zeroing the TIC counter. With motor power off and velocity zero, `ticcmd -d 00378067 --halt-and-set-position 0` changed the counter without motion. Readback showed count 0, no target and power off. Cerebro’s software front was then set to 0 at that same physical pose. With the existing inferred scale, left/right 90° targets are −8999/+8999. Hardware index/homing remains unverified, and missed steps still require a new physical alignment observation.
+
+During the room survey, delayed idle polling erased that software alignment and blocked can-targeted base planning. A gap up to five seconds now retains the existing datum and cable history only when both samples show motor power off, zero speed and the same count, with matching serial number and continuous controller uptime. This also covers the stopped, power-off portion of rotation preflight. It does not arm or resume motion, freshen a timestamp or establish physical alignment from counts. Missing identity/uptime, changed counts, reboot, active movement and longer gaps retain their invalidation behavior; active 500 ms DEBUG feedback checks and the TIC watchdog are unchanged. The torso readout explicitly distinguishes an operator-referenced estimate from an unconfirmed base datum.

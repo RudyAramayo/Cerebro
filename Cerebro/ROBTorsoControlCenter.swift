@@ -29,7 +29,9 @@ import Cocoa
     var currentCount: Double { ticPosition.map { Double($0.count) } ?? .nan }
     var countEstimateDetail: String {
         let reference = String(format: "Software front %.0f counts", calibration.centerCount)
-        return reference + " • count estimate, not measured torso alignment"
+        return reference + (hasSoftwareBaseReference
+            ? " • operator-referenced count estimate, not camera-measured alignment"
+            : " • base alignment unconfirmed; physical reference needed")
     }
     @nonobjc func heading(forCount count: Double) -> Double { calibration.heading(count: count) }
     @nonobjc func count(forHeading heading: Double) -> Double { calibration.count(heading: heading) }
@@ -245,21 +247,27 @@ import Cocoa
     @nonobjc private func acceptCount(_ sample: ROBTicVelocityTransport.PositionSample) {
         guard usesHardware else { return }
         guard usesCountEstimate else { ticPosition = sample; publish(); return }
+        var stationaryContinuity = false
         if let previous = ticPosition {
             let gap = sample.capturedAt-previous.capturedAt
             let delta = abs(Double(sample.count)-Double(previous.count))*360/ROBTorsoCountCalibration.countsPerTurn
             if gap > 0.75 || delta > max(8, maximumSpeed*max(0,gap)+4) {
                 let preflight = arming || powerRequestPending
-                if !preflight && (policy.armed || powerHoldRequested) {
+                stationaryContinuity = gap > 0.75 && !powerHoldRequested && !powerRequestPending &&
+                    (arming || (pendingLocalDemand == nil && remoteBaseline == nil && policy.mode == .hold)) &&
+                    sample.continuesStationaryCounter(after: previous)
+                if !stationaryContinuity && !preflight && (policy.armed || powerHoldRequested) {
                     lastCommandFailure = String(format: "TIC feedback interrupted (%.0f ms gap, %.2f° count change); stopped", gap*1000, delta)
                 }
-                hasSoftwareBaseReference = false
+                if !stationaryContinuity { hasSoftwareBaseReference = false }
                 // Preflight owns the USB queue and issues only zero-speed
                 // setup. Rebase from its actual status without cancelling the
-                // setup because an idle poll waited behind it. No saved base
-                // alignment survives that gap, and no turn is dispatched here.
+                // setup because an idle poll waited behind it. Only the
+                // separately checked unchanged, power-off counter may retain
+                // its software datum. The new sample must still satisfy the
+                // ordinary freshness gate before preflight can finish.
                 if !preflight { stop() }
-                policy.resetObservation()
+                if !stationaryContinuity { policy.resetObservation() }
             }
         }
         ticPosition = sample; countSequence &+= 1
@@ -267,7 +275,8 @@ import Cocoa
         let wasArmed = policy.armed
         _ = policy.observe(.init(heading: calibration.heading(count: Double(sample.count)),
             capturedAt: sample.capturedAt, uncertainty: 0.05,
-            stream: "tic-count-estimate-\(referenceRevision)", sequence: countSequence), now: now)
+            stream: "tic-count-estimate-\(referenceRevision)", sequence: countSequence), now: now,
+            continuousStationaryCounter: stationaryContinuity)
         visionDetail = String(format: "TIC %d • %@\n%@", sample.count,
             sample.uncertain ? "index/reference unconfirmed" : "controller reference set", countEstimateDetail)
         if (wasArmed && !policy.armed) || (!policy.armed && hardwareReady && !powerHoldRequested) { stopHardware() }

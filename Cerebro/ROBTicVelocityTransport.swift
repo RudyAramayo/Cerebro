@@ -54,6 +54,24 @@ final class ROBTicVelocityTransport {
         let capturedAt: TimeInterval
         let energized: Bool
         let operationState: String
+        var serialNumber: String? = nil
+        var uptimeSeconds: Double? = nil
+
+        /// A delayed idle poll does not by itself change an observed software
+        /// datum. Require the same powered controller and unchanged stopped,
+        /// de-energized counter. This is still a count estimate, not an encoder.
+        func continuesStationaryCounter(after previous: PositionSample) -> Bool {
+            guard !energized, !previous.energized, velocity == 0, previous.velocity == 0,
+                  operationState == "De-energized", previous.operationState == "De-energized",
+                  count == previous.count, let serialNumber, !serialNumber.isEmpty,
+                  serialNumber == previous.serialNumber,
+                  let uptimeSeconds, let previousUptime = previous.uptimeSeconds,
+                  uptimeSeconds >= previousUptime else { return false }
+            let gap = capturedAt - previous.capturedAt
+            // ticcmd reports whole seconds. Allow that quantization plus USB
+            // read latency, but not a restarted or discontinuous device clock.
+            return gap > 0 && gap <= 5 && abs(uptimeSeconds - previousUptime - gap) <= 1.25
+        }
     }
     private enum Demand { case arm(Profile, Bool), velocity(Double, TimeInterval, Bool), position(Int32, TimeInterval), read, stop }
     private struct Release {
@@ -336,7 +354,8 @@ final class ROBTicVelocityTransport {
         }
         let sample = PositionSample(count: count, velocity: try Self.currentVelocity(status),
             uncertain: uncertain == "Yes", capturedAt: capturedAt,
-            energized: energized == "Yes", operationState: operationState)
+            energized: energized == "Yes", operationState: operationState,
+            serialNumber: fields["Serial number"], uptimeSeconds: Self.uptimeSeconds(fields["Up time"]))
         DispatchQueue.main.async { [weak self] in
             guard let self, self.current(token) else { return }
             self.onPosition?(sample)
@@ -434,6 +453,16 @@ final class ROBTicVelocityTransport {
             fields[String(line[..<separator])] = line[line.index(after: separator)...].trimmingCharacters(in: .whitespaces)
         }
         return fields
+    }
+
+    static func uptimeSeconds(_ text: String?) -> Double? {
+        guard let text else { return nil }
+        let parts = text.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
+              let hours = Double(parts[0]), let minutes = Double(parts[1]), let seconds = Double(parts[2]),
+              (0..<60).contains(minutes), (0..<60).contains(seconds) else { return nil }
+        let result = hours * 3600 + minutes * 60 + seconds
+        return result.isFinite ? result : nil
     }
 
     static func checkStatus(_ text: String, starting: Bool) throws {

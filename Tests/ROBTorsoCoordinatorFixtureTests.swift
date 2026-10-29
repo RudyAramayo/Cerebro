@@ -262,7 +262,40 @@ final class ROBArmRoutineCoordinator {
         try expect(abs(restored.maximumPulseRate-3000)<1e-8, "Overspeed setting was accepted")
         restored.closeControls()
         try localTakeover()
+        try idleReferenceReacquisition()
         print("Torso coordinator passed: exact TIC targets and five-pulse UI edits, no host position hunting, focus rules, persisted pulse ceiling, rehearsal isolation, camera gates, idle arming, camera-referenced VR, target-preserving power updates, idle release/resume, visual-loss power release, explicit re-arm")
+    }
+
+    static func idleReferenceReacquisition() throws {
+        let motor = FixtureMotor()
+        let transport = ROBTicVelocityTransport(execute: motor.execute)
+        let center = ROBTorsoControlCenter(transport: transport, vision: ROBMarkerlessVisionService(resources: nil),
+            reference: ["modelID": "test-model", "referenceID": "test-reference"])
+        center.setCountEstimate(); try wait { center.canSetSoftwareReference }
+        center.closeControls()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        func sample(_ uptime: Double) -> ROBTicVelocityTransport.PositionSample {
+            .init(count: 1000, velocity: 0, uncertain: true, capturedAt: ProcessInfo.processInfo.systemUptime,
+                  energized: false, operationState: "De-energized", serialNumber: "fixture", uptimeSeconds: uptime)
+        }
+        transport.onPosition?(sample(100))
+        center.setSoftwareReference(0)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        transport.onPosition?(sample(101))
+        let commands = motor.calls.count
+        // Deliberately pause this isolated main-thread fixture. No live USB,
+        // timers or hardware workers are used for the resulting samples.
+        Thread.sleep(forTimeInterval: 0.9)
+        transport.onPosition?(sample(102))
+        try expect(center.hasSoftwareBaseReference && center.navigationHeading == 0 && !center.isArmed,
+            "A stopped unchanged same-boot TIC sample erased the observed software reference")
+        try expect(!motor.calls.dropFirst(commands).contains(where: { $0.contains("--position") || $0.contains("--energize") }),
+            "Idle reference reacquisition dispatched movement or energized the motor")
+        Thread.sleep(forTimeInterval: 0.9)
+        transport.onPosition?(sample(0))
+        try expect(!center.hasSoftwareBaseReference && !center.isArmed,
+            "A rebooted controller retained the previous physical reference")
+        center.closeControls()
     }
 
     static func localTakeover() throws {

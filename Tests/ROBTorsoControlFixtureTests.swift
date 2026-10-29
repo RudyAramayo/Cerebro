@@ -13,7 +13,37 @@ import Foundation
         while !condition() && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
         try expect(condition(), "Asynchronous Tic fixture timed out")
     }
+    static func stationaryCounterContinuity() throws {
+        typealias Sample = ROBTicVelocityTransport.PositionSample
+        func value(count: Int32 = 8999, velocity: Int32 = 0, energized: Bool = false,
+                   time: Double = 101.2, uptime: Double? = 901, serial: String? = "fixture") -> Sample {
+            .init(count: count, velocity: velocity, uncertain: true, capturedAt: time,
+                  energized: energized, operationState: energized ? "Normal" : "De-energized",
+                  serialNumber: serial, uptimeSeconds: uptime)
+        }
+        let before = value(time: 100, uptime: 900)
+        try expect(value().continuesStationaryCounter(after: before), "Unchanged idle counter lost continuity after a diagnostic pause")
+        for after in [value(count: 8998), value(velocity: 1), value(energized: true), value(uptime: 0),
+                      value(uptime: 905), value(uptime: nil), value(serial: "other"), value(serial: nil),
+                      value(time: 106, uptime: 906), value(time: 99, uptime: 899)] {
+            try expect(!after.continuesStationaryCounter(after: before), "Changed, active, restarted or unidentifiable counter retained its datum")
+        }
+        try expect(ROBTicVelocityTransport.uptimeSeconds("24:43:36") == 89016, "TIC whole-second uptime parsing failed")
+        for invalid in ["", "1:02", "1:60:00", "1:00:60", "-1:00:00", "NaN:00:00"] {
+            try expect(ROBTicVelocityTransport.uptimeSeconds(invalid) == nil, "Malformed TIC uptime accepted")
+        }
+        var policy = ROBTorsoMotionPolicy(); policy.debugCableMode = true
+        for i in 0...18 {
+            policy.observe(sample(-Double(i)*5, 100+Double(i)*0.1, UInt64(i+1), stream: "tic"), now: 100+Double(i)*0.1)
+        }
+        policy.observe(sample(-90, 103, 20, stream: "tic"), now: 103, continuousStationaryCounter: true)
+        try expect(policy.cableTravelDegrees == -90 && !policy.armed, "Idle reacquisition erased cable history or armed motion")
+        _ = policy.arm(at: 103)
+        policy.observe(sample(-90, 104.2, 21, stream: "tic"), now: 104.2, continuousStationaryCounter: true)
+        try expect(!policy.armed && policy.cableTravelDegrees == nil, "Stationary continuity bypassed an active-control gap")
+    }
     static func main() throws {
+        try stationaryCounterContinuity()
         let echo = try ROBTicVelocityTransport.runCommand(executable: "/bin/echo", arguments: ["torso fixture"], operation: "fixture")
         try expect(echo == "torso fixture\n", "Direct child completion lost output")
         for (program, args, timeout, expected) in [
