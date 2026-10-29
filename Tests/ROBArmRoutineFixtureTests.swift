@@ -21,6 +21,22 @@ final class ROBShowMotionCoordinator {
     static let shared = ROBShowMotionCoordinator()
     static let greetingSummary = "Fixture combined greeting"
     var isRunning = false
+    func stop() { isRunning = false }
+}
+
+// The left trial has its own production-runtime fixture suite. This suite
+// exercises the paired coordinator and must not depend on its visual-servo IO.
+final class ROBLeftArmTrial {
+    static let shared = ROBLeftArmTrial()
+    static let commands: [String] = []
+    static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
+    var isRunning = false, isPreparingPreviewedCanObservation = false
+    var status = "Fixture idle", lastRecordingPath = ""
+    var statusChanged: ((String) -> Void)?
+    func cancel(reason: String) {}
+    func perform(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
+        completion(["status": "blocked", "detail": "Separate left-arm fixture owns this action"])
+    }
 }
 
 // The production coordinator and planner run unchanged, with no sockets,
@@ -45,6 +61,7 @@ final class ROBAmberArmMotionArbiter {
 final class ROBAmberGestureExecutor {
     static let shared = ROBAmberGestureExecutor()
     var isExecuting = false
+    func cancelCurrentGesture(reason: String) -> Bool { isExecuting = false; return true }
 }
 final class ROBGripperStartupCalibration {
     static let shared = ROBGripperStartupCalibration()
@@ -89,6 +106,15 @@ final class ROBAmberGatewayClient: NSObject {
     var afterStateQuery: (() -> Void)?
     var sequence: UInt64 = 1, nextID: UInt64 = 1
     var feedbackReadyAt = 0.0
+    var currentRaw = 0.2
+    var verifyReadyLeases = false
+    var activeReadyLeases: Set<String> = []
+    var endedLeaseRenewals = 0
+    var simulateReadyOvershoot = false
+    var readyOvershootSamples = 0
+    var readyOvershoot: (arm: String, until: Double)?
+    var readyEndpointLag = false
+    var torsoPreparationRejection: String?
     var modeFeedbackDelay = 0.0
     var modeFeedbackReadyAt: [String: Double] = [:]
     func isReady() -> Bool { ready }
@@ -100,19 +126,47 @@ final class ROBAmberGatewayClient: NSObject {
         guard ProcessInfo.processInfo.systemUptime >= feedbackReadyAt else { return nil }
         sequence += 1
         let status = ProcessInfo.processInfo.systemUptime < (modeFeedbackReadyAt[arm] ?? 0) ? 1 : mode[arm]!
-        return ROBAmberGatewayTelemetry(sequence: sequence, positions: q[arm]!, stale: stale, status: status)
+        var positions = q[arm]!
+        if let overshoot = readyOvershoot, overshoot.arm == arm,
+           ProcessInfo.processInfo.systemUptime < overshoot.until {
+            positions[5] -= 0.0264
+            readyOvershootSamples += 1
+        }
+        if readyEndpointLag && arm == "right" && activeReadyLeases.contains(arm) { positions[4] -= 0.014 }
+        let sample = ROBAmberGatewayTelemetry(sequence: sequence, positions: positions, stale: stale, status: status)
+        sample.currents = Array(repeating: NSNumber(value: currentRaw), count: 7)
+        return sample
     }
     func modes(forArm arm: String) -> [NSNumber] { Array(repeating: NSNumber(value: mode[arm]!), count: 7) }
-    func ack(_ operation: String, _ arm: String, accepted: Bool = true) -> UInt64 {
+    func ack(_ operation: String, _ arm: String, accepted: Bool = true, delay: TimeInterval = 0) -> UInt64 {
         let id = nextID; nextID += 1
         commands.append("\(operation):\(arm)")
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: self,
                 userInfo: ["commandID": NSNumber(value: id), "accepted": accepted, "operation": operation])
         }
         return id
     }
     func queryMode(forArm arm: String) -> UInt64 { ack("mode_query", arm) }
+    var afterReadyDispatch: (() -> Void)?
+    func sendTorsoPreparationStep(arm: String, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
+        guard let sample = telemetry(forArm: arm) else { return 0 }
+        guard let target = ROBArmRoutineCoordinator.shared.approvedTorsoPreparationTarget(arm: arm, index: index,
+            duration: duration, generation: expectedSessionGeneration) else { return 0 }
+        guard let minimum = ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
+              duration >= minimum - 0.05 else {
+            torsoPreparationRejection = "Synthetic gateway rejected unpadded cubic timing"; return 0
+        }
+        precondition(mode.values.allSatisfy { $0 == 2 })
+        q[arm] = target
+        activeReadyLeases.insert(arm)
+        if simulateReadyOvershoot && arm == "right" && index == 6 {
+            readyOvershoot = (arm, ProcessInfo.processInfo.systemUptime + 0.35)
+        }
+        let id = ack("ready_\(index)", arm)
+        afterReadyDispatch?()
+        return id
+    }
     func sendApprovedLeftGestureStep(proposalID: UUID, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 { 0 }
     func enterPositionMode(forArm arm: String) -> UInt64 {
         mode[arm] = 2
@@ -126,8 +180,15 @@ final class ROBAmberGatewayClient: NSObject {
         q[arm] = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right")!
         return ack("waypoint_\(index)", arm)
     }
-    func priorityHold(forArm arm: String) -> UInt64 { ack("priority_hold", arm) }
-    func renewLease(forArm arm: String, leaseMilliseconds: UInt32) -> UInt64 { ack("renew_lease", arm, accepted: !rejectRenewal) }
+    func priorityHold(forArm arm: String) -> UInt64 {
+        activeReadyLeases.remove(arm)
+        return ack("priority_hold", arm, delay: verifyReadyLeases ? 0.65 : 0)
+    }
+    func renewLease(forArm arm: String, leaseMilliseconds: UInt32) -> UInt64 {
+        let ended = verifyReadyLeases && !activeReadyLeases.contains(arm)
+        if ended { endedLeaseRenewals += 1 }
+        return ack("renew_lease", arm, accepted: !rejectRenewal && !ended)
+    }
     func deactivateArm(_ arm: String) -> UInt64 {
         precondition(ROBArmRoutinePlan.near(q[arm]!, Array(repeating: 0, count: 7)), "Torque removed away from hanging")
         mode[arm] = 0; return ack("deactivate", arm)
@@ -225,6 +286,78 @@ final class ROBArmRoutineVision {
 }
 
 @main struct ArmRoutineFixtures {
+    @MainActor static func testTorsoReady() async throws {
+        let r = ROBArmRoutineCoordinator.shared, g = ROBAmberGatewayClient.shared, approval = ROBControllerArmApproval.shared
+        let oldDebug = UserDefaults.standard.object(forKey: "ROBDevelopmentMode")
+        let oldLimit = UserDefaults.standard.object(forKey: ROBLeftArmTrial.currentLimitKey)
+        UserDefaults.standard.set(true, forKey: "ROBDevelopmentMode")
+        UserDefaults.standard.set(4.0, forKey: ROBLeftArmTrial.currentLimitKey)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("torso-ready-fixture-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        approval.localRecyclingApprovalAuditDirectory = directory.appendingPathComponent("audit")
+        defer {
+            if let oldDebug { UserDefaults.standard.set(oldDebug, forKey: "ROBDevelopmentMode") }
+            else { UserDefaults.standard.removeObject(forKey: "ROBDevelopmentMode") }
+            if let oldLimit { UserDefaults.standard.set(oldLimit, forKey: ROBLeftArmTrial.currentLimitKey) }
+            else { UserDefaults.standard.removeObject(forKey: ROBLeftArmTrial.currentLimitKey) }
+            try? FileManager.default.removeItem(at: directory)
+        }
+        var prompts = 0
+        approval.announceApproval = { _ in prompts += 1 }
+        g.verifyReadyLeases = true
+        g.simulateReadyOvershoot = true
+        ROBArmRoutineVision.shared.handsClear = false
+        ROBArmRoutineVision.shared.fresh = false
+        defer { ROBArmRoutineVision.shared.handsClear = true; ROBArmRoutineVision.shared.fresh = true }
+        func runReady() async throws -> NSDictionary {
+            var value = try r.torsoPreparationTemplate()
+            let messages = ["Synthetic both-arm preparation instruction.", "Synthetic empty and clear observation."]
+            value["sourceMessages"] = messages
+            value["sourceMessageSHA256"] = messages.map { ROBGhostRobotModel.hash(Data($0.utf8)) }
+            value["bothArmsEmpty"] = true; value["operatorObservesClearLift"] = true
+            let url = directory.appendingPathComponent(UUID().uuidString+".json")
+            try JSONSerialization.data(withJSONObject: value).write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            return await withCheckedContinuation { continuation in
+                r.prepareArmsForTorsoTest(receipt: url) { continuation.resume(returning: $0) }
+            }
+        }
+        let result = try await runReady()
+        precondition(result["status"] as? String == "completed", result.description)
+        precondition(r.torsoRotationBlockReason == nil && prompts == 0)
+        precondition(g.endedLeaseRenewals == 0, "A completed arm's lease was renewed while awaiting its final hold")
+        precondition(g.readyOvershootSamples > 0, "Intermediate servo overshoot was not exercised")
+        precondition(g.commands.filter { $0.hasPrefix("ready_") }.count == 16)
+        precondition(!g.commands.contains { $0.hasPrefix("gripper") || $0.hasPrefix("calibrate") || $0.hasPrefix("deactivate") })
+        print("PASS both measured ready holds, no jaw command or redundant approval, torso guard satisfied")
+        g.simulateReadyOvershoot = false
+        g.readyEndpointLag = true
+        g.q["right"] = [0.25594, 1.66461, 0, 0.98393, -1.10692, -1.71083, -0.46278]
+        g.commands = []
+        let recovered = try await runReady()
+        precondition(recovered["status"] as? String == "completed", recovered.description)
+        precondition(g.q["right"]![4] > 0 && !g.commands.contains { $0.hasPrefix("ready_") && $0.hasSuffix(":left") })
+        precondition(!g.commands.contains { $0.hasPrefix("position_mode") }, "Recovery cut torque on an already held arm")
+        print("PASS mirrored LEFT recovery from measured hold leaves the ready RIGHT arm stationary")
+        g.readyEndpointLag = false
+        for fault in ["feedback", "current", "bounds", "stop"] {
+            g.q = ["left": [Double](repeating: 0, count: 7), "right": [Double](repeating: 0, count: 7)]
+            g.mode = ["left": 0, "right": 0]; g.commands = []; g.stale = false; g.currentRaw = 0.2
+            g.afterReadyDispatch = {
+                if fault == "feedback" { g.stale = true }
+                if fault == "current" { g.currentRaw = 6 }
+                if fault == "bounds" { g.q["left"]![5] = 1.76 }
+                if fault == "stop" { r.cancel(reason: "Synthetic operator Stop") }
+            }
+            let result = try await runReady()
+            precondition(result["status"] as? String == "blocked", result.description)
+            precondition(g.commands.filter { $0.hasPrefix("ready_") }.count == 1, "A failure dispatched a later step")
+            precondition(g.commands.contains("priority_hold:left") && g.commands.contains("priority_hold:right"))
+            precondition(!r.isRunning && ROBAmberArmMotionArbiter.shared.owners.isEmpty)
+            print("PASS \(fault) holds both arms and prevents the next step")
+        }
+        g.afterReadyDispatch = nil
+    }
     @MainActor static func run(_ command: String, target: String = "fixture object") async -> NSDictionary {
         await withCheckedContinuation { continuation in
             ROBArmRoutineCoordinator.shared.performCommand(command, target: target) { continuation.resume(returning: $0) }
@@ -527,5 +660,15 @@ final class ROBArmRoutineVision {
         print("Arm routine fixtures passed (no hardware access)")
         exit(0)
     }
-    static func main() { Task { @MainActor in await test() }; RunLoop.main.run() }
+    static func main() {
+        setbuf(stdout, nil)
+        Task { @MainActor in
+            if CommandLine.arguments.last == "torso-ready-preparation" {
+                do { try await testTorsoReady(); exit(0) }
+                catch { fatalError(error.localizedDescription) }
+            }
+            await test()
+        }
+        RunLoop.main.run()
+    }
 }

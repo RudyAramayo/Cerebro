@@ -138,7 +138,7 @@ static NSInteger const kROBLocalTreadMaximumCommand = 255;
     lever.minValue = -1; lever.maxValue = 1; lever.doubleValue = 0;
     lever.continuous = YES; lever.numberOfTickMarks = 3;
     lever.target = self; lever.action = @selector(waistRotationAction:);
-    lever.toolTip = @"Torso turn speed. Arm in Torso Rotation, then hold and slide. Release to stop.";
+    lever.toolTip = @"Torso turn speed. Hold and slide to take manual control. Release to stop.";
     [lever setAccessibilityLabel:@"Torso turn speed"];
     [oldSlider.superview addSubview:lever];
     [oldSlider removeFromSuperview];
@@ -567,14 +567,14 @@ static NSInteger const kROBLocalTreadMaximumCommand = 255;
 - (void)refreshTorsoControl:(NSNotification *)notification
 {
     ROBTorsoControlCenter *center = ROBTorsoControlCenter.shared;
-    self.waistRotationSlider.enabled = center.isArmed;
-    if (!center.isArmed) self.waistRotationSlider.doubleValue = 0;
+    self.waistRotationSlider.enabled = center.canUseLocalControls;
+    if (!center.isLocalLeverHeld) self.waistRotationSlider.doubleValue = 0;
     self.energizeWaistRotationButton.enabled = center.canEnergize;
     self.deenergizeTorsoButton.enabled = center.usesHardware;
     NSString *detail = center.compactControlDetail;
     if (![self.torsoControlOutput.stringValue isEqualToString:detail]) self.torsoControlOutput.stringValue = detail;
-    self.waistRotationSlider.toolTip = center.isArmed
-        ? @"Turn speed: hold and slide; release to slow to a stop."
+    self.waistRotationSlider.toolTip = center.canUseLocalControls
+        ? @"Hold and slide to take manual control; release to stop."
         : center.compactControlDetail;
 }
 

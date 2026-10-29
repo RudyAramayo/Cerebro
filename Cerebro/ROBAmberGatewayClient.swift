@@ -901,6 +901,36 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             expectedSessionGeneration: expectedSessionGeneration)
     }
 
+    /// No caller-supplied joint vector: consume only the coordinator's current,
+    /// reviewed step of the one-use operator-observed preparation.
+    @nonobjc private(set) var torsoPreparationRejection: String?
+    @nonobjc func sendTorsoPreparationStep(arm: String, index: Int, duration: Double,
+                                         expectedSessionGeneration: UInt64) -> UInt64 {
+        guard Thread.isMainThread else { return 0 }
+        torsoPreparationRejection = nil
+        func reject(_ reason: String) -> UInt64 { torsoPreparationRejection = reason; return 0 }
+        guard let sample = telemetry(forArm: arm),
+              sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds else {
+            return reject("Fresh motor/gripper feedback is required at grasp-ready dispatch.")
+        }
+        guard sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }),
+              modes(forArm: arm).count == 7, modes(forArm: arm).allSatisfy({ $0.intValue == 2 }) else {
+            return reject("The arm is not uniformly holding in position mode at grasp-ready dispatch.")
+        }
+        guard let target = ROBArmRoutineCoordinator.shared.approvedTorsoPreparationTarget(arm: arm, index: index,
+                duration: duration, generation: expectedSessionGeneration) else {
+            return reject("The reviewed grasp-ready step or measured start changed before dispatch.")
+        }
+        guard let minimum = ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
+              duration.isFinite, duration >= minimum - 0.05, duration <= 5 else {
+            return reject("Grasp-ready segment timing does not cover its current measured start.")
+        }
+        let id = sendVendorLeasedTrajectory(arm: arm, positionsRadians: target.map(NSNumber.init(value:)),
+            duration: duration, leaseMilliseconds: 1500, expectedSessionGeneration: expectedSessionGeneration)
+        return id == 0 ? reject("Gateway connection, ownership or trajectory bounds changed at grasp-ready dispatch.") : id
+    }
+
     @discardableResult public func queryMode(forArm arm: String) -> UInt64 {
         sendArmCommand(type: "mode_query", arm: arm)
     }
@@ -1087,10 +1117,9 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             let arm = port == 26001 ? "left" : port == 26002 ? "right" : ""
             let telemetry = arm == "left" ? leftTelemetry : arm == "right" ? rightTelemetry : nil
             let reason: String?
+            var waitingForOwner = false
             if arm.isEmpty {
                 reason = "Unknown Amber arm port"
-            } else if let side = ROBArmSide(amberGatewayArm: arm), ROBAmberArmMotionArbiter.shared.isReserved(side) {
-                reason = "A supervised arm routine owns this arm; use Stop + hold before manual motion"
             } else if state != .ready || !exclusiveControllerSession || authenticatedSessionGeneration == 0 {
                 reason = "Connect Amber Diagnostics before sending manual arm commands"
             } else if expectedSessionGeneration != 0 && expectedSessionGeneration != authenticatedSessionGeneration {
@@ -1109,10 +1138,13 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                     + "oldest joint CAN \(age(canAge)); local time since receipt \(age(localAge))."
             } else if telemetry!.effectiveGripperFeedbackAgeMilliseconds > ROBArmFeedbackTiming.maximumAgeMilliseconds {
                 reason = "Gripper CAN feedback is missing or stale; check the arm connection"
+            } else if let side = ROBArmSide(amberGatewayArm: arm), ROBAmberArmMotionArbiter.shared.isReserved(side) {
+                waitingForOwner = true
+                reason = "Waiting for the automatic arm routine to release control"
             } else {
                 reason = nil
             }
-            return ["allowed": reason == nil, "reason": reason ?? "",
+            return ["allowed": reason == nil, "reason": reason ?? "", "waitingForOwner": waitingForOwner,
                     "sessionGeneration": NSNumber(value: authenticatedSessionGeneration)] as NSDictionary
         }
     }

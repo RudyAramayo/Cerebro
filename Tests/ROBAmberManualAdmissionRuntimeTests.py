@@ -66,13 +66,13 @@ static BOOL ROBLaunchTaskSafely(NSTask *task, NSError **error) { return [task la
 @property BOOL active;
 @property dispatch_semaphore_t completed;
 + (instancetype)shared;
-- (void)requestWithOperation:(NSString *)operation arm:(NSString *)arm summary:(NSString *)summary
+- (void)performLocalPanelArmCommandWithOperation:(NSString *)operation arm:(NSString *)arm summary:(NSString *)summary
                     execute:(void (^)(void (^)(NSDictionary *)))execute cancel:(void (^)(void))cancel
                  completion:(void (^)(NSDictionary *))completion;
 @end
 @implementation ROBControllerArmApproval
 + (instancetype)shared { static ROBControllerArmApproval *b; if (!b) { b = [self new]; b.approve = YES; } return b; }
-- (void)requestWithOperation:(NSString *)operation arm:(NSString *)arm summary:(NSString *)summary
+- (void)performLocalPanelArmCommandWithOperation:(NSString *)operation arm:(NSString *)arm summary:(NSString *)summary
                     execute:(void (^)(void (^)(NSDictionary *)))execute cancel:(void (^)(void))cancel
                  completion:(void (^)(NSDictionary *))completion {
     if (!self.approve) { completion(@{@"status": @"rejected", @"detail": @"Fixture rejected"}); dispatch_semaphore_signal(self.completed); return; }

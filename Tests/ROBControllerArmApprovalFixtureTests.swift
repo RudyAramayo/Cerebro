@@ -13,11 +13,14 @@ final class ROBAmberGatewayClient: NSObject {
     var generation: UInt64 = 1
     var ready = true
     var feedbackFresh = true
+    var ownerBusy = false
     var holds: [String] = []
     func isReady() -> Bool { ready }
     func connectionSnapshot() -> NSDictionary { ["sessionGeneration": NSNumber(value: generation)] }
     func manualArmControlReadiness(forUDPPort: Int, expectedSessionGeneration: UInt64) -> NSDictionary {
-        ["allowed": ready && feedbackFresh && expectedSessionGeneration == generation, "reason": "Feedback/session changed"]
+        ["allowed": ready && feedbackFresh && !ownerBusy && expectedSessionGeneration == generation,
+         "waitingForOwner": ready && feedbackFresh && ownerBusy && expectedSessionGeneration == generation,
+         "reason": "Feedback/session/ownership changed"]
     }
     func priorityHold(forArm arm: String) -> UInt64 { holds.append(arm); return 1 }
 }
@@ -46,6 +49,71 @@ final class ROBAmberGatewayClient: NSObject {
         var checks = 0
         func check(_ condition: @autoclosure () -> Bool, _ detail: String) {
             precondition(condition(), detail); checks += 1
+        }
+
+        // Native panel presses are one-command authority. The real broker
+        // cancels the old owner, sends no question and grants no model route.
+        do {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            var announcements = 0, executed = 0, cancelled = 0, takeovers = 0
+            var oldDone: ((NSDictionary) -> Void)?
+            b.announceApproval = { _ in announcements += 1 }
+            b.requestRecycleMissionTask(summary: "Automatic can phase", authorization: { true },
+                execute: { oldDone = $0 }, cancel: { cancelled += 1 }, completion: { _ in })
+            let observer = NotificationCenter.default.addObserver(forName: Notification.Name("ROBLocalManualControlRequested"),
+                object: b, queue: .main) { _ in takeovers += 1 }
+            defer { NotificationCenter.default.removeObserver(observer) }
+            b.performLocalPanelArmCommand(operation: "cmd_position_input", arm: "right", summary: "Local target",
+                execute: { _ in executed += 1 }, cancel: { cancelled += 1 }, completion: { _ in })
+            check(executed == 1 && cancelled == 1 && takeovers == 1 && announcements == 0,
+                "Local input did not immediately replace automatic control without voice")
+            check(!b.manualArmSessionActive && !b.authorizesRightArmTrial("Local target") && !b.authorizesSupervisedArmRoute(),
+                "Local input leaked reusable automatic-route authority")
+            oldDone?(["status": "completed"])
+            b.tick()
+            check(b.isPending && announcements == 0, "Old completion or tick interrupted the local command")
+            gateway.generation += 1; b.tick()
+            check(!b.isPending && cancelled == 2, "Changed gateway did not cancel local execution")
+
+            var result: NSDictionary = [:]
+            gateway.feedbackFresh = false
+            b.performLocalPanelArmCommand(operation: "cmd_position_input", arm: "left", summary: "Stale target",
+                execute: { _ in executed += 1 }, cancel: {}, completion: { result = $0 })
+            check(executed == 1 && result["status"] as? String == "blocked", "Local input bypassed stale feedback")
+            gateway.feedbackFresh = true
+            b.performLocalPanelArmCommand(operation: "restart_stack", arm: "left", summary: "Unknown local action",
+                execute: { _ in executed += 1 }, cancel: {}, completion: { result = $0 })
+            check(executed == 1 && result["status"] as? String == "rejected", "Panel command scope admitted stack maintenance")
+
+            gateway.ownerBusy = true
+            b.performLocalPanelArmCommand(operation: "cmd_position_input", arm: "left", summary: "Handoff target",
+                execute: { done in executed += 1; done(["status": "completed"]) }, cancel: {}, completion: { result = $0 })
+            check(executed == 1 && b.isPending, "Local command ran before the previous owner released")
+            gateway.ownerBusy = false
+            RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+            check(executed == 2 && !b.isPending, "Fresh ownership handoff did not dispatch the captured command")
+            gateway.ownerBusy = true
+            b.performLocalPanelArmCommand(operation: "cmd_position_input", arm: "right", summary: "Cancelled handoff",
+                execute: { _ in executed += 1 }, cancel: {}, completion: { _ in })
+            b.cancel(reason: "Fixture Stop"); gateway.ownerBusy = false
+            RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+            check(executed == 2 && !b.isPending, "Stop allowed a delayed ownership-handoff command")
+
+            for (i, operation) in ["close_gripper", "open_gripper", "calibrate_gripper"].enumerated() {
+                let id = UInt64(900 + i)
+                b.performLocalPanelGatewayCommand(operation: operation, arm: "right", summary: "Local gripper button",
+                    command: { executed += 1; return id }, completion: { result = $0 })
+                check(b.isPending, "Local gripper button did not dispatch immediately")
+                NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                    userInfo: ["commandID": NSNumber(value: id), "accepted": true])
+                check(!b.isPending && result["status"] as? String == "accepted_unverified",
+                    "Gripper acknowledgement was not matched or falsely claimed physical completion")
+            }
+            check(executed == 5 && announcements == 0, "A native gripper button asked for a voice session")
+            b.request(operation: "startup", arm: "both", summary: "Unrelated automatic routine",
+                execute: { _ in executed += 1 }, cancel: {}, completion: { _ in })
+            check(executed == 5 && announcements == 1, "Local press silently authorized an unrelated automatic routine")
+            b.cancel(reason: "Fixture complete")
         }
 
         // A real mission Start covers each native can phase once. It never
@@ -528,6 +596,44 @@ final class ROBAmberGatewayClient: NSObject {
         func hash(_ text: String) -> String {
             SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
         }
+        #if DEBUG
+        do {
+            let previous = UserDefaults.standard.object(forKey: "ROBDevelopmentMode")
+            UserDefaults.standard.set(true, forKey: "ROBDevelopmentMode")
+            defer {
+                if let previous { UserDefaults.standard.set(previous, forKey: "ROBDevelopmentMode") }
+                else { UserDefaults.standard.removeObject(forKey: "ROBDevelopmentMode") }
+            }
+            let b = localBroker(), context = "synthetic-both-arm-context", revision = "fixture-ready-v1"
+            func torsoReceipt(_ change: (inout [String: Any]) -> Void = { _ in }) throws -> URL {
+                var value = b.torsoPreparationTemplate(context: context, readyPoseRevision: revision)
+                let messages = ["Synthetic instruction to prepare both empty arms.", "Synthetic observed clear sweep."]
+                value["sourceMessages"] = messages; value["sourceMessageSHA256"] = messages.map(hash)
+                value["bothArmsEmpty"] = true; value["operatorObservesClearLift"] = true
+                change(&value)
+                let url = localDirectory.appendingPathComponent(UUID().uuidString + ".json")
+                try JSONSerialization.data(withJSONObject: value).write(to: url)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                return url
+            }
+            for change: (inout [String: Any]) -> Void in [
+                { $0["context"] = "changed pose" }, { $0["appSessionID"] = UUID().uuidString },
+                { $0["bothArmsEmpty"] = false }, { $0["operatorObservesClearLift"] = false },
+                { $0["jawCommands"] = true }, { $0["torsoCommands"] = true },
+                { $0["readyPoseRevision"] = "different target" }, { $0["sourceMessageSHA256"] = [] },
+                { $0["issuedAtMilliseconds"] = 0.0 }
+            ] {
+                let url = try torsoReceipt(change)
+                do { _ = try b.consumeTorsoPreparationReceipt(url, context: context, readyPoseRevision: revision); check(false, "Changed preparation receipt admitted") }
+                catch { check(true, "Changed preparation receipt rejected") }
+            }
+            let url = try torsoReceipt()
+            _ = try b.consumeTorsoPreparationReceipt(url, context: context, readyPoseRevision: revision)
+            check(!b.isPending && !b.armSessionActive && !b.manualArmSessionActive, "Preparation must not create a general session")
+            do { _ = try b.consumeTorsoPreparationReceipt(url, context: context, readyPoseRevision: revision); check(false, "Preparation receipt replayed") }
+            catch { check(true, "One-use preparation receipt rejected replay") }
+        }
+        #endif
         func receipt(_ b: ROBControllerArmApproval, mutate: (inout [String: Any]) -> Void = { _ in }) throws -> URL {
             var value = b.localRecyclingReceiptTemplate! as! [String: Any]
             value["sourceMessage"] = "Synthetic explicit user instruction for this isolated four-can fixture."

@@ -5445,7 +5445,8 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
         NSLog(@"%@: %@", operation, error.localizedDescription ?: output);
         return;
     }
-    // Capture all targets before the controller reviews this one-shot request.
+    // Capture the local operator's targets at the click; later edits cannot
+    // alter an already dispatched command. No voice authorization is needed.
     NSArray<NSString *> *capturedArguments = [arguments copy];
     NSUInteger portIndex = [capturedArguments indexOfObject:@"--port"];
     NSInteger port = portIndex != NSNotFound && portIndex + 1 < capturedArguments.count
@@ -5459,7 +5460,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
         unsigned long long generation = [gateway.connectionSnapshot[@"sessionGeneration"] unsignedLongLongValue];
         NSString *summary = [NSString stringWithFormat:@"Physical %@ arm: %@ (%@). Mode changes can remove torque; clear the workspace and support the arm as needed.",
             physicalArm, operation, [[capturedArguments subarrayWithRange:NSMakeRange(1, capturedArguments.count - 1)] componentsJoinedByString:@" "]];
-        [[ROBControllerArmApproval shared] requestManualArmCommandWithOperation:operation arm:physicalArm summary:summary
+        [[ROBControllerArmApproval shared] performLocalPanelArmCommandWithOperation:operation arm:physicalArm summary:summary
             execute:^(void (^done)(NSDictionary *)) {
                 dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
                     NSMutableArray *immediate = [capturedArguments mutableCopy];

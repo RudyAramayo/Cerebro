@@ -132,6 +132,18 @@ struct GatewayCompatibilityFixtures {
         let admitted = client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: 0)
         expect(admitted["allowed"] as? Bool == true, "Fresh physical-right feedback was not admitted on L10")
         let admittedGeneration = (admitted["sessionGeneration"] as! NSNumber).uint64Value
+        let owner = UUID()
+        expect(ROBAmberArmMotionArbiter.shared.reserve(.right, owner: owner), "Fixture could not reserve the physical right arm")
+        let manualHandoff = client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: admittedGeneration)
+        expect(manualHandoff["allowed"] as? Bool == false && manualHandoff["waitingForOwner"] as? Bool == true,
+               "Fresh local takeover did not distinguish an ownership handoff")
+        var staleOwned = motorSample
+        staleOwned["joint_feedback_age_ms"] = [Double](repeating: 1000, count: 7)
+        try client.fixtureReceive(staleOwned)
+        expect(client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: admittedGeneration)["waitingForOwner"] as? Bool == false,
+               "Stale feedback was queued as an ownership handoff")
+        ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
+        try client.fixtureReceive(motorSample)
         expect(client.manualArmControlReadiness(forUDPPort: 26002, expectedSessionGeneration: 0)["allowed"] as? Bool == false,
                "Physical-left command borrowed physical-right feedback")
         motorSample["sequence"] = 4

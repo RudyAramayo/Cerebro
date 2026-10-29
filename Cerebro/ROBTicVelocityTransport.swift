@@ -33,9 +33,9 @@ final class ROBTicVelocityTransport {
 
         func velocityUnits(_ degrees: Double) -> Int32? {
             guard degrees.isFinite, pulsesPerTurn.isFinite, (1 ... 10_000_000).contains(pulsesPerTurn),abs(motorDirection)==1,
-                  abs(degrees) <= 20 else { return nil }
+                  abs(degrees) <= ROBTorsoMotionPolicy.speedRange.upperBound else { return nil }
             let value = degrees * pulsesPerTurn / 360 * 10_000 * motorDirection
-            guard abs(value) <= 500_000_000 else { return nil }
+            guard abs(value) <= ROBTorsoMotionPolicy.maximumPulseRate * 10_000 else { return nil }
             return Int32(value.rounded())
         }
         var accelerationUnits: Int32? {
@@ -55,7 +55,7 @@ final class ROBTicVelocityTransport {
         let energized: Bool
         let operationState: String
     }
-    private enum Demand { case arm(Profile, Bool), velocity(Double, TimeInterval, Bool), read, stop }
+    private enum Demand { case arm(Profile, Bool), velocity(Double, TimeInterval, Bool), position(Int32, TimeInterval), read, stop }
     private struct Release {
         let id = UUID()
         let token: UInt64
@@ -109,6 +109,11 @@ final class ROBTicVelocityTransport {
     func velocity(_ degreesPerSecond: Double, validUntil: TimeInterval, releaseWhenStopped: Bool = true) {
         enqueue(.velocity(degreesPerSecond, validUntil, releaseWhenStopped), interrupt: false)
     }
+    /// A real target position, never an assignment to the current counter.
+    /// Repeating the same target renews supervision while TIC owns braking.
+    func position(_ count: Int32, validUntil: TimeInterval) {
+        enqueue(.position(count, validUntil), interrupt: false)
+    }
     func stop() { enqueue(.stop, interrupt: true) }
     /// Read-only and lower priority than every motion/Stop request.
     func readPosition() { enqueue(.read, interrupt: false) }
@@ -132,13 +137,15 @@ final class ROBTicVelocityTransport {
         if interrupt { generation &+= 1 }
         if case .read = demand, pending != nil { lock.unlock(); return }
         // A speed update cannot replace a pending stop or explicit arm request.
-        if case .velocity = demand {
+        switch demand {
+        case .velocity, .position:
             if let pending {
                 switch pending {
                 case .arm, .stop: lock.unlock(); return
-                case .velocity, .read: break
+                case .velocity, .position, .read: break
                 }
             }
+        default: break
         }
         pending = demand
         let start = !draining
@@ -238,6 +245,37 @@ final class ROBTicVelocityTransport {
                     } else {
                         try beginRelease(readyWhenComplete: true, detail: nil, token: token)
                     }
+                case .position(let count, let validUntil):
+                    guard armed, current(token) else { continue }
+                    guard validUntil.isFinite, ProcessInfo.processInfo.systemUptime <= validUntil else {
+                        throw Self.error("Torso position supervision expired")
+                    }
+                    if !driveActive {
+                        release = nil
+                        try Self.checkStatus(execute(["--status", "--full"]), starting: true)
+                        guard current(token) else { continue }
+                        guard ProcessInfo.processInfo.systemUptime <= validUntil else {
+                            throw Self.error("Torso position supervision expired before energizing")
+                        }
+                        motorMayBeEnergized = true
+                        _ = try execute(["--velocity", "0", "--energize", "--exit-safe-start"])
+                        guard current(token) else { continue }
+                        try Self.checkStatus(execute(["--status", "--full"]), starting: false)
+                        driveActive = true
+                    }
+                    guard current(token) else { continue }
+                    guard ProcessInfo.processInfo.systemUptime <= validUntil else {
+                        throw Self.error("Torso position supervision expired before movement")
+                    }
+                    onMotionDispatch?()
+                    let capturedAt = ProcessInfo.processInfo.systemUptime
+                    let status = try execute(["--position", String(count), "--status", "--full"])
+                    try publishPosition(status, capturedAt: capturedAt, token: token)
+                    try Self.checkStatus(status, starting: false)
+                    let currentSpeed = try Self.currentVelocity(status)
+                    let arrived = Self.fields(status)["Current position"].flatMap(Int32.init) == count && currentSpeed == 0
+                    publish(true, arrived ? "TIC at target count \(count); holding at zero speed"
+                        : "TIC moving to target count \(count)", token: token)
                 case .velocity(let degrees, let validUntil, let releaseWhenStopped):
                     guard armed, current(token) else { continue }
                     guard ProcessInfo.processInfo.systemUptime <= validUntil,
@@ -444,6 +482,9 @@ final class ROBTicVelocityTransport {
     /// Local bounded diagnostic trace; command arguments are not recorded.
     static func trace(_ detail: String) {
         #if DEBUG
+        // CLI fixtures use fake transport samples; keep them out of the live
+        // app's hardware evidence log.
+        guard Bundle.main.bundleIdentifier == "com.orbitusrobotics.Cerebro" else { return }
         let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Cerebro", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,

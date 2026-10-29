@@ -19,6 +19,8 @@ import UniformTypeIdentifiers
         let actions: [Action]
     }
     private static let trials: [Trial] = [
+        Trial(id: "torso-preparation", title: "Grasp-ready for torso test", detail: "Raise both empty arms into grasp-ready holds before a torso test. Each whole arm moves in coordinated segments, with fresh feedback, current monitoring and tread-proxy review. The operator observes external clearance; left ready geometry and camera registration remain unmeasured. No jaw or torso command is included. A private one-use record binds the existing explicit task instruction to this app and current arm context.", parameters: .current,
+              actions: [Action(title: "Export task template…", command: "torso-ready:export"), Action(title: "Prepare both arms from task receipt…", command: "torso-ready:run")]),
         Trial(id: "right-recycling", title: "Recycle can · right arm", detail: "Use ROB's physical right arm (Amber L10). Find an empty upright can, grasp its middle, verify a small lift with fixed-head visual evidence, then carry and gravity-drop above the bucket. Right-arm calibration is separate from left-arm reach tuning. One task approval covers both arms holding at their measured positions and only the right arm travelling.", parameters: .current,
               actions: [Action(title: "Grasp nearby can + lift and hold", command: "local-recycling:grasp-hold"), Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Export empty-hand observation template…", command: "local-recycling:empty-observation-export"), Action(title: "Import empty-hand observation…", command: "local-recycling:empty-observation-import"), Action(title: "Recycle selected cans", command: "right_recycle_cans"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
         Trial(id: "fixed-head-registration", title: "Camera-to-arm registration", detail: "Measure a local camera-to-robot transform from current RGB-D robot surfaces. Hold the exact head pose; fit and held-out validation use separate surface patches and later frames. A validated fit records its uncertainty and bounded volume. This test never moves an arm and does not manufacture a motion approval.", parameters: .none,
@@ -452,6 +454,29 @@ import UniformTypeIdentifiers
     @objc private func performTrialAction(_ sender: NSButton) {
         guard selectedTrial.actions.indices.contains(sender.tag) else { return }
         let command = selectedTrial.actions[sender.tag].command
+        if command.hasPrefix("torso-ready:") {
+            guard canEdit, storeParameters() else { return }
+            do {
+                if command == "torso-ready:export" {
+                    let value = try ROBArmRoutineCoordinator.shared.torsoPreparationTemplate()
+                    let panel = NSSavePanel(); panel.nameFieldStringValue = "torso-preparation.json"
+                    panel.allowedContentTypes = [.json]
+                    guard panel.runModal() == .OK, let url = panel.url else { return }
+                    try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .prettyPrinted]).write(to: url, options: .atomic)
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                    parameterMessage = "Task template exported. It does not authorize or move an arm."
+                } else {
+                    let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]; panel.allowsMultipleSelection = false
+                    guard panel.runModal() == .OK, let url = panel.url else { return }
+                    observingLeftOperation = false; parameterMessage = ""
+                    ROBArmRoutineCoordinator.shared.prepareArmsForTorsoTest(receipt: url) { [weak self] result in
+                        self?.parameterMessage = result["detail"] as? String ?? "Preparation ended."
+                        self?.refresh()
+                    }
+                }
+            } catch { parameterMessage = error.localizedDescription }
+            refresh(); return
+        }
         // File controls must remain reachable while the receipt-only request
         // deliberately disables ordinary edits and other trial actions.
         if command == "local-recycling:export" { exportLocalRecyclingApprovalTemplate(); return }

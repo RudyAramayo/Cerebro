@@ -93,6 +93,59 @@ struct ROBTableRelayInitialEmptyEvidence {
     // restart below are distinct from ordinary chat/model/controller text.
     private let localSessionID = UUID()
     var localRecyclingApprovalSessionID: String { localSessionID.uuidString }
+
+    /// A private, one-use record of the actual operator's two-arm lift request.
+    /// This is not a spoken response, an arm session, or a can-campaign restart.
+    @nonobjc func torsoPreparationTemplate(context: String, readyPoseRevision: String) -> [String: Any] {
+        ["schemaVersion": 1, "kind": "operator_observed_torso_test_preparation",
+         "receiptID": UUID().uuidString, "appSessionID": localSessionID.uuidString,
+         "context": context, "issuedAtMilliseconds": now().timeIntervalSince1970 * 1000,
+         "readyPoseRevision": readyPoseRevision,
+         "source": "explicit_user_messages", "sourceMessages": [], "sourceMessageSHA256": [],
+         "bothArmsEmpty": false, "operatorObservesClearLift": false,
+         "jawCommands": false, "treadCommands": false, "torsoCommands": false]
+    }
+
+    @nonobjc func consumeTorsoPreparationReceipt(_ url: URL, context: String, readyPoseRevision: String) throws -> UUID {
+        #if DEBUG
+        guard UserDefaults.standard.bool(forKey: "ROBDevelopmentMode"), pending == nil,
+              !manualArmSessionActive, !armSessionActive else {
+            throw localApprovalError("Finish the active arm authorization before this supervised debug preparation.")
+        }
+        let data = try readPrivateLocalReceipt(url)
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value["schemaVersion"] as? Int == 1,
+              value["kind"] as? String == "operator_observed_torso_test_preparation",
+              let idText = value["receiptID"] as? String, let id = UUID(uuidString: idText),
+              value["appSessionID"] as? String == localSessionID.uuidString,
+              value["context"] as? String == context,
+              value["readyPoseRevision"] as? String == readyPoseRevision,
+              let issued = value["issuedAtMilliseconds"] as? Double,
+              (0...300_000).contains(now().timeIntervalSince1970 * 1000 - issued),
+              value["source"] as? String == "explicit_user_messages",
+              let messages = value["sourceMessages"] as? [String], (2...6).contains(messages.count),
+              messages.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 4096 }),
+              let hashes = value["sourceMessageSHA256"] as? [String],
+              hashes == messages.map({ Self.localHash(Data($0.utf8)) }),
+              value["bothArmsEmpty"] as? Bool == true,
+              value["operatorObservesClearLift"] as? Bool == true,
+              value["jawCommands"] as? Bool == false,
+              value["treadCommands"] as? Bool == false,
+              value["torsoCommands"] as? Bool == false else {
+            throw localApprovalError("The two-arm preparation receipt is stale or does not match this exact app, controller and empty-arm task.")
+        }
+        // Exclusive creation consumes the receipt before any motor command.
+        // A fault, Stop or relaunch cannot replay it.
+        try writeLocalApprovalAudit(["receipt": value, "receiptSHA256": Self.localHash(data),
+            "consumedAtMilliseconds": now().timeIntervalSince1970 * 1000,
+            "cameraRegistrationVerified": false, "clearanceSource": "operator_observed",
+            "cameraPersonPredictions": "advisory_for_this_empty_lift"],
+            name: "torso-preparation-" + id.uuidString + ".json")
+        return id
+        #else
+        throw localApprovalError("Operator-observed torso preparation is a debug-only sandbox test.")
+        #endif
+    }
     @nonobjc var localRecyclingApprovalAuditDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cerebro/LocalSessionApprovals", isDirectory: true)
     @nonobjc var standingCanCampaignDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -874,6 +927,7 @@ struct ROBTableRelayInitialEmptyEvidence {
         var recycleMissionAuthorization: (() -> Bool)?
         var armSessionID: String? = nil
         var manualArmSessionID: String? = nil
+        var localPanelGeneration: UInt64? = nil
         var attentionReminders = 0
         var localRecyclingScope: LocalRecyclingScope?
         var tableRelayScope:TableRelayScope?
@@ -1019,8 +1073,61 @@ struct ROBTableRelayInitialEmptyEvidence {
             execute: execute, cancel: cancel, completion: completion)
     }
 
+    /// Only native panel handlers call this entry. A local click is authority
+    /// for this captured command, not a spoken response or reusable AI grant.
+    func takeLocalPanelControl() {
+        precondition(Thread.isMainThread)
+        let reason = "Operator took control at the local panel"
+        cancel(reason: reason)
+        NotificationCenter.default.post(name: Notification.Name("ROBLocalManualControlRequested"), object: self)
+    }
+
+    func performLocalPanelArmCommand(operation: String, arm: String, summary: String,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        let allowed = ["activate", "position", "deactivate", "cmd_activate_mode_v2", "cmd_deactivate_mode_v2",
+            "cmd_position_mode_v2", "cmd_current_mode_v2", "zero_position_mode_v2", "cmd_position_input",
+            "cmd_cartesian_input", "close_gripper", "open_gripper", "calibrate_gripper"]
+        guard allowed.contains(operation), ["left", "right"].contains(arm) else {
+            completion(["status": "rejected", "detail": "Unknown local panel command or arm."]); return
+        }
+        takeLocalPanelControl()
+        let gateway = ROBAmberGatewayClient.shared
+        let generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
+        guard gateway.isReady(), generation != 0 else {
+            completion(["status": "blocked", "detail": "Connect Amber before using the local arm controls."]); return
+        }
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm, "summary": summary],
+            summary: summary, localPanelGeneration: generation, execute: { [weak self] done in
+                guard let self, let id = self.pending?.id else { return }
+                let deadline = ProcessInfo.processInfo.systemUptime + 2
+                func dispatchWhenReleased() {
+                    guard self.pending?.id == id else { return }
+                    guard gateway.isReady(), (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation else {
+                        done(["status": "blocked", "detail": "The arm connection changed during manual takeover."]); return
+                    }
+                    let readiness = gateway.manualArmControlReadiness(forUDPPort: arm == "right" ? 26001 : 26002,
+                        expectedSessionGeneration: generation)
+                    if readiness["allowed"] as? Bool == true { execute(done); return }
+                    // Only ownership handoff may wait. Stale feedback never
+                    // gets a relaxed age or an automatic later replay.
+                    if readiness["waitingForOwner"] as? Bool == true,
+                       ProcessInfo.processInfo.systemUptime < deadline {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02, execute: dispatchWhenReleased)
+                    } else {
+                        done(["status": "blocked", "detail": readiness["reason"] as? String ?? "Manual control is unavailable."])
+                    }
+                }
+                dispatchWhenReleased()
+            }, cancel: cancel, completion: completion)
+    }
+
     private func authorizationIsLive(_ p: Pending) -> Bool {
         guard let started = p.started, (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
+        if let generation = p.localPanelGeneration {
+            let gateway = ROBAmberGatewayClient.shared
+            return gateway.isReady() && (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation
+        }
         if let authorized=p.recycleMissionAuthorization { return authorized() }
         if let scope=p.tableRelayScope {
             guard tableRelayAuditFailure==nil,let approval=tableRelayApproval,approval.pendingID==p.id,
@@ -1251,14 +1358,14 @@ struct ROBTableRelayInitialEmptyEvidence {
     }
 
     func authorizesMotionPath(_ name: String) -> Bool {
-        guard let p = pending, p.started != nil, p.action == "play_gesture",
+        guard let p = pending, p.localPanelGeneration == nil, p.started != nil, p.action == "play_gesture",
               p.arguments["gesture"] as? String == name else { return false }
         return authorizationIsLive(p)
     }
 
     /// Exact one-shot scope for the operator-supervised physical-left trial.
     func authorizesLeftArmTrial(_ summary: String) -> Bool {
-        guard let p = pending,
+        guard let p = pending, p.localPanelGeneration == nil,
               p.tableRelayScope==nil,p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
               p.arguments["arm"] as? String == "left", p.summary == summary,
               authorizationIsLive(p) else { return false }
@@ -1266,7 +1373,7 @@ struct ROBTableRelayInitialEmptyEvidence {
     }
 
     func authorizesRightArmTrial(_ summary: String) -> Bool {
-        guard let p = pending,p.tableRelayScope==nil,p.action == "arm_operation",
+        guard let p = pending, p.localPanelGeneration == nil, p.tableRelayScope==nil,p.action == "arm_operation",
               p.arguments["operation"] as? String == "manual",
               ["right","both"].contains(p.arguments["arm"] as? String ?? ""), p.summary == summary,
               authorizationIsLive(p) else { return false }
@@ -1277,7 +1384,7 @@ struct ROBTableRelayInitialEmptyEvidence {
     /// operator-supervised travel may replace the semantic route inspection.
     /// Never persist or infer this scope from a model's request or a preference.
     func authorizesSupervisedArmRoute() -> Bool {
-        guard let p = pending,p.tableRelayScope==nil,authorizationIsLive(p) else { return false }
+        guard let p = pending, p.localPanelGeneration == nil, p.tableRelayScope==nil,authorizationIsLive(p) else { return false }
         return (p.action == "arm_operation" && p.summary.hasSuffix(Self.supervisedRouteNotice))
             || (p.action == "play_gesture" && p.summary == Self.supervisedGreetingName)
     }
@@ -1297,6 +1404,7 @@ struct ROBTableRelayInitialEmptyEvidence {
                          recycleMissionAuthorization: (() -> Bool)? = nil,
                          allowArmSession: Bool = false,
                          allowManualArmSession: Bool = false,
+                         localPanelGeneration: UInt64? = nil,
                          localRecyclingScope: LocalRecyclingScope? = nil,
                          localContextIdentity: (() -> String?)? = nil, receiptOnly: Bool = false, tableRelayScope:TableRelayScope? = nil,
                          execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
@@ -1319,6 +1427,10 @@ struct ROBTableRelayInitialEmptyEvidence {
         pendingEmptyObservation=nil
         pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
             created: now(), execute: execute, cancel: cancel, completion: completion, executionLimit: executionLimit)
+        if let generation = localPanelGeneration {
+            pending?.localPanelGeneration = generation
+            startTimer(); beginAcceptedOperation(); return
+        }
         if let authorization=recycleMissionAuthorization {
             guard authorization() else { finish(["status":"blocked","detail":"Mission authorization expired"],state:.failed);return }
             pending?.recycleMissionAuthorization=authorization
@@ -1536,7 +1648,7 @@ struct ROBTableRelayInitialEmptyEvidence {
             // is missed. Repeat the SAME scope without extending its deadline.
             announceApproval?("Hey! Can I move my arms?")
         }
-        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil || p.tableRelayScope != nil || p.recycleMissionAuthorization != nil {
+        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil || p.tableRelayScope != nil || p.recycleMissionAuthorization != nil || p.localPanelGeneration != nil {
             if !authorizationIsLive(p) { pauseOrCancelLostOperation("Authorized arm operation expired; hold requested.") }
             return
         }
@@ -1585,17 +1697,28 @@ struct ROBTableRelayInitialEmptyEvidence {
         return now().timeIntervalSince(current.seen) < 15 && sessionIsActive(peer.device, peer.session)
     }
 
-    /// UI callers capture the selected arm/force before requesting approval.
-    /// Recheck feedback and the gateway generation after the operator decides.
+    /// Controller/session callers retain their existing authorization lane.
     @nonobjc func requestGatewayCommand(operation: String, arm: String, summary: String,
+        command: @escaping () -> UInt64, completion: @escaping (NSDictionary) -> Void) {
+        gatewayCommand(operation: operation, arm: arm, summary: summary, localPanel: false,
+            command: command, completion: completion)
+    }
+
+    /// Native buttons capture the selected arm and force at the click. They
+    /// take control directly, with dispatch feedback and acknowledgement checks.
+    @nonobjc func performLocalPanelGatewayCommand(operation: String, arm: String, summary: String,
+        command: @escaping () -> UInt64, completion: @escaping (NSDictionary) -> Void) {
+        gatewayCommand(operation: operation, arm: arm, summary: summary, localPanel: true,
+            command: command, completion: completion)
+    }
+
+    private func gatewayCommand(operation: String, arm: String, summary: String, localPanel: Bool,
         command: @escaping () -> UInt64, completion: @escaping (NSDictionary) -> Void) {
         guard ["left", "right"].contains(arm) else {
             completion(["status": "rejected", "detail": "Unknown manual arm selection."]); return
         }
-        // Only the native Diagnostics handlers enter this lane. Full-travel
-        // calibration remains separate; routine/model requests cannot inherit it.
         let covered = ["activate", "position", "deactivate", "close_gripper", "open_gripper"].contains(operation)
-        if covered, !manualArmSessionActive {
+        if !localPanel, covered, !manualArmSessionActive {
             beginManualArmSession { [weak self] result in
                 guard result["status"] as? String == "completed", let self else { completion(result); return }
                 self.requestGatewayCommand(operation: operation, arm: arm, summary: summary, command: command, completion: completion)
@@ -1613,8 +1736,7 @@ struct ROBTableRelayInitialEmptyEvidence {
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil; timeout?.cancel(); timeout = nil
         }
-        request(action: "arm_operation", arguments: ["operation": operation, "arm": arm, "summary": summary],
-            summary: summary, allowManualArmSession: covered, execute: { done in
+        let execute: (@escaping (NSDictionary) -> Void) -> Void = { done in
             let readiness = gateway.manualArmControlReadiness(forUDPPort: port,
                 expectedSessionGeneration: generation)
             guard generation != 0, readiness["allowed"] as? Bool == true else {
@@ -1641,9 +1763,17 @@ struct ROBTableRelayInitialEmptyEvidence {
             }
             timeout = deadline
             DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: deadline)
-        }, cancel: {
+        }
+        let cancel: () -> Void = {
             cleanup(); _ = gateway.priorityHold(forArm: gatewayArm)
-        }, completion: completion)
+        }
+        if localPanel {
+            performLocalPanelArmCommand(operation: operation, arm: arm, summary: summary,
+                execute: execute, cancel: cancel, completion: completion)
+        } else {
+            request(action: "arm_operation", arguments: ["operation": operation, "arm": arm, "summary": summary],
+                summary: summary, allowManualArmSession: covered, execute: execute, cancel: cancel, completion: completion)
+        }
     }
     private func publish(_ state: ROBRobotActionState, detail: String, result: NSDictionary) {
         guard let p = pending, let peer = p.peer else { return }

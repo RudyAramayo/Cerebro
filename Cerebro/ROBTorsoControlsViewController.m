@@ -88,6 +88,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 @property (nonatomic, strong) NSPopover *neckSafetyConfigurationPopover;
 @property (nonatomic, assign) BOOL pendingNeckOperatorCommandAfterStartup;
 @property (nonatomic, assign) BOOL pendingLowerTiltOperatorCommandAfterStartup;
+@property (nonatomic, strong) ROBArmPositionControlState *l10PositionControlState;
+@property (nonatomic, strong) ROBArmPositionControlState *r11PositionControlState;
+- (NSArray<NSSlider *> *)armPositionSlidersForGatewayArm:(NSString *)arm;
+- (void)refreshAmberPositionControls;
+- (void)armPositionSlidersWereEditedForGatewayArm:(NSString *)arm;
 - (void)startAmberHostDiscovery;
 - (void)setupAmberReconnectControl;
 - (IBAction)reconnectAmberArms:(id)sender;
@@ -112,6 +117,17 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (void) viewDidLoad
 {
     [super viewDidLoad];
+    self.l10PositionControlState = [ROBArmPositionControlState new];
+    self.r11PositionControlState = [ROBArmPositionControlState new];
+    for (NSString *arm in @[@"left", @"right"]) {
+        NSArray<NSSlider *> *sliders = [self armPositionSlidersForGatewayArm:arm];
+        for (NSUInteger i = 0; i < sliders.count; i++) {
+            sliders[i].continuous = YES;
+            sliders[i].accessibilityLabel = [NSString stringWithFormat:@"Robot %@ J%lu position",
+                [arm isEqualToString:@"left"] ? @"right" : @"left", (unsigned long)i+1];
+        }
+    }
+    [self refreshAmberPositionControls];
     [self setupNeckCommandReadouts];
     [self setupNeckSafetyConfigurationControls];
     [[NSNotificationCenter defaultCenter]
@@ -1100,27 +1116,71 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (IBAction)mirrorPosition_R11_to_L10:(id)sender {
     self.arm_L10_position_cmdTime.doubleValue = self.arm_R11_position_cmdTime.doubleValue;
     self.arm_L10_position_cmdSleep.doubleValue = self.arm_R11_position_cmdSleep.doubleValue;
-    self.arm_L10_position_servo1.doubleValue = -self.arm_R11_position_servo1.doubleValue;
-    self.arm_L10_position_servo2.doubleValue = -self.arm_R11_position_servo2.doubleValue;
-    self.arm_L10_position_servo3.doubleValue = -self.arm_R11_position_servo3.doubleValue;
-    self.arm_L10_position_servo4.doubleValue = -self.arm_R11_position_servo4.doubleValue;
-    self.arm_L10_position_servo5.doubleValue = -self.arm_R11_position_servo5.doubleValue;
-    self.arm_L10_position_servo6.doubleValue = -self.arm_R11_position_servo6.doubleValue;
-    self.arm_L10_position_servo7.doubleValue = -self.arm_R11_position_servo7.doubleValue;
+    NSArray<NSNumber *> *values = [ROBArmPoseMirror mirroredJointValues:
+        [[self armPositionSlidersForGatewayArm:@"right"] valueForKey:@"doubleValue"]];
+    NSArray<NSSlider *> *destination = [self armPositionSlidersForGatewayArm:@"left"];
+    if (values.count != 7) return;
+    for (NSUInteger i = 0; i < 7; i++) destination[i].doubleValue = values[i].doubleValue;
+    [self armPositionSlidersWereEditedForGatewayArm:@"left"];
     [self update_arm_L10_Action:self];
 }
 
 - (IBAction)mirrorPosition_L10_to_R11:(id)sender {
     self.arm_R11_position_cmdTime.doubleValue = self.arm_L10_position_cmdTime.doubleValue;
     self.arm_R11_position_cmdSleep.doubleValue = self.arm_L10_position_cmdSleep.doubleValue;
-    self.arm_R11_position_servo1.doubleValue = -self.arm_L10_position_servo1.doubleValue;
-    self.arm_R11_position_servo2.doubleValue = -self.arm_L10_position_servo2.doubleValue;
-    self.arm_R11_position_servo3.doubleValue = -self.arm_L10_position_servo3.doubleValue;
-    self.arm_R11_position_servo4.doubleValue = -self.arm_L10_position_servo4.doubleValue;
-    self.arm_R11_position_servo5.doubleValue = -self.arm_L10_position_servo5.doubleValue;
-    self.arm_R11_position_servo6.doubleValue = -self.arm_L10_position_servo6.doubleValue;
-    self.arm_R11_position_servo7.doubleValue = -self.arm_L10_position_servo7.doubleValue;
+    NSArray<NSNumber *> *values = [ROBArmPoseMirror mirroredJointValues:
+        [[self armPositionSlidersForGatewayArm:@"left"] valueForKey:@"doubleValue"]];
+    NSArray<NSSlider *> *destination = [self armPositionSlidersForGatewayArm:@"right"];
+    if (values.count != 7) return;
+    for (NSUInteger i = 0; i < 7; i++) destination[i].doubleValue = values[i].doubleValue;
+    [self armPositionSlidersWereEditedForGatewayArm:@"right"];
     [self update_arm_R11_Action:self];
+}
+
+- (NSArray<NSSlider *> *)armPositionSlidersForGatewayArm:(NSString *)arm
+{
+    if ([arm isEqualToString:@"left"]) return @[
+        self.arm_L10_position_servo1, self.arm_L10_position_servo2, self.arm_L10_position_servo3,
+        self.arm_L10_position_servo4, self.arm_L10_position_servo5, self.arm_L10_position_servo6,
+        self.arm_L10_position_servo7];
+    return @[
+        self.arm_R11_position_servo1, self.arm_R11_position_servo2, self.arm_R11_position_servo3,
+        self.arm_R11_position_servo4, self.arm_R11_position_servo5, self.arm_R11_position_servo6,
+        self.arm_R11_position_servo7];
+}
+
+- (void)refreshAmberPositionControls
+{
+    ROBAmberGatewayClient *gateway = ROBAmberGatewayClient.shared;
+    for (NSString *arm in @[@"left", @"right"]) {
+        BOOL l10 = [arm isEqualToString:@"left"];
+        ROBArmPositionControlState *state = l10 ? self.l10PositionControlState : self.r11PositionControlState;
+        ROBAmberGatewayTelemetry *sample = [gateway telemetryForArm:arm];
+        NSArray<NSNumber *> *values = [state nextSliderValuesWithTargetRadians:[gateway targetPositionsForArm:arm]
+            measuredRadians:sample.positionsRadians ?: @[]
+            feedbackFresh:sample != nil && sample.effectiveSampleAgeMilliseconds <= ROBArmPositionControlState.maximumFeedbackAgeMilliseconds];
+        if (values.count != 7) continue;
+        NSArray<NSSlider *> *sliders = [self armPositionSlidersForGatewayArm:arm];
+        for (NSUInteger i = 0; i < 7; i++) sliders[i].doubleValue = values[i].doubleValue;
+        // Update labels only. A passive refresh must never call Send Position.
+        if (l10) [self update_arm_L10_Action:self];
+        else [self update_arm_R11_Action:self];
+    }
+}
+
+- (void)armPositionSlidersWereEditedForGatewayArm:(NSString *)arm
+{
+    ROBArmPositionControlState *state = [arm isEqualToString:@"left"]
+        ? self.l10PositionControlState : self.r11PositionControlState;
+    [state noteEditedSliderValues:[[self armPositionSlidersForGatewayArm:arm] valueForKey:@"doubleValue"]];
+    if (ROBArmRoutineCoordinator.shared.ownsPhysicalMotion) {
+        [ROBArmRoutineCoordinator.shared cancelWithReason:@"Operator adjusted an arm position; automatic motion held"];
+        [ROBShowMotionCoordinator.shared stop];
+    }
+    if (ROBAmberGestureExecutor.shared.isExecuting) {
+        [ROBAmberGestureExecutor.shared cancelCurrentGestureWithReason:@"Operator adjusted an arm position"];
+    }
+    if (ROBTorsoControlCenter.shared.isArmed) [ROBTorsoControlCenter.shared stop];
 }
 
 - (void) bindArm_controls
@@ -1407,6 +1467,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
 - (void) renderServoCommands
 {
+    [self refreshAmberPositionControls];
     ROBSerialBox *serialBox = self.robMainViewController.serialBox;
     if (self.pendingNeckOperatorCommandAfterStartup
         && !serialBox.isSafeNeckStartupInProgress) {
@@ -1515,6 +1576,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 }
 
 - (IBAction)update_arm_R11_Action:(id)sender {
+    if ([[self armPositionSlidersForGatewayArm:@"right"] containsObject:sender]) {
+        [self armPositionSlidersWereEditedForGatewayArm:@"right"];
+    }
     
     int force = [self.arm_R11_force intValue];
     self.arm_R11_force_label.stringValue = [NSString stringWithFormat:@"%i", force];
@@ -1594,6 +1658,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 }
 
 - (IBAction)update_arm_L10_Action:(id)sender {
+    if ([[self armPositionSlidersForGatewayArm:@"left"] containsObject:sender]) {
+        [self armPositionSlidersWereEditedForGatewayArm:@"left"];
+    }
     int force = [self.arm_L10_force intValue];
     self.arm_L10_force_label.stringValue = [NSString stringWithFormat:@"%i", force];
     

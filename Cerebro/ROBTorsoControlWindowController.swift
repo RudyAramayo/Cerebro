@@ -75,7 +75,8 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
     private let unwind = NSButton(title: "Unwind tracked debug turn", target: nil, action: nil)
     private let dial = NSSlider(value: 0, minValue: 0, maxValue: 360, target: nil, action: nil)
     private let lever = ROBTorsoVelocitySlider(value: 0, minValue: -1, maxValue: 1, target: nil, action: nil)
-    private let maximumSpeed = NSSlider(value: 8, minValue: 1, maxValue: 20, target: nil, action: nil)
+    private let maximumSpeed = NSSlider(value: 800, minValue: 100,
+        maxValue: ROBTorsoMotionPolicy.maximumPulseRate, target: nil, action: nil)
     private let speedLabel = NSTextField(labelWithString: "8°/s maximum")
     private let armButton = NSButton(title: "Arm rehearsal", target: nil, action: nil)
     private let turnButton = NSButton(title: "Turn to heading", target: nil, action: nil)
@@ -130,7 +131,7 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         readouts.addArrangedSubview(observation)
         sourceDetail.font = .systemFont(ofSize: 12); sourceDetail.textColor = .secondaryLabelColor
         sourceDetail.preferredMaxLayoutWidth = 360; readouts.addArrangedSubview(sourceDetail)
-        readouts.addArrangedSubview(label("Requested speed", bold: true))
+        readouts.addArrangedSubview(label("Turn speed", bold: true))
         velocity.font = .monospacedDigitSystemFont(ofSize: 22, weight: .regular)
         readouts.addArrangedSubview(velocity)
         readouts.addArrangedSubview(label("Orange: destination  •  Blue/green: observation", size: 11))
@@ -144,6 +145,7 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         heading.widthAnchor.constraint(equalToConstant: 72).isActive = true
         heading.setAccessibilityIdentifier("ROB.Torso.TargetHeading")
         turnButton.target = self; turnButton.action = #selector(turn)
+        turnButton.setAccessibilityIdentifier("ROB.Torso.Turn")
         stack.addArrangedSubview(row([label("Destination", bold: true), dial, heading, label("degrees"), turnButton]))
 
         counts.widthAnchor.constraint(equalToConstant: 90).isActive = true
@@ -158,7 +160,7 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         stack.addArrangedSubview(row([label("Count target"), counts, countSlider]))
         countRangeLabel.font = .systemFont(ofSize: 11)
         stack.addArrangedSubview(countRangeLabel)
-        stack.addArrangedSubview(label("Count slider previews a destination. Select Turn to heading to move after arming rotation.", size: 11))
+        stack.addArrangedSubview(label("Count slider previews a destination. Select Turn to heading to take control and move.", size: 11))
         baseReference.widthAnchor.constraint(equalToConstant: 65).isActive = true
         baseReference.setAccessibilityIdentifier("ROB.Torso.SoftwareBaseReference")
         referenceButton.target = self; referenceButton.action = #selector(setReference)
@@ -172,6 +174,10 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         lever.widthAnchor.constraint(equalToConstant: 650).isActive = true
         stack.addArrangedSubview(lever)
         maximumSpeed.target = self; maximumSpeed.action = #selector(speedChanged); maximumSpeed.isContinuous = false
+        maximumSpeed.doubleValue = center.maximumPulseRate
+        maximumSpeed.setAccessibilityIdentifier("ROB.Torso.MaximumPulseRate")
+        maximumSpeed.setAccessibilityLabel("Maximum torso pulse rate")
+        maximumSpeed.toolTip = "Saved maximum for every torso turn, in pulses per second. The 3000 pulses/s ceiling matches the operator-confirmed TIC setting. Changing it stops motion."
         maximumSpeed.widthAnchor.constraint(equalToConstant: 270).isActive = true
         stack.addArrangedSubview(row([label("Speed limit"), maximumSpeed, speedLabel]))
 
@@ -228,9 +234,22 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         counts.stringValue = String(format: "%.0f", center.count(forHeading: selectedHeading))
         countSlider.doubleValue = center.count(forHeading: selectedHeading)
     }
-    @objc private func turn() { headingChanged(); center.turnToHeading(selectedHeading) }
+    @objc private func turn() {
+        // Keep the full-precision selection behind the rounded degree display.
+        // Re-reading that display used to change a five-pulse count adjustment
+        // into a zero- or ten-pulse request. Commit only an actual text edit.
+        if heading.stringValue != String(format: "%.1f", selectedHeading) {
+            guard let value = Double(heading.stringValue), value.isFinite else { return }
+            selectHeading(value)
+        } else if counts.stringValue != String(format: "%.0f", center.count(forHeading: selectedHeading)) {
+            guard let value = Double(counts.stringValue), value.isFinite,
+                  (Double(Int32.min)...Double(Int32.max)).contains(value) else { return }
+            selectHeading(center.heading(forCount: value))
+        }
+        center.takeLocalControlAndTurn(to: selectedHeading)
+    }
     @objc private func rateChanged() { center.setLever(lever.doubleValue, held: lever.isHeld) }
-    @objc private func speedChanged() { center.setMaximumSpeed(maximumSpeed.doubleValue) }
+    @objc private func speedChanged() { center.setMaximumPulseRate(maximumSpeed.doubleValue) }
     @objc private func arm() { center.isArmed ? center.stop() : center.arm() }
     @objc private func energize() { center.energize() }
     @objc private func deenergize() { lever.doubleValue = 0; center.deenergize() }
@@ -250,9 +269,10 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
         let armTitle = center.isArmed ? "Disarm" : (center.usesHardware ? "Arm torso" : "Arm rehearsal")
         if armButton.title != armTitle { armButton.title = armTitle }
         armButton.isEnabled = center.isArmed || center.canArm
-        turnButton.isEnabled = center.isArmed
-        lever.isEnabled = center.isArmed
-        if !center.isArmed { lever.doubleValue = 0 }
+        turnButton.isEnabled = center.canUseLocalControls
+        lever.isEnabled = center.canUseLocalControls
+        lever.toolTip = "Hold and slide to take manual control. Release to stop."
+        if !center.isLocalLeverHeld { lever.doubleValue = 0 }
         headingView.observed = center.observedHeading; headingView.live = center.usesLiveCamera
         referenceButton.isEnabled = center.canSetSoftwareReference
         if countSlider.minValue != center.count(forHeading: 90) || countSlider.maxValue != center.count(forHeading: -90) {
@@ -264,7 +284,7 @@ final class ROBTorsoControlWindowController: NSWindowController, NSWindowDelegat
             center.count(forHeading:90),center.countReference,center.count(forHeading:-90)))
         unwind.isEnabled = center.canUnwind
         show(cable, !center.debugCableMode ? "Untethered: unrestricted rotation via slipring" : center.cableTravelDegrees.isFinite ? String(format: "Debug tether: %+.1f° since tracking began. Heading requests prefer unwinding. Earlier cable twist is unknown.", center.cableTravelDegrees) : "Debug tether: turn history unavailable; existing cable twist is unknown.")
-        show(speedLabel, String(format: "%.1f°/s maximum", center.maximumSpeed))
+        show(speedLabel, String(format: "%.0f pulses/s · est. %.1f°/s at table", center.maximumPulseRate, center.maximumSpeed))
         source.selectedSegment = center.usesCountEstimate ? 2 : center.usesLiveCamera ? 1 : 0
     }
 

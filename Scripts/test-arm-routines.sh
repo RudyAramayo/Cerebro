@@ -13,14 +13,13 @@ cp "$repo_dir/Cerebro/ROBWorkspaceDepthMap.swift" "$fixture_dir/DepthMap.swift"
 cp "$repo_dir/Cerebro/ROBFixedHeadRegistration.swift" "$fixture_dir/FixedHeadRegistration.swift"
 cp "$repo_dir/Cerebro/ROBEstimatedArmCalibrationPlan.swift" "$fixture_dir/EstimatedCalibration.swift"
 cp "$repo_dir/Cerebro/ROBVisualGraspVerifier.swift" "$fixture_dir/VisualVerifier.swift"
-cp "$repo_dir/Cerebro/ROBLeftArmTrial.swift" "$fixture_dir/LeftTrial.swift"
 cp "$repo_dir/Cerebro/ROBArmRoutineCoordinator.swift" "$fixture_dir/Coordinator.swift"
 cp "$repo_dir/Cerebro/ROBControllerArmApproval.swift" "$fixture_dir/Approval.swift"
 cp "$repo_dir/Cerebro/ROBRobotActionProtocol.swift" "$fixture_dir/Protocol.swift"
 cp "$repo_dir/Tests/ROBArmRoutineFixtureTests.swift" "$fixture_dir/Fixtures.swift"
-xcrun swiftc -swift-version 5 -parse-as-library \
+xcrun swiftc -j 4 -D DEBUG -O -swift-version 5 -parse-as-library \
   -module-cache-path /private/tmp/cerebro-swift-module-cache \
-  "$fixture_dir/Imitation.swift" "$fixture_dir/Plan.swift" "$fixture_dir/Ghost.swift" "$fixture_dir/Workspace.swift" "$fixture_dir/JointLimits.swift" "$fixture_dir/Collision.swift" "$fixture_dir/DepthMap.swift" "$fixture_dir/FixedHeadRegistration.swift" "$fixture_dir/EstimatedCalibration.swift" "$fixture_dir/VisualVerifier.swift" "$fixture_dir/Coordinator.swift" "$fixture_dir/LeftTrial.swift" "$fixture_dir/Approval.swift" "$fixture_dir/Protocol.swift" "$fixture_dir/Fixtures.swift" \
+  "$fixture_dir/Imitation.swift" "$fixture_dir/Plan.swift" "$fixture_dir/Ghost.swift" "$fixture_dir/Workspace.swift" "$fixture_dir/JointLimits.swift" "$fixture_dir/Collision.swift" "$fixture_dir/DepthMap.swift" "$fixture_dir/FixedHeadRegistration.swift" "$fixture_dir/EstimatedCalibration.swift" "$fixture_dir/VisualVerifier.swift" "$fixture_dir/Coordinator.swift" "$fixture_dir/Approval.swift" "$fixture_dir/Protocol.swift" "$fixture_dir/Fixtures.swift" \
   -o "$fixture_dir/routines"
 cp -R "$repo_dir/Cerebro/Resources/ShadowPlanner" "$fixture_dir/ShadowPlanner"
-"$fixture_dir/routines"
+"$fixture_dir/routines" "$@"

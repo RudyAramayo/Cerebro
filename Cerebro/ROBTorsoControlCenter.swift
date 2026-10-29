@@ -4,6 +4,7 @@ import Cocoa
     static let shared = ROBTorsoControlCenter()
     static let changed = Notification.Name("ROBTorsoControlDidChange")
     static let cameraDemandChanged = Notification.Name("ROBTorsoVisionDemandDidChange")
+    static let speedLimitKey = "ROBTorsoMaximumPulseRate"
 
     private(set) var cameraDemandActive = false
     private(set) var usesLiveCamera = false
@@ -54,6 +55,11 @@ import Cocoa
     private var lastUIPublish = 0.0
     private var uiPublishPending = false
     private var localLeverHeld = false
+    private enum LocalDemand { case rate(Double), heading(Double) }
+    @nonobjc private var pendingLocalDemand: LocalDemand?
+    private var localDemandDeadline = 0.0
+    private var localControlOwnsTorso = false
+    private var nativePositionTarget: Int32?
     private var arming = false
     private let modelID: String?
     private let referenceID: String?
@@ -71,6 +77,10 @@ import Cocoa
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         modelID = manifest?["modelID"] as? String; referenceID = manifest?["referenceID"] as? String
         super.init()
+        let savedSpeed = UserDefaults.standard.double(forKey: Self.speedLimitKey) * 360 / ROBTorsoCountCalibration.countsPerTurn
+        if savedSpeed.isFinite, ROBTorsoMotionPolicy.speedRange.contains(savedSpeed) {
+            policy.maximumSpeed = savedSpeed
+        }
         policy.debugCableMode = UserDefaults.standard.bool(forKey: "ROBDevelopmentMode")
         transport.onPosition = { [weak self] sample in self?.acceptCount(sample) }
         transport.onMotionDispatch = { ROBFixedHeadBodyMotionIdentity.invalidate() }
@@ -85,8 +95,10 @@ import Cocoa
                 if let reason = self.armClearance() {
                     self.stop(); self.policy.invalidate(reason)
                 } else if !self.usesHardware || !self.policy.arm(at: ProcessInfo.processInfo.systemUptime) { self.stop() }
+                else { self.advanceLocalDemand() }
             } else if self.usesHardware && unexpectedLoss {
                 self.arming = false; self.powerRequestPending = false; self.powerHoldRequested = false
+                self.pendingLocalDemand = nil; self.localLeverHeld = false
                 self.lastCommandFailure = detail
                 self.policy.invalidate(detail)
             }
@@ -114,11 +126,13 @@ import Cocoa
     var isArmed: Bool { policy.armed }
     var status: String {
         let operation = lastCommandFailure.map { "Last command failed: " + $0 } ?? (powerRequestPending ? "Checking TIC and energizing a zero-speed hold…"
-            : arming ? "Checking Tic settings and preparing the motor…" : policy.status)
+            : arming ? "Checking Tic settings and preparing the motor…"
+            : pendingLocalDemand != nil ? "Taking manual control…" : policy.status)
         if usesHardware, let reason = armClearance() { return operation + "\n" + reason }
         return operation
     }
     var maximumSpeed: Double { policy.maximumSpeed }
+    var maximumPulseRate: Double { policy.maximumSpeed * ROBTorsoCountCalibration.countsPerTurn / 360 }
     private var hasFreshTicFeedback: Bool {
         ticPosition.map { (0...0.5).contains(ProcessInfo.processInfo.systemUptime-$0.capturedAt) } == true
     }
@@ -147,6 +161,11 @@ import Cocoa
         return policy.hasFreshObservation(at: now) && (!usesCountEstimate || hasFreshTicFeedback)
     }
     var canArm: Bool { !arming && !powerRequestPending && hasFreshFeedback && (!usesHardware || armClearance() == nil) }
+    var isLocalLeverHeld: Bool { localLeverHeld }
+    var canUseLocalControls: Bool {
+        localLeverHeld || pendingLocalDemand != nil || isArmed || canArm
+            || (hasFreshFeedback && ROBArmRoutineCoordinator.shared.ownsPhysicalMotion)
+    }
 
     func showControls(_ sender: Any?) {
         precondition(Thread.isMainThread)
@@ -188,7 +207,8 @@ import Cocoa
         hardwareDetail = "Disarmed — software count control"
         visionDetail = countEstimateDetail
         // Begin a new tracked segment, never claim existing cable twist is zero.
-        policy = ROBTorsoMotionPolicy()
+        let speed = policy.maximumSpeed
+        policy = ROBTorsoMotionPolicy(); policy.maximumSpeed = speed
         policy.debugCableMode = UserDefaults.standard.bool(forKey: "ROBDevelopmentMode")
         transport.readPosition(); startTimer(); publish()
     }
@@ -218,6 +238,7 @@ import Cocoa
     func unwindDebugTurn() {
         guard remoteBaseline == nil, policy.requestUnwind() else { return }
         localLeverHeld = false; motionUntil = ProcessInfo.processInfo.systemUptime + 600
+        configureNativePositionTarget()
         publish()
     }
 
@@ -299,8 +320,10 @@ import Cocoa
 
     func stop() {
         precondition(Thread.isMainThread)
+        nativePositionTarget = nil
+        pendingLocalDemand = nil; localDemandDeadline = 0; localControlOwnsTorso = false
         localLeverHeld = false; remoteBaseline = nil; remoteUntil = 0; motionUntil = 0
-        policy.invalidate(usesHardware ? "Stopped — re-arm to move" : "Rehearsal stopped")
+        policy.invalidate(usesHardware ? "Stopped — hold the slider or choose a destination to move" : "Rehearsal stopped")
         stopHardware(retry: true); publish()
     }
 
@@ -310,20 +333,76 @@ import Cocoa
     }
 
     func releaseLever() {
+        if case .rate = pendingLocalDemand {
+            // A released drag never becomes a delayed move after USB setup.
+            stop(); return
+        }
+        nativePositionTarget = nil
         localLeverHeld = false
         if remoteBaseline == nil { policy.hold() }
+        publish()
     }
 
     func setLever(_ value: Double, held: Bool) {
         precondition(Thread.isMainThread)
         startTimer()
         guard held else { releaseLever(); return }
-        guard remoteBaseline == nil, policy.armed else {
-            if !policy.armed { publish() }
-            return
+        guard value.isFinite else { stop(); return }
+        let rate = min(1, max(-1, value))
+        if !localLeverHeld {
+            beginLocalDemand(.rate(rate)); return
         }
-        localLeverHeld = true
-        policy.requestRate(value); motionUntil = ProcessInfo.processInfo.systemUptime + 60
+        if pendingLocalDemand != nil { pendingLocalDemand = .rate(rate) }
+        else if policy.armed { policy.requestRate(rate) }
+    }
+
+    /// Native destination button: the click authorizes this bounded turn.
+    func takeLocalControlAndTurn(to heading: Double) {
+        guard heading.isFinite else { stop(); return }
+        beginLocalDemand(.heading(heading))
+    }
+
+    @nonobjc private func beginLocalDemand(_ demand: LocalDemand) {
+        precondition(Thread.isMainThread)
+        // Cancel the previous target before handing off other motion owners.
+        // The main controller may synchronously call stop() during this event.
+        stop()
+        NotificationCenter.default.post(name: Notification.Name("ROBLocalManualControlRequested"), object: self)
+        pendingLocalDemand = demand
+        localControlOwnsTorso = true
+        if case .rate = demand { localLeverHeld = true }
+        localDemandDeadline = ProcessInfo.processInfo.systemUptime + 2
+        startTimer(); advanceLocalDemand(); publish()
+    }
+
+    private func advanceLocalDemand() {
+        guard let demand = pendingLocalDemand else { return }
+        guard ProcessInfo.processInfo.systemUptime < localDemandDeadline else {
+            stop(); policy.invalidate("Manual takeover timed out; try the control again"); return
+        }
+        if arming { return }
+        guard hasFreshFeedback else {
+            stop(); policy.invalidate("Waiting for fresh torso feedback from the selected source"); return
+        }
+        // Cancellation can finish asynchronously. Wait only for that handoff;
+        // never loosen telemetry ages or replay a released slider request.
+        if ROBArmRoutineCoordinator.shared.ownsPhysicalMotion { return }
+        if !policy.armed {
+            arm()
+            guard policy.armed else {
+                if !arming { pendingLocalDemand = nil; localLeverHeld = false }
+                return
+            }
+        }
+        pendingLocalDemand = nil
+        motionUntil = ProcessInfo.processInfo.systemUptime + 60
+        switch demand {
+        case .rate(let rate):
+            guard localLeverHeld else { stop(); return }
+            policy.requestRate(rate)
+        case .heading(let heading):
+            turnToHeading(heading)
+        }
     }
 
     func turnToHeading(_ heading: Double) {
@@ -331,13 +410,31 @@ import Cocoa
         guard remoteBaseline == nil, policy.armed else { return }
         localLeverHeld = false
         policy.requestHeading(heading); motionUntil = ProcessInfo.processInfo.systemUptime + 60
+        configureNativePositionTarget()
+    }
+
+    private func configureNativePositionTarget() {
+        nativePositionTarget = nil
+        guard usesCountEstimate, let target = policy.targetHeading else { return }
+        let count = calibration.count(heading: target).rounded()
+        guard count.isFinite, (Double(Int32.min)...Double(Int32.max)).contains(count) else {
+            stop(); policy.invalidate("Target count is outside the TIC position range"); return
+        }
+        nativePositionTarget = Int32(count)
     }
 
     func setMaximumSpeed(_ speed: Double) {
-        guard speed.isFinite, (1 ... 20).contains(speed) else { return }
+        guard speed.isFinite, ROBTorsoMotionPolicy.speedRange.contains(speed) else { return }
         // A profile change requires another explicit arm; the Tic limits and
-        // host taper cannot silently disagree during a turn.
-        stop(); policy.maximumSpeed = speed; publish()
+        // host profile cannot silently disagree during a turn.
+        stop(); policy.maximumSpeed = speed
+        UserDefaults.standard.set(maximumPulseRate, forKey: Self.speedLimitKey)
+        publish()
+    }
+
+    func setMaximumPulseRate(_ pulses: Double) {
+        guard pulses.isFinite, (100...ROBTorsoMotionPolicy.maximumPulseRate).contains(pulses) else { return }
+        setMaximumSpeed(pulses * 360 / ROBTorsoCountCalibration.countsPerTurn)
     }
 
     /// Existing normalized VR head demand becomes a circular heading offset
@@ -349,7 +446,7 @@ import Cocoa
             return
         }
         guard usesLiveCamera, hardwareReady, policy.armed,
-              policy.hasFreshObservation(at: ProcessInfo.processInfo.systemUptime), !localLeverHeld else { return }
+              policy.hasFreshObservation(at: ProcessInfo.processInfo.systemUptime), !localControlOwnsTorso else { return }
         if remoteBaseline == nil { remoteBaseline = policy.unwrappedHeading }
         guard let remoteBaseline else { return }
         remoteUntil = ProcessInfo.processInfo.systemUptime + 0.6
@@ -358,9 +455,14 @@ import Cocoa
     }
 
     @objc private func applicationInactive() {
-        // Local mouse/keyboard ownership cannot survive app focus loss. An
-        // authenticated remote demand has its own continuously renewed lease.
-        if remoteBaseline == nil { stop() }
+        // A clicked finite destination owns the whole bounded turn. Returning
+        // to chat must not silently cancel it. Held manual input still loses
+        // ownership on focus loss; remote demand keeps its separate lease.
+        guard remoteBaseline == nil else { return }
+        if case .heading = pendingLocalDemand { return }
+        let finiteTurn = policy.armed && policy.mode == .heading && !localLeverHeld
+            && ProcessInfo.processInfo.systemUptime < motionUntil
+        if !finiteTurn { stop() }
     }
 
     @objc private func applicationTerminating() {
@@ -385,6 +487,10 @@ import Cocoa
     }
 
     @nonobjc func advance(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        // Use the operator's shared DEBUG 500 ms budget for the UI control
+        // loop too. Original sample ages, TIC freshness and its independent
+        // hardware watchdog remain unchanged.
+        policy.maximumControlInterval = ROBArmFeedbackTiming.maximumAgeMilliseconds / 1000
         if usesHardware && (policy.armed || arming), let reason = armClearance() {
             stop(); policy.invalidate(reason); publish(); return
         }
@@ -410,10 +516,17 @@ import Cocoa
             _ = policy.observe(.init(heading: simulatedHeading, capturedAt: now, uncertainty: 0.1,
                                      stream: "explicit-rehearsal", sequence: simulatedSequence), now: now)
         }
+        advanceLocalDemand()
         if remoteBaseline != nil && now > remoteUntil { remoteBaseline = nil; policy.hold() }
         if policy.armed && policy.mode != .hold && now > motionUntil { policy.hold() }
         let wasArmed = policy.armed
-        let velocity = policy.tick(at: now)
+        if !policy.armed || policy.mode != .heading { nativePositionTarget = nil }
+        let directTarget = nativePositionTarget
+        let measuredVelocity = directTarget.flatMap { _ in ticPosition.map {
+            -Double($0.velocity) / 10_000 * 360 / ROBTorsoCountCalibration.countsPerTurn
+        } }
+        let arrived = directTarget.map { target in ticPosition?.count == target && ticPosition?.velocity == 0 } ?? false
+        let velocity = policy.tick(at: now, measuredPositionVelocity: measuredVelocity, positionReached: arrived)
         if usesHardware {
             if wasArmed && !policy.armed { stopHardware() }
             else if hardwareReady && !policy.armed && !powerHoldRequested { stopHardware() }
@@ -424,8 +537,14 @@ import Cocoa
                 let feedbackDeadline = powerHoldRequested && !policy.armed
                     ? (ticPosition?.capturedAt ?? 0) + 0.5
                     : (policy.observation?.capturedAt ?? 0) + policy.maximumObservationAge
-                transport.velocity(velocity, validUntil: min(now + 0.2, feedbackDeadline),
-                    releaseWhenStopped: policy.mode == .hold && !powerHoldRequested)
+                if let directTarget, policy.mode == .heading, policy.armed {
+                    transport.position(directTarget, validUntil: min(now + policy.maximumControlInterval,
+                        (ticPosition?.capturedAt ?? 0) + 0.5, motionUntil))
+                } else {
+                    nativePositionTarget = nil
+                    transport.velocity(velocity, validUntil: min(now + 0.2, feedbackDeadline),
+                        releaseWhenStopped: policy.mode == .hold && !powerHoldRequested)
+                }
             }
         }
         publish()

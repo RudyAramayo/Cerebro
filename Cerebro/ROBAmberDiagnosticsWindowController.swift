@@ -689,8 +689,8 @@ private final class ROBAmberArmSchematicView: NSView {
     private let tunnelStateLabel = NSTextField(labelWithString: "Tunnel disconnected")
     private let credentialStatusLabel = NSTextField(labelWithString: "")
     private let authorityStatusLabel = NSTextField(labelWithString: "Debug authority is off")
-    private let manualSessionButton = NSButton(title: "Start 15-minute manual session", target: nil, action: nil)
-    private let endManualSessionButton = NSButton(title: "End manual session", target: nil, action: nil)
+    private let manualSessionButton = NSButton(title: "Take manual control", target: nil, action: nil)
+    private let endManualSessionButton = NSButton(title: "Stop + hold", target: nil, action: nil)
     private let tokenField = NSSecureTextField()
     private let passwordField = NSSecureTextField()
     private let hostField = NSTextField(string: ROBAmberGatewayConfiguration.shared.sshHost)
@@ -755,7 +755,7 @@ private final class ROBAmberArmSchematicView: NSView {
         buildInterface()
         installObservers()
         ingestExistingTelemetry()
-        appendEvent("Diagnostics initialized; gripper actions and torque-changing arm modes require Vision Pro or iPhone approval")
+        appendEvent("Diagnostics initialized; local manual controls take over directly without voice approval")
         refreshGestureCatalog()
         refreshDisplay()
     }
@@ -824,7 +824,7 @@ private final class ROBAmberArmSchematicView: NSView {
         stateStack.alignment = .leading
         stateStack.spacing = 2
 
-        let safetyLabel = NSTextField(labelWithString: "SUPERVISED ROBOT DEBUG — gripper and torque-changing actions require controller approval")
+        let safetyLabel = NSTextField(labelWithString: "LOCAL MANUAL CONTROL — buttons take over directly; Stop + hold remains available")
         safetyLabel.font = .systemFont(ofSize: 11, weight: .bold)
         safetyLabel.textColor = .systemOrange
         let stateRow = NSStackView(views: [stateStack, NSView(), safetyLabel])
@@ -952,10 +952,10 @@ private final class ROBAmberArmSchematicView: NSView {
         commandArmSelector.selectedSegment = 0
         commandArmSelector.toolTip = "Robot Left: R11, UDP 26002. Robot Right: L10, UDP 26001."
         let queryModeButton = makeButton("Query Mode", action: #selector(querySelectedArmMode(_:)))
-        let activateButton = makeButton("Activate…", action: #selector(activateSelectedArm(_:)))
-        let positionButton = makeButton("Position + Hold…", action: #selector(positionSelectedArm(_:)))
+        let activateButton = makeButton("Activate", action: #selector(activateSelectedArm(_:)))
+        let positionButton = makeButton("Position + Hold", action: #selector(positionSelectedArm(_:)))
         let holdButton = makeButton("Hold Measured Pose", action: #selector(holdSelectedArm(_:)))
-        let deactivateButton = makeButton("Deactivate…", action: #selector(deactivateSelectedArm(_:)))
+        let deactivateButton = makeButton("Deactivate", action: #selector(deactivateSelectedArm(_:)))
         deactivateButton.contentTintColor = .systemRed
         armCommandButtons = [activateButton, positionButton, deactivateButton]
         let commandWarning = NSTextField(
@@ -975,7 +975,7 @@ private final class ROBAmberArmSchematicView: NSView {
         commandRow.spacing = 8
         manualSessionButton.target = self
         manualSessionButton.action = #selector(startManualSession(_:))
-        manualSessionButton.toolTip = "One spoken or controller approval enables both arms' mode, position and gripper Hold/Release controls for 15 minutes. Stops the active automatic routine first."
+        manualSessionButton.toolTip = "Stop automatic motion and take control here. Each manual button also takes control directly; no voice approval is needed."
         endManualSessionButton.target = self
         endManualSessionButton.action = #selector(endManualSession(_:))
 
@@ -1249,18 +1249,18 @@ private final class ROBAmberArmSchematicView: NSView {
         let queryButton = actionButton("Refresh", action: #selector(queryGripperState(_:)))
         queryButton.toolTip = "Queries the authenticated gateway's per-session calibration state. This does not move the gripper."
         let calibrateButton = actionButton(
-            "Calibrate \(arm.title)…",
+            "Calibrate \(arm.title)",
             action: #selector(calibrateGripper(_:))
         )
         calibrateButton.contentTintColor = .systemOrange
-        calibrateButton.toolTip = "Calibration can move this gripper through its travel and requires controller approval."
+        calibrateButton.toolTip = "Takes manual control and calibrates this gripper through its travel. Empty the jaws and keep the travel clear."
         calibrateButton.setAccessibilityLabel("Calibrate \(arm.rawValue) gripper")
-        let releaseButton = actionButton("Release…", action: #selector(releaseGripper(_:)))
+        let releaseButton = actionButton("Release", action: #selector(releaseGripper(_:)))
         releaseButton.contentTintColor = .systemOrange
-        releaseButton.toolTip = "Uses the active 15-minute manual session without another prompt. Requests bounded release; support any held object. Jaw position and force are not measured."
-        let holdButton = actionButton("Hold…", action: #selector(holdGripper(_:)))
+        releaseButton.toolTip = "Takes manual control and releases at the selected intensity; support any held object. Jaw position and force are not measured."
+        let holdButton = actionButton("Hold", action: #selector(holdGripper(_:)))
         holdButton.contentTintColor = .systemOrange
-        holdButton.toolTip = "Uses the active 15-minute manual session without another prompt. Requests bounded hold; clear the pinch zone. Jaw position and force are not measured."
+        holdButton.toolTip = "Takes manual control and holds at the selected intensity; clear the pinch zone. Jaw position and force are not measured."
         let stopButton = actionButton("Stop N/A", action: #selector(stopGripperUnavailable(_:)))
         stopButton.isEnabled = false
         stopButton.toolTip = "Amber exposes release, hold, and calibration only. It has no verified stop primitive; release would itself cause motion and may drop an object."
@@ -1573,8 +1573,7 @@ private final class ROBAmberArmSchematicView: NSView {
     private func refreshDisplay() {
         let connection = connectionSnapshot()
         manualSessionButton.isEnabled = connection.state == .ready && !stackMaintenance.isRunning && !stackRecoveryInProgress
-            && !ROBControllerArmApproval.shared.manualArmSessionActive
-        endManualSessionButton.isEnabled = ROBControllerArmApproval.shared.manualArmSessionActive
+        endManualSessionButton.isEnabled = true
         synchronizeGatewayTargets()
         gatewayStateLabel.stringValue = gatewayStateText(connection)
         gatewayStateLabel.textColor = connection.state == .ready ? .systemGreen
@@ -1588,9 +1587,6 @@ private final class ROBAmberArmSchematicView: NSView {
                 && connection.exclusiveControllerSession
                 && pendingManualCommandIDs.isEmpty
                 && !gripperCommandIsActive
-                && !gestureIsExecuting
-                && !ROBArmRoutineCoordinator.shared.isRunning
-            && !ROBControllerArmApproval.shared.isPending
                 && !stackMaintenance.isRunning
                 && !stackRecoveryInProgress
         }
@@ -1701,7 +1697,6 @@ private final class ROBAmberArmSchematicView: NSView {
             && connection.exclusiveControllerSession
             && pendingManualCommandIDs.isEmpty
             && !hasActiveGripperCommand()
-            && !gestureIsExecuting
             && !stackMaintenance.isRunning
             && !stackRecoveryInProgress
 
@@ -1824,8 +1819,8 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     private func refreshAuthorityStatus() {
-        authorityStatusLabel.stringValue = ROBControllerArmApproval.shared.manualArmSessionActive
-            ? ROBControllerArmApproval.shared.manualArmSessionDetail : ROBControllerArmApproval.shared.status
+        authorityStatusLabel.stringValue = ROBControllerArmApproval.shared.isPending
+            ? ROBControllerArmApproval.shared.status : "Manual controls take over directly — no voice approval"
         authorityStatusLabel.textColor = ROBControllerArmApproval.shared.isPending ? .systemOrange : .secondaryLabelColor
     }
 
@@ -2129,8 +2124,8 @@ private final class ROBAmberArmSchematicView: NSView {
 
     @objc private func calibrateGripper(_ sender: NSControl) {
         guard let arm = diagnosticsArm(forTag: sender.tag),
-              validateGripperInterlocks(for: arm, requiresCalibration: false) else { return }
-        ROBControllerArmApproval.shared.requestGatewayCommand(operation: "calibrate_gripper", arm: arm.rawValue,
+              validateGripperInterlocks(for: arm, requiresCalibration: false, allowAutomaticTakeover: true) else { return }
+        ROBControllerArmApproval.shared.performLocalPanelGatewayCommand(operation: "calibrate_gripper", arm: arm.rawValue,
             summary: "Calibrate the physical \(arm.rawValue) gripper through its full travel. Empty the jaws and keep fingers and cables clear. Mechanical completion is unverified.",
             command: { [weak self] in
                 guard let self, self.validateGripperInterlocks(for: arm, requiresCalibration: false) else { return 0 }
@@ -2161,13 +2156,13 @@ private final class ROBAmberArmSchematicView: NSView {
     ) {
         guard let arm = diagnosticsArm(forTag: sender.tag),
               let controls = gripperControls[arm],
-              validateGripperInterlocks(for: arm, requiresCalibration: true) else { return }
+              validateGripperInterlocks(for: arm, requiresCalibration: true, allowAutomaticTakeover: true) else { return }
         let force = min(20, max(2, Int(controls.forceSlider.doubleValue.rounded())))
         controls.forceSlider.integerValue = force
         controls.forceLabel.stringValue = "Cmd force \(force)"
 
         let caution = action == "hold" ? "The jaws may close; clear the pinch zone." : "The jaws may open; support any held object."
-        ROBControllerArmApproval.shared.requestGatewayCommand(
+        ROBControllerArmApproval.shared.performLocalPanelGatewayCommand(
             operation: action == "hold" ? "close_gripper" : "open_gripper", arm: arm.rawValue,
             summary: "\(displayName.capitalized) the physical \(arm.rawValue) gripper at raw intensity \(force). \(caution) Jaw position and force remain unverified.",
             command: { [weak self] in
@@ -2180,7 +2175,8 @@ private final class ROBAmberArmSchematicView: NSView {
 
     private func validateGripperInterlocks(
         for arm: ROBAmberDiagnosticsArm,
-        requiresCalibration: Bool
+        requiresCalibration: Bool,
+        allowAutomaticTakeover: Bool = false
     ) -> Bool {
         let connection = connectionSnapshot()
         _ = hasActiveGripperCommand(refreshFromGateway: true)
@@ -2190,9 +2186,9 @@ private final class ROBAmberArmSchematicView: NSView {
             reason = "the authenticated exclusive Amber gateway is not ready"
         } else if !snapshot.commandsAvailable {
             reason = "gripper control requires a gateway update"
-        } else if ROBArmRoutineCoordinator.shared.isRunning {
+        } else if !allowAutomaticTakeover && ROBArmRoutineCoordinator.shared.isRunning {
             reason = "the startup/grab/relax routine owns both grippers"
-        } else if ROBAmberGestureExecutor.shared.isExecuting {
+        } else if !allowAutomaticTakeover && ROBAmberGestureExecutor.shared.isExecuting {
             reason = "an approved arm gesture is executing"
         } else if !pendingManualCommandIDs.isEmpty {
             reason = "a manual arm command is pending"
@@ -2264,14 +2260,14 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     @objc private func startManualSession(_ sender: Any?) {
-        ROBArmRoutineCoordinator.shared.performCommand("manual_arm_session", target: "") { [weak self] result in
-            self?.appendEvent(result["detail"] as? String ?? "Manual session request ended")
-            self?.refreshDisplay()
-        }
+        ROBControllerArmApproval.shared.takeLocalPanelControl()
+        appendEvent("Manual control taken at the local panel")
+        refreshDisplay()
     }
 
     @objc private func endManualSession(_ sender: Any?) {
-        ROBArmRoutineCoordinator.shared.cancel(reason: "Operator ended manual arm session")
+        ROBControllerArmApproval.shared.takeLocalPanelControl()
+        appendEvent("Stop + hold requested")
         refreshDisplay()
     }
 
@@ -2284,7 +2280,7 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     @objc private func holdSelectedArm(_ sender: Any?) {
-        ROBControllerArmApproval.shared.cancel(reason: "Immediate hold requested in Diagnostics")
+        ROBControllerArmApproval.shared.takeLocalPanelControl()
         let arm = selectedCommandArm
         recordSubmittedCommand(gateway.priorityHold(forArm: arm.amberGatewayArm), operation: "hold measured pose", arm: arm)
     }
@@ -2296,7 +2292,7 @@ private final class ROBAmberArmSchematicView: NSView {
     private func requestArmMode(_ operation: String, summary: String) {
         let arm = selectedCommandArm
         var submittedID: UInt64 = 0
-        ROBControllerArmApproval.shared.requestGatewayCommand(operation: operation, arm: arm.rawValue,
+        ROBControllerArmApproval.shared.performLocalPanelGatewayCommand(operation: operation, arm: arm.rawValue,
             summary: "Physical \(arm.rawValue) arm: \(summary)", command: { [weak self] in
                 guard let self, !ROBArmRoutineCoordinator.shared.isRunning,
                       !ROBAmberGestureExecutor.shared.isExecuting, self.pendingManualCommandIDs.isEmpty,

@@ -70,13 +70,13 @@ import Foundation
             p.observe(sample(physical, now, UInt64(i + 1)), now: now)
             let velocity = p.tick(at: now)
             try expect(abs(velocity - previousVelocity) <= p.acceleration * 0.05 + 1e-8, "Acceleration jumped")
-            try expect(physical <= 45.1, "Taper overshot the heading")
+            try expect(physical <= 45.1, "Braking overshot the heading")
             peak = max(peak, velocity)
             if 45 - physical < 3 { nearSpeed = min(nearSpeed, abs(velocity)) }
             previousVelocity = velocity
         }
         try expect(abs(45 - physical) <= 0.85 && p.mode == .hold && abs(p.velocity) < 1e-8, "Heading did not settle inside the visual tolerance")
-        try expect(peak > 7 && nearSpeed < 1, "Heading should travel briskly and taper near arrival")
+        try expect(peak > 7 && nearSpeed < 1, "Heading should cruise and brake near arrival")
         p.requestRate(1)
         let finalTime = 55.0
         _ = p.tick(at: finalTime + 0.05)
@@ -85,6 +85,33 @@ import Foundation
         try expect(reversed >= 0, "A direction reversal must first reach zero")
         _ = p.tick(at: finalTime + 1)
         try expect(!p.armed && p.velocity == 0, "Stale vision did not inhibit motion")
+
+        // Reproduce the slow test and the operator's full TIC pulse-rate limit.
+        // Neither profile should crawl through the last25° or exceed its cap.
+        for speed in [4.0, ROBTorsoMotionPolicy.speedRange.upperBound] {
+            for direction in [-1.0, 1.0] {
+                p = ROBTorsoMotionPolicy(); p.maximumSpeed = speed
+                p.observe(sample(0, 200, 1), now: 200); _ = p.arm(at: 200)
+                let destination = direction * 170
+                p.requestHeading(destination)
+                physical = 0; previousVelocity = 0
+                var movingBelowOne = 0.0, elapsed = 0.0
+                for i in 1...1200 {
+                    elapsed = Double(i) * 0.05
+                    physical += previousVelocity * 0.05
+                    p.observe(sample(physical, 200+elapsed, UInt64(i+1)), now: 200+elapsed)
+                    let velocity = p.tick(at: 200+elapsed)
+                    try expect(p.armed && abs(velocity) <= speed+1e-8, "Turn lost authority or exceeded its speed cap")
+                    try expect(abs(velocity-previousVelocity) <= p.acceleration*0.05+1e-8, "Crisper stop discarded the acceleration ramp")
+                    if abs(destination-physical)<25 && abs(velocity)>0.01 && abs(velocity)<1 { movingBelowOne += 0.05 }
+                    previousVelocity = velocity
+                    if p.mode == .hold && abs(velocity)<1e-8 { break }
+                }
+                try expect(p.mode == .hold && abs(destination-physical)<=0.85, "Crisper profile failed to settle")
+                try expect(movingBelowOne<0.5, "Long low-speed deceleration tail returned")
+                try expect(elapsed<170/speed+speed/p.acceleration+2, "Turn spent excessive time tapering")
+            }
+        }
 
         p = ROBTorsoMotionPolicy(); p.observe(sample(0, 60, 1), now: 60); _ = p.arm(at: 60); p.requestRate(1)
         for i in 1...70 {
@@ -115,6 +142,19 @@ import Foundation
         p.observe(sample(0, 70.1, 2, sigma: 8), now: 70.1)
         try expect(!p.armed, "Ambiguous yaw retained authority")
 
+        for budget in [0.25, 0.5] {
+            p = ROBTorsoMotionPolicy(); p.maximumControlInterval = budget
+            p.observe(sample(0, 120, 1), now: 120); _ = p.arm(at: 120); p.requestHeading(90)
+            p.observe(sample(0, 120.4, 2), now: 120.4)
+            _ = p.tick(at: 120.4)
+            try expect(p.armed == (budget == 0.5), "Debug/normal control timing budget was ignored")
+            if budget == 0.5 {
+                p.observe(sample(0, 120.901, 3), now: 120.901)
+                _ = p.tick(at: 120.901)
+                try expect(!p.armed && p.velocity == 0, "A control gap beyond500ms retained movement")
+            }
+        }
+
         let profile = ROBTicVelocityTransport.Profile()
         try expect(profile.pulsesPerTurn==35996 && ROBTicVelocityTransport.Profile.observedCenterCount==92,
                    "Operator quarter-turn endpoints lost their scale/midpoint")
@@ -122,6 +162,35 @@ import Foundation
                    "ROB left must decrease TIC counts; units are pulses per10,000seconds")
         try expect(profile.accelerationUnits == 79991, "Acceleration must retain a positive magnitude with negative left polarity")
         try expect(profile.velocityUnits(.nan) == nil, "Non-finite velocity accepted")
+        try expect(profile.velocityUnits(ROBTorsoMotionPolicy.speedRange.upperBound) == -30_000_000,
+                   "Confirmed3000pulse/s ceiling was not converted exactly")
+        try expect(profile.velocityUnits(ROBTorsoMotionPolicy.speedRange.upperBound+0.001) == nil,
+                   "Transport accepted a rate above the configured pulse ceiling")
+        p = ROBTorsoMotionPolicy()
+        p.observe(sample(89.5, 300, 1), now: 300); _ = p.arm(at: 300); p.requestHeading(90)
+        _ = p.tick(at: 300.05, measuredPositionVelocity: 0.3, positionReached: false)
+        try expect(p.mode == .heading && p.velocity == 0.3, "Host angle tolerance interrupted TIC's position planner")
+        p.observe(sample(90, 300.1, 2), now: 300.1)
+        _ = p.tick(at: 300.1, measuredPositionVelocity: 0, positionReached: true)
+        try expect(p.mode == .hold && p.velocity == 0, "Exact controller arrival did not complete the turn")
+        let positionMotor = FakeTic()
+        let positionTransport = ROBTicVelocityTransport(execute: positionMotor.execute)
+        var positionReady = false, arrivedCount: Int32?
+        positionTransport.onState = { ready, _ in positionReady = ready }
+        positionTransport.onPosition = { arrivedCount = $0.count }
+        positionTransport.arm(profile: profile)
+        try wait { positionReady }
+        positionTransport.position(-8907, validUntil: ProcessInfo.processInfo.systemUptime+1)
+        try wait { arrivedCount == -8907 }
+        try expect(!positionMotor.movedWithoutPower && positionMotor.calls.contains(where: { $0.prefix(2) == ["--position", "-8907"] }),
+                   "Position target was not powered and sent through the native controller")
+        try expect(!positionMotor.calls.contains(where: { $0.contains("--halt-and-set-position") || $0.contains("--home") || $0.contains("--reset") }),
+                   "Target position changed the hardware reference")
+        let positionWrites = positionMotor.calls.filter { $0.contains("--position") }.count
+        positionTransport.position(92, validUntil: ProcessInfo.processInfo.systemUptime-1)
+        try wait { !positionReady && !positionMotor.energized }
+        try expect(positionMotor.calls.filter { $0.contains("--position") }.count == positionWrites,
+                   "Expired position supervision still moved the motor")
         try ROBTicVelocityTransport.checkStatus(FakeTic.status(ready: true), starting: false)
         let healthy = FakeTic.status(ready: true)
         try expect(healthy.contains("Errors currently stopping the motor: None"), "Fixture lost real ticcmd healthy formatting")
@@ -343,7 +412,7 @@ import Foundation
         pending.stop(); gate.signal()
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         try expect(!blocking.calls.contains(where: { $0.contains("--energize") }), "Cancelled preflight still energized")
-        print("Torso fixtures passed: circular goals, camera gates, taper/reversal, observed stall, zero-before-wake, measured-stop power release, idle resume, watchdog, stale wake, fault/release latches, cancelled arm, no home or position commands")
+        print("Torso fixtures passed: exact supervised position targets, circular goals, camera gates, bounded braking/reversal, observed stall, zero-before-wake, measured-stop power release, idle resume, watchdog, stale wake, fault/release latches, cancelled arm, no homing or counter reset")
     }
 }
 
@@ -356,6 +425,7 @@ private final class FakeTic {
     private var isEnergized = false
     private var safeStart = true
     private var measuredVelocity: Int32 = 0
+    private var measuredPosition: Int32 = 0
     private var requestedVelocity: Int32 = 0
     private var lastReportedVelocity: Int32 = 0
     private var stoppingPolls = 0
@@ -400,6 +470,10 @@ private final class FakeTic {
         }
         if args.contains("--energize") { isEnergized = true }
         if args.contains("--exit-safe-start") { safeStart = false }
+        if let index = args.firstIndex(of: "--position"), let target = Int32(args[index+1]) {
+            if isEnergized && !safeStart { measuredPosition = target; requestedVelocity = 0; measuredVelocity = 0 }
+            else { unpoweredMovement = true }
+        }
         if args.contains("--enter-safe-start") {
             safeStart = true; requestedVelocity = 0
             if measuredVelocity != 0 { stoppingPolls = configuredDecelerationPolls }
@@ -420,6 +494,7 @@ private final class FakeTic {
             }
             lastReportedVelocity = measuredVelocity
             return Self.status(ready: isEnergized, fault: hasFault, currentVelocity: measuredVelocity, safeStart: safeStart)
+                .replacingOccurrences(of: "Current position:             0", with: "Current position:             \(measuredPosition)")
         }
         return ""
     }

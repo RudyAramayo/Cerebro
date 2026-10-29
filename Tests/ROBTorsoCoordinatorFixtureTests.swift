@@ -30,6 +30,16 @@ final class ROBArmRoutineCoordinator {
                    "residualMeters": 0.003]]
     }
     static func main() throws {
+        let oldDebug = UserDefaults.standard.object(forKey: "ROBDevelopmentMode")
+        let oldSpeed = UserDefaults.standard.object(forKey: ROBTorsoControlCenter.speedLimitKey)
+        UserDefaults.standard.set(false, forKey: "ROBDevelopmentMode")
+        UserDefaults.standard.removeObject(forKey: ROBTorsoControlCenter.speedLimitKey)
+        defer {
+            if let oldDebug { UserDefaults.standard.set(oldDebug, forKey: "ROBDevelopmentMode") }
+            else { UserDefaults.standard.removeObject(forKey: "ROBDevelopmentMode") }
+            if let oldSpeed { UserDefaults.standard.set(oldSpeed, forKey: ROBTorsoControlCenter.speedLimitKey) }
+            else { UserDefaults.standard.removeObject(forKey: ROBTorsoControlCenter.speedLimitKey) }
+        }
         let fake = FixtureMotor()
         let vision = ROBMarkerlessVisionService(resources: nil)
         let center = ROBTorsoControlCenter(transport: ROBTicVelocityTransport(execute: fake.execute), vision: vision,
@@ -95,6 +105,9 @@ final class ROBArmRoutineCoordinator {
         try wait { fake.currentVelocity < 0 }
         try expect(fake.calls.filter { $0.contains("--energize") }.count == wakeCount + 1,
                    "The coordinator could not resume after an idle power release")
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: nil)
+        try expect(center.isArmed && center.policy.mode == .heading,
+                   "Returning to chat cancelled an explicitly started finite turn")
         ROBArmRoutineCoordinator.shared.torsoRotationBlockReason = "Arm clearance lost during turn"
         center.advance()
         try expect(!center.isArmed, "Torso kept turning after an arm left its raised hold")
@@ -156,6 +169,7 @@ final class ROBArmRoutineCoordinator {
         let slider = try control("ROB.Torso.CalibratedCountRange", as: NSSlider.self)
         let countField = try control("ROB.Torso.TargetCount", as: NSTextField.self)
         let headingField = try control("ROB.Torso.TargetHeading", as: NSTextField.self)
+        let turn = try control("ROB.Torso.Turn", as: NSButton.self)
         let energize = try control("ROB.Torso.Energize", as: NSButton.self)
         let deenergize = try control("ROB.Torso.Deenergize", as: NSButton.self)
         let lever = try control("ROB.Torso.Velocity", as: NSSlider.self)
@@ -189,16 +203,130 @@ final class ROBArmRoutineCoordinator {
         center.arm(); try wait { center.isArmed }
         fake.commandDelay = 0
         try expect(fake.energized && center.powerHoldRequested, "Arming rotation discarded an explicit powered hold")
+        let trackingDeadline = Date().addingTimeInterval(0.8)
+        while Date() < trackingDeadline {
+            RunLoop.current.run(mode: .eventTracking, before: Date().addingTimeInterval(0.02))
+        }
+        try expect(center.isArmed && fake.energized,
+                   "Menu/slider tracking starved TIC feedback: \(center.status)")
+        let beforePositionTurn = fake.calls.count
+        let nativeGoal = String(Int32(center.count(forHeading: 90).rounded()))
         center.turnToHeading(90); try wait { fake.currentVelocity<0 }
-        center.stop(); try wait { !fake.energized }
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: nil)
+        try expect(center.isArmed && center.policy.mode == .heading, "Focus loss interrupted a native position turn")
+        try wait { center.policy.mode == .hold && fake.currentVelocity == 0 }
+        let nativeTurnCalls = Array(fake.calls.dropFirst(beforePositionTurn))
+        try expect(nativeTurnCalls.contains(where: { $0.prefix(2) == ["--position", nativeGoal] }),
+                   "TIC count heading did not dispatch its target position")
+        try expect(!nativeTurnCalls.contains(where: { args in
+            guard let i = args.firstIndex(of: "--velocity") else { return false }
+            return args[i+1] != "0"
+        }), "Mac velocity corrections interfered with TIC position braking")
+        try expect(center.isArmed && abs(center.observedHeading-90)<0.02,
+                   "Count turn did not arrive: heading=\(center.observedHeading), status=\(center.status), calls=\(nativeTurnCalls)")
+        let fineTarget = Int32(center.currentCount) - 5
+        countField.stringValue = String(fineTarget)
+        _ = countField.sendAction(countField.action, to: countField.target)
+        _ = turn.sendAction(turn.action, to: turn.target)
+        try wait { center.currentCount == Double(fineTarget) && center.policy.mode == .hold }
+        try expect(fake.calls.contains(where: { $0.prefix(2) == ["--position", String(fineTarget)] }),
+                   "Native count entry was rounded through the degree display before dispatch")
+        center.setLever(0.2, held: true)
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: nil)
+        try expect(!center.isArmed, "Held manual speed input survived focus loss")
+        try wait { !fake.energized }
         center.closeControls()
-        print("Torso coordinator passed: rehearsal isolation, camera gates, idle arming, camera-referenced VR, target-preserving power updates, idle release/resume, visual-loss power release, explicit re-arm")
+        #if DEBUG
+        UserDefaults.standard.set(true, forKey: "ROBDevelopmentMode")
+        center.advance()
+        try expect(center.policy.maximumControlInterval == 0.5, "Debug UI retained the250ms torso limit")
+        center.setLiveCamera(false); center.advance()
+        try expect(center.policy.maximumControlInterval == 0.5, "Changing torso source lost the500ms debug budget")
+        UserDefaults.standard.set(false, forKey: "ROBDevelopmentMode"); center.advance()
+        try expect(center.policy.maximumControlInterval == 0.25, "Normal torso mode kept the debug allowance")
+        center.closeControls()
+        #endif
+        center.setMaximumPulseRate(3000)
+        try expect(abs(center.maximumPulseRate-3000)<1e-8 && !center.isArmed, "Pulse-rate change did not stop and save the limit")
+        center.setCountEstimate()
+        try expect(abs(center.maximumPulseRate-3000)<1e-8, "Switching to TIC silently reset the speed limit")
+        center.closeControls()
+        let restored = ROBTorsoControlCenter(transport: ROBTicVelocityTransport(execute: FixtureMotor().execute),
+            vision: ROBMarkerlessVisionService(resources: nil))
+        try expect(abs(restored.maximumPulseRate-3000)<1e-8, "Relaunch lost the selected pulse ceiling")
+        restored.setMaximumPulseRate(3001)
+        try expect(abs(restored.maximumPulseRate-3000)<1e-8, "Overspeed setting was accepted")
+        restored.closeControls()
+        try localTakeover()
+        print("Torso coordinator passed: exact TIC targets and five-pulse UI edits, no host position hunting, focus rules, persisted pulse ceiling, rehearsal isolation, camera gates, idle arming, camera-referenced VR, target-preserving power updates, idle release/resume, visual-loss power release, explicit re-arm")
+    }
+
+    static func localTakeover() throws {
+        let motor = FixtureMotor()
+        let center = ROBTorsoControlCenter(transport: ROBTicVelocityTransport(execute: motor.execute),
+            vision: ROBMarkerlessVisionService(resources: nil),
+            reference: ["modelID": "test-model", "referenceID": "test-reference"])
+        defer { center.closeControls(); ROBArmRoutineCoordinator.shared.ownsPhysicalMotion = false }
+        center.setCountEstimate(); try wait { center.canArm }
+        try expect(!center.isArmed && center.canUseLocalControls, "Local lever still requires the Arm button")
+        center.setLever(0.25, held: true)
+        try wait { motor.currentVelocity < 0 }
+        try expect(center.isLocalLeverHeld && center.isArmed, "Local drag did not preflight and start directly")
+        center.releaseLever(); try wait { !motor.energized && motor.currentVelocity == 0 }
+
+        center.stop(); try wait { center.canArm }
+        motor.commandDelay = 0.08
+        let before = motor.calls.count
+        center.setLever(-0.25, held: true)
+        try wait { motor.calls.dropFirst(before).contains(where: { $0.contains("--get-settings") }) }
+        center.releaseLever()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.7))
+        try expect(!center.isArmed && !motor.energized && !motor.calls.dropFirst(before).contains(where: { args in
+            if args.contains("--position") { return true }
+            guard let i = args.firstIndex(of: "--velocity") else { return false }
+            return args[i+1] != "0"
+        }), "Released preflight produced a delayed movement")
+        motor.commandDelay = 0
+        try wait { center.canArm }
+
+        // Main-view takeover synchronously stops the center; owner cleanup can
+        // finish later. The new demand must survive only while still held.
+        ROBArmRoutineCoordinator.shared.ownsPhysicalMotion = true
+        var takeovers = 0
+        let observer = NotificationCenter.default.addObserver(forName: Notification.Name("ROBLocalManualControlRequested"),
+            object: center, queue: .main) { _ in
+                takeovers += 1; center.stop()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    ROBArmRoutineCoordinator.shared.ownsPhysicalMotion = false
+                }
+            }
+        center.setLever(-0.25, held: true)
+        try expect(motor.currentVelocity == 0, "Manual control moved before ownership handoff")
+        try wait { motor.currentVelocity > 0 }
+        try expect(takeovers == 1, "Manual drag did not notify automatic owners exactly once")
+        NotificationCenter.default.removeObserver(observer)
+        center.releaseLever(); try wait { !motor.energized }
+
+        center.setLiveCamera(true); center.acceptObservation(observation())
+        center.arm(); try wait { center.isArmed }
+        center.setRemoteActive(true, rotation: 0.1); try wait { motor.currentVelocity < 0 }
+        center.acceptObservation(observation(sequence: 2))
+        center.setLever(-0.25, held: true); try wait { motor.currentVelocity > 0 }
+        center.setRemoteActive(true, rotation: 0.1)
+        try expect(center.policy.mode == .velocity, "Remote demand stole control during a local drag")
+        center.releaseLever()
+        center.setRemoteActive(true, rotation: 0.1)
+        try expect(center.policy.mode == .hold, "Old remote demand resumed after local release")
+        center.stop(); try wait { !motor.energized }
+        print("Local torso takeover passed: no Arm prerequisite, release cancels preflight, owner handoff, remote override and no remote replay")
     }
 }
 
 private final class FixtureMotor {
     private let lock = NSLock()
     private var recorded: [[String]] = []
+    private var measuredPosition: Int32 = 1000
+    private var positionTarget: Int32?
     private var isEnergized = false
     private var safeStart = true
     private var measuredVelocity: Int32 = 0
@@ -221,10 +349,19 @@ private final class FixtureMotor {
         }
         if let index = args.firstIndex(of: "--velocity"), index + 1 < args.count,
            let velocity = Int32(args[index + 1]), velocity == 0 || (isEnergized && !safeStart) {
-            measuredVelocity = velocity
+            measuredVelocity = velocity; positionTarget = nil
         }
         if args.contains("--energize") { isEnergized = true }
         if args.contains("--exit-safe-start") { safeStart = false }
+        if let index = args.firstIndex(of: "--position"), isEnergized && !safeStart {
+            positionTarget = Int32(args[index+1])
+        }
+        if args.contains("--status"), let target = positionTarget, isEnergized && !safeStart {
+            // Deterministic controller progress within the host's continuity
+            // bound. Position control finishes without a host velocity command.
+            measuredPosition += min(500, max(-500, target-measuredPosition))
+            measuredVelocity = measuredPosition == target ? 0 : (target > measuredPosition ? 1_000_000 : -1_000_000)
+        }
         if args.contains("--enter-safe-start") { safeStart = true; measuredVelocity = 0 }
         if args.contains("--deenergize") { isEnergized = false; measuredVelocity = 0 }
         var errors: [String] = []
@@ -238,7 +375,7 @@ private final class FixtureMotor {
         Operation state: \(isEnergized && !safeStart ? "Normal" : "Soft error")
         Energized: \(isEnergized ? "Yes" : "No")
         Current velocity: \(measuredVelocity)
-        Current position: 1000
+        Current position: \(measuredPosition)
         Position uncertain: Yes
         Errors currently stopping the motor:\(errors.isEmpty ? " None" : "\n" + errors.map { "  - " + $0 }.joined(separator: "\n"))
         Errors that occurred since last check: None

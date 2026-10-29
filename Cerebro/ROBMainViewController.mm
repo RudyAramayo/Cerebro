@@ -2900,6 +2900,20 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self performOperatorPriorityStopWithReason:reason];
 }
 
+- (void)localManualControlRequested:(NSNotification *)notification
+{
+    if (notification.object != [ROBControllerArmApproval shared] &&
+        notification.object != [ROBTorsoControlCenter shared]) { return; }
+    NSString *reason = @"Operator took control at the local panel";
+    [self.robAI cancelDualDialogue];
+    if (self.stageShowCoordinator.isRunning) {
+        [self.stageShowCoordinator cancelWithReason:reason];
+    }
+    [self applyPrioritySoftwareStopWithReason:reason];
+    (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:reason];
+    (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
+}
+
 - (BOOL)acceptLocalMicrophoneAuthorization:(NSString *)transcript
 {
     // This delegate is called only by SpeechBox's final on-device microphone
@@ -3023,6 +3037,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                              selector:@selector(controllerOperatorPriorityStopRequested:)
                                                  name:@"ROBControllerOperatorPriorityStop"
                                                object:[ROBControllerArmApproval shared]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(localManualControlRequested:)
+                                                 name:@"ROBLocalManualControlRequested"
+                                               object:nil];
     // Register before ROBSerialBox begins discovery so the first successful
     // connection and every later reconnect can establish the approved pose.
     [[NSNotificationCenter defaultCenter] addObserver:self

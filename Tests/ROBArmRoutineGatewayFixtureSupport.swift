@@ -22,6 +22,7 @@ final class ROBLeftArmTrial {
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     var isRunning = false
+    func approvedTorsoPreparationTarget(arm: String, index: Int, duration: Double, generation: UInt64) -> [Double]? { nil }
 }
 enum ROBArmSide {
     case left, right

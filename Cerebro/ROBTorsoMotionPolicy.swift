@@ -31,7 +31,11 @@ struct ROBTorsoMotionPolicy {
 
     var maximumSpeed = 8.0
     var acceleration = 8.0
-    var slowdownAngle = 25.0
+    var maximumControlInterval = 0.25
+    // Operator-confirmed TIC ceiling; output angles use observed table counts,
+    // without applying an unverified gearbox ratio a second time.
+    static let maximumPulseRate = 3_000.0
+    static let speedRange = 1.0...(maximumPulseRate * 360 / ROBTorsoCountCalibration.countsPerTurn)
     var debugCableMode = false
     private(set) var cableReferenceHeading: Double?
     private(set) var cableTrackingInterrupted = false
@@ -125,7 +129,7 @@ struct ROBTorsoMotionPolicy {
         // Untethered operation retains the shortest circular route, without stops.
         let reference = debugCableMode ? cableReferenceHeading ?? current : current
         targetHeading = reference + Self.wrap(heading - Self.wrap(reference))
-        mode = .heading; status = "Turning to heading with a smooth slowdown"
+        mode = .heading; status = "Turning to heading with a ramped stop"
     }
 
     @discardableResult mutating func requestUnwind() -> Bool {
@@ -155,32 +159,44 @@ struct ROBTorsoMotionPolicy {
         invalidate(reason); observation = nil
     }
 
-    /// Smooth quadratic taper plus a stopping-distance bound. Reversals pass through
-    /// zero; large timing gaps or missing visual evidence stop authority.
-    mutating func tick(at now: TimeInterval) -> Double {
+    /// Cruise until braking distance, without a long low-speed taper. Acceleration
+    /// remains bounded and reversals pass through zero; stale evidence stops.
+    mutating func tick(at now: TimeInterval, measuredPositionVelocity: Double? = nil,
+                       positionReached: Bool = false) -> Double {
         guard armed else { return 0 }
-        guard maximumSpeed.isFinite, (0.1 ... 20).contains(maximumSpeed),
+        guard maximumSpeed.isFinite, Self.speedRange.contains(maximumSpeed),
               acceleration.isFinite, (0.1 ... 30).contains(acceleration),
-              slowdownAngle.isFinite, (5 ... 90).contains(slowdownAngle),
               hasFreshObservation(at: now), let current = unwrappedHeading else {
             invalidate("Visual confirmation lost or motion profile invalid; torso stopped")
             return 0
         }
         let dt = now - (previousTick ?? now)
-        guard dt >= 0, dt <= 0.25 else {
+        guard maximumControlInterval.isFinite, (0.05...0.5).contains(maximumControlInterval),
+              dt >= 0, dt <= maximumControlInterval else {
             invalidate("Control timing expired; torso stopped")
             return 0
         }
         previousTick = now
+        if mode == .heading, let measuredPositionVelocity {
+            guard measuredPositionVelocity.isFinite else {
+                invalidate("TIC velocity feedback is invalid; torso stopped"); return 0
+            }
+            // TIC's onboard position planner owns acceleration and braking.
+            // The host only supervises freshness/deadlines and exact arrival.
+            velocity = measuredPositionVelocity
+            if positionReached {
+                velocity = 0; mode = .hold; stallStart = nil
+                status = "At requested TIC target; controller stopped"
+            } else { status = "TIC moving to target position" }
+            return velocity
+        }
         var desired = 0.0
         if mode == .velocity { desired = rate * maximumSpeed }
         if mode == .heading, let target = targetHeading {
             let error = target - current
             let tolerance = max(0.75, 2 * (observation?.uncertainty ?? 2))
             let distance = max(0, abs(error) - tolerance)
-            let t = min(1, abs(error) / slowdownAngle)
-            let tapered = maximumSpeed * t * (2 - t)
-            desired = (error < 0 ? -1 : 1) * min(tapered, sqrt(2 * acceleration * distance))
+            desired = (error < 0 ? -1 : 1) * min(maximumSpeed, sqrt(2 * acceleration * distance))
             if distance == 0 && abs(velocity) < 0.05 {
                 mode = .hold; status = "At requested heading within camera uncertainty"
             }

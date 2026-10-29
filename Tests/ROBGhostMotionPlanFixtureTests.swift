@@ -37,6 +37,49 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last == "torso-ready-preparation" {
+            let leftGoal = try ROBCanRecyclingReadyPose.target(physicalSide: "left")
+            let rightGoal = try ROBCanRecyclingReadyPose.target(physicalSide: "right")
+            precondition(leftGoal == [0.2564815877344792,1.6648804817852159,0,0.9825658273336827,1.107465951929527,-1.7111044361935033,-0.46278495947412146], "Ready target differs from the provisional shared mirror")
+            precondition(ROBArmPoseMirror.mirroredJointValues(leftGoal.map(NSNumber.init(value:)))!.map(\.doubleValue) == rightGoal, "Reverse mirror lost the right ready target")
+            let heldLeft = [0.25594, 1.66461, 0, 0.98393, -1.10692, -1.71083, -0.46278]
+            let recovery = try ROBOperatorObservedReadyPlan.make(model: model, baseline: heldLeft)
+            precondition(recovery.baseline == heldLeft && ROBCanRecyclingReadyPose.reached(recovery.steps.last!.positions, goal: leftGoal))
+            var priorJ5 = heldLeft[4]
+            for step in recovery.steps {
+                precondition(step.positions[4] > priorJ5, "LEFT J5 did not approach the corrected shared target")
+                var shortStart = heldLeft
+                shortStart[4] = priorJ5 - 0.014
+                let required = ROBArmRoutinePlan.duration(from: shortStart, to: step.positions)!
+                precondition(step.seconds >= required - 0.05, "Accepted endpoint lag fails the next segment's cubic timing admission")
+                priorJ5 = step.positions[4]
+            }
+            print("PASS shared mirror target and coordinated recovery from the observed left hold")
+            for side in ["left", "right"] {
+                let arm = try ROBGhostRobotModel(directory: model.directory, physicalSide: side)
+                let zero = [Double](repeating: 0, count: 7)
+                let plan = try ROBOperatorObservedReadyPlan.make(model: arm, baseline: zero)
+                precondition(!plan.steps.isEmpty && plan.steps.allSatisfy { $0.jawAction == nil && $0.seconds <= 5 })
+                precondition(ROBCanRecyclingReadyPose.matches(plan.steps.last!.positions, physicalSide: side))
+                precondition(arm.torsoTurnVerticalClearance(vendorJoints: plan.steps.last!.positions)! >= 0.03)
+                // Check denser samples independently of the planner's sample grid.
+                var proxy = ROBWorkspaceSelfProxyClearance(model: arm), start = zero
+                let narrow = Set(plan.initialPairs.filter { $0.value < 0.03 }.keys)
+                for step in plan.steps {
+                    for sample in 0...200 {
+                        let t = Double(sample)/200, q = zip(start, step.positions).map { $0 + ($1-$0)*t }
+                        let pairs = try proxy.separations(vendorLeft: q, forceNarrowPairs: narrow, minimumRetreatBounds: plan.initialPairs)
+                        precondition(pairs.allSatisfy { $0.value + 1e-8 >= min(0.03, plan.initialPairs[$0.key]!) })
+                    }
+                    let movingJoints = zip(start, step.positions).filter { abs($1-$0) > 1e-6 }.count
+                    precondition(movingJoints >= 5, "Preparation introduced an individual-joint test")
+                    start = step.positions
+                }
+                expectBlocked { _ = try ROBOperatorObservedReadyPlan.make(model: arm, baseline: [Double](repeating: .nan, count: 7)) }
+                print("PASS \(side) full coordinated ready path, nonworsening tread proxy, no jaws, raised endpoint")
+            }
+            return
+        }
         if CommandLine.arguments.last == "torso-arm-clearance" {
             for side in ["left", "right"] {
                 let arm = try ROBGhostRobotModel(directory: model.directory, physicalSide: side)

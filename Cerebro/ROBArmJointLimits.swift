@@ -15,6 +15,51 @@ enum ROBArmJointLimits {
     ]
 }
 
+/// Physical L10 ↔ R11 pose mapping shared by both UI directions and ready
+/// planning. This commissioning candidate retains J5's encoder sign and
+/// reverses the other six joints. Startup zero offsets remain unverified;
+/// the operator-adjusted hold is not proof of this mapping at other poses.
+/// Units are preserved; no driver or encoder-zero change is made here.
+@objcMembers final class ROBArmPoseMirror: NSObject {
+    static func mirroredJointValues(_ values: [NSNumber]) -> [NSNumber]? {
+        guard values.count == 7, values.allSatisfy({ $0.doubleValue.isFinite }) else { return nil }
+        return values.enumerated().map { index, value in
+            NSNumber(value: value.doubleValue * (index == 4 ? 1 : -1))
+        }
+    }
+}
+
+/// Editable position controls show accepted command targets, seeded once
+/// from fresh feedback after launch. Telemetry redraws never erase a draft.
+@objcMembers final class ROBArmPositionControlState: NSObject {
+    static var maximumFeedbackAgeMilliseconds: Double { ROBArmFeedbackTiming.maximumAgeMilliseconds }
+    private var displayed = false
+    private var lastTarget: [Double]?
+    private var draft: [Double]?
+
+    func noteEditedSliderValues(_ values: [NSNumber]) {
+        guard values.count == 7, values.allSatisfy({ $0.doubleValue.isFinite }) else { return }
+        draft = values.map { $0.doubleValue / 100 }
+    }
+
+    func nextSliderValues(targetRadians: [NSNumber], measuredRadians: [NSNumber], feedbackFresh: Bool) -> [NSNumber]? {
+        let target = targetRadians.map(\.doubleValue), measured = measuredRadians.map(\.doubleValue)
+        let targetValid = target.count == 7 && target.allSatisfy(\.isFinite)
+        if let draft {
+            guard targetValid, zip(draft, target).allSatisfy({ abs($0-$1) <= 0.000001 }) else { return nil }
+            self.draft = nil
+        }
+        if targetValid {
+            guard !displayed || target != lastTarget else { return nil }
+            displayed = true; lastTarget = target
+            return target.map { NSNumber(value: $0 * 100) }
+        }
+        guard !displayed, feedbackFresh, measured.count == 7, measured.allSatisfy(\.isFinite) else { return nil }
+        displayed = true
+        return measured.map { NSNumber(value: $0 * 100) }
+    }
+}
+
 /// Host feedback admission uses a bounded commissioning budget only while the
 /// DEBUG app's existing Development Mode is enabled. Packet ages remain real.
 enum ROBArmFeedbackTiming {

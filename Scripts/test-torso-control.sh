@@ -6,7 +6,7 @@ fixture_dir="$(mktemp -d /private/tmp/rob-torso-fixture.XXXXXX)"
 trap 'rm -r "$fixture_dir"' EXIT
 "$python_bin" -B "$repo_dir/Tests/ROBMarkerlessDepthFrameTests.py"
 "$python_bin" -B "$repo_dir/Tests/ROBTorsoMarkerlessTests.py"
-xcrun swiftc -swift-version 5 -warnings-as-errors \
+xcrun swiftc -D DEBUG -swift-version 5 -warnings-as-errors \
   "$repo_dir/Cerebro/ROBTorsoMotionPolicy.swift" "$repo_dir/Cerebro/ROBTicVelocityTransport.swift" \
   "$repo_dir/Tests/ROBTorsoControlFixtureTests.swift" -o "$fixture_dir/policy"
 "$fixture_dir/policy"
@@ -18,9 +18,10 @@ frames = source[source.index("enum CameraSource: String"):source.index("protocol
 roles = source[source.index("enum CameraRole: String"):source.index("struct CameraDeviceOption:")]
 (Path(sys.argv[2]) / "CameraFrameTypes.swift").write_text("import Foundation\nimport CoreMedia\nimport CryptoKit\n" + frames + roles)
 PY
-xcrun swiftc -swift-version 5 -warnings-as-errors \
+xcrun swiftc -D DEBUG -swift-version 5 -warnings-as-errors \
   "$fixture_dir/CameraFrameTypes.swift" "$repo_dir/Cerebro/ROBMarkerlessVisionService.swift" \
   "$repo_dir/Cerebro/ROBTorsoMotionPolicy.swift" "$repo_dir/Cerebro/ROBTicVelocityTransport.swift" \
+  "$repo_dir/Cerebro/ROBArmJointLimits.swift" \
   "$repo_dir/Cerebro/ROBFixedHeadRegistration.swift" "$repo_dir/Cerebro/ROBTorsoControlCenter.swift" "$repo_dir/Cerebro/ROBTorsoControlWindowController.swift" \
   "$repo_dir/Tests/ROBTorsoCoordinatorFixtureTests.swift" -o "$fixture_dir/coordinator"
 "$fixture_dir/coordinator"

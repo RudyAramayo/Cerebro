@@ -44,6 +44,182 @@ enum ROBArmRoutineError: LocalizedError {
     private var activeRendition: ROBArmRendition?
     private let arms = ["left", "right"] // gateway keys; physical sides convert at the boundary
     private var torsoClearanceModels: [String: ROBGhostRobotModel] = [:]
+    private var readyPreparationID: UUID?
+    private var readyPreparationBody = ""
+    private var readyPreparationPlans: [String: ROBOperatorObservedReadyPlan] = [:]
+    private var readyPreparationArm: String?
+    private var readyPreparationStep = -1
+    private var readyDispatchStart: [Double]?
+    private var readyLastCurrents: [String: [Double]] = [:]
+    private var readyLastSequences: [String: UInt64] = [:]
+    private var readyCurrentLimit = 0.0
+
+    private func readyModel(_ key: String) throws -> ROBGhostRobotModel {
+        let physical = key == "right" ? "left" : "right"
+        if let cached = torsoClearanceModels[physical] { return cached }
+        guard let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
+            throw ROBArmRoutineError.blocked("The arm geometry is unavailable.")
+        }
+        let model = try ROBGhostRobotModel(directory: directory, physicalSide: physical)
+        torsoClearanceModels[physical] = model
+        return model
+    }
+
+    private func torsoPreparationContext() throws -> String {
+        guard !ownsPhysicalMotion, gateway.isReady(), !ROBGripperStartupCalibration.shared.isRunning else {
+            throw ROBArmRoutineError.blocked("The arms must be connected and idle for a fresh preparation.")
+        }
+        var object: [String: Any] = ["gateway": gateway.connectionSnapshot()["sessionGeneration"] ?? 0,
+            "body": ROBFixedHeadBodyMotionIdentity.currentIdentity, "ready": ROBCanRecyclingReadyPose.revision]
+        for key in arms {
+            let model = try readyModel(key), modes = gateway.modes(forArm: key).map(\.intValue)
+            _ = try measured(key)
+            guard modes.count == 7, modes.allSatisfy({ $0 == 0 }) || modes.allSatisfy({ $0 == 2 }) else {
+                throw ROBArmRoutineError.blocked("Each arm must be inactive or holding uniformly before preparation.")
+            }
+            // Position feedback is reacquired for every full plan and segment.
+            // Encoder quantization during a hold must not revoke task authority.
+            object[key] = ["modes": modes, "model": model.modelID,
+                           "geometry": model.geometryID, "mapping": model.selectedMappingID]
+        }
+        return ROBGhostRobotModel.hash(try JSONSerialization.data(withJSONObject: object, options: .sortedKeys))
+    }
+
+    @nonobjc func torsoPreparationTemplate() throws -> [String: Any] {
+        ROBControllerArmApproval.shared.torsoPreparationTemplate(context: try torsoPreparationContext(), readyPoseRevision: ROBCanRecyclingReadyPose.revision)
+    }
+
+    /// Only the dedicated native sandbox file action reaches this entry. The
+    /// receipt is consumed once; neither ordinary model text nor a can grant
+    /// can select this operator-observed route.
+    @nonobjc func prepareArmsForTorsoTest(receipt: URL, completion: @escaping (NSDictionary) -> Void) {
+        do {
+            let context = try torsoPreparationContext()
+            let limit = UserDefaults.standard.double(forKey: ROBLeftArmTrial.currentLimitKey)
+            guard limit.isFinite, limit >= 0 else { throw ROBArmRoutineError.blocked("Invalid current-jump limit.") }
+            let grant = try ROBControllerArmApproval.shared.consumeTorsoPreparationReceipt(receipt, context: context, readyPoseRevision: ROBCanRecyclingReadyPose.revision)
+            let id = UUID()
+            guard ROBAmberArmMotionArbiter.shared.reserve(.left, owner: id) else {
+                throw ROBArmRoutineError.blocked("Another controller owns the left arm.")
+            }
+            guard ROBAmberArmMotionArbiter.shared.reserve(.right, owner: id) else {
+                ROBAmberArmMotionArbiter.shared.release(.left, owner: id)
+                throw ROBArmRoutineError.blocked("Another controller owns the right arm.")
+            }
+            owner = id; readyPreparationID = grant; readyPreparationBody = ROBFixedHeadBodyMotionIdentity.currentIdentity
+            readyCurrentLimit = limit; readyLastCurrents = [:]; readyLastSequences = [:]; readyPreparationPlans = [:]
+            isRunning = true; activeCommand = "torso-ready"; failure = nil; self.completion = completion
+            deadline = ProcessInfo.processInfo.systemUptime + 180
+            generation = 0; moving = false; supervisedRoute = false; superviseCamera = false
+            vision.setActive(true); cameraDemand?(true)
+            setStatus("Reviewing both coordinated empty-arm lifts; operator watching clearance")
+            let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.monitor() }
+            self.timer = timer; RunLoop.main.add(timer, forMode: .common)
+            task = Task { @MainActor [weak self] in
+                guard let self else { return }
+                do { self.finish(try await self.executeTorsoPreparation(), hold: true) }
+                catch { self.finish(["status": "blocked", "detail": self.failure ?? error.localizedDescription], hold: true) }
+            }
+        } catch { completion(["status": "blocked", "detail": error.localizedDescription]) }
+    }
+
+    @MainActor private func executeTorsoPreparation() async throws -> NSDictionary {
+        generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
+        guard generation > 0 else { throw ROBArmRoutineError.blocked("The arm gateway is not authenticated.") }
+        try await accepted(arms.map { try send(gateway.queryMode(forArm: $0)) })
+        // Review both complete paths before changing torque. Rebuild again
+        // from actual position-mode feedback before dispatching any waypoint.
+        for key in arms {
+            let model = try readyModel(key), q = try measured(key)
+            _ = try await Task.detached(priority: .userInitiated) {
+                try ROBOperatorObservedReadyPlan.make(model: model, baseline: q)
+            }.value
+            try check()
+        }
+        for key in arms where !gateway.modes(forArm: key).allSatisfy({ $0.intValue == 2 }) {
+            try await accepted([try send(gateway.enterPositionMode(forArm: key))])
+        }
+        let before = Dictionary(uniqueKeysWithValues: arms.map { ($0, gateway.telemetry(forArm: $0)?.sequence ?? 0) })
+        try await wait(seconds: 3, reason: "Both arms did not report fresh position holds; no lift was sent.") {
+            arms.allSatisfy { key in
+                guard let sample = gateway.telemetry(forArm: key), sample.sequence > before[key]!,
+                      (try? measured(key)) != nil, sample.statuses.count == 7,
+                      sample.statuses.allSatisfy({ $0.intValue == 2 }) else { return false }
+                return gateway.modes(forArm: key).count == 7 && gateway.modes(forArm: key).allSatisfy({ $0.intValue == 2 })
+            }
+        }
+        for key in arms {
+            let model = try readyModel(key), q = try measured(key)
+            readyPreparationPlans[key] = try await Task.detached(priority: .userInitiated) {
+                try ROBOperatorObservedReadyPlan.make(model: model, baseline: q)
+            }.value
+            try check()
+        }
+        // One complete arm at a time reduces simultaneous power demand. All
+        // seven joints in that arm share each coordinated trajectory.
+        for key in arms {
+            let model = try readyModel(key), plan = readyPreparationPlans[key]!
+            readyPreparationArm = key
+            for (index, step) in plan.steps.enumerated() {
+                readyPreparationStep = index
+                let actual = try measured(key)
+                let expected = index == 0 ? plan.baseline : plan.steps[index-1].positions
+                guard ROBCanRecyclingReadyPose.reached(actual, goal: expected) else {
+                    throw ROBArmRoutineError.blocked("The measured arm left the reviewed lift start; holding.")
+                }
+                try await Task.detached(priority: .userInitiated) {
+                    try plan.review(from: actual, to: step.positions, final: index == plan.steps.count-1, model: model)
+                }.value
+                try check()
+                readyDispatchStart = actual
+                let sentAt = ProcessInfo.processInfo.systemUptime
+                moving = true
+                setStatus("Raising \(model.physicalSide) arm to grasp-ready · \(index+1)/\(plan.steps.count)")
+                let command = gateway.sendTorsoPreparationStep(arm: key, index: index,
+                    duration: step.seconds, expectedSessionGeneration: generation)
+                guard command != 0 else {
+                    throw ROBArmRoutineError.blocked(gateway.torsoPreparationRejection ?? "Grasp-ready dispatch was refused.")
+                }
+                try await accepted([try send(command)])
+                readyDispatchStart = nil; leased.insert(key); lastRenewal = ProcessInfo.processInfo.systemUptime
+                var settler = ROBArmRoutineSettler()
+                try await wait(seconds: step.seconds + 3, reason: "The grasp-ready segment did not reach its measured target.") {
+                    guard let sample = gateway.telemetry(forArm: key) else { return false }
+                    let q = sample.positionsRadians.map(\.doubleValue)
+                    return settler.observe(sequence: sample.sequence, positions: q, target: step.positions,
+                        now: ProcessInfo.processInfo.systemUptime) && ROBCanRecyclingReadyPose.reached(q, goal: step.positions) &&
+                        ProcessInfo.processInfo.systemUptime - sentAt >= step.seconds
+                }
+                moving = false
+            }
+            // The gateway ends its lease as soon as priority_hold is accepted.
+            // Retire this serial arm's renewals BEFORE awaiting that reply, so
+            // a timer cannot renew an already-ended lease during the handoff.
+            leased.remove(key); renewalIDs.removeAll(); renewalSentAt.removeAll()
+            try await accepted([try send(gateway.priorityHold(forArm: key))])
+        }
+        for key in arms {
+            let model = try readyModel(key), q = try measured(key)
+            guard ROBCanRecyclingReadyPose.matches(q, physicalSide: model.physicalSide),
+                  model.torsoTurnVerticalClearance(vendorJoints: q).map({ $0 >= 0.03 }) == true else {
+                throw ROBArmRoutineError.blocked("Both measured ready holds were not confirmed.")
+            }
+        }
+        return ["status": "completed", "detail": "Both arms reached measured grasp-ready holds above the treads. Jaws unchanged. Torso test may now be selected in Torso Rotation.",
+                "camera_registration_verified": false, "clearance_source": "operator_observed", "jaw_commands": 0]
+    }
+
+    @nonobjc func approvedTorsoPreparationTarget(arm: String, index: Int, duration: Double, generation: UInt64) -> [Double]? {
+        guard Thread.isMainThread, isRunning, activeCommand == "torso-ready", readyPreparationID != nil,
+              failure == nil, owner != nil, generation == self.generation,
+              readyPreparationBody == ROBFixedHeadBodyMotionIdentity.currentIdentity,
+              ProcessInfo.processInfo.systemUptime < deadline, readyPreparationArm == arm, readyPreparationStep == index,
+              let plan = readyPreparationPlans[arm], plan.steps.indices.contains(index),
+              plan.steps[index].seconds == duration, let reviewed = readyDispatchStart,
+              let actual = try? measured(arm), ROBCanRecyclingReadyPose.reached(actual, goal: reviewed) else { return nil }
+        readyDispatchStart = nil
+        return plan.steps[index].positions
+    }
 
     /// A torso turn may not sweep either hanging gripper across a tread.
     /// Use real motor feedback and each physical arm's own model mapping.
@@ -407,6 +583,11 @@ enum ROBArmRoutineError: LocalizedError {
     private func check() throws {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
+        if activeCommand == "torso-ready" {
+            guard readyPreparationID != nil, readyPreparationBody == ROBFixedHeadBodyMotionIdentity.currentIdentity else {
+                throw ROBArmRoutineError.blocked("The supervised preparation lost its task or body context.")
+            }
+        }
         if supervisedRoute && activeCommand != "relax" && !ROBControllerArmApproval.shared.authorizesSupervisedArmRoute() {
             throw ROBArmRoutineError.blocked("Controller supervision ended; an arm hold was requested.")
         }
@@ -739,7 +920,37 @@ enum ROBArmRoutineError: LocalizedError {
         precondition(Thread.isMainThread)
         guard isRunning, failure == nil else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        if now > deadline { abort("Arm routine exceeded its 90-second deadline."); return }
+        if now > deadline { abort("Arm routine exceeded its execution deadline."); return }
+        if activeCommand == "torso-ready" {
+            do {
+                try check()
+                for key in arms {
+                    guard let sample = gateway.telemetry(forArm: key), sample.currents.count == 7,
+                          sample.currents.allSatisfy({ $0.doubleValue.isFinite }) else {
+                        throw ROBArmRoutineError.blocked("Current feedback is missing during grasp-ready preparation.")
+                    }
+                    if sample.sequence > (readyLastSequences[key] ?? 0) {
+                        let currents = sample.currents.map(\.doubleValue)
+                        let jump = zip(currents, readyLastCurrents[key] ?? currents).map { abs($0-$1) }.max() ?? 0
+                        readyLastCurrents[key] = currents; readyLastSequences[key] = sample.sequence
+                        if readyCurrentLimit > 0 && jump > readyCurrentLimit {
+                            throw ROBArmRoutineError.blocked("\(key == "left" ? "Right" : "Left") arm current jump \(jump) exceeded \(readyCurrentLimit) raw units; holding.")
+                        }
+                    }
+                }
+                if moving, let key = readyPreparationArm, let plan = readyPreparationPlans[key],
+                   plan.steps.indices.contains(readyPreparationStep) {
+                    // Intermediate servo overshoot may remain inside the full
+                    // reviewed lift. Keep the authorized joint span as the
+                    // live envelope; each waypoint still must settle to its
+                    // measured target before the next segment is reviewed.
+                    guard ROBCanRecyclingReadyPose.containsFeedback(try measured(key), from: plan.baseline,
+                        to: plan.steps.last!.positions) else {
+                        throw ROBArmRoutineError.blocked("A joint left its complete grasp-ready path bounds; holding.")
+                    }
+                }
+            } catch { abort(error.localizedDescription); return }
+        }
         if generation > 0 {
             guard gateway.isReady(), (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation else {
                 referencedGeneration = 0
@@ -762,7 +973,12 @@ enum ROBArmRoutineError: LocalizedError {
             }
         }
         if superviseCamera && (!vision.fresh || viewIsStationary?() != true) { abort(cameraFailureDetail); return }
-        if moving && !vision.handsClear { abort("Person or hand clearance was lost; an arm hold was requested."); return }
+        // This exact empty-arm test uses the operator's observed clear sweep.
+        // A global image flag (including failed inference or a person outside
+        // that sweep) cannot replace that scoped clearance source. Ordinary
+        // routes retain their camera veto. RGB-D stays diagnostic for this
+        // operator-observed lift; motor feedback remains mandatory throughout.
+        if moving && activeCommand != "torso-ready" && !vision.handsClear { abort("Person or hand clearance was lost; an arm hold was requested."); return }
         if !leased.isEmpty, now - lastRenewal >= 0.4 {
             if renewalSentAt.values.contains(where: { now - $0 > 1 }) { abort("An arm lease acknowledgement timed out."); return }
             lastRenewal = now
@@ -788,6 +1004,8 @@ enum ROBArmRoutineError: LocalizedError {
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
         owner = nil; activeRendition = nil; isRunning = false; task = nil; moving = false; superviseCamera = false; supervisedRoute = false
+        readyPreparationID = nil; readyPreparationPlans = [:]; readyPreparationArm = nil; readyPreparationStep = -1
+        readyDispatchStart = nil; readyLastCurrents = [:]; readyLastSequences = [:]
         setStatus(result["detail"] as? String ?? "Arm routine ended")
         let callback = completion; completion = nil; callback?(result)
     }

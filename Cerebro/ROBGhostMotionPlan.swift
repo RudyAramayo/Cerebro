@@ -330,16 +330,21 @@ final class ROBGhostRobotModel {
     }
 }
 
-/// Operator-taught can-recycling start, measured on 2026-10-27 at 17:04:11Z.
+/// Physical RIGHT can-recycling start, measured on 2026-10-27 at 17:04:11Z.
+/// LEFT uses the shared Mirror L10 → R11 mapping candidate. Both native
+/// mirror buttons share this provisional joint-specific mapping. Its J5
+/// sign/zero relationship is not physically calibrated. An operator-adjusted
+/// hold must not be overwritten merely to match this assumed ready target.
 /// These are physical-side Amber encoder radians, not mirrored URDF angles.
 /// Saving a target does not grant motion or certify camera registration.
 enum ROBCanRecyclingReadyPose {
-    static let revision = "operator_taught_ready_20261027_v4"
+    static let revision = "operator_ready_20261028_shared_mirror_j5_v7"
     static let jointTolerance = 0.015
+    private static let rightTarget = [-0.2564815877344792,-1.6648804817852159,0,-0.9825658273336827,1.107465951929527,1.7111044361935033,0.46278495947412146]
     static func target(physicalSide:String)throws->[Double] {
         switch physicalSide {
-        case "left": return [0.2564815877344792,1.6656986048720883,0,0.9825658273336827,-1.1095112596467078,-1.7111044361935033,-0.46278495947412146]
-        case "right": return [-0.2564815877344792,-1.6648804817852159,0,-0.9825658273336827,1.107465951929527,1.7111044361935033,0.46278495947412146]
+        case "left": return ROBArmPoseMirror.mirroredJointValues(rightTarget.map(NSNumber.init(value:)))!.map(\.doubleValue)
+        case "right": return rightTarget
         default: throw ROBGhostMotionError.blocked("The recycling ready pose needs a physical left or right arm.")
         }
     }
@@ -382,6 +387,86 @@ enum ROBCanRecyclingReadyPose {
             result.append(.init(positions:target,seconds:duration,stage:"Direct move to taught recycling ready pose"));previous=target
         }
         return result
+    }
+}
+
+/// Geometry for the explicitly operator-observed, empty two-arm torso test.
+/// This reviews modeled tread-proxy separation. External clearance comes
+/// from the operator; the mirrored left target remains model-assumed.
+struct ROBOperatorObservedReadyPlan {
+    let baseline: [Double]
+    let steps: [ROBLeftGestureProposal.Step]
+    let initialPairs: [String: Double]
+
+    static func make(model: ROBGhostRobotModel, baseline: [Double]) throws -> Self {
+        let goal = try ROBCanRecyclingReadyPose.target(physicalSide: model.physicalSide)
+        let bounds = ROBWorkspaceCollisionPlan.jointBounds(model: model)
+        guard baseline.count == 7, (baseline + goal).allSatisfy(\.isFinite),
+              zip(baseline, bounds).allSatisfy({ $1.contains($0) }),
+              zip(goal, bounds).allSatisfy({ $1.contains($0) }),
+              model.torsoTurnVerticalClearance(vendorJoints: goal).map({ $0 >= 0.03 }) == true else {
+            throw ROBGhostMotionError.blocked("The grasp-ready target exceeds the arm model or tread-clearance bounds.")
+        }
+        var proxy = ROBWorkspaceSelfProxyClearance(model: model)
+        let initial = try proxy.separations(vendorLeft: baseline)
+        if ROBCanRecyclingReadyPose.reached(baseline, goal: goal) {
+            return .init(baseline: baseline, steps: [], initialPairs: initial)
+        }
+        // Keep all moving joints coordinated. A slightly earlier shoulder lift
+        // can clear the left tread proxy without separate joint test motions.
+        for bias in [0.0, 0.05, 0.1, 0.2, 0.35, -0.05, -0.1, -0.2] {
+            let delta = zip(baseline, goal).map { $1 - $0 }
+            let count = max(8, Int(ceil((delta.map(abs).max() ?? 0) * (1 + abs(bias)) / 0.25)))
+            var previous = baseline, steps: [ROBLeftGestureProposal.Step] = []
+            for index in 1...count {
+                let t = Double(index) / Double(count)
+                let q = (0..<7).map { i in
+                    baseline[i] + delta[i] * (i == 1 ? t + bias * t * (1-t) : t)
+                }
+                // Accepted endpoint error affects every timing bound, including
+                // the cubic bound; padding only average speed can reject the
+                // next segment despite an in-tolerance measured hold.
+                guard let seconds = ROBArmRoutinePlan.duration(from: previous, to: q,
+                    padding: ROBCanRecyclingReadyPose.jointTolerance) else { continue }
+                guard seconds <= 5 else { break }
+                steps.append(.init(positions: q, seconds: seconds, stage: "Coordinated grasp-ready lift"))
+                previous = q
+            }
+            guard steps.count == count else { continue }
+            let plan = Self(baseline: baseline, steps: steps, initialPairs: initial)
+            do {
+                var start = baseline
+                for (index, step) in steps.enumerated() {
+                    try plan.review(from: start, to: step.positions, final: index == steps.count-1, model: model)
+                    start = step.positions
+                }
+                return plan
+            } catch { try Task.checkCancellation() }
+        }
+        throw ROBGhostMotionError.blocked("No coordinated grasp-ready lift preserves the starting tread-proxy clearance.")
+    }
+
+    func review(from start: [Double], to target: [Double], final: Bool, model: ROBGhostRobotModel) throws {
+        let bounds = ROBWorkspaceCollisionPlan.jointBounds(model: model)
+        guard start.count == 7, target.count == 7, (start+target).allSatisfy(\.isFinite),
+              zip(start, bounds).allSatisfy({ $1.contains($0) }),
+              zip(target, bounds).allSatisfy({ $1.contains($0) }) else {
+            throw ROBGhostMotionError.blocked("The measured lift segment exceeds joint bounds.")
+        }
+        var proxy = ROBWorkspaceSelfProxyClearance(model: model)
+        let narrow = Set(initialPairs.filter { $0.value < 0.03 }.keys)
+        let count = max(1, Int(ceil((zip(start, target).map { abs($1-$0) }.max() ?? 0) / 0.005)))
+        for index in 0...count {
+            try Task.checkCancellation()
+            let t = Double(index) / Double(count)
+            let q = zip(start, target).map { $0 + ($1-$0)*t }
+            let pairs = try proxy.separations(vendorLeft: q, forceNarrowPairs: narrow, minimumRetreatBounds: initialPairs)
+            guard pairs.keys == initialPairs.keys,
+                  pairs.allSatisfy({ pair, gap in gap + 1e-8 >= min(0.03, initialPairs[pair]!) }),
+                  !final || index != count || pairs.values.allSatisfy({ $0 >= 0.03 }) else {
+                throw ROBGhostMotionError.blocked("The coordinated lift approaches a tread proxy; holding the current pose.")
+            }
+        }
     }
 }
 
