@@ -45,6 +45,27 @@ import Foundation
         expect(decodedBow == bowDocument, "Greeting and visual lean survive JSON")
         let oldDocument = try ROBAnimationStore.decode(ROBAnimationStore.encode(document))
         expect(oldDocument.sequences[0].completionGreeting == nil && oldDocument.sequences[0].clips[0].pose.previewLeanDegrees == nil, "Older libraries need no new metadata")
+        expect(oldDocument.sequences[0].armSpeedMultiplier == nil && oldDocument.sequences[0].armSpeed == 1, "Old libraries retain 100% arm speed")
+        var speedSequence = ROBAnimationSequence(name: "speed", clips: [clip], armSpeedMultiplier: 0.5)
+        expect(speedSequence.duration == 5 && speedSequence.clips[0].transition == 2 && speedSequence.clips[0].hold == 1, "50% doubles arm transition without rewriting saved timing or hold")
+        expect(ROBAnimationDocument.sample(speedSequence, at: 2, baseline: baseline)["arm.right.j2"] == 0.1, "Slower ghost reaches its midpoint at the scaled time")
+        speedSequence.armSpeedMultiplier = 2
+        expect(speedSequence.duration == 2 && ROBAnimationDocument.sample(speedSequence, at: 0.5, baseline: baseline)["arm.right.j2"] == 0.1, "200% halves arm transition while preserving the hold")
+        let mixed = ROBAnimationClip(pose: .init(name: "mixed", values: ["arm.right.j2":0.2, "maestro.4":7000, "lact.speed":30]), transition:2)
+        speedSequence.clips = [mixed]; speedSequence.armSpeedMultiplier = 0.5
+        let mixedBaseline = ["arm.right.j2":0.0, "maestro.4":6000.0]
+        let slower = ROBAnimationDocument.sample(speedSequence, at: 2.1, baseline: mixedBaseline)
+        expect(speedSequence.duration == 4 && slower["arm.right.j2"]! < 0.2 && slower["maestro.4"] == 7000 && slower["lact.speed"] == 0, "Slow arms do not extend Maestro transitions or timed LACT")
+        speedSequence.armSpeedMultiplier = 2
+        let faster = ROBAnimationDocument.sample(speedSequence, at: 1, baseline: mixedBaseline)
+        expect(speedSequence.duration == 2 && faster["arm.right.j2"] == 0.2 && faster["maestro.4"] == 6500 && faster["lact.speed"] == 30, "Fast arms hold while other tracks finish on their original schedule")
+        var speedDocument = ROBAnimationDocument(); speedDocument.sequences = [speedSequence]
+        let decodedSpeed = try ROBAnimationStore.decode(ROBAnimationStore.encode(speedDocument))
+        expect(decodedSpeed == speedDocument, "Arm speed round-trips for human and JSON editing")
+        for bad in [0.0, 0.24, 2.01, Double.infinity, Double.nan] {
+            speedDocument.sequences[0].armSpeedMultiplier = bad
+            rejects("Invalid arm speed accepted") { try speedDocument.validate() }
+        }
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let greeting = ROBAnimationGreeting()
         for (hour, minute, text) in [(4,59,"こんばんは。"),(5,0,"おはようございます。"),(10,59,"おはようございます。"),(11,0,"こんにちは。"),(17,59,"こんにちは。"),(18,0,"こんばんは。"),(23,59,"こんばんは。")] {

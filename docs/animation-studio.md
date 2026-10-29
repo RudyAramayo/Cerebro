@@ -23,6 +23,8 @@ The role menu assigns a taught library pose to `grasp.horizontal.right`, `grasp.
 
 ## Ghost output and robot playback
 
+**Arm speed** is saved per sequence. Use the slider or enter **25–200%** and choose **Apply speed**. **100%** uses the saved arm transition times, **50%** doubles them and **200%** halves them. Holds and neck, Maestro, torso and timed LACT tracks keep their authored timing. In a mixed clip, a faster arm waits for the other tracks; slower arms can extend the clip. The ghost timeline reflects requested arm speed. Hardware playback extends timing when needed for the existing 0.20 rad/s (about 11.5°/s) ceiling, controller segment duration and measured progress, and reports when motor limits apply. Changing speed applies to the next Run; it does not change a sequence already executing.
+
 **Ghost output**, **Preview sequence**, and timeline scrubbing are silent and nonactuating. The existing diagnostic ghost window shows both arms, neck and torso. Its mappings are display priors; the original mesh/depth evidence stays separate. Unmapped Maestro channels and LACT remain timeline tracks. The optional **Ghost lean °** field (`previewLeanDegrees`, 0–45) illustrates body lean independently of the timed LACT channel; it is not an angle command or a measurement. A blank field carries the previous illustration forward within a sequence. Choose a ghost preset to return to that window's original gesture editor.
 
 **Run on robot** is a direct local panel command covering the saved sequence. It takes over automatic owners once, enters position mode for included arms, and stops on manual takeover, Stop, close, sleep, connection change, stale feedback, rejected/late acknowledgement or current-limit trip. Arm segments use the gateway lease, existing joint bounds and 0.20 rad/s transport admission; timing must accommodate the selected easing and measured start. Torso turns retain both-arm clearance and the existing TIC/camera supervision. No additional voice authorization is requested.
@@ -42,6 +44,8 @@ python3 Scripts/rob-animation.py apply /tmp/animation-edit.json
 ```
 
 Create new UUIDs for new poses, sequences, clips **and each clip's embedded pose**. A clip contains `id`, optional `sourcePoseID`, `pose`, `transition`, `hold`, and `easing` (`smooth` or `linear`). A pose contains `id`, `name`, sparse `values`, optional `role`, `note`, and `needsReview`. Body tracks use the units above. Unknown/reserved channels, invalid IDs, ranges, duplicate roles and invalid timing are rejected.
+
+A sequence may contain `armSpeedMultiplier` from `0.25` to `2.0`. Omitted means `1.0` (100%), so existing libraries retain their timing. This scales arm transitions without rewriting clip snapshots or changing other channels' timing. It participates in revision checks and undo like other sequence edits.
 
 The CLI writes a request into `inbox/`; the running controller validates and applies it on the same serialized path as UI edits. The `.result` file records acceptance/conflict and the actual resulting revision. Stale revisions reject the complete edit; re-export and merge by UUID. A timeout means pending, not saved. Import JSON edit uses the same identity/revision check. Neither path can execute a sequence. Unsaved UI drafts survive incoming edits, and a stale draft cannot overwrite the newer library.
 

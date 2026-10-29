@@ -20,6 +20,8 @@ import Cocoa
     private var modesRequested = false
     private var index = -1
     private var clipStarted = 0.0
+    private var armTransition = 0.0
+    private var clipDuration = 0.0
     private var baseline: [String: Double] = [:]
     private var target: [String: Double] = [:]
     private var nextStep = 0.0
@@ -172,20 +174,20 @@ import Cocoa
             // The segment clock advances only after the preceding command's
             // actual duration. ACK receipt is not arrival, and wall-clock
             // lateness must never turn into overlapping catch-up commands.
-            if elapsed >= nextStep, time >= stepUntil, nextStep < clip.transition, pending.isEmpty {
-                let remaining = clip.transition-nextStep
+            if elapsed >= nextStep, time >= stepUntil, nextStep < armTransition, pending.isEmpty {
+                let remaining = armTransition-nextStep
                 // Amber's minimum leased segment is 0.65 s. Use equal segments
                 // so the last one is never shorter than the transport permits.
-                let count = max(1, Int(floor(clip.transition / 0.8)))
-                let seconds = min(remaining, clip.transition / Double(count))
-                let end = min(clip.transition, nextStep+seconds)
+                let count = max(1, Int(floor(armTransition / 0.8)))
+                let seconds = min(remaining, armTransition / Double(count))
+                let end = min(armTransition, nextStep+seconds)
                 approved = [:]; approvedDuration = seconds
                 for arm in arms {
                     let physical = arm == "left" ? "right" : "left"
                     guard clip.pose.values.keys.contains(where: { $0.hasPrefix("arm.\(physical).") }) else { continue }
                     let q = (1...7).map { j -> Double in
                         let key = "arm.\(physical).j\(j)", start = baseline[key]!
-                        return start + ((target[key] ?? start)-start)*clip.easing.fraction(end/clip.transition)
+                        return start + ((target[key] ?? start)-start)*clip.easing.fraction(end/armTransition)
                     }
                     approved[arm] = q
                 }
@@ -199,7 +201,7 @@ import Cocoa
                     approvedDuration = max(approvedDuration, required + 0.05)
                 }
                 let settlingAllowance = clip.pose.values["torso.heading"] == nil ? 8.0 : 60.0
-                try require(approved.isEmpty || time + approvedDuration <= clipStarted + clip.transition + settlingAllowance,
+                try require(approved.isEmpty || time + approvedDuration <= clipStarted + clipDuration - clip.hold + settlingAllowance,
                     "\(clip.pose.name): arm progress exhausted the clip's settling allowance; holding without skipping targets.")
                 // Validate every included arm before sending the first one.
                 // The gateway repeats this at dispatch to cover races.
@@ -213,9 +215,9 @@ import Cocoa
                     try require(id != 0, gateway.animationStepRejection ?? "Animation gateway changed at dispatch; holding.")
                     pending[id] = time; leasedArms.insert(arm)
                 }
-                approved = [:]; nextStep = abs(end-clip.transition) < 0.000001 ? clip.transition : end; stepUntil = now+approvedDuration
+                approved = [:]; nextStep = abs(end-armTransition) < 0.000001 ? armTransition : end; stepUntil = now+approvedDuration
             }
-            guard nextStep >= clip.transition, elapsed >= clip.duration, time >= stepUntil + clip.hold, pending.isEmpty else { return }
+            guard nextStep >= armTransition, elapsed >= clipDuration, time >= stepUntil + clip.hold, pending.isEmpty else { return }
             var settled = true
             for arm in arms {
                 let physical = arm == "left" ? "right" : "left", q = try measured(arm)
@@ -237,7 +239,7 @@ import Cocoa
                 if settling >= 3 { try beginNextClip() }
             } else {
                 settling = 0
-                try require(elapsed < clip.duration + (clip.pose.values["torso.heading"] == nil ? 8 : 60), "Clip did not reach its target; animation stopped without advancing.")
+                try require(elapsed < clipDuration + (clip.pose.values["torso.heading"] == nil ? 8 : 60), "Clip did not reach its target; animation stopped without advancing.")
             }
         } catch { stop(reason: error.localizedDescription) }
     }
@@ -246,18 +248,20 @@ import Cocoa
         index += 1
         guard sequence.clips.indices.contains(index) else { finishMotion(sequence); return }
         let clip = sequence.clips[index]
+        let requestedArmTransition = sequence.armTransition(for: clip)
+        armTransition = requestedArmTransition
         baseline = serial.animationMaestroSnapshot().mapValues(\.doubleValue)
         for arm in arms {
             let q = try measured(arm), physical = arm == "left" ? "right" : "left"
             for j in 1...7 { baseline["arm.\(physical).j\(j)"] = q[j-1] }
             if clip.pose.values.keys.contains(where: { $0.hasPrefix("arm.\(physical).") }) {
-                try require(clip.transition >= ROBArmRoutinePlan.minimumLeasedTrajectorySeconds, "Arm transitions must be at least \(ROBArmRoutinePlan.minimumLeasedTrajectorySeconds) seconds.")
+                armTransition = max(armTransition, ROBArmRoutinePlan.minimumLeasedTrajectorySeconds)
                 let peak = clip.easing == .smooth ? 1.5 : 1.0
                 for j in 1...7 {
                     let key = "arm.\(physical).j\(j)"
                     if let target = clip.pose.values[key] {
                         let minimum = abs(target-q[j-1])*peak/ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond
-                        try require(clip.transition >= minimum, "\(clip.pose.name): \(physical) J\(j) needs at least \(String(format: "%.2f", minimum)) seconds with this easing. Edit Transition before running.")
+                        armTransition = max(armTransition, minimum)
                     }
                 }
             }
@@ -266,8 +270,11 @@ import Cocoa
             try require(baseline[key] != nil, "\(key) has no known active starting target. Set that servo in manual controls before playback.")
         }
         target = baseline.merging(clip.pose.values) { _, new in new }
+        clipDuration = max(armTransition, clip.hasOtherTimedTargets ? clip.transition : 0) + clip.hold
         clipStarted = now; nextStep = 0; stepUntil = now; torsoStarted = false; settling = 0; lastSettledSequences = [:]
-        publish("Running \(sequence.name) · clip \(index+1)/\(sequence.clips.count): \(clip.pose.name). Stop or any local takeover interrupts.")
+        let speed = clip.hasArmTargets ? String(format: " Arms %.0f%%%@.", sequence.armSpeed*100,
+            armTransition > requestedArmTransition + 0.000001 ? " · motor-limited to \(String(format: "%.2f", armTransition)) s" : "") : ""
+        publish("Running \(sequence.name) · clip \(index+1)/\(sequence.clips.count): \(clip.pose.name).\(speed) Stop or any local takeover interrupts.")
     }
     private func finishMotion(_ sequence: ROBAnimationSequence) {
         guard let greeting = sequence.completionGreeting, let speechOutput else {

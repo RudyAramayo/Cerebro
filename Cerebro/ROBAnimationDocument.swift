@@ -71,6 +71,10 @@ struct ROBAnimationClip: Codable, Equatable, Identifiable {
         self.transition = transition; self.hold = hold
     }
     var duration: Double { transition + hold }
+    var hasArmTargets: Bool { pose.values.keys.contains { $0.hasPrefix("arm.") } }
+    var hasOtherTimedTargets: Bool {
+        pose.values.contains { !$0.key.hasPrefix("arm.") && ($0.key != "lact.speed" || $0.value != 0) }
+    }
 }
 
 struct ROBAnimationGreeting: Codable, Equatable {
@@ -91,7 +95,14 @@ struct ROBAnimationSequence: Codable, Equatable, Identifiable {
     var name: String
     var clips: [ROBAnimationClip] = []
     var completionGreeting: ROBAnimationGreeting? = nil
-    var duration: Double { clips.reduce(0) { $0 + $1.duration } }
+    // Missing in older libraries means the original authored timing (100%).
+    var armSpeedMultiplier: Double? = nil
+    var armSpeed: Double { armSpeedMultiplier ?? 1 }
+    func armTransition(for clip: ROBAnimationClip) -> Double { clip.hasArmTargets ? clip.transition / armSpeed : clip.transition }
+    func playbackDuration(for clip: ROBAnimationClip) -> Double {
+        max(armTransition(for: clip), clip.hasOtherTimedTargets ? clip.transition : 0) + clip.hold
+    }
+    var duration: Double { clips.reduce(0) { $0 + playbackDuration(for: $1) } }
 }
 
 struct ROBAnimationDocument: Codable, Equatable {
@@ -137,6 +148,7 @@ struct ROBAnimationDocument: Codable, Equatable {
             try check(!sequence.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && sequence.name.count <= 200, "A sequence needs a name of 1–200 characters.")
             try check(sequence.clips.count <= 10000, "Too many clips in a sequence.")
             try check(sequence.completionGreeting?.valid ?? true, "Greeting hours must be ordered within the local day.")
+            try check(sequence.armSpeed.isFinite && (0.25...2).contains(sequence.armSpeed), "Arm speed must be 25–200%.")
             for clip in sequence.clips {
                 try unique(clip.id); try pose(clip.pose)
                 try check(clip.transition.isFinite && (0.2...600).contains(clip.transition), "Transition must be 0.2–600 seconds.")
@@ -153,8 +165,9 @@ struct ROBAnimationDocument: Codable, Equatable {
         result["lact.speed"] = 0
         var remaining = max(0, time)
         for clip in sequence.clips {
-            let f = clip.easing.fraction(remaining / clip.transition)
             for (channel, target) in clip.pose.values where channel != "lact.speed" {
+                let transition = channel.hasPrefix("arm.") ? sequence.armTransition(for: clip) : clip.transition
+                let f = clip.easing.fraction(remaining / transition)
                 // Without a known start, show the target and label the preview
                 // as a reference estimate; never invent a hardware start.
                 let start = result[channel] ?? target
@@ -171,13 +184,13 @@ struct ROBAnimationDocument: Codable, Equatable {
             }
             if let lean = clip.pose.previewLeanDegrees {
                 let start = result["preview.bodyLeanDegrees"] ?? 0
-                result["preview.bodyLeanDegrees"] = start + (lean-start)*f
+                result["preview.bodyLeanDegrees"] = start + (lean-start)*clip.easing.fraction(remaining / clip.transition)
             }
-            if remaining < clip.duration {
-                result["lact.speed"] = clip.pose.values["lact.speed"] ?? 0
+            if remaining < sequence.playbackDuration(for: clip) {
+                result["lact.speed"] = remaining < clip.duration ? clip.pose.values["lact.speed"] ?? 0 : 0
                 return result
             }
-            remaining -= clip.duration
+            remaining -= sequence.playbackDuration(for: clip)
         }
         result["lact.speed"] = 0
         return result
@@ -186,8 +199,8 @@ struct ROBAnimationDocument: Codable, Equatable {
     static func previewProp(_ sequence: ROBAnimationSequence, at time: Double) -> ROBAnimationPreviewProp? {
         var remaining = max(0, time)
         for clip in sequence.clips {
-            if remaining < clip.duration { return clip.pose.previewProp }
-            remaining -= clip.duration
+            if remaining < sequence.playbackDuration(for: clip) { return clip.pose.previewProp }
+            remaining -= sequence.playbackDuration(for: clip)
         }
         return sequence.clips.last?.pose.previewProp
     }

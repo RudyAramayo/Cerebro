@@ -42,6 +42,8 @@ import UniformTypeIdentifiers
     private let easing = NSPopUpButton()
     private let role = NSPopUpButton()
     private let greeting = NSPopUpButton()
+    private let armSpeed = NSSlider(value: 100, minValue: 25, maxValue: 200, target: nil, action: nil)
+    private let armSpeedPercent = NSTextField(string: "100")
     private let ghostLean = NSTextField(string: "")
     private let timeline = ROBAnimationTimeline()
     private let clock = NSTextField(labelWithString: "0.00 s")
@@ -361,6 +363,19 @@ import UniformTypeIdentifiers
             document.sequences[i].completionGreeting = enabled ? (document.sequences[i].completionGreeting ?? ROBAnimationGreeting()) : nil
         }
     }
+    @objc private func armSpeedChanged(_ sender: Any?) {
+        guard let id = sequenceID else { return }
+        let percent: Double?
+        if sender as? NSSlider === armSpeed { percent = armSpeed.doubleValue.rounded() }
+        else { percent = Double(armSpeedPercent.stringValue) }
+        guard let percent, percent.isFinite, (25...200).contains(percent) else {
+            message("Enter arm speed from 25 to 200 percent."); reload(); return
+        }
+        if commit({ document in
+            guard let i = document.sequences.firstIndex(where: { $0.id == id }) else { throw ROBAnimationError.invalid("Sequence was deleted.") }
+            document.sequences[i].armSpeedMultiplier = percent == 100 ? nil : percent/100
+        }) { message("Arm speed \(format(percent))% saved for the next Run. Motor limits apply; other tracks keep their timing.") }
+    }
 
     @discardableResult private func commit(expected: Int? = nil, _ mutation: (inout ROBAnimationDocument) throws -> Void) -> Bool {
         do {
@@ -414,6 +429,9 @@ import UniformTypeIdentifiers
         greeting.selectItem(at: selectedSequence?.completionGreeting == nil ? 0 : 1)
         let schedule = selectedSequence?.completionGreeting ?? ROBAnimationGreeting()
         greeting.toolTip = "Spoken only after successful robot playback. Local time: morning \(schedule.morningHour):00, daytime \(schedule.daytimeHour):00, evening \(schedule.eveningHour):00. Now: \(schedule.text())"
+        armSpeed.isEnabled = selectedSequence != nil; armSpeedPercent.isEnabled = selectedSequence != nil
+        armSpeed.doubleValue = (selectedSequence?.armSpeed ?? 1)*100
+        armSpeedPercent.stringValue = format(armSpeed.doubleValue)
         timeline.sequence = selectedSequence; timeline.selectedClip = clipID; timeline.needsDisplay = true
         scrubber.maxValue = max(0.01, selectedSequence?.duration ?? 1)
         let time = min(scrubber.doubleValue, selectedSequence?.duration ?? 0)
@@ -527,6 +545,15 @@ import UniformTypeIdentifiers
         if let content = window.contentView { NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16), root.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16), root.topAnchor.constraint(equalTo: content.topAnchor, constant: 14), root.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14)]) }
         undoButton.target = self; undoButton.action = #selector(undoEdit); redoButton.target = self; redoButton.action = #selector(redoEdit)
         root.addArrangedSubview(row([heading("POSES → CLIPS → SEQUENCES"), button("Ghost output", #selector(previewPose)), button("Preview sequence", #selector(previewSelectedSequence)), button("Run on robot", #selector(runRobot)), button("Stop", #selector(stopAll)), undoButton, redoButton]))
+        armSpeed.target = self; armSpeed.action = #selector(armSpeedChanged(_:)); armSpeed.isContinuous = false
+        armSpeed.widthAnchor.constraint(equalToConstant: 170).isActive = true
+        armSpeed.setAccessibilityLabel("Arm playback speed percent")
+        armSpeedPercent.target = self; armSpeedPercent.action = #selector(armSpeedChanged(_:))
+        armSpeedPercent.widthAnchor.constraint(equalToConstant: 55).isActive = true
+        armSpeedPercent.setAccessibilityLabel("Arm speed percent")
+        armSpeed.toolTip = "25–200% of saved arm transition speed. Applies on the next Run; maximum 0.20 rad/s (11.5°/s). Other tracks retain their timing."
+        armSpeedPercent.toolTip = armSpeed.toolTip
+        root.addArrangedSubview(row([heading("Arm speed"), armSpeed, armSpeedPercent, heading("%"), button("Apply speed", #selector(armSpeedChanged(_:))), NSTextField(labelWithString: "Next Run · motor limits apply · other tracks keep their timing")]))
         let a = tablePane("Pose library", role: .library, actions: [button("New draft", #selector(newDraft)), button("Add →", #selector(addSelectedPose)), button("Delete pose", #selector(deletePose))])
         let b = tablePane("Selected sequence · independent clips", role: .clips, actions: [button("↑", #selector(moveUp)), button("↓", #selector(moveDown)), button("Duplicate", #selector(duplicateClip)), button("Remove", #selector(deleteClip))])
         let c = tablePane("Sequences", role: .sequences, actions: [button("New sequence", #selector(newSequence)), button("Delete sequence", #selector(deleteSequence))])
@@ -603,14 +630,16 @@ private final class ROBAnimationTimeline: NSView {
             NSColor.separatorColor.setFill(); NSRect(x: left, y: y+19, width: width, height: 1).fill()
             var start = 0.0
             for clip in sequence?.clips ?? [] {
+                let clipDuration = sequence?.playbackDuration(for: clip) ?? clip.duration
                 let active = clip.pose.values.keys.contains { ROBAnimationChannel.byID[$0]?.group == group }
                 if active {
-                    let rect = NSRect(x: left+start/duration*width, y: y, width: max(1,clip.duration/duration*width-2), height: 17)
+                    let rect = NSRect(x: left+start/duration*width, y: y, width: max(1,clipDuration/duration*width-2), height: 17)
                     colors[index].withAlphaComponent(clip.id == selectedClip ? 0.95 : 0.5).setFill(); NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
-                    if clip.hold > 0 { NSColor.white.withAlphaComponent(0.25).setFill(); NSRect(x:left+(start+clip.transition)/duration*width,y:y,width:max(0,clip.hold/duration*width-2),height:17).fill() }
+                    let transition = index < 2 ? (sequence?.armTransition(for: clip) ?? clip.transition) : clip.transition
+                    if clipDuration > transition { NSColor.white.withAlphaComponent(0.25).setFill(); NSRect(x:left+(start+transition)/duration*width,y:y,width:max(0,(clipDuration-transition)/duration*width-2),height:17).fill() }
                     if rect.width > 60 { (clip.pose.name as NSString).draw(in: rect.insetBy(dx: 4, dy: 1), withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.white]) }
                 }
-                start += clip.duration
+                start += clipDuration
             }
         }
         for i in 0...4 { (String(format:"%.1fs",duration*Double(i)/4) as NSString).draw(at:NSPoint(x:left+width*Double(i)/4-10,y:2),withAttributes:[.font:NSFont.monospacedDigitSystemFont(ofSize:10,weight:.regular),.foregroundColor:NSColor.secondaryLabelColor]) }

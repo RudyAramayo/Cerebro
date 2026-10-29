@@ -143,6 +143,17 @@ final class ROBTorsoControlCenter {
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let window = NSApp.windows.first { $0.title == "ROB Animation Studio" }!
         let popup = descendants(window.contentView!).compactMap { $0 as? NSPopUpButton }.first { $0.itemTitles.contains("Finish: Japanese greeting") }!
+        let speedSlider = descendants(window.contentView!).compactMap { $0 as? NSSlider }.first { $0.accessibilityLabel() == "Arm playback speed percent" }!
+        let speedField = descendants(window.contentView!).compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Arm speed percent" }!
+        expect(speedSlider.doubleValue == 100 && speedField.stringValue == "100", "Old sequences show normal speed")
+        speedSlider.doubleValue = 50
+        _ = studio.perform(NSSelectorFromString("armSpeedChanged:"), with: speedSlider)
+        expect(store.document.sequences[1].armSpeedMultiplier == 0.5 && store.document.sequences[0].armSpeedMultiplier == nil && speedField.stringValue == "50", "Speed edit persists only the selected sequence by UUID")
+        expect(ROBAmberGatewayClient.shared.sends.count == before, "Editing speed never moves the robot")
+        speedField.stringValue = "201"; _ = studio.perform(NSSelectorFromString("armSpeedChanged:"), with: speedField)
+        expect(store.document.sequences[1].armSpeedMultiplier == 0.5 && speedField.stringValue == "50", "Invalid speed retains the saved setting")
+        speedField.stringValue = "100"; _ = studio.perform(NSSelectorFromString("armSpeedChanged:"), with: speedField)
+        expect(store.document.sequences[1].armSpeedMultiplier == nil && store.document.sequences[1].clips == two.clips, "Resetting speed preserves authored clip timings")
         expect(popup.indexOfSelectedItem == 1, "Selected sequence displays its saved completion greeting")
         popup.selectItem(at: 0); _ = studio.perform(NSSelectorFromString("greetingChanged"))
         expect(store.document.sequences[1].completionGreeting == nil && store.document.sequences[0].completionGreeting == nil, "Greeting edit affects only the selected sequence UUID")
@@ -261,6 +272,23 @@ final class ROBTorsoControlCenter {
         engine.start(sequence:timed, serial:serial); run(0.15)
         expect(!engine.isRunning && gateway.sends.count == pairedBefore && engine.status.contains("second arm"), "A failed second-arm preflight must send neither arm")
         gateway.blockedArm = nil
+        gateway.q = ["left": Array(repeating: 0, count: 7), "right": Array(repeating: 0, count: 7)]
+        let slowPose = ROBAnimationPose(name:"slow arm and timed lean",values:["arm.right.j2":0.04,"lact.speed":20])
+        var speedRun = ROBAnimationSequence(name:"Half speed",clips:[.init(pose:slowPose,transition:0.8)],armSpeedMultiplier:0.5)
+        engine.start(sequence:speedRun,serial:serial); run(1.1)
+        expect(engine.isRunning && serial.lact.last == 0, "Half-speed arms do not lengthen timed lean output")
+        run(1)
+        expect(!engine.isRunning && engine.status.contains("complete"), "Half-speed playback completes")
+        gateway.q["left"] = Array(repeating:0,count:7)
+        speedRun = .init(name:"Double speed",clips:[.init(pose:.init(name:"fast",values:["arm.right.j2":0.04]),transition:1.6)],armSpeedMultiplier:2)
+        let fastStart = gateway.sends.count
+        engine.start(sequence:speedRun,serial:serial); run(1.2)
+        expect(!engine.isRunning && engine.status.contains("complete") && gateway.sends.count == fastStart+1 && gateway.sends.last!.2 == 0.8, "200% executes a feasible arm-only clip in half its authored transition")
+        gateway.q["left"] = Array(repeating:0,count:7)
+        speedRun = .init(name:"Capped speed",clips:[.init(pose:.init(name:"capped",values:["arm.right.j2":0.2]),transition:1)],armSpeedMultiplier:2)
+        engine.start(sequence:speedRun,serial:serial); run(0.1)
+        expect(engine.isRunning && engine.status.contains("motor-limited") && gateway.sends.last!.2 >= 1.5, "A faster request extends timing to retain the existing speed ceiling")
+        engine.stop(reason:"Speed limit verified without hardware")
         print("Animation UI/playback: \(checks) checks passed; all hardware adapters inert")
     }
 }
