@@ -1,0 +1,257 @@
+{
+  "id": "F95291CD-63D6-547D-9E28-6F821D730BDB",
+  "migrationNotes": [],
+  "poses": [
+    {
+      "id": "ED324749-8BB1-51F9-AC02-6BFF8D08C9D0",
+      "name": "Bow · Hands raised",
+      "needsReview": false,
+      "note": "Model-derived empty-hand gesture; first approach depends on measured start. Upright ghost lean is illustrative. No jaw or torso rotation commands.",
+      "previewLeanDegrees": 0,
+      "values": {
+        "arm.left.j1": -0.164061,
+        "arm.left.j2": 0.393222,
+        "arm.left.j3": -1.176989,
+        "arm.left.j4": 0.650074,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.158794,
+        "arm.right.j2": -0.401596,
+        "arm.right.j3": 1.193927,
+        "arm.right.j4": -0.708578,
+        "arm.right.j5": 1.195716,
+        "arm.right.j6": 1.488664,
+        "arm.right.j7": -0.099177,
+        "lact.speed": 0,
+        "maestro.0": 6000.0,
+        "maestro.1": 6011.0,
+        "maestro.2": 6906.0
+      }
+    },
+    {
+      "id": "F44CF69A-635A-54AE-B0B0-752905B8882C",
+      "name": "Bow · Hands together",
+      "needsReview": false,
+      "note": "Prayer-like pose with upright fingertips and space between the grippers; no force/contact or jaw command. Both arm mappings use the current model priors.",
+      "previewLeanDegrees": 0,
+      "values": {
+        "arm.left.j1": -0.50465,
+        "arm.left.j2": 0.447123,
+        "arm.left.j3": -1.060996,
+        "arm.left.j4": 1.142899,
+        "arm.left.j5": -1.251372,
+        "arm.left.j6": -1.413665,
+        "arm.left.j7": 0.93507,
+        "arm.right.j1": 0.498323,
+        "arm.right.j2": -0.456922,
+        "arm.right.j3": 1.070616,
+        "arm.right.j4": -1.201393,
+        "arm.right.j5": 1.240748,
+        "arm.right.j6": 1.428329,
+        "arm.right.j7": -0.930869,
+        "lact.speed": 0
+      }
+    },
+    {
+      "id": "E126B99C-F35A-5A64-B905-23E212EAABAA",
+      "name": "Bow · Head and body",
+      "needsReview": false,
+      "note": "Timed LACT draft: +40% for 0.8 s, zero hold. MD122004 rating at 12 V: 10.4–14.7 mm/s. Linear-duty reference is 3.3–4.7 mm, not measured travel. Ghost 12° is illustration only.",
+      "previewLeanDegrees": 12,
+      "values": {
+        "lact.speed": 40,
+        "maestro.0": 6000.0,
+        "maestro.1": 6011.0,
+        "maestro.2": 6306.0
+      }
+    },
+    {
+      "id": "0D2B3D2A-28DE-5444-87A7-7E4C90B1B0BE",
+      "name": "Bow · Pause",
+      "needsReview": false,
+      "note": "LACT stopped while the hands and head hold the bow. Body illustration retains 12°; no lean feedback.",
+      "previewLeanDegrees": 12,
+      "values": {
+        "lact.speed": 0
+      }
+    },
+    {
+      "id": "9DA62E4E-4FD2-53C7-977F-ABB9309C9220",
+      "name": "Bow · Return upright",
+      "needsReview": false,
+      "note": "Timed LACT draft: −40% for 0.8 s, zero hold. Equal time does not guarantee equal travel under unequal load. Ghost upright is not a measured return.",
+      "previewLeanDegrees": 0,
+      "values": {
+        "lact.speed": -40,
+        "maestro.0": 6000.0,
+        "maestro.1": 6011.0,
+        "maestro.2": 6906.0
+      }
+    },
+    {
+      "id": "AF19B4FE-79EB-51B7-8E26-6DEF67B0C524",
+      "name": "Bow · Upright greeting",
+      "needsReview": false,
+      "note": "Keep hands together, head forward and LACT stopped. After all motion settles, speak the greeting for the local time.",
+      "previewLeanDegrees": 0,
+      "values": {
+        "lact.speed": 0
+      }
+    }
+  ],
+  "revision": 0,
+  "schemaVersion": 1,
+  "sequences": [
+    {
+      "clips": [
+        {
+          "easing": "smooth",
+          "hold": 0.3,
+          "id": "A702FE04-1735-5423-9BB9-DA936EDC6A93",
+          "pose": {
+            "id": "B1348B2B-42ED-5CB7-A551-9B8B8E2D1D0B",
+            "name": "Bow · Hands raised",
+            "needsReview": false,
+            "note": "Model-derived empty-hand gesture; first approach depends on measured start. Upright ghost lean is illustrative. No jaw or torso rotation commands.",
+            "previewLeanDegrees": 0,
+            "values": {
+              "arm.left.j1": -0.164061,
+              "arm.left.j2": 0.393222,
+              "arm.left.j3": -1.176989,
+              "arm.left.j4": 0.650074,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.158794,
+              "arm.right.j2": -0.401596,
+              "arm.right.j3": 1.193927,
+              "arm.right.j4": -0.708578,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177,
+              "lact.speed": 0,
+              "maestro.0": 6000.0,
+              "maestro.1": 6011.0,
+              "maestro.2": 6906.0
+            }
+          },
+          "sourcePoseID": "ED324749-8BB1-51F9-AC02-6BFF8D08C9D0",
+          "transition": 18
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.8,
+          "id": "BBEF90A6-C916-5AB7-8182-950EE2448F2C",
+          "pose": {
+            "id": "830A7049-AF75-5209-A07F-E0E976C921F1",
+            "name": "Bow · Hands together",
+            "needsReview": false,
+            "note": "Prayer-like pose with upright fingertips and space between the grippers; no force/contact or jaw command. Both arm mappings use the current model priors.",
+            "previewLeanDegrees": 0,
+            "values": {
+              "arm.left.j1": -0.50465,
+              "arm.left.j2": 0.447123,
+              "arm.left.j3": -1.060996,
+              "arm.left.j4": 1.142899,
+              "arm.left.j5": -1.251372,
+              "arm.left.j6": -1.413665,
+              "arm.left.j7": 0.93507,
+              "arm.right.j1": 0.498323,
+              "arm.right.j2": -0.456922,
+              "arm.right.j3": 1.070616,
+              "arm.right.j4": -1.201393,
+              "arm.right.j5": 1.240748,
+              "arm.right.j6": 1.428329,
+              "arm.right.j7": -0.930869,
+              "lact.speed": 0
+            }
+          },
+          "sourcePoseID": "F44CF69A-635A-54AE-B0B0-752905B8882C",
+          "transition": 8.2
+        },
+        {
+          "easing": "smooth",
+          "hold": 0,
+          "id": "D2B8B780-41FE-5E39-AA86-0A36B369BFE8",
+          "pose": {
+            "id": "597444B2-ABC1-57DF-83A4-A842F3CDC7DD",
+            "name": "Bow · Head and body",
+            "needsReview": false,
+            "note": "Timed LACT draft: +40% for 0.8 s, zero hold. MD122004 rating at 12 V: 10.4–14.7 mm/s. Linear-duty reference is 3.3–4.7 mm, not measured travel. Ghost 12° is illustration only.",
+            "previewLeanDegrees": 12,
+            "values": {
+              "lact.speed": 40,
+              "maestro.0": 6000.0,
+              "maestro.1": 6011.0,
+              "maestro.2": 6306.0
+            }
+          },
+          "sourcePoseID": "E126B99C-F35A-5A64-B905-23E212EAABAA",
+          "transition": 0.8
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.7,
+          "id": "0213F198-684A-5323-894C-80443E317910",
+          "pose": {
+            "id": "DD228B77-F6AA-5F4E-844B-9AC660E2328C",
+            "name": "Bow · Pause",
+            "needsReview": false,
+            "note": "LACT stopped while the hands and head hold the bow. Body illustration retains 12°; no lean feedback.",
+            "previewLeanDegrees": 12,
+            "values": {
+              "lact.speed": 0
+            }
+          },
+          "sourcePoseID": "0D2B3D2A-28DE-5444-87A7-7E4C90B1B0BE",
+          "transition": 0.5
+        },
+        {
+          "easing": "smooth",
+          "hold": 0,
+          "id": "60E7D0D7-FF96-5756-AC72-D1BBE5D4F5B8",
+          "pose": {
+            "id": "880A81D5-C8F8-5464-B3A0-A8595FA45F49",
+            "name": "Bow · Return upright",
+            "needsReview": false,
+            "note": "Timed LACT draft: −40% for 0.8 s, zero hold. Equal time does not guarantee equal travel under unequal load. Ghost upright is not a measured return.",
+            "previewLeanDegrees": 0,
+            "values": {
+              "lact.speed": -40,
+              "maestro.0": 6000.0,
+              "maestro.1": 6011.0,
+              "maestro.2": 6906.0
+            }
+          },
+          "sourcePoseID": "9DA62E4E-4FD2-53C7-977F-ABB9309C9220",
+          "transition": 0.8
+        },
+        {
+          "easing": "smooth",
+          "hold": 0.4,
+          "id": "36EBEE2A-C975-5FB9-8122-8A7E37CBD74E",
+          "pose": {
+            "id": "9F0DBCA4-AC83-5624-A228-162FC37F5EFF",
+            "name": "Bow · Upright greeting",
+            "needsReview": false,
+            "note": "Keep hands together, head forward and LACT stopped. After all motion settles, speak the greeting for the local time.",
+            "previewLeanDegrees": 0,
+            "values": {
+              "lact.speed": 0
+            }
+          },
+          "sourcePoseID": "AF19B4FE-79EB-51B7-8E26-6DEF67B0C524",
+          "transition": 0.6
+        }
+      ],
+      "completionGreeting": {
+        "daytimeHour": 11,
+        "eveningHour": 18,
+        "morningHour": 5
+      },
+      "id": "419767A0-685E-5913-8D5C-CF3F595A3C59",
+      "name": "Japanese Greeting · Prayer Bow"
+    }
+  ]
+}

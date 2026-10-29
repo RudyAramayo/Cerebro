@@ -41,6 +41,8 @@ import UniformTypeIdentifiers
     private let hold = NSTextField(string: "0.0")
     private let easing = NSPopUpButton()
     private let role = NSPopUpButton()
+    private let greeting = NSPopUpButton()
+    private let ghostLean = NSTextField(string: "")
     private let timeline = ROBAnimationTimeline()
     private let clock = NSTextField(labelWithString: "0.00 s")
     private let scrubber = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
@@ -184,6 +186,7 @@ import UniformTypeIdentifiers
     }
     private func syncDraft() {
         poseName.stringValue = draft.name; legacyPoseName?.stringValue = draft.name
+        ghostLean.stringValue = draft.previewLeanDegrees.map(format) ?? ""
         role.selectItem(at: draft.role.flatMap { ROBAnimationDocument.roles.firstIndex(of: $0) }.map { $0+1 } ?? 0)
         for channel in ROBAnimationChannel.all {
             includes[channel.id]?.state = draft.values[channel.id] == nil ? .off : .on
@@ -207,6 +210,16 @@ import UniformTypeIdentifiers
         }
         // Original compact panel has no inspector yet; use its captured values.
         if fields.isEmpty { value.values = draft.values; value.name = draft.name }
+        if !fields.isEmpty {
+            let lean = ghostLean.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if lean.isEmpty { value.previewLeanDegrees = nil }
+            else {
+                guard let degrees = Double(lean), degrees.isFinite, (0...45).contains(degrees) else {
+                    throw ROBAnimationError.invalid("Ghost lean must be 0–45 degrees, or blank to retain the previous illustration.")
+                }
+                value.previewLeanDegrees = degrees
+            }
+        }
         value.role = role.indexOfSelectedItem > 0 ? ROBAnimationDocument.roles[role.indexOfSelectedItem - 1] : nil
         guard !value.values.isEmpty else { throw ROBAnimationError.invalid("Include at least one channel before recording a pose.") }
         return value
@@ -214,7 +227,7 @@ import UniformTypeIdentifiers
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField else { return }
         if field === transition || field === hold { timingDirty = true }
-        else if field === poseName || fields.values.contains(where: { $0 === field }) { editDraft(field) }
+        else if field === poseName || field === ghostLean || fields.values.contains(where: { $0 === field }) { editDraft(field) }
     }
     @objc private func editDraft(_ sender: Any?) {
         draftDirty = true
@@ -340,6 +353,14 @@ import UniformTypeIdentifiers
         if commit({ $0.sequences.removeAll { $0.id == sequenceID } }) { self.sequenceID = nil; clipID = nil; reload() }
     }
     @objc private func renameSelectedSequence() { renameSequence(sequenceName.stringValue) }
+    @objc private func greetingChanged() {
+        guard let id = sequenceID else { return }
+        let enabled = greeting.indexOfSelectedItem == 1
+        commit { document in
+            guard let i = document.sequences.firstIndex(where: { $0.id == id }) else { throw ROBAnimationError.invalid("Sequence was deleted.") }
+            document.sequences[i].completionGreeting = enabled ? (document.sequences[i].completionGreeting ?? ROBAnimationGreeting()) : nil
+        }
+    }
 
     @discardableResult private func commit(expected: Int? = nil, _ mutation: (inout ROBAnimationDocument) throws -> Void) -> Bool {
         do {
@@ -389,6 +410,10 @@ import UniformTypeIdentifiers
         }
         sequenceName.stringValue = selectedSequence?.name ?? "New sequence"
         legacySequenceName?.stringValue = sequenceName.stringValue
+        greeting.isEnabled = selectedSequence != nil
+        greeting.selectItem(at: selectedSequence?.completionGreeting == nil ? 0 : 1)
+        let schedule = selectedSequence?.completionGreeting ?? ROBAnimationGreeting()
+        greeting.toolTip = "Spoken only after successful robot playback. Local time: morning \(schedule.morningHour):00, daytime \(schedule.daytimeHour):00, evening \(schedule.eveningHour):00. Now: \(schedule.text())"
         timeline.sequence = selectedSequence; timeline.selectedClip = clipID; timeline.needsDisplay = true
         scrubber.maxValue = max(0.01, selectedSequence?.duration ?? 1)
         let time = min(scrubber.doubleValue, selectedSequence?.duration ?? 0)
@@ -408,7 +433,19 @@ import UniformTypeIdentifiers
     private func showDraftPreview(open: Bool) {
         stopPreview()
         var values = (capture?() ?? [:]).mapValues(\.doubleValue)
-        for (key, value) in draft.values { values[key] = value }
+        if case .clip(let sequenceID, let clipID) = editing,
+           var sequence = store.document.sequences.first(where: { $0.id == sequenceID }),
+           let index = sequence.clips.firstIndex(where: { $0.id == clipID }) {
+            // A sparse body/head clip inherits the preceding arm pose. Use a
+            // private prefix so neither later clips nor unsaved draft values
+            // can alter the stored sequence or issue hardware commands.
+            sequence.clips = Array(sequence.clips.prefix(index + 1))
+            sequence.clips[index].pose = draft
+            values = ROBAnimationDocument.sample(sequence, at: sequence.duration, baseline: values)
+        } else {
+            for (key, value) in draft.values { values[key] = value }
+            if let lean = draft.previewLeanDegrees { values["preview.bodyLeanDegrees"] = lean }
+        }
         output(values, title: draft.name, time: 0, open: open, prop: draft.previewProp)
     }
     private func startPreview(_ sequence: ROBAnimationSequence) {
@@ -520,13 +557,24 @@ import UniformTypeIdentifiers
                 let line = row([toggle, value]); list.addArrangedSubview(line)
             }
             list.addArrangedSubview(NSTextField(wrappingLabelWithString: group.contains("arm") ? "Vendor radians" : group == "Body" ? "Torso: ° to base\nLACT: ±% timed\nPositive = forward" : "Maestro targets: ¼ µs"))
+            if group == "Body" {
+                ghostLean.delegate = self; ghostLean.target = self; ghostLean.action = #selector(editDraft(_:))
+                ghostLean.widthAnchor.constraint(equalToConstant: 65).isActive = true
+                ghostLean.setAccessibilityLabel("Ghost lean degrees")
+                ghostLean.toolTip = "Illustration only; not an actuator angle command. Blank retains the previous ghost lean."
+                list.addArrangedSubview(row([NSTextField(labelWithString: "Ghost lean °"), ghostLean]))
+                list.addArrangedSubview(NSTextField(labelWithString: "Illustration only"))
+            }
             inspector.addArrangedSubview(list)
         }
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.documentView = inspector
         inspector.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([inspector.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), inspector.topAnchor.constraint(equalTo: scroll.contentView.topAnchor), inspector.widthAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.widthAnchor)])
         root.addArrangedSubview(scroll); scroll.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true; scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 175).isActive = true
-        root.addArrangedSubview(row([button("Export JSON", #selector(exportJSON)), button("Import JSON edit", #selector(importJSON)), button("Show library file", #selector(revealLibrary)), NSTextField(labelWithString: "Ch 3 unassigned · Ch 6–9 belong to Bubble controls")] ))
+        greeting.addItems(withTitles: ["Finish: no speech", "Finish: Japanese greeting"])
+        greeting.target = self; greeting.action = #selector(greetingChanged)
+        greeting.setAccessibilityLabel("Sequence completion greeting")
+        root.addArrangedSubview(row([button("Export JSON", #selector(exportJSON)), button("Import JSON edit", #selector(importJSON)), button("Show library file", #selector(revealLibrary)), greeting, NSTextField(labelWithString: "Ch 3 unassigned · Ch 6–9: Bubble")] ))
         root.addArrangedSubview(status); status.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
         status.font = .systemFont(ofSize: 12); status.textColor = .secondaryLabelColor
         windowController = NSWindowController(window: window); syncDraft()

@@ -730,6 +730,23 @@ final class GhostFixtureSnapshotView: NSView {
         NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: ["values": ["arm.right.j2": -0.6]])
         precondition(sword.parent == nil, "A new gesture must clear the previous prop")
         print("Animation sword: 60 cm reference, hand attachment, live movement and removal passed; no jaw output")
+        let leanLinks = ["right_tool", "left_tool", "torso_link", "oak_link"]
+        let originalsBeforeLean = leanLinks.map { link in rightScene.rootNode.fixtureDescendants.first { $0.name == "Original URDF \(link)" }!.simdTransform }
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["preview.bodyLeanDegrees":0.0, "lact.speed":40.0]])
+        let beforeLean = leanLinks.map { link in rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform }
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["preview.bodyLeanDegrees":12.0, "lact.speed":0.0]])
+        for (index, link) in leanLinks.enumerated() {
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform != beforeLean[index], "Both hands, torso and head follow illustrative body lean")
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Original URDF \(link)" }!.simdTransform == originalsBeforeLean[index], "Ghost lean must not rewrite measured evidence")
+        }
+        precondition(!rightExecute.isEnabled, "Illustrative lean cannot authorize hardware")
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: ["values": ["lact.speed":40.0]])
+        for (index, link) in leanLinks.enumerated() {
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform == beforeLean[index], "Timed motor demand alone must not invent an angle")
+        }
+        print("Animation bow: independent illustrative lean moves the full ghost hierarchy, never measured evidence or hardware")
         rightEditor.invalidate();gateway.ready=false;gateway.samples=[:]
         trial.physicalSide="left";trial.collisionReviewProposal=historical
         editor.reviewPresetNamed("collision")

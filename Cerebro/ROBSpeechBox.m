@@ -1107,6 +1107,18 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
     });
 }
 
+- (void)sayAnimationGreeting:(NSString *)text completion:(void (^)(BOOL finished))completion
+{
+    if (!NSThread.isMainThread || self.isShuttingDown || text.length == 0) {
+        if (completion) completion(NO);
+        return;
+    }
+    AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
+    utterance.voice = [self voiceForText:text];
+    if (completion) [self.utteranceCompletions setObject:[completion copy] forKey:utterance];
+    [self enqueueSpeechUtterance:utterance];
+}
+
 - (void)sayPersonalityText:(NSString *)text provider:(NSString *)provider completion:(void (^)(BOOL finished))completion
 {
     void (^enqueue)(void) = ^{

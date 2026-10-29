@@ -32,6 +32,32 @@ import Foundation
         let lact = ROBAnimationSequence(name: "lean", clips: [.init(pose: .init(name: "lean", values: ["lact.speed": 30]), transition: 2)])
         expect(ROBAnimationDocument.sample(lact, at: 1, baseline: [:])["lact.speed"] == 30, "Timed LACT runs within clip")
         expect(ROBAnimationDocument.sample(lact, at: 2, baseline: [:])["lact.speed"] == 0, "Timed LACT stops at exact endpoint")
+        var bowPose = ROBAnimationPose(name: "bow", values: ["lact.speed": 40])
+        bowPose.previewLeanDegrees = 12
+        var bow = ROBAnimationSequence(name: "bow", clips: [.init(pose: bowPose, transition: 2), .init(pose: .init(name: "pause", values: ["lact.speed": 0]), transition: 1)])
+        bow.completionGreeting = ROBAnimationGreeting()
+        let bowSample = ROBAnimationDocument.sample(bow, at: 1, baseline: [:])
+        expect(bowSample["preview.bodyLeanDegrees"] == 6 && bowSample["lact.speed"] == 40, "Ghost angle interpolates independently of timed motor percent")
+        expect(ROBAnimationDocument.sample(bow, at: 2.5, baseline: [:])["preview.bodyLeanDegrees"] == 12, "Omitted ghost lean carries forward through a pause")
+        expect(!bow.clips[0].pose.values.keys.contains("preview.bodyLeanDegrees"), "Visual lean never becomes a hardware channel")
+        var bowDocument = ROBAnimationDocument(); bowDocument.sequences = [bow]
+        let decodedBow = try ROBAnimationStore.decode(ROBAnimationStore.encode(bowDocument))
+        expect(decodedBow == bowDocument, "Greeting and visual lean survive JSON")
+        let oldDocument = try ROBAnimationStore.decode(ROBAnimationStore.encode(document))
+        expect(oldDocument.sequences[0].completionGreeting == nil && oldDocument.sequences[0].clips[0].pose.previewLeanDegrees == nil, "Older libraries need no new metadata")
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let greeting = ROBAnimationGreeting()
+        for (hour, minute, text) in [(4,59,"こんばんは。"),(5,0,"おはようございます。"),(10,59,"おはようございます。"),(11,0,"こんにちは。"),(17,59,"こんにちは。"),(18,0,"こんばんは。"),(23,59,"こんばんは。")] {
+            let date = calendar.date(from: DateComponents(year: 2026, month: 10, day: 29, hour: hour, minute: minute))!
+            expect(greeting.text(at: date, calendar: calendar) == text, "Local greeting boundary \(hour):\(minute)")
+        }
+        let noonUTC = calendar.date(from: DateComponents(year: 2026, month: 10, day: 29, hour: 12))!
+        calendar.timeZone = TimeZone(secondsFromGMT: 9*3600)!
+        expect(greeting.text(at: noonUTC, calendar: calendar) == "こんばんは。", "Greeting follows supplied local timezone, not UTC")
+        bowDocument.sequences[0].completionGreeting?.daytimeHour = 4
+        rejects("Invalid greeting hours accepted") { try bowDocument.validate() }
+        bowDocument.sequences = [bow]; bowDocument.sequences[0].clips[0].pose.previewLeanDegrees = 46
+        rejects("Out-of-model ghost lean accepted") { try bowDocument.validate() }
         var torsoClip = ROBAnimationClip(pose: .init(name: "circular", values: ["torso.heading": -179]), transition: 2)
         torsoClip.easing = .linear
         let torso = ROBAnimationSequence(name: "circular", clips: [torsoClip])

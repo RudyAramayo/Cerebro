@@ -80,13 +80,19 @@ final class ROBTorsoControlCenter {
         let b = ROBAnimationPose(name: "same name", values: ["arm.left.j3":0.03])
         document.poses = [a,b]
         let one = ROBAnimationSequence(name: "One")
-        let two = ROBAnimationSequence(name: "Two", clips: [.init(pose:b,transition:1)])
+        let two = ROBAnimationSequence(name: "Two", clips: [.init(pose:a,transition:1), .init(pose:b,transition:1)], completionGreeting: ROBAnimationGreeting())
         document.sequences = [one,two]
         try store.replace(document, expectedRevision: 0)
         let studio = ROBAnimationStudio(store: store)
         let library = NSTableView(), clips = NSTableView(), sequences = NSTableView()
         for table in [library,clips,sequences] { table.addTableColumn(NSTableColumn(identifier: .init("test"))) }
         let serial = ROBSerialBox()
+        var spoken: [String] = [], speechCompletions: [(Bool) -> Void] = []
+        var speechCancels = 0
+        ROBAnimationPlayback.shared.configureSpeech({ text, completion in
+            expect(serial.lact.last == 0, "Timed LACT output must be stopped before speech")
+            spoken.append(text); speechCompletions.append(completion)
+        }, cancel: { speechCancels += 1 })
         studio.connect(library: library, clips: clips, sequences: sequences, poseName: NSTextField(string:""), sequenceName:NSTextField(string:""), serial:serial,
             capture:{ ["arm.right.j2":0.05] }, enabled:{ ["arm.right.j2"] })
         expect(studio.numberOfRows(in: library) == 2 && studio.numberOfRows(in: clips) == 0 && studio.numberOfRows(in: sequences) == 2, "Three tables read independent datasets")
@@ -95,9 +101,9 @@ final class ROBTorsoControlCenter {
         library.selectRowIndexes(IndexSet(integer:1), byExtendingSelection:false)
         studio.addSelectedPose()
         expect(store.document.sequences[0].clips[0].pose.values == b.values, "Add uses selected pose ID")
-        expect(store.document.sequences[1].clips.count == 1, "Add cannot corrupt another sequence")
+        expect(store.document.sequences[1].clips.count == 2, "Add cannot corrupt another sequence")
         sequences.selectRowIndexes(IndexSet(integer:1), byExtendingSelection:false)
-        expect(studio.numberOfRows(in: clips) == 1, "Middle table follows selected sequence")
+        expect(studio.numberOfRows(in: clips) == 2, "Middle table follows selected sequence")
         library.selectRowIndexes(IndexSet(integer:0), byExtendingSelection:false)
         _ = studio.perform(NSSelectorFromString("deletePose"))
         expect(store.document.poses.count == 1 && store.document.poses[0].id == b.id, "Delete targets UUID even when names collide")
@@ -106,7 +112,34 @@ final class ROBTorsoControlCenter {
         let before = ROBAmberGatewayClient.shared.sends.count
         studio.previewSelectedSequence(); run(0.15)
         expect(ROBAmberGatewayClient.shared.sends.count == before && serial.servoWrites == 0, "Preview must never actuate")
+        expect(spoken.isEmpty, "Import and preview must never speak a completion greeting")
         _ = studio.perform(NSSelectorFromString("stopAll"))
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let window = NSApp.windows.first { $0.title == "ROB Animation Studio" }!
+        let popup = descendants(window.contentView!).compactMap { $0 as? NSPopUpButton }.first { $0.itemTitles.contains("Finish: Japanese greeting") }!
+        expect(popup.indexOfSelectedItem == 1, "Selected sequence displays its saved completion greeting")
+        popup.selectItem(at: 0); _ = studio.perform(NSSelectorFromString("greetingChanged"))
+        expect(store.document.sequences[1].completionGreeting == nil && store.document.sequences[0].completionGreeting == nil, "Greeting edit affects only the selected sequence UUID")
+        popup.selectItem(at: 1); _ = studio.perform(NSSelectorFromString("greetingChanged"))
+        expect(store.document.sequences[1].completionGreeting != nil && store.document.sequences[0].completionGreeting == nil, "Enabling greeting leaves the other dataset alone")
+        var clipPreview: [String:Double] = [:]
+        let previewObserver = NotificationCenter.default.addObserver(forName: ROBAnimationStudio.previewChanged, object: studio, queue: nil) { note in
+            clipPreview = note.userInfo?["values"] as? [String:Double] ?? [:]
+        }
+        clips.selectRowIndexes(IndexSet(integer:1), byExtendingSelection:false)
+        expect(clipPreview["arm.right.j2"] == a.values["arm.right.j2"] && clipPreview["arm.left.j3"] == b.values["arm.left.j3"], "Selected sparse clip inherits preceding sequence poses instead of current controls")
+        NotificationCenter.default.removeObserver(previewObserver)
+        library.selectRowIndexes(IndexSet(integer:0), byExtendingSelection:false)
+        let leanField = descendants(window.contentView!).compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Ghost lean degrees" }!
+        leanField.stringValue = "12"
+        studio.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: leanField))
+        _ = studio.perform(NSSelectorFromString("updateSelected"))
+        expect(store.document.poses[0].previewLeanDegrees == 12 && store.document.poses[0].values == b.values, "Ghost lean editor saves visual metadata without adding a motor target")
+        leanField.stringValue = "46"
+        studio.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: leanField))
+        _ = studio.perform(NSSelectorFromString("updateSelected"))
+        expect(store.document.poses[0].previewLeanDegrees == 12, "Invalid illustrative angle cannot replace the saved pose")
+        _ = studio.perform(NSSelectorFromString("discardDraft"))
         if CommandLine.arguments.contains("--show") || Bundle.main.bundleIdentifier == "com.orbitusrobotics.AnimationPreviewFixture" {
             studio.show(); NSApp.activate(ignoringOtherApps: true); NSApp.run(); return
         }
@@ -148,6 +181,29 @@ final class ROBTorsoControlCenter {
         engine.start(sequence:sequence, serial:serial); run(0.1)
         gateway.generation += 1; run(0.1)
         expect(!engine.isRunning && engine.status.contains("connection changed"), "Reconnect invalidates playback")
+        let bowSequence = ROBAnimationSequence(name: "Bow and greet", clips: [
+            .init(pose: .init(name: "bow", values: ["arm.right.j2":0.02,"lact.speed":40], previewLeanDegrees:12), transition:0.8),
+            .init(pose: .init(name: "upright", values: ["lact.speed":0], previewLeanDegrees:0), transition:0.2)
+        ], completionGreeting: ROBAnimationGreeting())
+        engine.start(sequence:bowSequence, serial:serial); run(1.8)
+        expect(engine.isRunning && spoken == [ROBAnimationGreeting().text()], "One local-time greeting follows completed motion")
+        expect(!ROBAmberArmMotionArbiter.shared.owners.isEmpty, "Arm ownership remains during speech")
+        speechCompletions.last!(true); run(0.1)
+        expect(!engine.isRunning && engine.status.contains("greeting complete") && speechCancels == 0, "Successful speech completes without canceling unrelated speech")
+        run(0.1); expect(spoken.count == 1, "Greeting is spoken exactly once")
+        engine.start(sequence:bowSequence, serial:serial); run(0.1); engine.stop(reason:"fixture stop"); run(1.5)
+        expect(spoken.count == 1, "Stop during motion never reaches speech")
+        engine.start(sequence:bowSequence, serial:serial); run(1.8)
+        let oldCompletion = speechCompletions.last!
+        ROBControllerArmApproval.shared.takeLocalPanelControl()
+        expect(!engine.isRunning && speechCancels == 1 && serial.lact.last == 0, "Manual takeover cancels speech and motor outputs")
+        engine.start(sequence:bowSequence, serial:serial); run(1.8)
+        oldCompletion(true); run(0.1)
+        expect(engine.isRunning, "Old speech completion cannot finish a new playback session")
+        gateway.generation += 1; run(0.1)
+        expect(!engine.isRunning && speechCancels == 2, "Reconnect during speech cancels the greeting and retains no motion session")
+        speechCompletions.last!(true); run(0.1)
+        expect(!engine.isRunning && ROBAmberArmMotionArbiter.shared.owners.isEmpty, "Late completion cannot replay or reclaim the arms")
         print("Animation UI/playback: \(checks) checks passed; all hardware adapters inert")
     }
 }

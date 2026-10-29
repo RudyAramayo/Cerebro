@@ -933,6 +933,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     }
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(animationMaestroDemand:) name:@"ROBAnimationMaestroDemand" object:nil];
     __weak typeof(self) weakSelf = self;
+    [[ROBAnimationPlayback shared] configureSpeech:^(NSString *text, void (^completion)(BOOL)) {
+        ROBSpeechBox *speech = weakSelf.robMainViewController.speechBox;
+        if (speech) [speech sayAnimationGreeting:text completion:completion];
+        else completion(NO);
+    } cancel:^{ [weakSelf.robMainViewController.speechBox stopIt:nil]; }];
     [[ROBAnimationStudio shared] connectWithLibrary:self.keyframeTableView clips:self.keyframeSequenceDetailsTableView
         sequences:self.keyframeSequencesTableView poseName:self.keyframeNameTextField sequenceName:self.sequenceNameTextField
         serial:self.robMainViewController.serialBox capture:^NSDictionary<NSString *, NSNumber *> *{ return [weakSelf animationControlValues] ?: @{}; }

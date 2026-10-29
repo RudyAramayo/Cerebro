@@ -94,8 +94,11 @@ import simd
             for j in 1...7 { positions["\(side)_joint\(j)"] = converted["\(side)_joint\(j)"] }
         }
         if let heading = values["torso.heading"] { positions["torso_yaw"] = heading * .pi / 180 }
+        if let lean = values["preview.bodyLeanDegrees"], lean.isFinite, (0...45).contains(lean) {
+            positions["body_lean"] = lean * .pi / 180
+        }
         // Display mounting prior only. Uncalibrated generic Maestro and timed
-        // LACT commands remain visible in the timeline, not invented geometry.
+        // LACT commands remain in the timeline; ghost lean is separate intent.
         let panCenter = values["preview.neckPanCenter"] ?? 6000
         let panScale = values["preview.neckPanTargetsPerDegree"] ?? 33.3333333333
         if let pan = values["maestro.0"], let lower = values["maestro.1"], let upper = values["maestro.2"], panScale != 0,
@@ -110,6 +113,7 @@ import simd
         let title = notification.userInfo?["title"] as? String ?? "Animation"
         let time = notification.userInfo?["time"] as? Double ?? 0
         status.stringValue = String(format: "Animation Studio · %@ · %.2f s\nGhost output only. Arm/head mappings are display priors. LACT is timed; no lean-angle feedback. Unmapped Maestro tracks are shown in the timeline.", title, time)
+        if values["preview.bodyLeanDegrees"] != nil { status.stringValue += " Body lean is the author's illustration, not measured travel." }
     }
 
     private func updateAnimationProp(_ prop: [String: Any]?) {

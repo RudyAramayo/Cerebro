@@ -64,6 +64,8 @@ FOUNDATION_EXPORT BOOL ROBLocalSpeechContainsPriorityStop(NSString * _Nullable t
 /// Stage delivery keeps normal ROB speech responsive while adding a small
 /// punctuation-aware pause between sentences and before the next show cue.
 - (void)sayStageShowText:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;
+/// Enqueued synchronously on the main thread so animation Stop cannot race a deferred enqueue.
+- (void)sayAnimationGreeting:(NSString *)text completion:(void (^ _Nullable)(BOOL finished))completion;
 - (void) stopIt:(id)sender;
 - (void) setOutputLanguage:(NSString *)language;
 - (void) startRecognizer;

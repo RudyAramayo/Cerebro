@@ -5,6 +5,8 @@
 
 ## Animation authoring
 
+- **Japanese greeting bow (2026-10-29):** The prayer bow pack uses a short timed LACT draft (+40% for 0.8 s, pause stopped, −40% for 0.8 s, stop). ROB's hardware records identify Glideforce MD122004 / Pololu 3613: vendor speeds at 12 V are 14.7 mm/s unloaded and 10.4 mm/s rated-load. PWM scaling is an estimate, not measured travel or lean angle. Keep `previewLeanDegrees` separate from hardware channels. Sequence `completionGreeting` selects Japanese speech from the current local hour only after successful motion; previews/imports stay silent, and Stop/manual takeover/reconnect cancel it. Selected sparse clips inherit preceding clip values in ghost output.
+
 - **Animation Studio (2026-10-29):** Rudy requested replacing the three fragile keyframe tables with one stable-ID pose/clip/sequence library, per-joint channel masks, transition/hold timing, ghost output, and shared human/LLM editing. Use `Documents/ROB Animations/library.json` and its revision-checked inbox; never treat names or UI rows as identity. Clips own value snapshots. Preserve old `.keyAnim` files and review their mixed slider/radian units before live playback. Preview, capture, import and JSON edits never actuate. Native Run on robot covers the frozen sequence without voice permission; keep Stop/manual takeover, fresh feedback, owner/session binding, joint/rate bounds and both-arm torso clearance. Neck uses its existing coupled gateway; Maestro 6–9 remain owned by Bubble controls. LACT is timed signed percent until position feedback is connected; do not label it a measured lean angle.
 
 ## Headless robot authorization

@@ -27,6 +27,9 @@ int main(void)
         ROBExpectLanguage(@"繁體中文也可以。", ROBSpeechDetectedLanguageChinese);
         ROBExpectLanguage(@"ROB 2.0：你好！", ROBSpeechDetectedLanguageChinese);
         ROBExpectLanguage(@"今日は ROB camera 2 です。", ROBSpeechDetectedLanguageJapanese);
+        ROBExpectLanguage(@"おはようございます。", ROBSpeechDetectedLanguageJapanese);
+        ROBExpectLanguage(@"こんにちは。", ROBSpeechDetectedLanguageJapanese);
+        ROBExpectLanguage(@"こんばんは。", ROBSpeechDetectedLanguageJapanese);
         ROBExpectLanguage(@"東京", ROBSpeechDetectedLanguageJapanese);
         ROBExpectLanguage(@"日本料理", ROBSpeechDetectedLanguageUnknown);
         ROBExpectLanguage(@"寿司", ROBSpeechDetectedLanguageUnknown);

@@ -54,6 +54,8 @@ struct ROBAnimationPose: Codable, Equatable, Identifiable {
     var note = ""
     var needsReview = false
     var previewProp: ROBAnimationPreviewProp? = nil
+    // Author's visual intent, deliberately separate from timed LACT output.
+    var previewLeanDegrees: Double? = nil
 }
 
 struct ROBAnimationClip: Codable, Equatable, Identifiable {
@@ -71,10 +73,24 @@ struct ROBAnimationClip: Codable, Equatable, Identifiable {
     var duration: Double { transition + hold }
 }
 
+struct ROBAnimationGreeting: Codable, Equatable {
+    var morningHour = 5
+    var daytimeHour = 11
+    var eveningHour = 18
+    func text(at date: Date = Date(), calendar: Calendar = .autoupdatingCurrent) -> String {
+        let hour = calendar.component(.hour, from: date)
+        if hour >= morningHour && hour < daytimeHour { return "おはようございます。" }
+        if hour >= daytimeHour && hour < eveningHour { return "こんにちは。" }
+        return "こんばんは。"
+    }
+    var valid: Bool { 0 <= morningHour && morningHour < daytimeHour && daytimeHour < eveningHour && eveningHour <= 23 }
+}
+
 struct ROBAnimationSequence: Codable, Equatable, Identifiable {
     var id = UUID()
     var name: String
     var clips: [ROBAnimationClip] = []
+    var completionGreeting: ROBAnimationGreeting? = nil
     var duration: Double { clips.reduce(0) { $0 + $1.duration } }
 }
 
@@ -103,6 +119,9 @@ struct ROBAnimationDocument: Codable, Equatable {
                 try check(prop.kind == "sword" && ["right", "left"].contains(prop.arm)
                     && prop.lengthMeters.isFinite && (0.05...2).contains(prop.lengthMeters), "Invalid preview prop.")
             }
+            if let lean = value.previewLeanDegrees {
+                try check(lean.isFinite && (0...45).contains(lean), "Ghost lean must be 0–45 degrees; it is not a LACT position command.")
+            }
             for (id, number) in value.values {
                 guard let channel = ROBAnimationChannel.byID[id] else { throw ROBAnimationError.invalid("Unknown or reserved channel: \(id).") }
                 try check(number.isFinite && (channel.minimum...channel.maximum).contains(number), "\(channel.name) must be \(channel.minimum)…\(channel.maximum) \(channel.unit).")
@@ -117,6 +136,7 @@ struct ROBAnimationDocument: Codable, Equatable {
             try unique(sequence.id)
             try check(!sequence.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && sequence.name.count <= 200, "A sequence needs a name of 1–200 characters.")
             try check(sequence.clips.count <= 10000, "Too many clips in a sequence.")
+            try check(sequence.completionGreeting?.valid ?? true, "Greeting hours must be ordered within the local day.")
             for clip in sequence.clips {
                 try unique(clip.id); try pose(clip.pose)
                 try check(clip.transition.isFinite && (0.2...600).contains(clip.transition), "Transition must be 0.2–600 seconds.")
@@ -148,6 +168,10 @@ struct ROBAnimationDocument: Codable, Equatable {
                     destination = reference + wrap(target-wrap(reference))
                 } else { destination = target }
                 result[channel] = start + (destination - start) * f
+            }
+            if let lean = clip.pose.previewLeanDegrees {
+                let start = result["preview.bodyLeanDegrees"] ?? 0
+                result["preview.bodyLeanDegrees"] = start + (lean-start)*f
             }
             if remaining < clip.duration {
                 result["lact.speed"] = clip.pose.values["lact.speed"] ?? 0

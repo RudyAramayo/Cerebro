@@ -37,7 +37,15 @@ import Cocoa
     private var usesMaestro = false
     private var usesLACT = false
     private var usesTorso = false
+    private var speechOutput: ((String, @escaping (Bool) -> Void) -> Void)?
+    private var cancelSpeech: (() -> Void)?
+    private var speechID: UUID?
     private let gateway = ROBAmberGatewayClient.shared
+
+    @objc(configureSpeech:cancel:)
+    func configureSpeech(_ speak: @escaping (String, @escaping (Bool) -> Void) -> Void, cancel: @escaping () -> Void) {
+        speechOutput = speak; cancelSpeech = cancel
+    }
 
     override init() {
         super.init()
@@ -55,6 +63,7 @@ import Cocoa
         do {
             var document = ROBAnimationDocument(); document.sequences = [sequence]; try document.validate()
             try require(!sequence.clips.isEmpty, "This sequence has no clips.")
+            try require(sequence.completionGreeting == nil || speechOutput != nil, "Connect the controller speech output before running the greeting.")
             try require(sequence.clips.allSatisfy { !$0.pose.needsReview }, "Review imported clip values and Update selected before robot playback.")
             try require(sequence.clips.allSatisfy { !$0.pose.values.isEmpty }, "Remove empty clips before robot playback.")
             let channels = Set(sequence.clips.flatMap { $0.pose.values.keys })
@@ -131,6 +140,10 @@ import Cocoa
                 try require(ROBArmSide(amberGatewayArm: arm).map { ROBAmberArmMotionArbiter.shared.isReserved($0, owner: owner) } == true, "Animation lost arm ownership.")
                 _ = try measured(arm)
                 if leasedArms.contains(arm) { try require(gateway.renewLease(forArm: arm, leaseMilliseconds: 1500) != 0, "Could not renew arm hold watchdog.") }
+            }
+            if speechID != nil {
+                try require(time < deadline, "Greeting timed out; robot holding.")
+                return
             }
             guard sequence.clips.indices.contains(index) else { stop(reason: "Sequence complete; robot holding."); return }
             let clip = sequence.clips[index]
@@ -209,7 +222,7 @@ import Cocoa
     private func beginNextClip() throws {
         guard let sequence, let serial else { return }
         index += 1
-        guard sequence.clips.indices.contains(index) else { stop(reason: "Sequence complete; robot holding. Servo/LACT tracks are command estimates."); return }
+        guard sequence.clips.indices.contains(index) else { finishMotion(sequence); return }
         let clip = sequence.clips[index]
         baseline = serial.animationMaestroSnapshot().mapValues(\.doubleValue)
         for arm in arms {
@@ -234,6 +247,25 @@ import Cocoa
         clipStarted = now; nextStep = 0; stepUntil = now; torsoStarted = false; settling = 0; lastSettledSequences = [:]
         publish("Running \(sequence.name) · clip \(index+1)/\(sequence.clips.count): \(clip.pose.name). Stop or any local takeover interrupts.")
     }
+    private func finishMotion(_ sequence: ROBAnimationSequence) {
+        guard let greeting = sequence.completionGreeting, let speechOutput else {
+            stop(reason: "Sequence complete; robot holding. Servo/LACT tracks are command estimates."); return
+        }
+        // Every clip has settled. End the timed outputs before speaking, and
+        // keep arm ownership/feedback/hold leases until speech finishes.
+        serial?.endAnimationOutputs()
+        let id = UUID(), speechOwner = owner
+        speechID = id; deadline = now + 30
+        let text = greeting.text()
+        publish("Motion complete · speaking \(text)")
+        speechOutput(text) { [weak self] finished in
+            DispatchQueue.main.async {
+                guard let self, self.isRunning, self.owner == speechOwner, self.speechID == id else { return }
+                self.speechID = nil
+                self.stop(reason: finished ? "Sequence and greeting complete; robot holding." : "Greeting interrupted; robot holding.")
+            }
+        }
+    }
     /// Consumed synchronously by the authenticated gateway, never externally
     /// supplied JSON. Fresh dispatch still rechecks modes, bounds and rate.
     func approvedStep(arm: String, generation: UInt64) -> (values: [Double], seconds: Double)? {
@@ -248,7 +280,9 @@ import Cocoa
     @objc func stop(reason: String) {
         precondition(Thread.isMainThread)
         let active = isRunning
+        let speaking = speechID != nil; speechID = nil
         isRunning = false; timer?.invalidate(); timer = nil; approved = [:]; pending = [:]
+        if speaking { cancelSpeech?() }
         if active {
             for arm in arms { _ = gateway.priorityHold(forArm: arm) }
             if usesTorso { ROBTorsoControlCenter.shared.stop() }
