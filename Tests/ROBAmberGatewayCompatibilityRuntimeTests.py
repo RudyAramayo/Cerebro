@@ -439,6 +439,8 @@ struct GatewayCompatibilityFixtures {
         expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
             "Animation target without a local run was admitted")
         animation.step = ([0,0.05,0,0,0,0,0], 1)
+        expect(taught.localAnimationStepRejection(arm: "left", expectedSessionGeneration: generation) == nil,
+            "Paired read-only preflight rejected a valid local segment")
         expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) > 0,
             "Valid frozen local animation segment was rejected")
         expect(taught.sendLocalAnimationStep(arm: "right", expectedSessionGeneration: generation) == 0,
@@ -448,10 +450,23 @@ struct GatewayCompatibilityFixtures {
         animation.step = ([0,1,0,0,0,0,0], 1)
         expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
             "Animation exceeded existing transport rate")
+        expect(taught.animationStepRejection?.contains("Right arm J2") == true && taught.animationStepRejection?.contains("scheduled") == true,
+            "Animation rate rejection must identify the physical arm, joint and required timing")
+        animation.step = ([0,0.05,0,0,0,0,0], 0.4)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0 && taught.animationStepRejection?.contains("duration bounds") == true,
+            "Short animation segment needs a specific duration rejection")
+        animation.step = ([0,3,0,0,0,0,0], 10)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0 && taught.animationStepRejection?.contains("joint or duration bounds") == true,
+            "Joint bounds must reject before any paired animation dispatch")
         animation.step = ([0,0.05,0,0,0,0,0], 1)
         try motorFeedback(age: 501)
         expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
             "Animation admitted expired telemetry")
+        expect(taught.animationStepRejection?.contains("feedback expired") == true && taught.animationStepRejection?.contains("motors") == true,
+            "Feedback rejection must report its real cause and measured ages, not suggest transition edits")
+        try motorFeedback()
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) > 0 && taught.animationStepRejection == nil,
+            "A previous rejection must not latch or contaminate the next valid local dispatch")
         animation.step = nil
         print("Animation gateway: frozen owner segment, physical arm, reconnect, rate and freshness checks passed")
         print("Amber gateway compatibility fixtures passed")

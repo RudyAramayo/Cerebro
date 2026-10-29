@@ -169,7 +169,10 @@ import Cocoa
                 }
             }
             if usesLACT { try require(serial.applyAnimationLACTPercent(elapsed < clip.duration ? clip.pose.values["lact.speed"] ?? 0 : 0), "LACT command failed.") }
-            if elapsed >= nextStep, nextStep < clip.transition, pending.isEmpty {
+            // The segment clock advances only after the preceding command's
+            // actual duration. ACK receipt is not arrival, and wall-clock
+            // lateness must never turn into overlapping catch-up commands.
+            if elapsed >= nextStep, time >= stepUntil, nextStep < clip.transition, pending.isEmpty {
                 let remaining = clip.transition-nextStep
                 // Amber's minimum leased segment is 0.65 s. Use equal segments
                 // so the last one is never shorter than the transport permits.
@@ -186,14 +189,33 @@ import Cocoa
                     }
                     approved[arm] = q
                 }
+                // Telemetry can legitimately trail the last planned point.
+                // Keep the same geometric target and rate ceiling; give both
+                // arms the duration required from their current feedback,
+                // plus one scheduler interval for dispatch/readback skew.
+                for (arm, q) in approved {
+                    let current = try measured(arm)
+                    let required = zip(q, current).map { abs($0-$1) / ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond }.max() ?? 0
+                    approvedDuration = max(approvedDuration, required + 0.05)
+                }
+                let settlingAllowance = clip.pose.values["torso.heading"] == nil ? 8.0 : 60.0
+                try require(approved.isEmpty || time + approvedDuration <= clipStarted + clip.transition + settlingAllowance,
+                    "\(clip.pose.name): arm progress exhausted the clip's settling allowance; holding without skipping targets.")
+                // Validate every included arm before sending the first one.
+                // The gateway repeats this at dispatch to cover races.
+                for arm in arms where approved[arm] != nil {
+                    if let reason = gateway.localAnimationStepRejection(arm: arm, expectedSessionGeneration: generation) {
+                        throw ROBAnimationError.invalid(reason)
+                    }
+                }
                 for arm in arms where approved[arm] != nil {
                     let id = gateway.sendLocalAnimationStep(arm: arm, expectedSessionGeneration: generation)
-                    try require(id != 0, "Animation target/rate/feedback changed before dispatch; increase transition time if needed.")
+                    try require(id != 0, gateway.animationStepRejection ?? "Animation gateway changed at dispatch; holding.")
                     pending[id] = time; leasedArms.insert(arm)
                 }
-                approved = [:]; nextStep = abs(end-clip.transition) < 0.000001 ? clip.transition : end; stepUntil = time+seconds
+                approved = [:]; nextStep = abs(end-clip.transition) < 0.000001 ? clip.transition : end; stepUntil = now+approvedDuration
             }
-            guard elapsed >= clip.duration, time >= stepUntil, pending.isEmpty else { return }
+            guard nextStep >= clip.transition, elapsed >= clip.duration, time >= stepUntil + clip.hold, pending.isEmpty else { return }
             var settled = true
             for arm in arms {
                 let physical = arm == "left" ? "right" : "left", q = try measured(arm)

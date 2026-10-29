@@ -31,18 +31,44 @@ final class ROBAmberGatewayClient {
     static let shared = ROBAmberGatewayClient()
     var stale = false; var reject = false; var ready = true; var generation: UInt64 = 1
     var count: UInt64 = 0; var sends: [(String,[Double],Double)] = []; var holds: [String] = []
+    var sendTimes: [Double] = []
+    var travelDelay: [String: Double] = [:]
+    var blockedArm: String?
+    var animationStepRejection: String?
+    struct Motion { let start: [Double], end: [Double], sent: Double, seconds: Double }
+    var motions: [String: Motion] = [:]
     var q = ["left": Array(repeating: 0.0, count: 7), "right": Array(repeating: 0.0, count: 7)]
+    func actual(_ arm: String) -> [Double] {
+        guard let motion = motions[arm] else { return q[arm]! }
+        let t = max(0, min(1, (ProcessInfo.processInfo.systemUptime - motion.sent - (travelDelay[arm] ?? 0)) / motion.seconds))
+        return zip(motion.start, motion.end).map { $0 + ($1-$0)*t }
+    }
     func connectionSnapshot() -> [String:Any] { ["sessionGeneration": NSNumber(value: generation)] }
     func isReady() -> Bool { ready }
-    func telemetry(forArm arm: String) -> Sample? { count += 1; return Sample(sequence: count, positionsRadians: q[arm]!.map(NSNumber.init(value:)), effectiveSampleAgeMilliseconds: stale ? 1000 : 0) }
+    func telemetry(forArm arm: String) -> Sample? { count += 1; return Sample(sequence: count, positionsRadians: actual(arm).map(NSNumber.init(value:)), effectiveSampleAgeMilliseconds: stale ? 1000 : 0) }
     func modes(forArm arm: String) -> [NSNumber] { Array(repeating: NSNumber(value: 2), count: 7) }
     func enterPositionMode(forArm arm: String) -> UInt64 { count += 1; return count }
     func renewLease(forArm arm: String, leaseMilliseconds: UInt32) -> UInt64 { 1 }
-    func priorityHold(forArm arm: String) -> UInt64 { holds.append(arm); return 1 }
+    func priorityHold(forArm arm: String) -> UInt64 { q[arm] = actual(arm); motions[arm] = nil; holds.append(arm); return 1 }
+    func localAnimationStepRejection(arm: String, expectedSessionGeneration: UInt64) -> String? {
+        if blockedArm == arm { return "Fixture: second arm is not in position mode" }
+        guard let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration) else { return "Fixture: no local segment" }
+        if zip(step.values, actual(arm)).contains(where: { abs($0-$1)/step.seconds > ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond }) {
+            return "Fixture: measured-start rate exceeded"
+        }
+        return nil
+    }
     func sendLocalAnimationStep(arm: String, expectedSessionGeneration: UInt64) -> UInt64 {
+        animationStepRejection = localAnimationStepRejection(arm: arm, expectedSessionGeneration: expectedSessionGeneration)
+        guard animationStepRejection == nil else { return 0 }
         guard let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration) else { return 0 }
         count += 1; let id = count
-        sends.append((arm, step.values, step.seconds)); if !reject { q[arm] = step.values }
+        let time = ProcessInfo.processInfo.systemUptime
+        sends.append((arm, step.values, step.seconds)); sendTimes.append(time)
+        if !reject {
+            if travelDelay[arm] != nil { motions[arm] = Motion(start: actual(arm), end: step.values, sent: time, seconds: step.seconds) }
+            else { q[arm] = step.values }
+        }
         DispatchQueue.main.async { NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: self, userInfo: ["commandID": NSNumber(value: id), "accepted": !self.reject, "error": self.reject ? "fixture rejection" : ""]) }
         return id
     }
@@ -204,6 +230,37 @@ final class ROBTorsoControlCenter {
         expect(!engine.isRunning && speechCancels == 2, "Reconnect during speech cancels the greeting and retains no motion session")
         speechCompletions.last!(true); run(0.1)
         expect(!engine.isRunning && ROBAmberArmMotionArbiter.shared.owners.isEmpty, "Late completion cannot replay or reclaim the arms")
+
+        // The original adapter teleported q to each demand and therefore
+        // could not catch the bow's reported measured-start rate rejection.
+        // Model command travel and different response delays on both arms.
+        gateway.q = ["left": Array(repeating: 0, count: 7), "right": Array(repeating: 0, count: 7)]
+        gateway.travelDelay = ["left": 0.16, "right": 0.24]
+        let timingStart = gateway.sends.count
+        let lift = ROBAnimationPose(name: "Bow lift timing", values: ["arm.right.j1":0.2, "arm.right.j2":-1.6, "arm.right.j4":-1,
+            "arm.left.j1":-0.2, "arm.left.j2":1.6, "arm.left.j4":1, "lact.speed":20])
+        let timed = ROBAnimationSequence(name: "Measured lag", clips: [.init(pose:lift, transition:12.5, hold:0.2)])
+        engine.start(sequence:timed, serial:serial)
+        run(12.7)
+        expect(engine.isRunning && serial.lact.last == 0, "Retimed arms must not extend the timed LACT pulse: \(engine.status)")
+        run(5)
+        expect(!engine.isRunning && engine.status.contains("complete"), "Realistic arm lag should finish without dispatch rejection: \(engine.status)")
+        let timings = Array(timingStart..<gateway.sends.count)
+        expect(timings.count == 30, "Every planned segment must run on both arms without skips or retries")
+        expect(timings.contains { gateway.sends[$0].2 > 12.5/15 + 0.01 }, "Measured feedback must extend segment timing when necessary")
+        for arm in ["left", "right"] {
+            let indices = timings.filter { gateway.sends[$0].0 == arm }
+            expect(zip(indices, indices.dropFirst()).allSatisfy { gateway.sendTimes[$1] - gateway.sendTimes[$0] >= gateway.sends[$0].2 }, "Segments cannot overlap or catch up on wall time")
+            let goal = arm == "left" ? -1.6 : 1.6
+            expect(abs(gateway.q[arm]![1] - goal) <= ROBArmRoutinePlan.tolerance, "Both arms must reach the lift before wrist orientation")
+            expect([2,4,5,6].allSatisfy { gateway.q[arm]![$0] == 0 }, "Sparse lift retained wrists throughout delayed travel")
+        }
+        gateway.travelDelay = [:]
+        gateway.blockedArm = "right"
+        let pairedBefore = gateway.sends.count
+        engine.start(sequence:timed, serial:serial); run(0.15)
+        expect(!engine.isRunning && gateway.sends.count == pairedBefore && engine.status.contains("second arm"), "A failed second-arm preflight must send neither arm")
+        gateway.blockedArm = nil
         print("Animation UI/playback: \(checks) checks passed; all hardware adapters inert")
     }
 }

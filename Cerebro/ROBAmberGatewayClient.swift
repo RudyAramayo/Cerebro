@@ -876,19 +876,55 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
 
     /// Native Animation Studio owns a frozen local sequence and supplies only
     /// its current segment. Draft/JSON/preview values cannot call this route.
+    @nonobjc private(set) var animationStepRejection: String?
+
+    /// Read-only paired preflight. Dispatch repeats this check; a first arm
+    /// must not move when the other already has an invalid segment.
+    @nonobjc func localAnimationStepRejection(arm: String, expectedSessionGeneration: UInt64) -> String? {
+        let side = arm == "left" ? "Right" : "Left"
+        guard Thread.isMainThread else { return "Animation dispatch requires the main controller thread." }
+        guard let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration) else {
+            return "\(side) arm animation ownership, segment or session changed; holding."
+        }
+        guard let sample = telemetry(forArm: arm) else { return "\(side) arm animation feedback is unavailable; holding." }
+        let motorAge = sample.effectiveSampleAgeMilliseconds, gripperAge = sample.effectiveGripperFeedbackAgeMilliseconds
+        guard motorAge <= ROBArmFeedbackTiming.maximumAgeMilliseconds, gripperAge <= ROBArmFeedbackTiming.maximumAgeMilliseconds else {
+            return String(format: "%@ arm animation feedback expired at dispatch (motors %.0f ms, gripper %.0f ms; limit %.0f ms).", side, motorAge, gripperAge, ROBArmFeedbackTiming.maximumAgeMilliseconds)
+        }
+        let positions = sample.positionsRadians.map(\.doubleValue), modes = modes(forArm: arm)
+        guard positions.count == 7, positions.allSatisfy(\.isFinite), sample.statuses.count == 7,
+              sample.statuses.allSatisfy({ $0.intValue == 2 }), modes.count == 7, modes.allSatisfy({ $0.intValue == 2 }) else {
+            return "\(side) arm animation requires seven valid positions and seven joints in position hold."
+        }
+        guard step.values.count == 7, zip(step.values, Self.jointBoundsRadians).allSatisfy({ $0.isFinite && $1.contains($0) }),
+              step.seconds.isFinite, (ROBArmRoutinePlan.minimumLeasedTrajectorySeconds ... 10).contains(step.seconds) else {
+            return "\(side) arm animation segment exceeds joint or duration bounds."
+        }
+        for (joint, pair) in zip(step.values, positions).enumerated() {
+            let needed = abs(pair.0-pair.1) / ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond
+            if needed > step.seconds {
+                return String(format: "%@ arm J%d animation segment needs %.3f s from measured feedback; scheduled %.3f s (limit %.2f rad/s).", side, joint+1, needed, step.seconds, ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond)
+            }
+        }
+        return queue.sync {
+            guard state == .ready, ["left", "right"].contains(arm), expectedSessionGeneration > 0,
+                  authenticatedSessionGeneration == expectedSessionGeneration, startupGripperOwner == nil,
+                  nextCommandID <= UInt64(UInt32.max) else {
+                return "\(side) arm animation gateway connection, session or ownership changed."
+            }
+            return nil
+        }
+    }
+
     @nonobjc func sendLocalAnimationStep(arm: String, expectedSessionGeneration: UInt64) -> UInt64 {
-        guard Thread.isMainThread,
-              let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration),
-              let sample = telemetry(forArm: arm),
-              sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
-              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
-              sample.positionsRadians.count == 7, sample.statuses.count == 7,
-              sample.statuses.allSatisfy({ $0.intValue == 2 }),
-              modes(forArm: arm).count == 7, modes(forArm: arm).allSatisfy({ $0.intValue == 2 }),
-              step.values.count == 7, step.seconds >= ROBArmRoutinePlan.minimumLeasedTrajectorySeconds,
-              zip(step.values, sample.positionsRadians).allSatisfy({ abs($0-$1.doubleValue)/step.seconds <= ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond }) else { return 0 }
-        return sendVendorLeasedTrajectory(arm: arm, positionsRadians: step.values.map(NSNumber.init(value:)),
+        guard Thread.isMainThread else { return 0 }
+        animationStepRejection = localAnimationStepRejection(arm: arm, expectedSessionGeneration: expectedSessionGeneration)
+        guard animationStepRejection == nil,
+              let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration) else { return 0 }
+        let id = sendVendorLeasedTrajectory(arm: arm, positionsRadians: step.values.map(NSNumber.init(value:)),
             duration: step.seconds, leaseMilliseconds: 1500, expectedSessionGeneration: expectedSessionGeneration)
+        if id == 0 { animationStepRejection = "Animation gateway connection, session or bounds changed during dispatch; holding." }
+        return id
     }
 
     /// Fixed hanging/front corridors only. The left trial alone may use its
