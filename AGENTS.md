@@ -5,6 +5,8 @@
 
 ## Animation authoring
 
+- **Ghost playback controls (2026-10-29):** Ghost speed (0.25×–4×), Play/Pause and Loop are visual-only viewing controls. Integrate elapsed preview time when changing rate so the playhead does not jump. Keep them separate from saved arm-speed multipliers, revisioned assets, robot commands and greeting speech; Loop must never repeat physical playback.
+
 - **Editable arm speed (2026-10-29):** Animation Studio stores a per-sequence 25–200% arm speed control (`armSpeedMultiplier`, omitted = 100%). Apply it to arm transitions and ghost timing, preserving authored holds and non-arm track timing, especially timed LACT pulses. Hardware timing still respects the existing 0.20 rad/s ceiling, segment minimum, measured progress and settling checks; report a motor-limited request. Edits apply on the next Run and do not mutate an executing sequence.
 
 - **Animation dispatch timing (2026-10-29):** Rudy's revised bow moved the arms outward, then stopped with the generic target/rate/feedback error. The old scheduler could overlap segments and assumed the measured arm had reached each planned point; a travel-time fixture reproduces the same failure. Wait for each command's actual duration and size the next paired duration from fresh measured positions at the existing rate limit. Keep the keyframe path and existing bounded settling allowance, preflight both arms before sending either, and report the specific dispatch rejection. Arm timing extensions must not extend timed LACT output. A retry starts from new measured feedback; never automatically replay the failed run.

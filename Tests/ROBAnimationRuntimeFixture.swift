@@ -109,7 +109,9 @@ final class ROBTorsoControlCenter {
         let two = ROBAnimationSequence(name: "Two", clips: [.init(pose:a,transition:1), .init(pose:b,transition:1)], completionGreeting: ROBAnimationGreeting())
         document.sequences = [one,two]
         try store.replace(document, expectedRevision: 0)
-        let studio = ROBAnimationStudio(store: store)
+        var previewUptime = 0.0
+        let studio = ROBAnimationStudio(store: store, previewUptime: { previewUptime })
+        func previewAdvance(_ seconds: Double) { previewUptime += seconds; _ = studio.perform(NSSelectorFromString("previewTick")) }
         let library = NSTableView(), clips = NSTableView(), sequences = NSTableView()
         for table in [library,clips,sequences] { table.addTableColumn(NSTableColumn(identifier: .init("test"))) }
         let serial = ROBSerialBox()
@@ -142,6 +144,38 @@ final class ROBTorsoControlCenter {
         _ = studio.perform(NSSelectorFromString("stopAll"))
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let window = NSApp.windows.first { $0.title == "ROB Animation Studio" }!
+        let ghostRate = descendants(window.contentView!).compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "Ghost preview speed" }!
+        let ghostLoop = descendants(window.contentView!).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "Loop ghost preview" }!
+        let ghostPlay = descendants(window.contentView!).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "animation-preview-sequence" }!
+        let playhead = descendants(window.contentView!).compactMap { $0 as? NSSlider }.first { $0.accessibilityLabel() == "Animation playhead seconds" }!
+        let previewDocument = store.document
+        var previewTimes: [Double] = []
+        let timingObserver = NotificationCenter.default.addObserver(forName: ROBAnimationStudio.previewChanged, object: studio, queue: nil) { note in
+            if let time = note.userInfo?["time"] as? Double { previewTimes.append(time) }
+        }
+        playhead.doubleValue = 0; _ = studio.perform(NSSelectorFromString("scrubSlider"))
+        ghostRate.selectItem(withTitle: "4×"); _ = studio.perform(NSSelectorFromString("previewSpeedChanged"))
+        studio.previewSelectedSequence(); previewAdvance(0.18)
+        expect(playhead.doubleValue > 0.4 && playhead.doubleValue < 1.2 && ghostPlay.title == "Pause ghost", "4× advances the visual timeline faster: playhead \(playhead.doubleValue), button \(ghostPlay.title), rate \(ghostRate.titleOfSelectedItem ?? "nil")")
+        let beforeSlow = playhead.doubleValue
+        ghostRate.selectItem(withTitle: "0.25×"); _ = studio.perform(NSSelectorFromString("previewSpeedChanged"))
+        let changedAt = playhead.doubleValue
+        expect(changedAt >= beforeSlow && changedAt-beforeSlow < 0.2, "Live preview rate change retains its current frame")
+        previewAdvance(0.3)
+        expect(playhead.doubleValue-changedAt > 0.02 && playhead.doubleValue-changedAt < 0.14, "Quarter-speed advances at the slower rate")
+        studio.previewSelectedSequence(); let pausedAt = playhead.doubleValue; previewAdvance(0.15)
+        expect(playhead.doubleValue == pausedAt && ghostPlay.title == "Play ghost", "Pause retains the exact ghost playhead")
+        studio.previewSelectedSequence(); previewAdvance(0.15)
+        expect(playhead.doubleValue > pausedAt && playhead.doubleValue-pausedAt < 0.1, "Play resumes the paused frame instead of restarting")
+        ghostLoop.state = .on; ghostRate.selectItem(withTitle:"4×")
+        _ = studio.perform(NSSelectorFromString("previewSpeedChanged")); previewTimes = []
+        for _ in 0..<8 { previewAdvance(0.1) }
+        expect(zip(previewTimes, previewTimes.dropFirst()).contains { $1 < $0 } && ghostPlay.title == "Pause ghost", "Loop crosses the sequence boundary and keeps playing")
+        _ = studio.perform(NSSelectorFromString("stopAll")); let stoppedAt = playhead.doubleValue; previewAdvance(10); run(0.05)
+        expect(playhead.doubleValue == stoppedAt && ghostPlay.title == "Play ghost", "Stop cancels the loop without automatic replay")
+        expect(store.document == previewDocument && ROBAmberGatewayClient.shared.sends.count == before && serial.servoWrites == 0 && serial.lact.isEmpty && spoken.isEmpty, "Preview speeds, pause and loop cannot edit assets, actuate hardware or speak")
+        NotificationCenter.default.removeObserver(timingObserver)
+        ghostLoop.state = .off; ghostRate.selectItem(withTitle:"1×"); _ = studio.perform(NSSelectorFromString("previewSpeedChanged"))
         let popup = descendants(window.contentView!).compactMap { $0 as? NSPopUpButton }.first { $0.itemTitles.contains("Finish: Japanese greeting") }!
         let speedSlider = descendants(window.contentView!).compactMap { $0 as? NSSlider }.first { $0.accessibilityLabel() == "Arm playback speed percent" }!
         let speedField = descendants(window.contentView!).compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Arm speed percent" }!

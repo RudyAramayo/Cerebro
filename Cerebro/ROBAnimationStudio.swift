@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
     @objc static let shared = ROBAnimationStudio()
     static let previewChanged = Notification.Name("ROBAnimationPreviewChanged")
     private let store: ROBAnimationStore
+    private let previewUptime: () -> Double
     private enum Role { case library, clips, sequences }
     private struct Table { weak var view: NSTableView?; let role: Role }
     private var tables: [Table] = []
@@ -28,9 +29,15 @@ import UniformTypeIdentifiers
     private var timingDirty = false
     private var inboxTimer: Timer?
     private var previewTimer: Timer?
-    private var previewStart = 0.0
+    private var previewLastTick = 0.0
+    private var previewElapsed = 0.0
+    private var previewRate = 1.0
     private var previewSequence: ROBAnimationSequence?
     private var previewBaseline: [String: Double] = [:]
+    private let previewPlay = NSButton(title: "Play ghost", target: nil, action: nil)
+    private let previewSpeed = NSPopUpButton()
+    private let previewLoop = NSButton(checkboxWithTitle: "Loop", target: nil, action: nil)
+    private static let previewRates = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4]
     private var undoHistory: [ROBAnimationDocument] = []
     private var redoHistory: [ROBAnimationDocument] = []
     private let poseName = NSTextField(string: "New pose")
@@ -59,8 +66,8 @@ import UniformTypeIdentifiers
         self.init(store: ROBAnimationStore(url: documents.appendingPathComponent("ROB Animations/library.json"),
             legacyDirectory: documents.appendingPathComponent("ROB KeyframeAnimations")))
     }
-    init(store: ROBAnimationStore) {
-        self.store = store
+    init(store: ROBAnimationStore, previewUptime: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) {
+        self.store = store; self.previewUptime = previewUptime
         super.init()
         sequenceID = store.document.sequences.first?.id
         draftRevision = store.document.revision; lastObservedRevision = draftRevision
@@ -128,7 +135,7 @@ import UniformTypeIdentifiers
             load(value.pose, editing: .clip(sequence.id, value.id)); loadTiming(value)
         case .sequences:
             sequenceID = store.document.sequences[table.selectedRow].id; clipID = nil
-            stopPreview(); sequenceName.stringValue = selectedSequence?.name ?? ""
+            stopPreview(); scrubber.doubleValue = 0; sequenceName.stringValue = selectedSequence?.name ?? ""
         case nil: return
         }
         reload(); showDraftPreview(open: false)
@@ -180,7 +187,14 @@ import UniformTypeIdentifiers
     @objc func previewPose() { show(); showDraftPreview(open: true) }
     @objc func previewSelectedSequence() {
         guard let sequence = selectedSequence, !sequence.clips.isEmpty else { message("Add poses to a sequence first."); return }
-        show(); startPreview(sequence)
+        if previewTimer != nil {
+            advancePreview(at: previewUptime())
+            guard previewSequence != nil else { return }
+            previewTimer?.invalidate(); previewTimer = nil; previewPlay.title = "Play ghost"
+            message("Ghost preview paused. Play ghost resumes from this frame.")
+        } else if previewSequence == sequence {
+            resumePreview(); message("Ghost preview resumed at \(format(previewRate))×. No robot commands.")
+        } else { show(); startPreview(sequence) }
     }
 
     private func load(_ pose: ROBAnimationPose, editing: Editing) {
@@ -469,17 +483,44 @@ import UniformTypeIdentifiers
     private func startPreview(_ sequence: ROBAnimationSequence) {
         stopPreview(); previewSequence = sequence
         previewBaseline = (capture?() ?? [:]).mapValues(\.doubleValue)
-        previewStart = ProcessInfo.processInfo.systemUptime
-        output(ROBAnimationDocument.sample(sequence, at: 0, baseline: previewBaseline), title: sequence.name, time: 0, open: true, prop: ROBAnimationDocument.previewProp(sequence, at: 0))
-        previewTimer = Timer.scheduledTimer(withTimeInterval: 1/30, repeats: true) { [weak self] _ in
-            guard let self, let sequence = self.previewSequence else { return }
-            let time = min(sequence.duration, ProcessInfo.processInfo.systemUptime - self.previewStart)
-            self.renderTime(time, sequence: sequence, baseline: self.previewBaseline)
-            if time >= sequence.duration { self.stopPreview() }
-        }
-        message("Ghost preview at real timeline speed. No robot commands.")
+        previewElapsed = scrubber.doubleValue < sequence.duration ? max(0, scrubber.doubleValue) : 0
+        output(ROBAnimationDocument.sample(sequence, at: previewElapsed, baseline: previewBaseline), title: sequence.name, time: previewElapsed, open: true, prop: ROBAnimationDocument.previewProp(sequence, at: previewElapsed))
+        renderTime(previewElapsed, sequence: sequence, baseline: previewBaseline)
+        resumePreview()
+        message("Ghost preview at \(format(previewRate))×. Change Ghost speed while playing; Loop repeats. No robot commands.")
     }
-    private func stopPreview() { previewTimer?.invalidate(); previewTimer = nil; previewSequence = nil }
+    private func resumePreview() {
+        guard previewSequence != nil else { return }
+        previewLastTick = previewUptime()
+        let timer = Timer(timeInterval: 1/30, repeats: true) { [weak self] _ in
+            self?.previewTick()
+        }
+        previewTimer = timer; RunLoop.main.add(timer, forMode: .common)
+        previewPlay.title = "Pause ghost"
+    }
+    @objc private func previewTick() { advancePreview(at: previewUptime()) }
+    private func advancePreview(at time: Double) {
+        guard previewTimer != nil, let sequence = previewSequence else { return }
+        // Integrate elapsed time at the current rate so a live speed change
+        // does not jump backward or multiply the entire prior playback time.
+        previewElapsed += max(0, time-previewLastTick)*previewRate; previewLastTick = time
+        let finished = previewElapsed >= sequence.duration
+        if finished {
+            previewElapsed = previewLoop.state == .on && sequence.duration > 0
+                ? previewElapsed.truncatingRemainder(dividingBy: sequence.duration) : sequence.duration
+        }
+        renderTime(previewElapsed, sequence: sequence, baseline: previewBaseline)
+        if finished && previewLoop.state != .on { stopPreview(); message("Ghost preview complete. Play ghost replays; Loop repeats automatically.") }
+    }
+    @objc private func previewSpeedChanged() {
+        guard Self.previewRates.indices.contains(previewSpeed.indexOfSelectedItem) else { return }
+        advancePreview(at: previewUptime())
+        previewRate = Self.previewRates[previewSpeed.indexOfSelectedItem]
+        message("Ghost speed \(format(previewRate))× · visual playback only. Saved timings and robot speed are unchanged.")
+    }
+    private func stopPreview() {
+        previewTimer?.invalidate(); previewTimer = nil; previewSequence = nil; previewPlay.title = "Play ghost"
+    }
     @objc private func scrubSlider() { scrub(to: scrubber.doubleValue) }
     private func scrub(to time: Double) {
         stopPreview(); guard let sequence = selectedSequence else { return }
@@ -544,7 +585,17 @@ import UniformTypeIdentifiers
         window.contentView?.addSubview(root)
         if let content = window.contentView { NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16), root.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16), root.topAnchor.constraint(equalTo: content.topAnchor, constant: 14), root.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14)]) }
         undoButton.target = self; undoButton.action = #selector(undoEdit); redoButton.target = self; redoButton.action = #selector(redoEdit)
-        root.addArrangedSubview(row([heading("POSES → CLIPS → SEQUENCES"), button("Ghost output", #selector(previewPose)), button("Preview sequence", #selector(previewSelectedSequence)), button("Run on robot", #selector(runRobot)), button("Stop", #selector(stopAll)), undoButton, redoButton]))
+        previewPlay.target = self; previewPlay.action = #selector(previewSelectedSequence)
+        previewPlay.setAccessibilityIdentifier("animation-preview-sequence")
+        previewPlay.toolTip = "Play or pause the ghost from the playhead. Preview only; no robot motion."
+        previewSpeed.addItems(withTitles: Self.previewRates.map { format($0) + "×" }); previewSpeed.selectItem(at: 3)
+        previewSpeed.target = self; previewSpeed.action = #selector(previewSpeedChanged)
+        previewSpeed.setAccessibilityLabel("Ghost preview speed")
+        previewSpeed.toolTip = "0.25×–4× visual playback. Changes immediately without editing the sequence or moving ROB."
+        previewLoop.setAccessibilityLabel("Loop ghost preview")
+        previewLoop.toolTip = "Repeat only the ghost preview; Run on robot remains one sequence."
+        root.addArrangedSubview(row([heading("POSES → CLIPS → SEQUENCES"), button("Ghost output", #selector(previewPose)), previewPlay,
+            heading("Ghost speed"), previewSpeed, previewLoop, button("Run on robot", #selector(runRobot)), button("Stop", #selector(stopAll)), undoButton, redoButton]))
         armSpeed.target = self; armSpeed.action = #selector(armSpeedChanged(_:)); armSpeed.isContinuous = false
         armSpeed.widthAnchor.constraint(equalToConstant: 170).isActive = true
         armSpeed.setAccessibilityLabel("Arm playback speed percent")
