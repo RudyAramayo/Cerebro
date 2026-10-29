@@ -3,10 +3,58 @@
   "migrationNotes": [],
   "poses": [
     {
+      "id": "008E4B68-6BB2-5E97-B370-037D1D4C21D5",
+      "name": "Gesture \u00b7 Lift outward, wrists held",
+      "needsReview": false,
+      "note": "Move shoulders outward with a small coordinated elbow lift. J3 and J5\u2013J7 are omitted and retain measured starting values. No wrist rotation while beside the treads. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+      "values": {
+        "arm.left.j1": -0.1,
+        "arm.left.j2": 0.65,
+        "arm.left.j4": 0.15,
+        "arm.right.j1": 0.1,
+        "arm.right.j2": -0.65,
+        "arm.right.j4": -0.15
+      }
+    },
+    {
+      "id": "3DC53A04-6B18-53AB-B91D-6EE54DB28C31",
+      "name": "Gesture \u00b7 Lift above treads, wrists held",
+      "needsReview": false,
+      "note": "Continue the shoulder/elbow lift before twisting. J3 and J5\u2013J7 still retain measured starting values. Hold for measured arrival before the next clip. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+      "values": {
+        "arm.left.j1": -0.1,
+        "arm.left.j2": 1.85,
+        "arm.left.j4": 1.0,
+        "arm.right.j1": 0.1,
+        "arm.right.j2": -1.85,
+        "arm.right.j4": -1.0
+      }
+    },
+    {
+      "id": "35C12785-5E2D-586F-A4D7-A33297AEC102",
+      "name": "Gesture \u00b7 Orient raised grippers",
+      "needsReview": false,
+      "note": "Keep the raised shoulder/elbow targets. Coordinate J5\u2013J7 together only after both lift clips settle; J3 remains unchanged until the hands-raised approach. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+      "values": {
+        "arm.left.j1": -0.1,
+        "arm.left.j2": 1.85,
+        "arm.left.j4": 1.0,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.1,
+        "arm.right.j2": -1.85,
+        "arm.right.j4": -1.0,
+        "arm.right.j5": 1.195716,
+        "arm.right.j6": 1.488664,
+        "arm.right.j7": -0.099177
+      }
+    },
+    {
       "id": "C38E35A3-565E-54B0-9B0A-D75F6D33B579",
       "name": "Gesture \u00b7 Hands raised",
       "needsReview": false,
-      "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+      "note": "Approach the raised-hands pose only after the outward lift, raised lift and gripper-orientation clips. Those clips hold J3; this approach brings J3 and the shoulders into the final pose. Model-derived, not physically commissioned.",
       "values": {
         "arm.left.j1": -0.164061,
         "arm.left.j2": 0.393222,
@@ -497,7 +545,77 @@
   "schemaVersion": 1,
   "sequences": [
     {
+      "armSpeedMultiplier": 0.25,
       "clips": [
+        {
+          "easing": "smooth",
+          "hold": 1.0,
+          "id": "19759856-C19A-504E-B7A1-441643FF9D03",
+          "pose": {
+            "id": "59B68BAA-F7C4-58A0-93E5-E95335FAA74E",
+            "name": "Gesture \u00b7 Lift outward, wrists held",
+            "needsReview": false,
+            "note": "Move shoulders outward with a small coordinated elbow lift. J3 and J5\u2013J7 are omitted and retain measured starting values. No wrist rotation while beside the treads. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+            "values": {
+              "arm.left.j1": -0.1,
+              "arm.left.j2": 0.65,
+              "arm.left.j4": 0.15,
+              "arm.right.j1": 0.1,
+              "arm.right.j2": -0.65,
+              "arm.right.j4": -0.15
+            }
+          },
+          "sourcePoseID": "008E4B68-6BB2-5E97-B370-037D1D4C21D5",
+          "transition": 6.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.0,
+          "id": "51367A21-C135-5BC1-AEED-25F0056CE883",
+          "pose": {
+            "id": "1E274912-362E-52F9-9D01-4633074BD89F",
+            "name": "Gesture \u00b7 Lift above treads, wrists held",
+            "needsReview": false,
+            "note": "Continue the shoulder/elbow lift before twisting. J3 and J5\u2013J7 still retain measured starting values. Hold for measured arrival before the next clip. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+            "values": {
+              "arm.left.j1": -0.1,
+              "arm.left.j2": 1.85,
+              "arm.left.j4": 1.0,
+              "arm.right.j1": 0.1,
+              "arm.right.j2": -1.85,
+              "arm.right.j4": -1.0
+            }
+          },
+          "sourcePoseID": "3DC53A04-6B18-53AB-B91D-6EE54DB28C31",
+          "transition": 10.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.0,
+          "id": "09452C17-DE16-5000-BA6E-3327EDF0E8AC",
+          "pose": {
+            "id": "9170CFE5-764F-554B-8AA1-FB03EA9A2539",
+            "name": "Gesture \u00b7 Orient raised grippers",
+            "needsReview": false,
+            "note": "Keep the raised shoulder/elbow targets. Coordinate J5\u2013J7 together only after both lift clips settle; J3 remains unchanged until the hands-raised approach. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+            "values": {
+              "arm.left.j1": -0.1,
+              "arm.left.j2": 1.85,
+              "arm.left.j4": 1.0,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.1,
+              "arm.right.j2": -1.85,
+              "arm.right.j4": -1.0,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177
+            }
+          },
+          "sourcePoseID": "35C12785-5E2D-586F-A4D7-A33297AEC102",
+          "transition": 12.5
+        },
         {
           "easing": "smooth",
           "hold": 0.3,
@@ -506,7 +624,7 @@
             "id": "50105160-8B6B-5DD4-A499-8478FFF3AB70",
             "name": "Gesture \u00b7 Hands raised",
             "needsReview": false,
-            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "note": "Approach the raised-hands pose only after the outward lift, raised lift and gripper-orientation clips. Those clips hold J3; this approach brings J3 and the shoulders into the final pose. Model-derived, not physically commissioned.",
             "values": {
               "arm.left.j1": -0.164061,
               "arm.left.j2": 0.393222,
@@ -525,7 +643,7 @@
             }
           },
           "sourcePoseID": "C38E35A3-565E-54B0-9B0A-D75F6D33B579",
-          "transition": 18.0
+          "transition": 12.5
         },
         {
           "easing": "smooth",
@@ -969,7 +1087,77 @@
       "name": "Handshake \u00b7 Right Hand"
     },
     {
+      "armSpeedMultiplier": 0.25,
       "clips": [
+        {
+          "easing": "smooth",
+          "hold": 1.0,
+          "id": "2926D4A7-F2EA-5411-BE5A-BEBFE87C3641",
+          "pose": {
+            "id": "8FA4E1FA-868B-5427-8E68-2406A1BC1E9C",
+            "name": "Gesture \u00b7 Lift outward, wrists held",
+            "needsReview": false,
+            "note": "Move shoulders outward with a small coordinated elbow lift. J3 and J5\u2013J7 are omitted and retain measured starting values. No wrist rotation while beside the treads. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+            "values": {
+              "arm.left.j1": -0.1,
+              "arm.left.j2": 0.65,
+              "arm.left.j4": 0.15,
+              "arm.right.j1": 0.1,
+              "arm.right.j2": -0.65,
+              "arm.right.j4": -0.15
+            }
+          },
+          "sourcePoseID": "008E4B68-6BB2-5E97-B370-037D1D4C21D5",
+          "transition": 6.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.0,
+          "id": "54FDE675-2FDB-5EEC-B7AE-80DB239B8E9B",
+          "pose": {
+            "id": "D44AF68E-9FC5-5B36-9390-1B7F98205613",
+            "name": "Gesture \u00b7 Lift above treads, wrists held",
+            "needsReview": false,
+            "note": "Continue the shoulder/elbow lift before twisting. J3 and J5\u2013J7 still retain measured starting values. Hold for measured arrival before the next clip. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+            "values": {
+              "arm.left.j1": -0.1,
+              "arm.left.j2": 1.85,
+              "arm.left.j4": 1.0,
+              "arm.right.j1": 0.1,
+              "arm.right.j2": -1.85,
+              "arm.right.j4": -1.0
+            }
+          },
+          "sourcePoseID": "3DC53A04-6B18-53AB-B91D-6EE54DB28C31",
+          "transition": 10.0
+        },
+        {
+          "easing": "smooth",
+          "hold": 1.0,
+          "id": "E70F08DF-3F56-5C85-BF8D-D8720AFBC500",
+          "pose": {
+            "id": "6DB1C5D0-A4AF-59E8-9CD2-B79C3AAC7AC4",
+            "name": "Gesture \u00b7 Orient raised grippers",
+            "needsReview": false,
+            "note": "Keep the raised shoulder/elbow targets. Coordinate J5\u2013J7 together only after both lift clips settle; J3 remains unchanged until the hands-raised approach. Model-derived empty-arm entry from hanging zero; physical clearance and encoder alignment remain unverified.",
+            "values": {
+              "arm.left.j1": -0.1,
+              "arm.left.j2": 1.85,
+              "arm.left.j4": 1.0,
+              "arm.left.j5": -1.213675,
+              "arm.left.j6": -1.47459,
+              "arm.left.j7": 0.064455,
+              "arm.right.j1": 0.1,
+              "arm.right.j2": -1.85,
+              "arm.right.j4": -1.0,
+              "arm.right.j5": 1.195716,
+              "arm.right.j6": 1.488664,
+              "arm.right.j7": -0.099177
+            }
+          },
+          "sourcePoseID": "35C12785-5E2D-586F-A4D7-A33297AEC102",
+          "transition": 12.5
+        },
         {
           "easing": "smooth",
           "hold": 0.3,
@@ -978,7 +1166,7 @@
             "id": "28AEC030-93FC-5A90-BA78-F746ED7C3FDA",
             "name": "Gesture \u00b7 Hands raised",
             "needsReview": false,
-            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "note": "Approach the raised-hands pose only after the outward lift, raised lift and gripper-orientation clips. Those clips hold J3; this approach brings J3 and the shoulders into the final pose. Model-derived, not physically commissioned.",
             "values": {
               "arm.left.j1": -0.164061,
               "arm.left.j2": 0.393222,
@@ -997,7 +1185,7 @@
             }
           },
           "sourcePoseID": "C38E35A3-565E-54B0-9B0A-D75F6D33B579",
-          "transition": 18.0
+          "transition": 12.5
         },
         {
           "easing": "smooth",
@@ -1326,7 +1514,7 @@
             "id": "B4ACD23C-F0E5-5E78-A2CD-8415DCC8213D",
             "name": "Gesture \u00b7 Hands raised",
             "needsReview": false,
-            "note": "Authored in vendor radians from the current ghost model; model/reference priors, not a measured hardware calibration. Arm tracks only; jaw, head, torso and LACT settings are retained. ",
+            "note": "Approach the raised-hands pose only after the outward lift, raised lift and gripper-orientation clips. Those clips hold J3; this approach brings J3 and the shoulders into the final pose. Model-derived, not physically commissioned.",
             "values": {
               "arm.left.j1": -0.164061,
               "arm.left.j2": 0.393222,

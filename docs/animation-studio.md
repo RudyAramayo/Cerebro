@@ -55,10 +55,10 @@ The CLI writes a request into `inbox/`; the running controller validates and app
 
 `Animations/basic-gestures.json` contains five sequences and their reusable poses:
 
-- **Hands Folded Up:** raise both hands, bring them inward and hold in front of the chest.
+- **Hands Folded Up:** lift outward, lift higher with wrists held, orient the raised grippers, then bring both hands inward and hold in front of the chest. Defaults to 25% for the collision-retry draft.
 - **Wave · Right Hand:** raise, wave three times and return to the raised ready pose.
 - **Handshake · Right Hand:** offer the hand, make three small vertical gestures and withdraw. This is a mime; it does not sense contact or close the jaws.
-- **Kung Fu · Guard and Flow:** salute, alternate outward blocks and palm presses, then return.
+- **Kung Fu · Guard and Flow:** use the same staged raised-hands entry, salute, alternate outward blocks and palm presses, then return. Defaults to 25% with the revised entry.
 - **Sword Form · Right Hand · 60 cm:** salute, high guards, two diagonal sweeps, blade presentation and recovery. The left hand remains raised away from the blade path; jaw settings are unchanged.
 
 Install without replacing existing animations:
@@ -67,15 +67,21 @@ Install without replacing existing animations:
 python3 Scripts/rob-animation.py add-pack Animations/basic-gestures.json
 ```
 
-Repeated installation preserves existing edits by stable ID. The app still validates the whole merged document and its revision before saving. All five sequences contain arm tracks only. Clip timings use smooth easing and a nominal peak below 0.20 rad/s; the 18-second first clip is sized from hanging coordinates, and native playback checks the actual measured start. Each pose can be edited independently in the studio. The targets were authored with the bundled model's FK and each arm's own vendor-coordinate mapping; they are model-derived gestures, not physically commissioned motions.
+Repeated installation preserves existing edits by stable ID. The app still validates the whole merged document and its revision before saving. All five sequences contain arm tracks only. Clip timings use smooth easing and a nominal peak below 0.20 rad/s. Folded Hands and Kung Fu use the staged hanging entry described below; their 25% setting keeps the nominal peak below 0.05 rad/s. The other three sequences retain their original 18-second first transitions and have not received this entry revision. Native playback checks the actual measured start. Each pose can be edited independently in the studio. The targets were authored with the bundled model's FK and each arm's own vendor-coordinate mapping; they are model-derived gestures, not physically commissioned motions.
 
 An optional pose field, `previewProp: {"kind":"sword", "arm":"right", "lengthMeters":0.6}`, draws a reference sword along the tool's +Z axis. It follows the ghost hand while scrubbing, survives pose/clip copies and JSON edits, and disappears for poses without the field. This is display geometry, not a measured grip transform, jaw command or payload-clearance model. Other values remain unchanged.
 
 ## Japanese greeting bow
 
-`Animations/japanese-bow.json` adds **Japanese Greeting · Prayer Bow** and eight reusable poses. Its entry first lifts the shoulders/elbows, then orients the raised grippers, then approaches the hands-raised pose. The lift omits J3 and J5–J7 so they retain their measured starting positions; the orientation clip keeps the raised shoulder/elbow targets and still retains J3. Native playback checks measured arm arrival before advancing to the next clip. This replaces the original simultaneous lift/wrist rotation after the reported right-gripper collision with a tread.
+`Animations/japanese-bow.json` adds **Japanese Greeting · Prayer Bow** and nine reusable poses. Following the reported bow twisting and raised-hands/tread collision, the bow, Hands Folded Up and Kung Fu share this revised entry:
 
-The remaining clips bring the grippers close together with fingertips tilted slightly inward in front of the chest, nod and lean, pause, then return upright with the hands still together. The pose leaves space between the grippers; it does not command contact or close their jaws. Nominal motion duration is 47.8 seconds, with settling potentially extending it. No torso rotation is included. Selecting a sparse sequence clip previews its inherited arm/head pose; selecting a library pose uses current controls for omitted channels. The revised entry is reviewed from hanging zero; the model check does not establish physical clearance from an arbitrary starting pose.
+1. **Lift outward, wrists held:** coordinate J1/J2/J4 to move the grippers outward with a small elbow lift. J3 and J5–J7 are omitted and retain their measured starting positions.
+2. **Lift above treads, wrists held:** increase the shoulder lift before any wrist rotation; the same omitted channels remain unchanged.
+3. **Orient raised grippers:** keep the raised shoulder/elbow targets and coordinate J5–J7 together. J3 stays unchanged until the subsequent hands-raised approach. A pitch-only intermediate was rejected because it approached the modeled torso.
+
+Each entry clip has a one-second hold, and native playback requires measured arrival of both arms before advancing. At the saved **25% arm speed**, their arm transitions take **24, 40 and 50 seconds** respectively; the subsequent hands-raised approach takes 50 seconds. Neck timing, LACT pulse lengths, jaw state and the existing motor/feedback/current/Stop protections are unchanged. These are editable sequence settings, not new global speed restrictions.
+
+The remaining clips bring the grippers close together with fingertips tilted slightly inward in front of the chest, nod and lean, pause, then return upright with the hands still together. The pose leaves space between the grippers; it does not command contact or close their jaws. The bow takes a nominal **204.7 seconds at 25%**; Hands Folded Up takes **183.1 seconds**. Settling can extend either. No torso rotation is included. Selecting a sparse sequence clip previews its inherited arm/head pose; selecting a library pose uses current controls for omitted channels. The revised entry is reviewed from hanging zero. Physical clearance, starting encoder alignment and the cause of the reported left-arm twisting remain unverified; no failed run is replayed automatically.
 
 ```sh
 python3 Scripts/rob-animation.py add-pack Animations/japanese-bow.json
@@ -91,7 +97,7 @@ ROB's hardware evidence identifies **Concentric Glideforce MD122004**, Pololu it
 
 ## Verification
 
-`Scripts/test-animation-entry-geometry.sh` samples the complete bow from explicit hanging-zero coordinates, including the first transition. It checks retained wrist channels, shoulder/elbow height before wrist rotation, joint/rate bounds and full-arm tread proxies. Existing conservative proxy overlap at hanging must not worsen during the lift; subsequent clips restore the ordinary modeled margin. These are offline regression checks, not a measured clearance certificate or additional runtime movement restrictions.
+`Scripts/test-animation-entry-geometry.sh` samples the complete bow, folded-hands and Kung Fu sequences from explicit hanging-zero coordinates, including the first transition and saved speed. It checks retained wrist channels through both lifts, outward gripper travel, extra arm/open-gripper height throughout wrist orientation, joint/rate bounds and full-arm tread proxies. It also samples both arms together against the body with convex hulls, excluding mechanically adjacent links. Existing conservative proxy overlap at hanging must not deepen; later tread checks restore the ordinary modeled margin. A regression verifies that the rejected pitch-only shortcut produces a modeled torso intersection. These are offline regression checks, not a measured clearance certificate or additional runtime movement restrictions.
 
 `Tests/ROBAmberManualCommandTests.py` also covers the manual Zero command after shutdown. Zero requests seven hanging joint targets without resetting encoder coordinates or changing torque mode. It now requires reported position mode and checks the controller acknowledgement; rejection or timeout is an error, not a successful reset. Position + Hold is the existing manual mode command. An acknowledged target still does not establish physical arrival.
 
