@@ -23,6 +23,7 @@ import simd
         for side in ["right", "left"] { for j in 1...7 { baseline["arm.\(side).j\(j)"] = 0 } }
         for sequence in sequences {
           check(sequence.armSpeed == 0.25, "Reported collision paths must ship at the requested slower trial speed")
+          check(Array(sequence.clips.prefix(3).map(\.transition)) == [6, 10, 12.5], "Compact lift must preserve the working transition times")
           for side in ["right", "left"] {
             let model = try ROBGhostRobotModel(directory: directory, physicalSide: side)
             var proxy = ROBWorkspaceSelfProxyClearance(model: model)
@@ -48,7 +49,7 @@ import simd
                 let inherited = ROBAnimationDocument.sample(sequence, at: time, baseline: changedBaseline)
                 check([3,5,6,7].allSatisfy { inherited["arm.\(side).j\($0)"] == 0.1 }, "Lift changed an omitted wrist or forearm channel")
             }
-            check([0,1,2,3].allSatisfy { lift[$0] == orient[$0] }, "Orientation clip lowered the shoulder/elbow before rotating the gripper")
+            check([0,1,2,3].allSatisfy { abs(lift[$0] - orient[$0]) < 1e-9 }, "Orientation clip lowered the shoulder/elbow before rotating the gripper")
             let initialTool = model.toolPosition(model.positions(vendorLeft: zero))!
             let outwardTool = model.toolPosition(model.positions(vendorLeft: outward))!
             check(abs(outwardTool.y) > abs(initialTool.y) + 0.15, "First lift must move the gripper outward before elbow folding")
@@ -129,7 +130,7 @@ private final class AnimationWholeBodyEntryReview {
         }
     }
 
-    private func separations(_ values: [String: Double]) throws -> [String: Double] {
+    private func positions(_ values: [String: Double]) -> [String: Double] {
         var positions = left.reference
         for model in [left, right] {
             let q = (1...7).map { values["arm.\(model.physicalSide).j\($0)"]! }
@@ -143,7 +144,21 @@ private final class AnimationWholeBodyEntryReview {
            let head = left.headPositions(pan: estimate.panRadians, lowerPitch: estimate.lowerPitch, upperPitch: estimate.upperPitch) {
             positions.merge(head) { _, new in new }
         }
-        let frames = left.frames(positions), bounds = left.worldCollisionBounds(positions: positions)
+        return positions
+    }
+
+    private func envelope(_ values: [String: Double]) -> (span: Double, front: Double) {
+        let bounds = left.worldCollisionBounds(positions: positions(values)).filter {
+            $0.key.hasSuffix("_Link") || $0.key.hasSuffix("_tool")
+        }
+        let low = bounds.map { $0.value.low.y - ($0.key.hasSuffix("_tool") ? 0.03 : 0) }.min()!
+        let high = bounds.map { $0.value.high.y + ($0.key.hasSuffix("_tool") ? 0.03 : 0) }.max()!
+        return (high - low, bounds.values.map { $0.high.x }.max()!)
+    }
+
+    private func separations(_ values: [String: Double]) throws -> [String: Double] {
+        let mapped = positions(values)
+        let frames = left.frames(mapped), bounds = left.worldCollisionBounds(positions: mapped)
         var result: [String: Double] = [:]
         for (a, b) in pairs {
             let first = bounds[a]!, second = bounds[b]!, key = a + "|" + b
@@ -164,6 +179,18 @@ private final class AnimationWholeBodyEntryReview {
 
     func review(_ sequence: ROBAnimationSequence, baseline: [String: Double]) throws {
         let initial = try separations(baseline)
+        // Keep the physically tried wide entry as an explicit comparison.
+        // The compact path must save space, not merely rename the same lift.
+        var wide = sequence
+        for index in 0..<3 {
+            for (side, sign) in [("right", 1.0), ("left", -1.0)] {
+                for (joint, value) in zip([1,2,4], index == 0 ? [0.1,-0.65,-0.15] : [0.1,-1.85,-1.0]) {
+                    wide.clips[index].pose.values["arm.\(side).j\(joint)"] = sign * value
+                }
+            }
+        }
+        var compactSpan = 0.0, wideSpan = 0.0, compactFront = 0.0, wideFront = 0.0
+        var orientationToolGap = Double.infinity
         var time = 0.0, previous = baseline, samples = 0
         for (index, clip) in sequence.clips.enumerated() {
             let transition = sequence.armTransition(for: clip)
@@ -171,22 +198,37 @@ private final class AnimationWholeBodyEntryReview {
             let count = max(20, Int(ceil(delta / 0.025)))
             for n in 0...count {
                 let values = ROBAnimationDocument.sample(sequence, at: time + transition * Double(n) / Double(count), baseline: baseline)
-                for (pair, gap) in try separations(values) where gap + 1e-8 < min(0, initial[pair]!) {
+                let gaps = try separations(values)
+                if index == 2 { orientationToolGap = min(orientationToolGap, gaps["left_tool|right_tool"]!) }
+                if index < 4 {
+                    let compact = envelope(values)
+                    let old = envelope(ROBAnimationDocument.sample(wide, at: time + transition * Double(n) / Double(count), baseline: baseline))
+                    compactSpan = max(compactSpan, compact.span); wideSpan = max(wideSpan, old.span)
+                    compactFront = max(compactFront, compact.front); wideFront = max(wideFront, old.front)
+                }
+                for (pair, gap) in gaps where gap + 1e-8 < min(0, initial[pair]!) {
                     throw ROBAnimationError.invalid("\(sequence.name), clip \(index + 1): new/deeper whole-body intersection at \(pair): \(gap)m")
                 }
                 samples += 1
             }
             previous.merge(clip.pose.values) { _, new in new }; time += sequence.playbackDuration(for: clip)
         }
+        guard compactSpan <= wideSpan - 0.15, compactFront <= wideFront + 0.02 else {
+            throw ROBAnimationError.invalid("Compact entry did not reduce width by 15 cm while retaining forward reach: \(wideSpan) → \(compactSpan), forward \(wideFront) → \(compactFront)")
+        }
+        guard orientationToolGap >= 0.06 else {
+            throw ROBAnimationError.invalid("Compact orientation crowds the open-gripper allowance: \(orientationToolGap)m")
+        }
         // A separate full-pitch-before-roll candidate really does intersect
         // the modeled torso. Keep that failure observable in this fixture.
         var pitchOnly = baseline
-        for clip in sequence.clips.prefix(2) { pitchOnly.merge(clip.pose.values) { _, new in new } }
+        for clip in wide.clips.prefix(2) { pitchOnly.merge(clip.pose.values) { _, new in new } }
         for side in ["left", "right"] { pitchOnly["arm.\(side).j6"] = sequence.clips[2].pose.values["arm.\(side).j6"] }
         let wrongPath = try separations(pitchOnly)
         guard wrongPath.contains(where: { $0.value < min(0, initial[$0.key]!) - 0.001 }) else {
             throw ROBAnimationError.invalid("Whole-body check failed to detect the rejected pitch-only path")
         }
         print("PASS \(sequence.name): \(samples) paired whole-body samples; no new/deeper model intersections; rejected pitch-only shortcut detected")
+        print("PASS compact envelope: width \(wideSpan)m → \(compactSpan)m; forward \(wideFront)m → \(compactFront)m; orientation gripper separation \(orientationToolGap)m")
     }
 }
