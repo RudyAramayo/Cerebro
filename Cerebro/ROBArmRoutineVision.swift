@@ -1476,15 +1476,8 @@ struct ROBWorkspaceCanSelection {
     /// do not expose the older map as collision-clearance evidence.
     @nonobjc func canForBasePlanning() throws -> ROBWorkspaceLocatedObject {
         precondition(Thread.isMainThread)
-        guard let can = locatedObjects[.can], can.position.count == 3,
-              can.position.allSatisfy(\.isFinite) else {
-            throw ROBArmRoutineError.blocked("No located can with valid depth coordinates; scan the front table.")
-        }
-        let age = Date().timeIntervalSince1970*1000-can.capturedAt
-        guard (0...60_000).contains(age) else {
-            throw ROBArmRoutineError.blocked(String(format: "Can observation is %.1f seconds old; reacquire it before base planning.", age/1000))
-        }
         guard let map = collisionSnapshotValue, let model = collisionSnapshotModel,
+              map.modelID == model.modelID, map.geometryID == model.geometryID, map.mappingID == model.selectedMappingID,
               map.cameraGeneration == ROBArmRoutineVision.shared.cameraGeneration,
               (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == map.sessionGeneration,
               estimatedCameraProjectionIsCurrent(model:model,map:map) else {
@@ -1492,6 +1485,32 @@ struct ROBWorkspaceCanSelection {
         }
         guard map.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity else {
             throw ROBArmRoutineError.blocked("The body moved after the can capture; reacquire it at the current pose.")
+        }
+        let now = Date().timeIntervalSince1970*1000
+        var candidate = locatedObjects[.can]
+        if candidate == nil {
+            // Reach ranking deliberately omits an unreachable can from arm
+            // targets. Retain its confirmed depth for a floor-route proposal;
+            // this must not turn it back into a reachable grasp target.
+            let expected = ROBWorkspaceCanSceneIdentity(sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,
+                sessionGeneration:map.sessionGeneration,bodyMotionIdentity:map.bodyMotionIdentity,
+                modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+                estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity)
+            if canCandidates.context == expected {
+                candidate = canCandidates.confirmed(nowMilliseconds:now).filter { object in
+                    map.observations.contains {
+                        $0.sequence == object.sequence && $0.capturedAtMilliseconds == object.capturedAt &&
+                            $0.registrationID == object.registrationID
+                    }
+                }.min { hypot($0.point.x,$0.point.y) < hypot($1.point.x,$1.point.y) }
+            }
+        }
+        guard let can = candidate, can.position.count == 3, can.position.allSatisfy(\.isFinite) else {
+            throw ROBArmRoutineError.blocked("No confirmed can with matching depth coordinates; scan the front table.")
+        }
+        let age = now-can.capturedAt
+        guard (0...60_000).contains(age) else {
+            throw ROBArmRoutineError.blocked(String(format: "Can observation is %.1f seconds old; reacquire it before base planning.", age/1000))
         }
         guard map.observations.contains(where: {
             $0.sequence == can.sequence && $0.capturedAtMilliseconds == can.capturedAt && $0.registrationID == can.registrationID

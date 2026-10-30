@@ -148,6 +148,35 @@ FIXTURE = r'''
             ROBCanGrabPreview.calls=[];ROBCanGrabPreview.hook=nil
         }
 
+        // A can rejected for arm reach remains a target for floor planning.
+        // This does not restore arm reachability or collision-map authority.
+        enroll([object(1.2,confidence:0.99),object(0.9,confidence:0.5)])
+        search.locatedObjects=[:]
+        search.collisionSnapshotValue=search.collisionSnapshot
+        search.collisionSnapshot=nil
+        precondition((try? search.canForBasePlanning())?.position[0]==0.9,
+            "Unreachable confirmed cans were discarded before base planning")
+        precondition(search.locatedObjects.isEmpty && search.collisionSnapshot==nil,
+            "Floor planning revived arm reach or collision authority")
+        let fallbackMap=search.collisionSnapshotValue!
+        for changed in ["scene","body","camera","gateway","projection","source","registration"] {
+            search.collisionSnapshotValue=fallbackMap
+            if changed=="scene" {search.collisionSnapshotValue?.sceneID=UUID()}
+            if changed=="body" {search.collisionSnapshotValue?.bodyMotionIdentity="other"}
+            if changed=="camera" {search.collisionSnapshotValue?.cameraGeneration=UUID()}
+            if changed=="gateway" {search.collisionSnapshotValue?.sessionGeneration=2}
+            if changed=="projection" {search.collisionSnapshotValue?.estimatedCameraProjectionIdentity="other"}
+            if changed=="source" {search.collisionSnapshotValue?.observations=[]}
+            if changed=="registration" {search.collisionSnapshotValue?.observations = fallbackMap.observations.map {
+                .init(sequence:$0.sequence,capturedAtMilliseconds:$0.capturedAtMilliseconds,registrationID:"other")
+            }}
+            precondition((try? search.canForBasePlanning())==nil,"Invalid fallback passed floor planning: \(changed)")
+        }
+        search.collisionSnapshotValue=fallbackMap
+        search.canCandidates=ROBWorkspaceCanCandidateSet()
+        search.canCandidates.observe([object(0.9)],context:context,nowMilliseconds:now)
+        precondition((try? search.canForBasePlanning())==nil,"One unconfirmed exposure admitted base planning")
+
         // A measured map's aggregate hash differs from each exact source registration.
         // Bind all three fields to ONE observation, never unrelated map entries.
         var measuredFirst=object(0.45),measuredSecond=object(0.45,seq:2)

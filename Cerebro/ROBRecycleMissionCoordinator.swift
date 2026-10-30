@@ -306,7 +306,7 @@ import simd
                 } else { self.beginSurvey() }
             case .emptyPerceptionMiss:
                 self.message?.possiblePayloadHeld=false
-                if ROBWorkspaceSearch.shared.locatedObjects[.can] != nil { self.planCanReposition() }
+                if (try? ROBWorkspaceSearch.shared.canForBasePlanning()) != nil { self.planCanReposition() }
                 else { self.planNextStop() }
             case .hold(let possiblePayload):
                 self.message?.possiblePayloadHeld=possiblePayload
