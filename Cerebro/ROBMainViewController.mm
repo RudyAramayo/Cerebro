@@ -6091,11 +6091,13 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void) showROBControls
 {
-    NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil]; // get a reference to the storyboard
-    self.controlsWindowController = [storyBoard instantiateControllerWithIdentifier:@"ControlsWindowController"]; // instantiate your window controller
-    [self.controlsWindowController showWindow:self]; // show the window}
-    
-    [(ROBKeyboardControlsViewController *)self.controlsWindowController.contentViewController setRobMainViewController:self];
+    if (self.controlsWindowController == nil) {
+        NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil];
+        self.controlsWindowController = [storyBoard instantiateControllerWithIdentifier:@"ControlsWindowController"];
+        [(ROBKeyboardControlsViewController *)self.controlsWindowController.contentViewController setRobMainViewController:self];
+    }
+    [self.controlsWindowController showWindow:self];
+    [self.controlsWindowController.window makeKeyAndOrderFront:self];
 }
 
 - (IBAction)showBaseSerialConsole:(id)sender
@@ -6122,7 +6124,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (IBAction)showControls:(id)sender
 {
-    NSLog(@"show controls");
+    [self showROBControls];
 }
 
 

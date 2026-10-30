@@ -155,7 +155,20 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 
 - (void)installServoControlMenu
 {
+    // This panel must remain reachable when quiet startup skips diagnostics.
+    NSMenu *windowMenu = NSApp.windowsMenu;
+    for (NSMenuItem *item in windowMenu.itemArray) {
+        if ([item.title isEqualToString:@"ShowControls"]) {
+            item.title = @"Treads & Body Controls…";
+            item.action = @selector(showBaseControls:);
+            item.target = self;
+        }
+    }
     NSMenu *submenu = [[NSMenu alloc] initWithTitle:@"Servos"];
+    NSMenuItem *baseItem = [[NSMenuItem alloc] initWithTitle:@"Treads & Body Controls…"
+        action:@selector(showBaseControls:) keyEquivalent:@""];
+    baseItem.target = self;
+    [submenu addItem:baseItem];
     NSMenuItem *openItem = [[NSMenuItem alloc]
         initWithTitle:@"Open Servo Control…"
                action:@selector(showServoControl:)
@@ -217,6 +230,19 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
             [self mainViewControllerInViewController:window.contentViewController];
         if (mainViewController != nil) {
             [mainViewController showTorsoServoControls:sender];
+            return;
+        }
+    }
+    NSBeep();
+}
+
+- (IBAction)showBaseControls:(id)sender
+{
+    for (NSWindow *window in NSApp.windows) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:window.contentViewController];
+        if (mainViewController != nil) {
+            [mainViewController showControls:sender];
             return;
         }
     }
