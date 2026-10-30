@@ -1559,11 +1559,23 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         guard !leased else { throw ROBArmRoutineError.blocked("Hold the arm before scanning its environment.") }
         if localReceiptCommand != nil,!recyclingGripDispatched {localReceiptHeldNeckIdentity=nil}
         let now = Date().timeIntervalSince1970*1000
+        func reusableSearchScene()throws->ROBWorkspaceCollisionSnapshot? {
+            guard sceneCapturedForThisTask,let observed=ROBWorkspaceSearch.shared.collisionSnapshot,
+                  observed.sessionGeneration==generation,observed.cameraGeneration==vision.cameraGeneration,
+                  observed.modelID==model.modelID,observed.geometryID==model.geometryID else{return nil}
+            if (0...ROBWorkspaceCollisionPlan.maximumMapAgeMilliseconds).contains(now-observed.oldestCapturedAtMilliseconds) {return observed}
+            // The scoped DEBUG campaign already validates its advisory map
+            // budget in visualTrial. Do not replace that validated source map
+            // with a shoulder raster and strand the freshly selected can.
+            // This does not extend camera/object ages or ordinary map limits.
+            if activeCameraCollisionAdvisory,localReceiptCommand != nil,
+               try visualTrial(map:observed,model:model,baseline:try measured().positionsRadians.map(\.doubleValue)) != nil {
+                return observed
+            }
+            return nil
+        }
         let map: ROBWorkspaceCollisionSnapshot
-        if sceneCapturedForThisTask, let observed = ROBWorkspaceSearch.shared.collisionSnapshot,
-           observed.sessionGeneration == generation, observed.cameraGeneration == vision.cameraGeneration,
-           observed.modelID == model.modelID, observed.geometryID == model.geometryID,
-           (0...ROBWorkspaceCollisionPlan.maximumMapAgeMilliseconds).contains(now-observed.oldestCapturedAtMilliseconds) {
+        if let observed=try reusableSearchScene() {
             map = observed
         } else {
             map = try await ROBWorkspaceSearch.shared.scanCollisionScene(model:model,generation:generation,
