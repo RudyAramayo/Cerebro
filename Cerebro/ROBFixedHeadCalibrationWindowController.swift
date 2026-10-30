@@ -471,7 +471,7 @@ struct ROBFixedHeadCaptureFrameGate {
         guard measured.scope == scope else { throw ROBGhostMotionError.blocked("Fit returned a different capture scope.") }
         try checkPose(expected)
         guard let current = ROBArmRoutineVision.shared.snapshot()["face"],
-              (0...700).contains(Date().timeIntervalSince1970*1000-current.capturedAt),
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-current.capturedAt),
               try self.scope(model:model,frame:current) == scope else {
             throw ROBGhostMotionError.blocked("Camera or arm connection changed during fitting; capture this held view again.")
         }
@@ -494,7 +494,7 @@ struct ROBFixedHeadCaptureFrameGate {
             let kind = (try JSONSerialization.jsonObject(with:data) as? [String:Any])?["kind"] as? String
             guard let resources = Bundle.main.url(forResource:"ShadowPlanner",withExtension:nil),
                   let frame = ROBArmRoutineVision.shared.snapshot()["face"],
-                  (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt) else {
+                  (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt) else {
                 throw ROBGhostMotionError.blocked("Start a current fixed-view camera capture before importing measurements.")
             }
             let model = try ROBGhostRobotModel(directory:resources,physicalSide:side.indexOfSelectedItem == 0 ? "right" : "left")

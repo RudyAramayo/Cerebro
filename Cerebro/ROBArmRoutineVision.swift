@@ -3,16 +3,6 @@ import AVFoundation
 import Vision
 import simd
 
-/// Perception stage budgets, not motion permission. Leave 150 ms for analysis
-/// within the existing 700 ms final exposure-age limit; never refresh a stamp.
-struct ROBVisionFrameAgeBudget {
-    static func acceptsIngress(ageMilliseconds:Double)->Bool {(0...550).contains(ageMilliseconds)}
-    static func acceptsPublication(ageMilliseconds:Double)->Bool {(0...700).contains(ageMilliseconds)}
-    static func acceptsAnalysisOpportunity(active:Bool,busy:Bool,elapsedSeconds:Double)->Bool {
-        active && !busy && elapsedSeconds >= 0.1
-    }
-}
-
 /// Native image observations, not a statement that a motion corridor is clear.
 /// Coordinates use the original normalized RGB raster with its origin at top left.
 struct ROBArmHumanObservationEvidence {
@@ -127,7 +117,7 @@ struct ROBWorkspaceFrameEnrollment {
     private(set) var sequence: UInt64 = 0
     private(set) var capturedAtMilliseconds: Double?
     func decision(sequence candidate:UInt64,capturedAtMilliseconds captured:Double,nowMilliseconds now:Double)->Decision {
-        guard candidate>0,captured.isFinite,now.isFinite,(0...700).contains(now-captured) else {return .invalid}
+        guard candidate>0,captured.isFinite,now.isFinite,(0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(now-captured) else {return .invalid}
         if candidate==sequence,capturedAtMilliseconds==captured {return .alreadyEnrolled}
         guard candidate>sequence,capturedAtMilliseconds.map({captured>$0}) ?? true else {return .invalid}
         return .fresh
@@ -514,7 +504,7 @@ final class ROBArmRoutineVision {
         humanClearance:HumanClearance? = nil,
         cameraCollisionAdvisoryTrial:ROBWorkspaceVisualCalibrationTrial? = nil) throws -> ROBGripperVisualServo.Frame {
         guard nowMilliseconds.isFinite, frame.capturedAt.isFinite,
-              (0...700).contains(nowMilliseconds-frame.capturedAt), frame.sequence>0,
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(nowMilliseconds-frame.capturedAt), frame.sequence>0,
               frame.cameraGeneration==cameraGeneration,
               (frame.handsClear || humanClearance?.matches(frame:frame,scopeIdentity:scopeIdentity)==true ||
                (cameraCollisionAdvisoryTrial?.usesOperatorClearedCameraCollisionAdvisory==true && cameraCollisionAdvisoryTrial?.cameraGeneration==frame.cameraGeneration)),
@@ -524,7 +514,7 @@ final class ROBArmRoutineVision {
               openingCommandAtMilliseconds.map({$0.isFinite && (0...30_000).contains(nowMilliseconds-$0)}) ?? true,
               // Exposure-matched historical feedback is distinct from live
               // dispatch feedback, which the executor checks independently.
-              (0...700).contains(nowMilliseconds-jointCapturedAtMilliseconds),
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(nowMilliseconds-jointCapturedAtMilliseconds),
               abs(frame.capturedAt-jointCapturedAtMilliseconds)<=150,
               let depth=frame.depth, let k=frame.intrinsics,
               depth.width>0, depth.height>0,
@@ -635,7 +625,7 @@ final class ROBArmRoutineVision {
         return ["face"].map { key in
             let name = key == "face" ? "Forward camera" : "Belly camera"
             guard let frame = frames[key] else { return "\(name): \(inputNotes[key] ?? "no frames received")" }
-            return "\(name): \(Int(now - frame.capturedAt)) ms old, \(Int(frame.depthCoverage * 100))% usable depth, analysis \(Int(processingMilliseconds)) ms"
+            return "\(name): \(Int(now - frame.capturedAt)) ms old (limit \(Int(ROBVisionFrameAgeBudget.maximumAgeMilliseconds)) ms), \(Int(frame.depthCoverage * 100))% usable depth, analysis \(Int(processingMilliseconds)) ms"
         }.joined(separator: "; ")
     }
 
@@ -648,13 +638,13 @@ final class ROBArmRoutineVision {
         return ["active": active, "input_sequence": NSNumber(value: lastIncomingSequence),
                 "input_age_ms": lastIncomingCapture.map { now - $0 } ?? -1,
                 "analysis_age_ms": frame.map { now - $0.capturedAt } ?? -1,
-                "analysis_ms": processingMilliseconds, "depth_coverage": frame?.depthCoverage ?? 0,
+                "analysis_ms": processingMilliseconds, "camera_max_age_ms": ROBVisionFrameAgeBudget.maximumAgeMilliseconds, "depth_coverage": frame?.depthCoverage ?? 0,
                 "hands_clear": frame?.handsClear ?? false, "note": inputNotes["face"] ?? "No frames received",
                 "inspection": lastInspection,"settling":lastSettlingDiagnostics]
     }
 
     private func isFresh(_ frame: Frame) -> Bool {
-        (0 ... 700).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt)
+        (0 ... ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt)
             && frame.depthCoverage >= 0.25
     }
 
@@ -663,7 +653,7 @@ final class ROBArmRoutineVision {
     /// consistency tests; missing pixels never create free space. Ordinary
     /// inspection, human clearance and motion keep their25% coverage gate.
     private func isDepthMappingEligible(_ frame:Frame)->Bool {
-        guard frame.capturedAt.isFinite,(0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+        guard frame.capturedAt.isFinite,(0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
               frame.sequence>0,frame.cameraGeneration==cameraGeneration,
               frame.depthCoverage.isFinite,frame.depthCoverage>0,frame.depthCoverage<=1,
               let depth=frame.depth,depth.width>0,depth.height>0,
@@ -759,7 +749,7 @@ final class ROBArmRoutineVision {
         if !frame.capturedAt.isFinite {failed.append("nonfinite_capture_time")}
         else {
             if age<0 {failed.append("future_exposure")}
-            if age>700 {failed.append("exposure_older_than_700ms")}
+            if age>ROBVisionFrameAgeBudget.maximumAgeMilliseconds {failed.append("exposure_older_than_\(Int(ROBVisionFrameAgeBudget.maximumAgeMilliseconds))ms")}
             if frame.capturedAt<notBefore {failed.append("captured_before_acquisition")}
         }
         if depthMappingOnly {
@@ -851,11 +841,11 @@ final class ROBArmRoutineVision {
                     if let previous {
                         let gap=frame.capturedAt-previous.capturedAt
                         maximumCaptureGapMilliseconds=max(maximumCaptureGapMilliseconds,gap)
-                        if gap>700 {gapResets+=1}
+                        if gap>ROBVisionFrameAgeBudget.maximumAgeMilliseconds {gapResets+=1}
                     }
                     if requireStaticScene && difference>=0.025 {staticResets+=1}
                     if anchor == nil || (requireStaticScene && difference >= 0.025) ||
-                        previous.map({ frame.capturedAt - $0.capturedAt > 700 }) == true {
+                        previous.map({ frame.capturedAt - $0.capturedAt > ROBVisionFrameAgeBudget.maximumAgeMilliseconds }) == true {
                         anchor = frame; distinctSamples = 0
                     }
                     distinctSamples += 1
@@ -1395,7 +1385,7 @@ struct ROBWorkspaceCanSelection {
     }
     @MainActor @nonobjc private func registeredCurrentView(model: ROBGhostRobotModel) -> ROBWorkspaceView? {
         guard let frame = ROBArmRoutineVision.shared.snapshot()["face"],
-              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
               let context = registeredCameraContext(frame:frame,model:model),
               let neck = ROBFixedHeadCalibrationWindowController.shared.readNeck?(),
               let pan = neck["pan_degrees"] as? Double else { return nil }
@@ -1673,7 +1663,7 @@ struct ROBWorkspaceCanSelection {
                 }
                 // A check may consume capture age. Wait for another original
                 // exposure rather than refreshing or widening its timestamp.
-                guard (0...700).contains(Date().timeIntervalSince1970*1000-candidate.capturedAt) else {continue}
+                guard (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-candidate.capturedAt) else {continue}
                 guard candidate.cameraGeneration==snapshot.cameraGeneration,
                       let pixels=candidate.depth,let intrinsics=candidate.intrinsics,
                       intrinsics.isValid(forWidth:pixels.width,height:pixels.height),
@@ -1966,7 +1956,7 @@ struct ROBWorkspaceCanSelection {
     @MainActor @nonobjc func estimatedContextIsCurrent(model: ROBGhostRobotModel,
         map: ROBWorkspaceCollisionSnapshot) -> Bool {
         guard let frame = ROBArmRoutineVision.shared.snapshot()["face"],
-              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
               let context = try? ROBFixedHeadCalibrationWindowController.shared.currentEstimatedContext(model:model,frame:frame),
               let scope = try? ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame),
               context.matches(currentScope:scope,model:model),
@@ -2023,7 +2013,7 @@ struct ROBWorkspaceCanSelection {
                       context.bodyMotionIdentity == bodyIdentity,
                       vision.cameraGeneration == context.scope.cameraGeneration,
                       frame.cameraGeneration == context.scope.cameraGeneration,
-                      (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                      (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
                       controller.readNeck?()["ready_at"] as? Double == readyAt,
                       let depth = frame.depth, let k = frame.intrinsics,
                       depth.width == context.width, depth.height == context.height,
@@ -2704,7 +2694,7 @@ struct ROBWorkspaceCanSelection {
         func isViewReady(_ view: ROBWorkspaceView) -> Bool {
             guard let fixedContext else { return viewReady?(view.panDegrees,view.upperTarget) == true }
             guard view == fixedRegisteredView, let frame = vision.snapshot()["face"],
-                  (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                  (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
                   let current = registeredCameraContext(frame:frame,model:model) else { return false }
             return current.scope == fixedContext.scope && current.registration.id == fixedContext.registration.id
         }

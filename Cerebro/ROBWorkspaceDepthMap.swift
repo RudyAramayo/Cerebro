@@ -446,9 +446,9 @@ struct ROBWorkspaceDepthMap {
             throw ROBWorkspaceDepthMapError.acquisition("Depth capture time did not advance (received \(capturedAtMilliseconds), previous \(latestCapture))")
         }
         let frameAge = nowMilliseconds - capturedAtMilliseconds
-        guard (0...700).contains(frameAge) else {
-            if frameAge>700 {throw ROBWorkspaceDepthMapError.expiredAtProjection(frameAgeMilliseconds:frameAge)}
-            throw ROBWorkspaceDepthMapError.acquisition("Depth frame age \(String(format:"%.1f",frameAge)) ms is outside 0...700 ms at projection")
+        guard ROBVisionFrameAgeBudget.acceptsPublication(ageMilliseconds:frameAge) else {
+            if frameAge>ROBVisionFrameAgeBudget.maximumAgeMilliseconds {throw ROBWorkspaceDepthMapError.expiredAtProjection(frameAgeMilliseconds:frameAge)}
+            throw ROBWorkspaceDepthMapError.acquisition("Depth frame age \(String(format:"%.1f",frameAge)) ms is outside 0...\(Int(ROBVisionFrameAgeBudget.maximumAgeMilliseconds)) ms at projection")
         }
         guard nowMilliseconds-acquisitionStartedAtMilliseconds <= 60_000 else {
             throw ROBWorkspaceDepthMapError.acquisition("Scene acquisition exceeded 60000 ms (elapsed \(String(format:"%.1f",nowMilliseconds-acquisitionStartedAtMilliseconds)) ms)")
@@ -655,7 +655,7 @@ enum ROBWorkspaceDepthMapError: LocalizedError {
         switch self {
         case .invalidFrame: return "Depth map invalidated by stale/reordered frames, camera generation, scene expiry, or invalid camera geometry. Scan again without moving ROB."
         case .acquisition(let reason): return "Depth acquisition: \(reason). No arm travel was sent by this scan."
-        case .expiredAtProjection(let age): return "Depth acquisition: Depth frame age \(String(format:"%.1f",age)) ms is outside 0...700 ms at projection. No arm travel was sent by this scan."
+        case .expiredAtProjection(let age): return "Depth acquisition: Depth frame age \(String(format:"%.1f",age)) ms is outside 0...\(Int(ROBVisionFrameAgeBudget.maximumAgeMilliseconds)) ms at projection. No arm travel was sent by this scan."
         }
     }
 }

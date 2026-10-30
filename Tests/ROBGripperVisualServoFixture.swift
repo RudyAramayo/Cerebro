@@ -10,6 +10,7 @@ import Foundation
  }
  static func main() {
   setbuf(stdout,nil)
+  UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":false],forName:UserDefaults.argumentDomain)
   let cfg=ROBGripperVisualServo.Configuration(jointBounds:Array(repeating:-1.0...1.0,count:7),correctingJointIndices:[0,1])
   let roi=ROBGripperVisualServo.ROI(xMin:0.25,yMin:0.2,xMax:0.70,yMax:0.8)
   let target=ROBGripperVisualServo.Target(id:"unique-can",boxNormalized:[0.60,0.42,0.66,0.51],geometryAssumed:true,assumedDepthMeters:0.60,assumedDiameterMeters:0.066)
@@ -72,6 +73,18 @@ import Foundation
   _=repeated.update(frame:frame(1,1000,open:false),target:target,searchROI:roi,nowMilliseconds:1020)
   let stale=repeated.update(frame:frame(2,1200,command:1100),target:target,searchROI:roi,nowMilliseconds:2100)
   precondition(stale.status=="unavailable" && stale.observation==nil && stale.jointTarget==nil)
+  UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
+  for age in [900.0,1201.0] {
+   var diagnostic=ROBGripperVisualServo.Controller(configuration:.init(jointBounds:Array(repeating:-1.0...1.0,count:7),correctingJointIndices:[0,1]))
+   _=diagnostic.update(frame:frame(1,1000,open:false),target:target,searchROI:roi,nowMilliseconds:1020)
+   let result=diagnostic.update(frame:frame(2,1200,command:1100),target:target,searchROI:roi,nowMilliseconds:1200+age)
+   #if DEBUG
+   precondition((result.observation != nil)==(age==900),"Debug camera age was not honored by actual jaw observation")
+   #else
+   precondition(result.observation==nil && result.jointTarget==nil,"Release build accepted extended camera age")
+   #endif
+  }
+  UserDefaults.standard.removeVolatileDomain(forName:UserDefaults.argumentDomain)
   print("Observed-jaw servo fixture PASS: observed opening/identity, bounded estimated bootstrap and signed progress, failure latch, joint+image rank/conditioning, stale/scope/unchanged-ACK negatives, observation-only lift. Synthetic evidence does not establish real-hardware detector reliability.")
  }
 }

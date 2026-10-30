@@ -21,6 +21,7 @@ SUPPORT = r'''
 import Foundation
 enum Clock {static var milliseconds=1_000_474.0}
 struct Date {var timeIntervalSince1970:Double {Clock.milliseconds/1000}}
+__ACTUAL_TIMING__
 __ACTUAL_BUDGET__
 final class Harness {
  struct Frame {let capturedAt:Double,depthCoverage:Double;let handsClear:Bool}
@@ -32,6 +33,7 @@ final class Harness {
 }
 @main enum Fixture {
  static func main() {
+  UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":false],forName:UserDefaults.argumentDomain)
   let h=Harness(),exposure=1_000_000.0
   // Actual production incident:450ms transport plus24ms analysis is still
   // inside the existing final700ms motion age. Preserve the original stamp.
@@ -62,6 +64,28 @@ final class Harness {
   }
   Clock.milliseconds=exposure+700
   precondition(h.finalFresh(.init(capturedAt:exposure,depthCoverage:0.25,handsClear:true)),"Existing boundary changed")
+  UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
+  #if DEBUG
+  precondition(ROBVisionFrameAgeBudget.maximumAgeMilliseconds==1200)
+  precondition(ROBArmFeedbackTiming.maximumAgeMilliseconds==500,"Camera allowance changed live motor admission")
+  precondition(ROBVisionFrameAgeBudget.acceptsIngress(ageMilliseconds:1050))
+  precondition(!ROBVisionFrameAgeBudget.acceptsIngress(ageMilliseconds:1050.001))
+  for age in [713.0,1050,1200] {
+   Clock.milliseconds=exposure+age
+   precondition(ROBVisionFrameAgeBudget.acceptsPublication(ageMilliseconds:age))
+   precondition(h.finalFresh(.init(capturedAt:exposure,depthCoverage:0.25,handsClear:true)))
+  }
+  precondition(!ROBVisionFrameAgeBudget.acceptsPublication(ageMilliseconds:1200.001))
+  Clock.milliseconds=exposure+1200.001
+  precondition(!h.finalFresh(.init(capturedAt:exposure,depthCoverage:1,handsClear:true)))
+  #else
+  precondition(ROBVisionFrameAgeBudget.maximumAgeMilliseconds==700)
+  precondition(!ROBVisionFrameAgeBudget.acceptsPublication(ageMilliseconds:713))
+  #endif
+  UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":false],forName:UserDefaults.argumentDomain)
+  precondition(!ROBVisionFrameAgeBudget.acceptsPublication(ageMilliseconds:713))
+  UserDefaults.standard.removeVolatileDomain(forName:UserDefaults.argumentDomain)
+  print("PASS DEBUG + Development Mode camera1200ms; normal700ms; original timestamps, depth coverage and independent motor500ms preserved")
   print("PASS actual ingress550/publication700 and100ms no-backlog cadence:450+24 accepted with originalstamp; >550/future/nonfinite input and >700 completedanalysis rejected; busy/inactive analysis rejected; final700/25%/hands checks unchanged; no hardware or authority")
  }
 }
@@ -70,7 +94,9 @@ final class Harness {
 
 def main():
     source = (ROOT / 'Cerebro/ROBArmRoutineVision.swift').read_text()
-    budget = block(source, 'struct ROBVisionFrameAgeBudget {')
+    timing_source = (ROOT / 'Cerebro/ROBArmJointLimits.swift').read_text()
+    budget = block(timing_source, 'struct ROBVisionFrameAgeBudget {')
+    timing = block(timing_source, 'enum ROBArmFeedbackTiming {')
     offer = block(source, 'func offer(_ frame: CameraFrameSet, role: CameraRole)')
     # Exercise the actual value functions below and bind them to BOTH actual
     # production boundaries. A late result cannot overwrite the current frame.
@@ -85,18 +111,19 @@ def main():
     assert 'capturedAt: captured' in offer and 'let publicationAge=Date().timeIntervalSince1970*1000-captured' in offer
     final = block(source, 'private func isFresh(')
     assert final == '''private func isFresh(_ frame: Frame) -> Bool {
-        (0 ... 700).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt)
+        (0 ... ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt)
             && frame.depthCoverage >= 0.25
     }'''
-    swift = SUPPORT.replace('__ACTUAL_BUDGET__', budget).replace('__ACTUAL_FRESH__', final)
+    swift = SUPPORT.replace('__ACTUAL_TIMING__', timing).replace('__ACTUAL_BUDGET__', budget).replace('__ACTUAL_FRESH__', final)
     swift = swift.replace('__ACTUAL_HANDS__', block(source, 'var handsClear: Bool'))
     with tempfile.TemporaryDirectory(prefix='rob-vision-age-budget-') as folder:
         path = Path(folder)
         (path / 'Fixture.swift').write_text(swift)
-        subprocess.run(['xcrun', 'swiftc', '-O', '-swift-version', '5', '-parse-as-library',
-            '-module-cache-path', '/private/tmp/cerebro-swift-module-cache', str(path / 'Fixture.swift'),
-            '-o', str(path / 'fixture')], check=True, timeout=30)
-        subprocess.run([str(path / 'fixture')], check=True, timeout=10)
+        for flags in [[], ['-DDEBUG']]:
+            subprocess.run(['xcrun', 'swiftc', '-O', '-swift-version', '5', '-parse-as-library', *flags,
+                '-module-cache-path', '/private/tmp/cerebro-swift-module-cache', str(path / 'Fixture.swift'),
+                '-o', str(path / 'fixture')], check=True, timeout=30)
+            subprocess.run([str(path / 'fixture')], check=True, timeout=10)
 
 
 if __name__ == '__main__':

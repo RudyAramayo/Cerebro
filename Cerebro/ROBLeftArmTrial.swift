@@ -2322,7 +2322,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         guard usesFixedCommissioningKeyframes,let depth=frame.depth,let k=frame.intrinsics,let runtime=k.runtimeCalibration,
               k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,k.depthRGBGeometryCorrespondence?.status=="matched",
               frame.cameraGeneration==map.cameraGeneration,frame.handsClear,
-              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
               let image=CIContext(options:[.useSoftwareRenderer:true]).createCGImage(frame.image,from:frame.image.extent),
               image.width==depth.width,image.height==depth.height else {throw ROBArmRoutineError.blocked("Commissioning keyframe lost actual paired RGB-D/source pixels.")}
         let controller=ROBFixedHeadCalibrationWindowController.shared,scope=try controller.scope(model:model,frame:frame),neck=controller.readNeck?() ?? [:]
@@ -3500,7 +3500,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     throw reject("source_contract_changed","The RGB-D source changed while awaiting an actual fresh preflight frame.")
                 }
                 if frame.sequence>oldFrame.sequence,frame.capturedAt>=began,vision.fresh,
-                   (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                   (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
                    frame.depthCoverage>=0.25,let depth=frame.depth,let k=frame.intrinsics,
                    k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,
                    k.depthRGBGeometryCorrespondence?.status=="matched" {
@@ -4305,7 +4305,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private func exposureMatchedServoFeedback(_ frame:ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry? {
         let now=Date().timeIntervalSince1970*1000
         return servoTelemetryHistory.filter{$0.generation==generation && $0.sample.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds &&
-            $0.sample.effectiveSampleAgeMilliseconds<=700}.min {
+            $0.sample.effectiveSampleAgeMilliseconds<=ROBVisionFrameAgeBudget.maximumAgeMilliseconds}.min {
                 abs(now-$0.sample.effectiveSampleAgeMilliseconds-frame.capturedAt)<abs(now-$1.sample.effectiveSampleAgeMilliseconds-frame.capturedAt)
             }.flatMap { entry in
                 abs(now-entry.sample.effectiveSampleAgeMilliseconds-frame.capturedAt)<=150 ? entry.sample:nil
@@ -4593,7 +4593,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
               body.bodyContextIsCurrent,let app=UUID(uuidString:receipt["appSessionID"] as? String ?? ""),
               let task=UUID(uuidString:receipt["pendingID"] as? String ?? ""),
               let frame=vision.snapshot()["face"],frame.cameraGeneration==map.cameraGeneration,
-              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt) else {
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt) else {
             throw ROBGhostMotionError.blocked("Native attachment lost its live task/body/source context.")
         }
         return .init(appSessionID:app,taskID:task,ownershipID:owner,physicalArm:physicalSide,bodyMotionIdentity:body.bodyMotionIdentity,
@@ -4759,7 +4759,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             return result
         }
         try check()
-        guard (0...700).contains(Date().timeIntervalSince1970*1000-observedFrame.capturedAt),(activeCameraCollisionAdvisory || observedFrame.handsClear),
+        guard (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-observedFrame.capturedAt),(activeCameraCollisionAdvisory || observedFrame.handsClear),
               try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:observedFrame)==context.baseline.scope else{return false}
         let boxes=(observation.cans ?? [observation.can]).filter{$0.visuallyUsable}.map(\.box)
         guard !boxes.isEmpty,boxes.allSatisfy({box in u+0.22<box[0]-0.03 || u-0.22>box[2]+0.03 || v+0.22<box[1]-0.03 || v-0.22>box[3]+0.03}) else{return false}

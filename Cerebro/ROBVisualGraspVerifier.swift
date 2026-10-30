@@ -308,7 +308,7 @@ struct ROBVisualGraspVerifier {
     private static func valid(_ s:Sample,now:Double) -> Bool {
         guard (80...640).contains(s.width),(60...480).contains(s.height),s.gray.count==s.width*s.height,
               s.depthMeters.count==s.gray.count,s.sequence>0,s.capturedAtMilliseconds.isFinite,now.isFinite,
-              (0...800).contains(now-s.capturedAtMilliseconds),s.synchronizedRGBDepth,(s.handsClear || s.cameraCollisionAdvisory),
+              (0...ROBVisionFrameAgeBudget.limit(normal:800)).contains(now-s.capturedAtMilliseconds),s.synchronizedRGBDepth,(s.handsClear || s.cameraCollisionAdvisory),
               s.measuredToolCenter.x.isFinite,s.measuredToolCenter.y.isFinite,
               (0...1).contains(s.measuredToolCenter.x),(0...1).contains(s.measuredToolCenter.y),
               s.measuredToolDepthMeters.isFinite,(0.15...5).contains(s.measuredToolDepthMeters),
@@ -559,7 +559,7 @@ extension ROBVisualGraspVerifier {
             @discardableResult func append(_ frame:Frame,nowMilliseconds:Double)->Bool {
                 lock.lock();defer{lock.unlock()}
                 guard !isInvalidated,frame.valid,frame.scope==scope,nowMilliseconds.isFinite,
-                      (0...800).contains(nowMilliseconds-frame.capturedAtMilliseconds),
+                      (0...ROBVisionFrameAgeBudget.limit(normal:800)).contains(nowMilliseconds-frame.capturedAtMilliseconds),
                       values.last.map({frame.sequence>$0.sequence && frame.capturedAtMilliseconds>$0.capturedAtMilliseconds &&
                           frame.width==$0.width && frame.height==$0.height && [frame.fx,frame.fy,frame.cx,frame.cy]==[$0.fx,$0.fy,$0.cx,$0.cy]}) ?? true else {
                     isInvalidated=true;values=[];return false
@@ -597,7 +597,7 @@ extension ROBVisualGraspVerifier {
             func claimForNativeCompletion(currentScope:Scope,nowMilliseconds:Double)->Bool {
                 lock.lock();defer{lock.unlock()};guard !consumed else{return false};consumed=true
                 return currentScope==scope && nowMilliseconds.isFinite &&
-                    (0...800).contains(nowMilliseconds-evidence.lastCapturedAtMilliseconds)
+                    (0...ROBVisionFrameAgeBudget.limit(normal:800)).contains(nowMilliseconds-evidence.lastCapturedAtMilliseconds)
             }
         }
         private struct Opening {
@@ -673,7 +673,7 @@ extension ROBVisualGraspVerifier {
         /// gravity_mps2. Passing UP is rejected against the observed rim.
         init(baseline:Frame,canBox:Box,bucketROI:Box,canDiameterMeters:Double,canHeightMeters:Double,
              gravityOptical:SIMD3<Double>,uncertaintyMeters:Double,releaseAcceptedAtMilliseconds:Double,nowMilliseconds:Double)throws {
-            guard baseline.valid,nowMilliseconds.isFinite,(0...800).contains(nowMilliseconds-baseline.capturedAtMilliseconds),
+            guard baseline.valid,nowMilliseconds.isFinite,(0...ROBVisionFrameAgeBudget.limit(normal:800)).contains(nowMilliseconds-baseline.capturedAtMilliseconds),
                   canDiameterMeters.isFinite,(0.04...0.10).contains(canDiameterMeters),canHeightMeters.isFinite,(0.07...0.20).contains(canHeightMeters),
                   uncertaintyMeters.isFinite,(0.005...0.05).contains(uncertaintyMeters),
                   releaseAcceptedAtMilliseconds.isFinite,(0...500).contains(releaseAcceptedAtMilliseconds-baseline.capturedAtMilliseconds),
@@ -876,7 +876,7 @@ extension ROBVisualGraspVerifier {
             func finish(_ verdict:Verdict,_ text:String)->Evidence {var e=evidence;e.verdict=verdict;e.reason=text;return e}
             guard f.valid,f.scope==baseline.scope,f.width==baseline.width,f.height==baseline.height,
                   [f.fx,f.fy,f.cx,f.cy]==[baseline.fx,baseline.fy,baseline.cx,baseline.cy],
-                  nowMilliseconds.isFinite,(0...800).contains(nowMilliseconds-f.capturedAtMilliseconds),
+                  nowMilliseconds.isFinite,(0...ROBVisionFrameAgeBudget.limit(normal:800)).contains(nowMilliseconds-f.capturedAtMilliseconds),
                   f.sequence>lastSequence,f.capturedAtMilliseconds>lastTime,f.capturedAtMilliseconds-lastTime<=120,
                   (0...4000).contains(f.capturedAtMilliseconds-releaseAt),stableOpening(f) else {
                 evidence=finish(.unknown,"Raw capture/view/source changed, frames were missing/stale, or the actual mouth/rim was no longer visible and stationary.");return evidence

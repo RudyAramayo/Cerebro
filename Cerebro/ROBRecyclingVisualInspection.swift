@@ -39,7 +39,7 @@ import CoreImage
     static func fixedHeadContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {
         do {
             guard let frame=ROBArmRoutineVision.shared.snapshot()["face"],
-                  (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                  (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
                   frame.cameraGeneration==map.cameraGeneration,
                   map.modelID==model.modelID,map.geometryID==model.geometryID,map.mappingID==model.selectedMappingID,
                   let lastScope=map.observations.last?.fixedHeadScope,
@@ -155,7 +155,7 @@ import CoreImage
                 allCanDetections:(observation.cans ?? [observation.can])+[currentDetection],frame:currentFrame,
                 view:can.view,model:model,cameraToRobot:cameraToModel)
             try check();try validateVisualProjection(visual,scope:scope,frame:currentFrame,model:model)
-            guard (0...700).contains(Date().timeIntervalSince1970*1000-currentFrame.capturedAt),
+            guard (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-currentFrame.capturedAt),
                   let reacquired=prior.sections,reacquired.shapePriorEvidence?.valid==true else {
                 throw ROBGhostMotionError.blocked("Fresh table/silhouette evidence did not reacquire the assumed can cylinder. Holding before closure.")
             }
@@ -591,7 +591,7 @@ import CoreImage
             try validateVisualProjection(value,scope:scope,frame:frame,model:model)
             guard gatewayArm == (model.physicalSide == "right" ? "left" : "right"),
                   let feedback=feedbackForFrame?(frame) ?? ROBAmberGatewayClient.shared.telemetry(forArm:gatewayArm),
-                  feedback.effectiveSampleAgeMilliseconds <= (feedbackForFrame == nil ? 150:700),feedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                  feedback.effectiveSampleAgeMilliseconds <= (feedbackForFrame == nil ? 150:ROBVisionFrameAgeBudget.maximumAgeMilliseconds),feedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
                   feedback.positionsRadians.count==7,feedback.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),
                   feedback.statuses.count==7,feedback.statuses.allSatisfy({$0.intValue==2}),
                   let k=frame.intrinsics,let depth=frame.depth,

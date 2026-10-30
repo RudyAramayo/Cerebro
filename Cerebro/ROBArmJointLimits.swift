@@ -73,3 +73,20 @@ enum ROBArmFeedbackTiming {
     static var maximumAgeMilliseconds: Double { debugEnabled ? 500 : 250 }
     static var stationaryMaximumAgeMilliseconds: Double { debugEnabled ? 500 : 350 }
 }
+
+/// Camera exposure age, independent of current motor-feedback admission.
+/// Rudy's debugging budget applies only in a DEBUG build with Development Mode.
+/// Preserve original capture times and reserve 150 ms for image analysis.
+struct ROBVisionFrameAgeBudget {
+    static func limit(normal:Double)->Double {ROBArmFeedbackTiming.debugEnabled ? 1200:normal}
+    static var maximumAgeMilliseconds:Double {limit(normal:700)}
+    static func acceptsIngress(ageMilliseconds:Double)->Bool {
+        (0...(maximumAgeMilliseconds-150)).contains(ageMilliseconds)
+    }
+    static func acceptsPublication(ageMilliseconds:Double)->Bool {
+        (0...maximumAgeMilliseconds).contains(ageMilliseconds)
+    }
+    static func acceptsAnalysisOpportunity(active:Bool,busy:Bool,elapsedSeconds:Double)->Bool {
+        active && !busy && elapsedSeconds >= 0.1
+    }
+}
