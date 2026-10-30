@@ -318,9 +318,25 @@ import CoreImage
         frame:ROBArmRoutineVision.Frame,feedback:ROBAmberGatewayTelemetry,currentFeedback:ROBAmberGatewayTelemetry,
         heldSinceMilliseconds:Double,openingCommandAtMilliseconds:Double?,requireTableSupport:Bool=true,
         check:() throws->Void) throws->ServoObservation {
+        let processingStart=ProcessInfo.processInfo.systemUptime
+        var timings:[[String:Any]]=[]
+        func checkpoint(_ stage:String) {
+            timings.append(["stage":stage,"elapsed_ms":(ProcessInfo.processInfo.systemUptime-processingStart)*1000,
+                "exposure_age_ms":Date().timeIntervalSince1970*1000-frame.capturedAt])
+        }
+        defer {
+            let health=ROBArmRoutineVision.shared.healthSnapshot()
+            context.observations.append(["kind":"servo_processing_timing","sequence":NSNumber(value:frame.sequence),
+                "stages":timings,"total_ms":(ProcessInfo.processInfo.systemUptime-processingStart)*1000,
+                "camera_input_age_ms":health["input_age_ms"] ?? NSNull(),
+                "camera_analysis_age_ms":health["analysis_age_ms"] ?? NSNull(),
+                "camera_note":health["note"] ?? NSNull()])
+        }
+        checkpoint("begin")
         try check()
         guard case .visualTrial(let projection)=context.baseline.projection else {throw ROBGhostMotionError.blocked("Incremental servo requires its actual local visual-trial source.")}
         try validateVisualProjection(projection,scope:context.baseline.scope,frame:frame,model:model)
+        checkpoint("source_validated")
         let now=Date().timeIntervalSince1970*1000
         let historicalTime=now-feedback.effectiveSampleAgeMilliseconds
         guard frame.sequence>context.lastSequence,frame.capturedAt>=heldSinceMilliseconds,
@@ -331,6 +347,7 @@ import CoreImage
             throw ROBGhostMotionError.blocked("Servo needs an advancing held-pose image and actual exposure-matched CAN history, plus fresh current feedback.")
         }
         try context.tracker.perform([context.request],on:image)
+        checkpoint("target_tracked")
         guard let tracked=context.request.results?.first as? VNDetectedObjectObservation,tracked.confidence>=0.7 else {
             throw ROBGhostMotionError.blocked("The selected can tracker is ambiguous or occluded; hold without closing.")
         }
@@ -361,9 +378,11 @@ import CoreImage
             let optical=simd_inverse(projection.cameraToModel)*SIMD4(middle.x,middle.y,middle.z,1)
             targetDepth=optical.z>0 ? optical.z:nil
         }
+        checkpoint("can_geometry_reacquired")
         var pixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:frame,scopeIdentity:context.baseline.viewIdentity,
             jointPositions:feedback.positionsRadians.map(\.doubleValue),jointCapturedAtMilliseconds:historicalTime,
             poseHeldDuringCapture:true,openingCommandAtMilliseconds:openingCommandAtMilliseconds,nowMilliseconds:now,cameraCollisionAdvisoryTrial:context.cameraCollisionAdvisoryTrial)
+        checkpoint("jaw_pixels_materialized")
         let currentTool=model.toolPosition(model.positions(vendorLeft:currentFeedback.positionsRadians.map(\.doubleValue)))
         guard let currentTool,let k=frame.intrinsics,let depth=frame.depth else {throw ROBGhostMotionError.blocked("Missing nominal tool search region; no visual jaw location inferred.")}
         let optical=simd_inverse(projection.cameraToModel)*SIMD4(currentTool.x,currentTool.y,currentTool.z,1)
@@ -381,12 +400,14 @@ import CoreImage
             }
         }
         pixels.estimatedImageJacobian=estimated // explicitly estimated FK direction, never observed jaw pixels
+        checkpoint("search_region_projected")
 
         let target=ROBGripperVisualServo.Target(id:context.baseline.targetIdentity,boxNormalized:box,geometryAssumed:geometryAssumed,
             assumedDepthMeters:geometryAssumed ? targetDepth:nil,
             assumedDiameterMeters:geometryAssumed ? context.can.sections?.diameterMeters:nil,
             measuredDepthMeters:geometryAssumed ? nil:targetDepth)
         let decision=context.controller.update(frame:pixels,target:target,searchROI:roi,nowMilliseconds:now,observationOnly:!requireTableSupport)
+        checkpoint("jaw_analysis_completed")
         var evidence:[String:Any]=["sequence":NSNumber(value:frame.sequence),"captured_at_ms":frame.capturedAt,
             "can_box":box,"status":String(describing:decision.status),"reason":decision.reason,
             "joint_positions":feedback.positionsRadians.map(\.doubleValue),"joint_captured_at_ms":historicalTime,

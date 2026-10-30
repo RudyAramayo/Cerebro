@@ -4387,7 +4387,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         defer {do{try writeServoEvidence(context)}catch{servoEvidenceWriteError=error.localizedDescription}}
         var held=Date().timeIntervalSince1970*1000,openingAt:Double?
         var jawIdentificationAttempted=false
-        _ = try?await servoObservation(context,model:model,heldSince:held,openingAt:nil)
+        do {_ = try await servoObservation(context,model:model,heldSince:held,openingAt:nil)}
+        catch {context.observations.append(["kind":"pre_open_observation_unavailable","detail":error.localizedDescription])}
         try await taskJaw(.prepare,at:try measured().positionsRadians.map(\.doubleValue));openingAt=lastTaskOpeningCommandAtMilliseconds
         _ = try await servoObservation(context,model:model,heldSince:held,openingAt:openingAt)
         // Entry is ordinary full-arm/open-jaw observed-space checked. Each
