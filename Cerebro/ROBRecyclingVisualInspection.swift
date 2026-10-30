@@ -339,10 +339,16 @@ import CoreImage
         checkpoint("source_validated")
         let now=Date().timeIntervalSince1970*1000
         let historicalTime=now-feedback.effectiveSampleAgeMilliseconds
+        let heldDisplacement=try model.maximumArmHullDisplacement(from:feedback.positionsRadians.map(\.doubleValue),
+            to:currentFeedback.positionsRadians.map(\.doubleValue),openJawPadding:0.04)
+        timings.append(["stage":"held_feedback_comparison","modeled_hull_displacement_m":heldDisplacement,
+            "historical_motor_age_at_receipt_ms":feedback.sampleAgeAtReceiptMilliseconds,
+            "current_motor_age_ms":currentFeedback.effectiveSampleAgeMilliseconds,
+            "current_gripper_age_ms":currentFeedback.effectiveGripperFeedbackAgeMilliseconds])
         guard frame.sequence>context.lastSequence,frame.capturedAt>=heldSinceMilliseconds,
               feedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,currentFeedback.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
               currentFeedback.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
-              1.5*zip(feedback.positionsRadians,currentFeedback.positionsRadians).reduce(0.0,{$0+abs($1.0.doubleValue-$1.1.doubleValue)})<=0.003,
+              heldDisplacement<=0.003,
               let image=servoImageContext.createCGImage(frame.image,from:frame.image.extent) else {
             throw ROBGhostMotionError.blocked("Servo needs an advancing held-pose image and actual exposure-matched CAN history, plus fresh current feedback.")
         }

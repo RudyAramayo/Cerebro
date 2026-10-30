@@ -4257,6 +4257,15 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             if let frame=vision.snapshot()["face"],frame.sequence>context.lastSequence,frame.capturedAt>=heldSince,
                let historical=exposureMatchedServoFeedback(frame) {
                 let current=try measured()
+                let displacement=try model.maximumArmHullDisplacement(from:historical.positionsRadians.map(\.doubleValue),
+                    to:current.positionsRadians.map(\.doubleValue),openJawPadding:0.04)
+                if displacement>0.003 {
+                    // A frame exposed during residual settling is not a held
+                    // observation. Wait within this existing bounded window
+                    // for a later exposure; do not dispatch from the old one.
+                    try await Task.sleep(nanoseconds:50_000_000)
+                    continue
+                }
                 return try ROBRecyclingVisualInspection.observeIncrementalVisualServo(context:context,model:model,frame:frame,
                     feedback:historical,currentFeedback:current,heldSinceMilliseconds:heldSince,
                     openingCommandAtMilliseconds:openingAt,requireTableSupport:tableSupport,check:{try self.check()})

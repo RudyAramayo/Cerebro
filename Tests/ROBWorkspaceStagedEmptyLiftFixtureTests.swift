@@ -96,6 +96,18 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   let heldExcess=try heldLeft.maximumArmHullDisplacement(from:heldBefore,to:heldMoved,openJawPadding:0.04)
   precondition(heldExcess>0.003)
   print("PASS stationary left-arm recorded jitter: summed-lever",heldOld*1000,"mm, complete modeled hull",heldActual*1000,"mm; real displacement still rejected")
+  // Current RIGHT arm and the sample about 0.5 s earlier at the first can
+  // entry hold. J5 was finishing its endpoint settlement when the image was
+  // exposed; a summed universal lever overstates the actual box movement.
+  let imageQ=[-0.02031672332399649,-1.484484341129864,0.1090830782496456,-0.8811185645615123,1.212049353201375,1.497301602824198,0.4577398671050754]
+  let currentQ=[-0.02018036947618444,-1.484484341129864,0.1089467244018335,-0.8811185645615123,1.214094660918555,1.49675618743295,0.4574671594094512]
+  let imageOld=1.5*zip(imageQ,currentQ).reduce(0.0){$0+abs($1.0-$1.1)}
+  let imageMotion=try model.maximumArmHullDisplacement(from:imageQ,to:currentQ,openJawPadding:0.04)
+  precondition(model.physicalSide=="right" && imageOld>0.003 && imageMotion<0.003)
+  var unsettled=currentQ;unsettled[4]+=0.1
+  let unsettledMotion=try model.maximumArmHullDisplacement(from:imageQ,to:unsettled,openJawPadding:0.04)
+  precondition(unsettledMotion>0.003)
+  print("PASS recorded can-entry exposure/current hold: summed-lever",imageOld*1000,"mm; complete modeled hull",imageMotion*1000,"mm; larger wrist settlement still needs a newer image")
   let actual=[0.0,-0.0272707695624114,0,-0.01308996938995747,0,0,0]
   let firstBaseline=[0.0,-0.01949860023712415,0,0,0,0,0]
   let firstGoal=[0.0,-0.1282092619004997,0,-0.1435886966215985,0,0,0]
