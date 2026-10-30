@@ -4345,6 +4345,35 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             "detail":"The complete checked entry and observed alignment reached a measured hold with jaws commanded open. No close, lift, carry or release; ZERO transfers. Physical jaw opening remains unmeasured."]
     }
 
+    /// Detector inference is nonactuating and can briefly contend with camera
+    /// delivery. Keep the actual arm hold, ownership and motor checks active;
+    /// restore the ordinary live camera gate before any jaw or arm dispatch.
+    @MainActor private func captureIncrementalCanContext(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
+        map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial) async throws->ROBRecyclingVisualInspection.ServoContext {
+        try check()
+        guard cameraReady,positionReady,!leased,leaseRenewals.isEmpty,taskJawTarget==nil,
+              !jawSetupDispatchUncertain,!recyclingGripDispatched,!servoPossiblePayloadUncertain else {
+            throw ROBGhostMotionError.blocked("Can reacquisition requires an empty stationary position hold with no active arm or jaw command.")
+        }
+        let q=try measured().positionsRadians.map(\.doubleValue),previousCameraReady=cameraReady
+        cameraReady=false;taskJawTarget=q
+        defer {cameraReady=previousCameraReady;taskJawTarget=nil}
+        func heldCheck() throws {
+            try check()
+            guard heldHullDrift(side:arm,from:q,to:try measured().positionsRadians.map(\.doubleValue))<=0.003,
+                  ROBArmRoutineCoordinator.shared.viewIsStationary?()==true else {
+                throw ROBGhostMotionError.blocked("The held arm or body moved during nonactuating can reacquisition.")
+            }
+        }
+        phase="stationary visual-servo can reacquisition"
+        update("Holding both arms while reacquiring the can; fresh live view required before dispatch")
+        let context=try await ROBRecyclingVisualInspection.beginIncrementalVisualServo(model:model,can:can,map:map,trial:trial,gatewayArm:arm,
+            feedbackForFrame:{[weak self] in self?.exposureMatchedServoFeedback($0)},check:heldCheck)
+        try await wait(2) {self.vision.fresh && ROBArmRoutineCoordinator.shared.viewIsStationary?()==true}
+        try heldCheck()
+        return context
+    }
+
     @MainActor private func performIncrementalCanGrasp(_ entry:ROBLeftGestureProposal) async throws->NSDictionary {
         guard localReceiptCommand != nil,!nominalEmptyCommissioningStepEnabled,!oneDegreeEmptyCalibrationStepEnabled,
               let map=collisionMap,let model=collisionModel,let trial=entry.workspaceCollisionPlan?.context.visualTrial,
@@ -4353,8 +4382,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             throw ROBGhostMotionError.blocked("The incremental grasp needs its exact local receipt, real checked entry and selected measured or explicitly assumed can cylinder; no imported or calibration-only path is accepted.")
         }
         try requireLiveVisualTrial(trial,map:map,model:model)
-        let context=try await ROBRecyclingVisualInspection.beginIncrementalVisualServo(model:model,can:can,map:map,trial:trial,gatewayArm:arm,
-            feedbackForFrame:{[weak self] in self?.exposureMatchedServoFeedback($0)},check:{try self.check()})
+        let context=try await captureIncrementalCanContext(model:model,can:can,map:map,trial:trial)
+        try check();try requireLiveVisualTrial(trial,map:map,model:model)
         defer {do{try writeServoEvidence(context)}catch{servoEvidenceWriteError=error.localizedDescription}}
         var held=Date().timeIntervalSince1970*1000,openingAt:Double?
         var jawIdentificationAttempted=false
