@@ -67,7 +67,7 @@ final class Harness {
   UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
   #if DEBUG
   precondition(ROBVisionFrameAgeBudget.maximumAgeMilliseconds==1200)
-  precondition(ROBArmFeedbackTiming.maximumAgeMilliseconds==500,"Camera allowance changed live motor admission")
+  precondition(ROBArmFeedbackTiming.maximumAgeMilliseconds==1200,"Requested debug motor budget differs from1200ms")
   precondition(ROBVisionFrameAgeBudget.acceptsIngress(ageMilliseconds:1050))
   precondition(!ROBVisionFrameAgeBudget.acceptsIngress(ageMilliseconds:1050.001))
   for age in [713.0,1050,1200] {
@@ -85,7 +85,7 @@ final class Harness {
   UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":false],forName:UserDefaults.argumentDomain)
   precondition(!ROBVisionFrameAgeBudget.acceptsPublication(ageMilliseconds:713))
   UserDefaults.standard.removeVolatileDomain(forName:UserDefaults.argumentDomain)
-  print("PASS DEBUG + Development Mode camera1200ms; normal700ms; original timestamps, depth coverage and independent motor500ms preserved")
+  print("PASS DEBUG + Development Mode camera1200ms; normal700ms; original timestamps, depth coverage and requested motor1200ms independently enforced")
   print("PASS actual ingress550/publication700 and100ms no-backlog cadence:450+24 accepted with originalstamp; >550/future/nonfinite input and >700 completedanalysis rejected; busy/inactive analysis rejected; final700/25%/hands checks unchanged; no hardware or authority")
  }
 }

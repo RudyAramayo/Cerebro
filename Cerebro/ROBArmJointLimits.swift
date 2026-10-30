@@ -70,8 +70,9 @@ enum ROBArmFeedbackTiming {
         return false
         #endif
     }
-    static var maximumAgeMilliseconds: Double { debugEnabled ? 500 : 250 }
-    static var stationaryMaximumAgeMilliseconds: Double { debugEnabled ? 500 : 350 }
+    static let debugMaximumAgeMilliseconds: Double = 1200
+    static var maximumAgeMilliseconds: Double { debugEnabled ? debugMaximumAgeMilliseconds : 250 }
+    static var stationaryMaximumAgeMilliseconds: Double { debugEnabled ? debugMaximumAgeMilliseconds : 350 }
 }
 
 /// Camera exposure age, independent of current motor-feedback admission.

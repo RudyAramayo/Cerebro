@@ -462,13 +462,13 @@ struct GatewayCompatibilityFixtures {
         expect(waypoint("right") == 0, "A right task admitted a waypoint on the other physical arm")
         UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
         #if DEBUG
-        expect(ROBArmFeedbackTiming.maximumAgeMilliseconds == 500, "Development Mode did not select500ms")
-        for age in [262.0,398.0,490.0] {
+        expect(ROBArmFeedbackTiming.maximumAgeMilliseconds == 1200, "Development Mode did not select1200ms")
+        for age in [262.0,398.0,500.0,512.0,900.0,1190.0] {
             try motorFeedback(age: age)
             expect(ghost() > 0, "Native ghost dispatch retained an old250ms feedback blocker")
         }
-        try motorFeedback(age: 501)
-        expect(ghost() == 0, "Debug dispatch accepted feedback older than500ms")
+        try motorFeedback(age: 1201)
+        expect(ghost() == 0, "Debug dispatch accepted feedback older than1200ms")
         try motorFeedback(age: 398)
         trial.approved = false
         expect(ghost() == 0, "Debug feedback timing bypassed task authorization")
@@ -480,9 +480,9 @@ struct GatewayCompatibilityFixtures {
         #endif
         UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":false],forName:UserDefaults.argumentDomain)
         try motorFeedback(age: 398)
-        expect(ghost() == 0, "Disabling Development Mode retained500ms dispatch")
+        expect(ghost() == 0, "Disabling Development Mode retained1200ms dispatch")
         UserDefaults.standard.removeVolatileDomain(forName:UserDefaults.argumentDomain)
-        print("Shared feedback policy: actual native ghost dispatch accepts262/398/490ms only in DEBUG Development Mode;501ms and revoked authority reject; mode-off and Release unchanged")
+        print("Shared feedback policy: actual native ghost dispatch accepts262/398/500/512/900/1190ms only in DEBUG Development Mode;1201ms and revoked authority reject; mode-off and Release unchanged")
         trial.approved = false
         expect(ghost() == 0, "A revoked physical-right proposal retained transport authority")
         trial.physicalSide = "left"

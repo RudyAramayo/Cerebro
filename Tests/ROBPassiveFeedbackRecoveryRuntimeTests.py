@@ -169,21 +169,21 @@ final class ROBWorkspaceSearch {
   ROBControllerArmApproval.shared.onAuthorize=nil
   // The real failure had a raised RIGHT arm and inactive LEFT arm. Exercise
   // both check() branches and make sure diagnostics never excuse a mode fault,
-  // pose drift, missing packet, or more than500ms of age; leases share500ms.
+  // pose drift, missing packet, or more than1200ms of age; leases share1200ms.
   UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
   let diagnostic=Hold()
   diagnostic.sceneHold["left"]!.modes=Array(repeating:2,count:7)
   diagnostic.gateway.mode["left"]=2;diagnostic.gateway.samples["left"]!.statuses=Array(repeating:2,count:7)
   #if DEBUG
-  for age in [398.0,499.0,500.0] {
+  for age in [398.0,500.0,512.0,1199.0,1200.0] {
    for side in ["left","right"] {
     diagnostic.gateway.samples[side]!.effectiveSampleAgeMilliseconds=age
     diagnostic.gateway.samples[side]!.effectiveGripperFeedbackAgeMilliseconds=age
    }
    try diagnostic.check()
   }
-  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=501
-  do{try diagnostic.check();preconditionFailure("Stationary DEBUG scan admitted501ms feedback")}catch is ROBPassiveFeedbackPause{}
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=1201
+  do{try diagnostic.check();preconditionFailure("Stationary DEBUG scan admitted1201ms feedback")}catch is ROBPassiveFeedbackPause{}
   let diagnosticRecovery=Task{@MainActor in
    try await Task.sleep(nanoseconds:50_000_000);precondition(diagnostic.dispatches==0)
    diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=10
@@ -191,7 +191,7 @@ final class ROBWorkspaceSearch {
   try await diagnostic.accepted{diagnostic.dispatches+=1;diagnostic.acks[43]=true;return 43}
   try await diagnosticRecovery.value
   precondition(diagnostic.dispatches==1 && diagnostic.passiveFeedbackPauseStarted==nil)
-  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=501
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=1201
   diagnostic.passiveFeedbackPauseStarted=ProcessInfo.processInfo.systemUptime-5.01
   fatal(diagnostic,"within5seconds")
   diagnostic.passiveFeedbackPauseStarted=nil
@@ -203,7 +203,7 @@ final class ROBWorkspaceSearch {
   diagnostic.gateway.samples["right"]!.positionsRadians[0]=0
   diagnostic.gateway.mode["right"]=1;fatal(diagnostic,"gateway_modes");diagnostic.gateway.mode["right"]=0
   diagnostic.inactiveWorkspaceSearch=false;diagnostic.leased=true;try diagnostic.check()
-  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=501;fatal(diagnostic,"motor_age_ms")
+  diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=1201;fatal(diagnostic,"motor_age_ms")
   diagnostic.gateway.samples["right"]!.effectiveSampleAgeMilliseconds=398
   diagnostic.leased=false;diagnostic.inactiveWorkspaceSearch=true
   UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":false],forName:UserDefaults.argumentDomain);fatal(diagnostic,"motor_age_ms")
@@ -281,7 +281,7 @@ final class ROBWorkspaceSearch {
   try await Task.sleep(nanoseconds:50_000_000);camera.vision.available=true;camera.vision.sequence=2
   for _ in 0..<20 {if completed{break};try await Task.sleep(nanoseconds:20_000_000)}
   precondition(completed && camera.prepared==1 && camera.vision.ensureCalls==1)
-  print("PASS DEBUG raised EMPTY stationary scan pauses501ms delivery with no dispatch, resumes only after fresh same-pose feedback, times out at5s; active lease/pose/mode/Stop remain strict")
+  print("PASS DEBUG raised EMPTY stationary scan pauses1201ms delivery with no dispatch, resumes only after fresh same-pose feedback, times out at5s; active lease/pose/mode/Stop remain strict")
   print("PASS stationary inactive/position holds accept350ms; complete actual local/nonlocal/active check; inactive age-only same-q/mode defers≤2s; q/mode/missing/active-age/timeout fatal; direct local Prepare enrolls then waits fresh; source expiry capped2; no hardware")
  }
 }

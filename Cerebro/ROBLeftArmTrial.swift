@@ -2102,7 +2102,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
     }
 
-    /// Development Mode uses500ms throughout planning, jaw setup and motion.
+    /// Development Mode uses1200ms throughout planning, jaw setup and motion.
     /// Normal operation retains350ms only for unchanged empty planning and250ms
     /// for travel/jaw/lease state. Pose, mode, ownership and Stop stay enforced.
     private var selectedFeedbackMaximumAgeMilliseconds:Double {

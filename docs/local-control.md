@@ -28,6 +28,12 @@ request; client round-trip timing also includes queueing and socket transfer.
 It is not motor response time. `rpc_timings` retains the latest 120 timings per
 operation. A submitted target is not measured arrival.
 
+In a DEBUG build with Development Mode enabled, arm motor and gripper feedback
+admission allows up to 1200 ms during stationary planning, jaw setup and motion.
+This is the operator's October 30 debugging setting. Original packet timestamps,
+pose/mode/current checks and Stop remain active. Mode-off and Release retain
+250 ms active and 350 ms stationary limits. Other timing values are unchanged.
+
 `camera.demand` keeps the requested streams running for up to 120 seconds.
 Renew it while needed. It neither points the neck nor moves another actuator.
 It is separate from recording, task and UI demand, so expiry releases only this
