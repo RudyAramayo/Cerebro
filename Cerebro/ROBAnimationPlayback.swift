@@ -26,6 +26,7 @@ import Cocoa
     private var target: [String: Double] = [:]
     private var nextStep = 0.0
     private var stepUntil = 0.0
+    private var segmentProgress: [String: ROBAnimationSegmentProgress] = [:]
     private var approved: [String: [Double]] = [:]
     private var approvedDuration = 0.0
     private var pending: [UInt64: Double] = [:]
@@ -87,7 +88,7 @@ import Cocoa
             ROBControllerArmApproval.shared.takeLocalPanelControl()
             self.sequence = sequence; self.serial = serial; owner = UUID(); isRunning = true
             preparing = true; modesRequested = false; deadline = now + 2; lastTick = now
-            index = -1; pending = [:]; leasedArms = []
+            index = -1; pending = [:]; leasedArms = []; segmentProgress = [:]
             publish("Taking local control for \(sequence.name)…")
             let clock = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
             timer = clock; RunLoop.main.add(clock, forMode: .common)
@@ -174,20 +175,37 @@ import Cocoa
                 }
             }
             if usesLACT { try require(serial.applyAnimationLACTPercent(elapsed < clip.duration ? clip.pose.values["lact.speed"] ?? 0 : 0), "LACT command failed.") }
+            // The vendor ACK and requested duration do not establish arrival.
+            // Observe each arm independently, but keep paired path fractions
+            // synchronized: neither arm advances until both have settled.
+            var segmentSettled = true
+            for arm in arms where segmentProgress[arm] != nil {
+                let q = try measured(arm)
+                guard let sample = gateway.telemetry(forArm: arm) else { throw ROBAnimationError.invalid("Arm feedback unavailable at segment handoff.") }
+                let result = segmentProgress[arm]!.observe(sequence: sample.sequence, positions: q, time: time)
+                if let joint = result.reversedJoint {
+                    throw ROBAnimationError.invalid("\(arm == "left" ? "Right" : "Left") J\(joint) reversed outside its animation segment; holding both arms.")
+                }
+                segmentSettled = segmentSettled && result.settled
+            }
+            let settlingAllowance = clip.pose.values["torso.heading"] == nil ? 8.0 : 60.0
+            if !segmentSettled {
+                try require(elapsed < clipDuration + settlingAllowance, "Arm segment did not settle; animation stopped without advancing.")
+            }
             // The segment clock advances only after the preceding command's
             // actual duration. ACK receipt is not arrival, and wall-clock
             // lateness must never turn into overlapping catch-up commands.
-            if elapsed >= nextStep, time >= stepUntil, nextStep < armTransition, pending.isEmpty {
+            if elapsed >= nextStep, time >= stepUntil, segmentSettled, nextStep < armTransition, pending.isEmpty {
                 let remaining = armTransition-nextStep
                 // Amber's minimum leased segment is 0.65 s. Use equal segments
                 // so the last one is never shorter than the transport permits.
                 // Straight local targets can use longer native trajectories.
                 // Keep authored smooth curves sampled and never merge across
                 // clip corners, holds, measured-arrival gates or LACT timing.
-                // Four seconds leaves headroom beneath the 10 s transport
+                // Eight seconds leaves headroom beneath the 10 s transport
                 // bound when fresh measured progress extends a segment.
                 let count = clip.easing == .linear
-                    ? max(1, Int(ceil(armTransition / 4)))
+                    ? max(1, Int(ceil(armTransition / 8)))
                     : max(1, Int(floor(armTransition / 0.8)))
                 let seconds = min(remaining, armTransition / Double(count))
                 let end = min(armTransition, nextStep+seconds)
@@ -210,7 +228,6 @@ import Cocoa
                     let required = zip(q, current).map { abs($0-$1) / ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond }.max() ?? 0
                     approvedDuration = max(approvedDuration, required + 0.05)
                 }
-                let settlingAllowance = clip.pose.values["torso.heading"] == nil ? 8.0 : 60.0
                 try require(approved.isEmpty || time + approvedDuration <= clipStarted + clipDuration - clip.hold + settlingAllowance,
                     "\(clip.pose.name): arm progress exhausted the clip's settling allowance; holding without skipping targets.")
                 // Validate every included arm before sending the first one.
@@ -221,13 +238,15 @@ import Cocoa
                     }
                 }
                 for arm in arms where approved[arm] != nil {
+                    let current = try measured(arm)
                     let id = gateway.sendLocalAnimationStep(arm: arm, expectedSessionGeneration: generation)
                     try require(id != 0, gateway.animationStepRejection ?? "Animation gateway changed at dispatch; holding.")
                     pending[id] = time; leasedArms.insert(arm)
+                    segmentProgress[arm] = ROBAnimationSegmentProgress(start: current, target: approved[arm]!)
                 }
                 approved = [:]; nextStep = abs(end-armTransition) < 0.000001 ? armTransition : end; stepUntil = now+approvedDuration
             }
-            guard nextStep >= armTransition, elapsed >= clipDuration, time >= stepUntil + clip.hold, pending.isEmpty else { return }
+            guard nextStep >= armTransition, elapsed >= clipDuration, time >= stepUntil + clip.hold, segmentSettled, pending.isEmpty else { return }
             var settled = true
             for arm in arms {
                 let physical = arm == "left" ? "right" : "left", q = try measured(arm)
@@ -281,7 +300,7 @@ import Cocoa
         }
         target = baseline.merging(clip.pose.values) { _, new in new }
         clipDuration = max(armTransition, clip.hasOtherTimedTargets ? clip.transition : 0) + clip.hold
-        clipStarted = now; nextStep = 0; stepUntil = now; torsoStarted = false; settling = 0; lastSettledSequences = [:]
+        clipStarted = now; nextStep = 0; stepUntil = now; segmentProgress = [:]; torsoStarted = false; settling = 0; lastSettledSequences = [:]
         let speed = clip.hasArmTargets ? String(format: " Arms %.0f%%%@.", sequence.armSpeed*100,
             armTransition > requestedArmTransition + 0.000001 ? " · motor-limited to \(String(format: "%.2f", armTransition)) s" : "") : ""
         publish("Running \(sequence.name) · clip \(index+1)/\(sequence.clips.count): \(clip.pose.name).\(speed) Stop or any local takeover interrupts.")
@@ -320,7 +339,7 @@ import Cocoa
         precondition(Thread.isMainThread)
         let active = isRunning
         let speaking = speechID != nil; speechID = nil
-        isRunning = false; timer?.invalidate(); timer = nil; approved = [:]; pending = [:]
+        isRunning = false; timer?.invalidate(); timer = nil; approved = [:]; pending = [:]; segmentProgress = [:]
         if speaking { cancelSpeech?() }
         if active {
             for arm in arms { _ = gateway.priorityHold(forArm: arm) }
@@ -336,5 +355,49 @@ import Cocoa
     @objc private func commandCompleted(_ note: Notification) {
         guard isRunning, let info = note.userInfo, let id = (info["commandID"] as? NSNumber)?.uint64Value, pending.removeValue(forKey: id) != nil else { return }
         if info["accepted"] as? Bool != true { stop(reason: "Animation command rejected: \(info["error"] as? String ?? "unknown gateway error")") }
+    }
+}
+
+/// Feedback-only segment evidence. The hardware has no usable velocity field;
+/// derive stability from distinct position samples, never from an ACK. This
+/// is not a collision model or proof that interrupted vendor trajectories work.
+struct ROBAnimationSegmentProgress {
+    let start: [Double]
+    let target: [Double]
+    private var previous: [Double]?
+    private var sequence: UInt64 = 0
+    private var stableSince: Double?
+    private var stableSamples = 0
+    private var furthest: [Double]
+    private var settled = false
+
+    init(start: [Double], target: [Double]) {
+        self.start = start; self.target = target; self.furthest = start
+    }
+
+    mutating func observe(sequence: UInt64, positions: [Double], time: Double) -> (settled: Bool, reversedJoint: Int?) {
+        guard sequence > self.sequence else { return (settled, nil) }
+        self.sequence = sequence
+        guard positions.count == 7, positions.allSatisfy(\.isFinite) else { return (false, nil) }
+        // A 0.05 rad retreat from measured progress is a motion fault, not a
+        // tiny travel checkpoint. It catches the recorded J6 reversal near
+        // +0.34 rad instead of waiting until it passes the whole-run start.
+        for j in 0..<7 {
+            let direction = target[j] >= start[j] ? 1.0 : -1.0
+            let progress = direction * (positions[j] - start[j])
+            let peak = direction * (furthest[j] - start[j])
+            if progress < peak - 0.05 || direction * (positions[j] - target[j]) > 0.05 {
+                return (false, j+1)
+            }
+            if progress > peak { furthest[j] = positions[j] }
+        }
+        defer { previous = positions }
+        let near = zip(positions, target).allSatisfy { abs($0-$1) <= ROBArmRoutinePlan.tolerance }
+        let stable = previous.map { zip(positions, $0).allSatisfy { abs($0-$1) <= 0.004 } } ?? false
+        guard near && stable else { stableSince = nil; stableSamples = 0; settled = false; return (false, nil) }
+        if stableSince == nil { stableSince = time }
+        stableSamples += 1
+        settled = stableSamples >= 3 && time - (stableSince ?? time) >= 0.15
+        return (settled, nil)
     }
 }

@@ -32,6 +32,7 @@ final class ROBAmberGatewayClient {
     var stale = false; var reject = false; var ready = true; var generation: UInt64 = 1
     var count: UInt64 = 0; var sends: [(String,[Double],Double)] = []; var holds: [String] = []
     var sendTimes: [Double] = []
+    var starts: [[Double]] = []
     var travelDelay: [String: Double] = [:]
     var blockedArm: String?
     var animationStepRejection: String?
@@ -65,7 +66,7 @@ final class ROBAmberGatewayClient {
         guard let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration) else { return 0 }
         count += 1; let id = count
         let time = ProcessInfo.processInfo.systemUptime
-        sends.append((arm, step.values, step.seconds)); sendTimes.append(time)
+        sends.append((arm, step.values, step.seconds)); sendTimes.append(time); starts.append(actual(arm))
         if !reject {
             if travelDelay[arm] != nil { motions[arm] = Motion(start: actual(arm), end: step.values, sent: time, seconds: step.seconds) }
             else { q[arm] = step.values }
@@ -216,11 +217,28 @@ final class ROBTorsoControlCenter {
             studio.show(); NSApp.activate(ignoringOtherApps: true); NSApp.run(); return
         }
         let engine = ROBAnimationPlayback.shared, gateway = ROBAmberGatewayClient.shared
+        // Recorded J6 handoff: the timer expired at +0.327 while the preceding
+        // goal was +0.395. A new ACK must not promote that moving pose to arrival.
+        var handoff = ROBAnimationSegmentProgress(start: Array(repeating: 0, count: 7), target: [0,0,0,0,0,0.3951327,0])
+        var observed = Array(repeating: 0.0, count: 7)
+        observed[5] = 0.32725
+        expect(!handoff.observe(sequence: 1, positions: observed, time: 3.65).settled, "Nominal duration cannot settle an unfinished segment")
+        observed[5] = 0.3951327
+        expect(!handoff.observe(sequence: 2, positions: observed, time: 3.8).settled, "One arrival sample is not stationary evidence")
+        expect(!handoff.observe(sequence: 2, positions: observed, time: 4.1).settled, "Repeated telemetry cannot satisfy the settle gate")
+        _ = handoff.observe(sequence: 3, positions: observed, time: 4.15)
+        _ = handoff.observe(sequence: 4, positions: observed, time: 4.2)
+        expect(handoff.observe(sequence: 5, positions: observed, time: 4.35).settled, "Fresh stationary arrival opens the handoff without a fixed long sleep")
+        var reversal = ROBAnimationSegmentProgress(start: [0,0,0,0,0,0.32725,0], target: [0,0,0,0,0,1.0526241,0])
+        observed[5] = 0.34007
+        _ = reversal.observe(sequence: 1, positions: observed, time: 0)
+        observed[5] = 0.26248
+        expect(reversal.observe(sequence: 2, positions: observed, time: 0.21).reversedJoint == 6, "Recorded J6 reversal stops locally before the cable-sized excursion")
         let p1 = ROBAnimationPose(name:"right only",values:["arm.right.j2":0.02])
         let p2 = ROBAnimationPose(name:"left and body",values:["arm.left.j3":0.03,"maestro.4":6200,"lact.speed":20,"torso.heading":5])
         let sequence = ROBAnimationSequence(name:"runtime", clips:[.init(pose:p1,transition:0.8), .init(pose:p2,transition:0.8)])
         engine.start(sequence:sequence, serial:serial); run(2.6)
-        expect(!engine.isRunning && engine.status.contains("complete"), "Playback completes all clips")
+        expect(!engine.isRunning && engine.status.contains("complete"), "Playback completes all clips: \(engine.status)")
         expect(gateway.sends.count == 2, "Each sparse arm clip dispatches only its included arm")
         expect(gateway.q["left"]![1] == 0.02 && gateway.q["right"]![2] == 0.03, "Correct physical-arm mapping and endpoint")
         expect(gateway.q["left"]![0] == 0 && gateway.q["right"]![0] == 0, "Omitted joints remain measured hold")
@@ -289,14 +307,17 @@ final class ROBTorsoControlCenter {
         engine.start(sequence:timed, serial:serial)
         run(12.7)
         expect(engine.isRunning && serial.lact.last == 0, "Retimed arms must not extend the timed LACT pulse: \(engine.status)")
-        run(5)
+        run(8)
         expect(!engine.isRunning && engine.status.contains("complete"), "Realistic arm lag should finish without dispatch rejection: \(engine.status)")
         let timings = Array(timingStart..<gateway.sends.count)
         expect(timings.count == 30, "Every planned segment must run on both arms without skips or retries")
-        expect(timings.contains { gateway.sends[$0].2 > 12.5/15 + 0.01 }, "Measured feedback must extend segment timing when necessary")
+        expect(timings.allSatisfy { gateway.sends[$0].2 >= 12.5/15 - 0.000001 }, "Measured handoff retains each authored segment duration")
         for arm in ["left", "right"] {
             let indices = timings.filter { gateway.sends[$0].0 == arm }
             expect(zip(indices, indices.dropFirst()).allSatisfy { gateway.sendTimes[$1] - gateway.sendTimes[$0] >= gateway.sends[$0].2 }, "Segments cannot overlap or catch up on wall time")
+            expect(zip(indices, indices.dropFirst()).allSatisfy { previous, next in
+                zip(gateway.sends[previous].1, gateway.starts[next]).allSatisfy { abs($0-$1) <= ROBArmRoutinePlan.tolerance }
+            }, "Every command must start after physical arrival, including different per-arm delays")
             let goal = arm == "left" ? -1.6 : 1.6
             expect(abs(gateway.q[arm]![1] - goal) <= ROBArmRoutinePlan.tolerance, "Both arms must reach the lift before wrist orientation")
             expect([2,4,5,6].allSatisfy { gateway.q[arm]![$0] == 0 }, "Sparse lift retained wrists throughout delayed travel")
