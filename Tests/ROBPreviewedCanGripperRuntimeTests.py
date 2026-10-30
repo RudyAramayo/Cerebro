@@ -24,8 +24,16 @@ struct ROBGhostRobotModel {}
 struct ROBWorkspaceCollisionSnapshot { let sceneID=UUID() }
 struct Trial {}
 struct Step { let positions:[Double];let seconds:Double;let stage:String }
+enum ROBLeftGestureProposal {typealias Step=SwiftStep}
+typealias SwiftStep=Step
 enum ROBWorkspaceCollisionPlan {
  static var reviews=0
+ static func review(baseline:[Double],steps:[Step],map:ROBWorkspaceCollisionSnapshot,
+    model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,
+    nowMilliseconds:Double)throws->Bool {
+  precondition(steps.count==1 && steps[0].positions==baseline,"Preparation requested arm travel")
+  reviews+=1;return true
+ }
  static func reviewVisualCalibrationTrial(baseline:[Double],steps:[Step],map:ROBWorkspaceCollisionSnapshot,
     model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,
     nowMilliseconds:Double,trial:Trial)throws->Bool {
@@ -42,7 +50,7 @@ final class ROBGripperStartupCalibration {
  func calibrationReady(forArm:String)->Bool {false}
 }
 final class Gateway {
- var calibrated=false,failRelease=false
+ var calibrated=true,failRelease=false
  var commands:[String]=[]
  func queryGripperState(forArm:String)->UInt64 {commands.append("query");return 1}
  func calibrateGripper(forArm:String)->UInt64 {commands.append("calibrate");calibrated=true;return 1}
@@ -62,6 +70,7 @@ struct Sample {let positionsRadians:[NSNumber]}
  var nominalEmptyCommissioningStepEnabled=false,oneDegreeEmptyCalibrationStepEnabled=false
  var generation:UInt64=5,heldGripperReadyGeneration:UInt64?
  var activePreviewedCanGrasp:Int?=1
+ var missionTaskAuthorization:(()->Bool)?
  var recyclingGripDispatched=false,jawSetupDispatchUncertain=false,servoPossiblePayloadUncertain=false
  var authorized=true,held=false
  var phase="",taskJawTarget:[Double]?,taskOpeningCommandAtMilliseconds:Double?
@@ -90,15 +99,20 @@ FIXTURE = r'''
 @main struct Fixtures {
  @MainActor static func main()async throws {
   let normal=Harness();try await normal.run()
-  precondition(normal.gateway.commands==["query","calibrate","hold:2","release:10","query"])
+  precondition(normal.gateway.commands==["query","release:10","query"],"Preparation closed beside a can")
   precondition(normal.ready && !normal.jawSetupDispatchUncertain && normal.taskJawTarget==nil)
-  try await normal.run();precondition(normal.gateway.commands.count==5,"Prepared jaws repeated initialization")
+  try await normal.run();precondition(normal.gateway.commands.count==3,"Prepared jaws repeated initialization")
   normal.generation+=1;precondition(!normal.ready,"Readiness survived a new connection generation")
+  try await normal.run()
+  precondition(normal.ready && normal.gateway.commands==["query","release:10","query","query","release:10","query"],"Reconnect caused empty-jaw calibration near an object")
   let recycling=Harness();recycling.activePreviewedCanGrasp=nil;recycling.activeCameraCollisionAdvisory=true
   try await recycling.run()
-  precondition(recycling.gateway.commands==["query","calibrate","hold:2","release:10","query"] && recycling.ready)
-  for kind in ["payload","unauthorized","release-rejected","ordinary","wrong-arm","lift-only"] {
+  precondition(recycling.gateway.commands==["query","release:10","query"] && recycling.ready)
+  let mission=Harness();mission.missionTaskAuthorization={true};try await mission.run()
+  precondition(mission.gateway.commands==["query","release:10","query"] && mission.ready)
+  for kind in ["payload","unauthorized","release-rejected","ordinary","wrong-arm","lift-only","calibration-required"] {
    let h=Harness()
+   if kind=="calibration-required" {h.gateway.calibrated=false}
    if kind=="ordinary" {h.activePreviewedCanGrasp=nil}
    if kind=="wrong-arm" {h.physicalSide="left"}
    if kind=="lift-only" {h.activeHoldAfterInitialEmptyLift=true}
@@ -107,11 +121,13 @@ FIXTURE = r'''
    do {try await h.run();fatalError("Admitted \(kind)")} catch {}
    precondition(!h.ready && h.taskJawTarget==nil)
    if kind=="release-rejected" {
-    precondition(h.jawSetupDispatchUncertain && h.gateway.commands==["query","calibrate","hold:2","release:10"])
+    precondition(h.jawSetupDispatchUncertain && h.gateway.commands==["query","release:10"])
+   } else if kind=="calibration-required" {
+    precondition(!h.jawSetupDispatchUncertain && h.gateway.commands==["query"],"Missing calibration triggered physical jaw motion")
    } else {precondition(h.gateway.commands.isEmpty)}
   }
-  precondition(ROBWorkspaceCollisionPlan.reviews==3)
-  print("PASS preview and full RIGHT recycling prepare EMPTY jaws at the held pose: checked hold then calibration-close-open, no parking/arm travel, no replay; ordinary/LEFT/lift-only/payload/authority/generation failures remain blocked")
+  precondition(ROBWorkspaceCollisionPlan.reviews==6)
+  print("PASS held grasp preparation only queries and opens, including mission and reconnect; unknown calibration never closes/calibrates, rejected opening stays uncertain; no arm travel or readiness replay")
  }
 }
 '''

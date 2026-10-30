@@ -228,8 +228,11 @@ def main():
                             "private var fixtureSent: [ROBAmberGatewayMessage] = []\n    private let encoder = JSONEncoder()")
     client = client.replace("private func send(_ message: ROBAmberGatewayMessage) {",
                             "private func send(_ message: ROBAmberGatewayMessage) {\n        fixtureSent.append(message)")
-    support = (ROOT / "Tests/ROBArmRoutineGatewayFixtureSupport.swift").read_text().split(
-        "// Gateway-only fixtures never instantiate")[0]
+    support_source = (ROOT / "Tests/ROBArmRoutineGatewayFixtureSupport.swift").read_text()
+    # Use the real startup coordinator, while retaining the inert animation
+    # collaborators now referenced by the production gateway client.
+    support = support_source.split("// Gateway-only fixtures never instantiate")[0]
+    support += support_source[support_source.index("// Animation Studio cannot acquire authority"):]
     with tempfile.TemporaryDirectory(prefix="rob-startup-grippers-") as folder:
         directory = Path(folder)
         source = directory / "StartupFixture.swift"

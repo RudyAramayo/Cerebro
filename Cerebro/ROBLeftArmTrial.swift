@@ -1188,7 +1188,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             ? " THIS INVOCATION ENDS AT HOLD: survey the nearby table, select a reachable right-side can, prepare the EMPTY gripper at its current hold, approach, grip gently and verify the short lift. The operator will reveal the destination by a subsequent torso turn. No bucket search, torso movement, carry, release, return or next can in this pickup phase; ZERO transfers. A later turn invalidates this scene and requires fresh destination and payload evidence."
             : ""
         let cameraAdvisorySummary=campaignSummary + pickupSummary + (previewedCanGrasp == nil ? "" :
-            " THIS INVOCATION ENDS AT HOLD: reobserve the previewed near-right can, prepare its EMPTY gripper while stationary at the current held pose if calibration was lost on reconnect, approach, grip gently and perform the checked short verification lift. No bucket search, carry, payload release, return or next can; ZERO transfers. The old preview is an identity hint, never a replayed motion path.")
+            " THIS INVOCATION ENDS AT HOLD: reobserve the previewed near-right can, query current gripper calibration and open while stationary at the current held pose, approach, grip gently and perform the checked short verification lift. Missing calibration requires separate empty-jaw setup away from objects; preparation never closes beside the can. No bucket search, carry, payload release, return or next can; ZERO transfers. The old preview is an identity hint, never a replayed motion path.")
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
             start(command, summary: action, limit: limit, completion: completion)
@@ -4203,8 +4203,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
              gateway.gripperSnapshot(forArm:arm)["calibrationState"] as? String == "command_accepted_unverified")
     }
 
-    /// Explicit grasp preparation, distinct from automatic hanging startup.
-    /// Reconnect never manufactures calibration or moves the arm to obtain it.
+    /// Opening at a held grasp pose is distinct from empty-jaw initialization.
+    /// A can can already be inside the aperture without being held. Query the
+    /// gateway's current calibration; never prime or recalibrate beside it.
     @MainActor private func prepareHeldCanGripper(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot) async throws {
         if taskGripperReady {return}
         guard usesHeldCanPreparation,!recyclingGripDispatched,
@@ -4237,8 +4238,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         try await holdTaskPosition(q)
         defer {taskJawTarget=nil}
+        try await requireGripperCalibration(allowEmptyCalibration:false)
         jawSetupDispatchUncertain=true
-        try await requireGripperCalibration(allowEmptyCalibration:true)
         phase="opening empty right gripper at held pose"
         update("Opening the empty right gripper while the arm remains held")
         try await accepted {accountedJawCommand {
