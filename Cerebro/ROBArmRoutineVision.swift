@@ -2831,9 +2831,12 @@ struct ROBWorkspaceCanSelection {
                 guard preservingSceneID==nil else {
                     throw ROBWorkspaceDepthMapError.acquisition("Arm-side depth coverage cannot replace the object scene with a new map.")
                 }
+                let previousScene=currentMap.sceneID
                 currentMap = ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
                     sessionGeneration:sceneGatewayGeneration,cameraGeneration:frame.cameraGeneration,
                     estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
+                evidence.append(["fresh_acquisition_scene":true,"previous_scene_id":previousScene.uuidString,
+                    "scene_id":currentMap.sceneID.uuidString,"retained_old_geometry":false,"path_admitted":false])
             }
             let selfBounds = measuredSelfBounds(model:model)
             let captured = frame.capturedAt, sequence = frame.sequence, cameraEpoch = frame.cameraGeneration
@@ -3333,14 +3336,21 @@ struct ROBWorkspaceCanSelection {
                 throw ROBArmRoutineError.blocked("The targeted can search needs the unchanged measured selected-arm baseline.")
             }
             localReachSelectionRequired=true
-            let scene=collisionMap!.sceneID,camera=vision.cameraGeneration,body=sceneBodyIdentity
+            let camera=vision.cameraGeneration,body=sceneBodyIdentity
             func requireTargetedContext()throws {
                 try check();try Task.checkCancellation();try requireSceneProjectionIdentity()
-                guard try permitsLocalCanShapePrior(),collisionMap?.sceneID==scene,
+                // Perception can roll an expired acquisition into a fresh map.
+                // Keep the robot/source context fixed; freeze the particular
+                // scene only while ranking that scene's confirmed candidates.
+                guard try permitsLocalCanShapePrior(),let map=collisionMap,
+                      map.cameraGeneration==camera,map.sessionGeneration==sceneGatewayGeneration,
+                      map.bodyMotionIdentity==body,map.modelID==model.modelID,
+                      map.geometryID==model.geometryID,map.mappingID==model.selectedMappingID,
+                      map.estimatedCameraProjectionIdentity==estimatedProjectionIdentity,
                       sceneCaptureAnchor.permitsCurrent(camera),vision.cameraGeneration==camera,
                       ROBFixedHeadBodyMotionIdentity.currentIdentity==body,
                       (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==sceneGatewayGeneration else {
-                    throw ROBWorkspaceDepthMapError.invalidFrame
+                    throw ROBWorkspaceDepthMapError.acquisition("Robot, camera or projection context changed during targeted can search")
                 }
             }
             func rankCurrentCans(_ stage:String,candidates:[ROBWorkspaceLocatedObject]?=nil) async throws ->ROBWorkspaceCanSelection {
@@ -3350,14 +3360,18 @@ struct ROBWorkspaceCanSelection {
                     throw ROBWorkspaceDepthMapError.invalidFrame
                 }
                 try await searchCheckpoint();try requireTargetedContext()
-                let expected=ROBWorkspaceCanSceneIdentity(sceneID:scene,cameraGeneration:camera,
+                let expected=ROBWorkspaceCanSceneIdentity(sceneID:snapshot.sceneID,cameraGeneration:camera,
                     sessionGeneration:sceneGatewayGeneration,bodyMotionIdentity:body,modelID:model.modelID,
                     geometryID:model.geometryID,mappingID:model.selectedMappingID,
                     estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
                 let result=await selectReachableCan(candidates:candidates ?? confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000),
                     model:model,baseline:reachBaseline,map:snapshot,nowMilliseconds:Date().timeIntervalSince1970*1000,
-                    contextIsCurrent:{(try? requireTargetedContext()) != nil && confirmedCanCandidates.context==expected})
+                    contextIsCurrent:{(try? requireTargetedContext()) != nil &&
+                        collisionMap?.sceneID==snapshot.sceneID && confirmedCanCandidates.context==expected})
                 try await searchCheckpoint();try requireTargetedContext()
+                guard collisionMap?.sceneID==snapshot.sceneID else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Target scene changed while ranking can reach; reacquire before planning")
+                }
                 reachSelections.append(["stage":stage,"candidates":result.diagnostics,"path_admitted":false])
                 return result
             }
