@@ -2176,23 +2176,30 @@ struct ROBWorkspaceCanSelection {
         }
     }
 
-    /// Keep the existing settle interval and deadline for both initial neck
-    /// staging and captured views. Readiness remains the native raw-pose gate.
+    private func passiveSettleExposure() -> ROBPassiveViewSettling.Exposure? {
+        let vision=ROBArmRoutineVision.shared
+        guard let frame=vision.snapshot()["face"],frame.cameraGeneration==vision.cameraGeneration,
+              let imu=frame.intrinsics?.inertial else { return nil }
+        return .init(generation:frame.cameraGeneration.uuidString,sequence:frame.sequence,capturedAt:frame.capturedAt,
+            stationary:imu.stationary,validIMU:imu.isValid,imuWindowMilliseconds:imu.windowMilliseconds,imuSamples:imu.sampleCount)
+    }
+
+    /// Native neck readiness plus measured stationary exposures can settle
+    /// passive views sooner. Missing IMU retains the previous 1.5 s fallback.
     @MainActor @nonobjc private func settleCollisionScanView(_ view:ROBWorkspaceView,check:()throws->Void,
         status:(ROBWorkspaceView,Bool,Bool)->Void) async throws {
         let deadline=ProcessInfo.processInfo.systemUptime+8
-        var settledSince:TimeInterval?
+        var settling=ROBPassiveViewSettling()
         while true {
             try check();try Task.checkCancellation()
             let prepared=prepareView?(view.panDegrees,view.upperTarget)==true
             let ready=viewReady?(view.panDegrees,view.upperTarget)==true
             status(view,prepared,ready)
-            if prepared && ready {
-                settledSince=settledSince ?? ProcessInfo.processInfo.systemUptime
-                if ProcessInfo.processInfo.systemUptime-settledSince!>=1.5 {return}
-            } else {settledSince=nil}
+            if settling.observe(ready:prepared && ready,exposure:passiveSettleExposure(),
+                nowUptime:ProcessInfo.processInfo.systemUptime,nowMilliseconds:Date().timeIntervalSince1970*1000,
+                maximumAgeMilliseconds:ROBVisionFrameAgeBudget.maximumAgeMilliseconds) {return}
             guard ProcessInfo.processInfo.systemUptime<deadline else {
-                throw ROBWorkspaceDepthMapError.acquisition("neck did not maintain its 1.5 s settled interval within 8 s (prepareAccepted=\(prepared), viewReady=\(ready), settledFor=\(settledSince.map {ProcessInfo.processInfo.systemUptime-$0} ?? 0) s)")
+                throw ROBWorkspaceDepthMapError.acquisition("neck did not provide a settled view within 8 s (prepareAccepted=\(prepared), viewReady=\(ready), method=\(settling.method))")
             }
             try await Task.sleep(nanoseconds:100_000_000)
         }
@@ -2801,7 +2808,7 @@ struct ROBWorkspaceCanSelection {
                 "left_hanging_observed": leftHanging, "right_hanging_observed": rightHanging,
                 "visually_confirmed": visuallyFound.map(\.rawValue).sorted(), "decoded_observations": validObservations,
                 "announcements": announcements,
-                "settle_seconds_per_view": 1.5,
+                "settle_fallback_seconds_per_view": 1.5,"settle_stationary_exposure_span_ms":300,
                 "depth_required": requireDepth,
                 "front_table_survey": surveyFrontTable,
                 "front_table_views": surveyFrontTable ? schedule.attempted.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] } : [],
@@ -2912,15 +2919,14 @@ struct ROBWorkspaceCanSelection {
                 return false
             }
             let deadline = min(ProcessInfo.processInfo.systemUptime + 12,deadlineUptime ?? .infinity)
-            var settledSince: TimeInterval?
+            var settling=ROBPassiveViewSettling()
             progress(String(format: "Local search: camera pan %+.0f°, tilt target %d", view.panDegrees, view.upperTarget))
             while ProcessInfo.processInfo.systemUptime < deadline {
                 try await searchCheckpoint()
                 let prepared = fixedContext != nil ? true : prepareView?(view.panDegrees,view.upperTarget) == true
-                if prepared && isViewReady(view) {
-                    if settledSince == nil { settledSince = ProcessInfo.processInfo.systemUptime }
-                    if ProcessInfo.processInfo.systemUptime - settledSince! >= 1.5 { return true }
-                } else { settledSince = nil }
+                if settling.observe(ready:prepared && isViewReady(view),exposure:passiveSettleExposure(),
+                    nowUptime:ProcessInfo.processInfo.systemUptime,nowMilliseconds:Date().timeIntervalSince1970*1000,
+                    maximumAgeMilliseconds:ROBVisionFrameAgeBudget.maximumAgeMilliseconds) { return true }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
             evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "status": "view_unavailable"])

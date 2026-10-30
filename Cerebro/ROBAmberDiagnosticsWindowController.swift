@@ -1575,6 +1575,9 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     private func refreshDisplay() {
+        // Notifications continue to buffer native telemetry when this panel
+        // is hidden. No table reloads, plot copies or text layout are needed.
+        guard window?.isVisible == true, window?.isMiniaturized == false else { return }
         let connection = connectionSnapshot()
         manualSessionButton.isEnabled = connection.state == .ready && !stackMaintenance.isRunning && !stackRecoveryInProgress
         endManualSessionButton.isEnabled = true

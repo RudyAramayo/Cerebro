@@ -69,6 +69,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     private var displayDeliveryScheduled = false
     private var diagnosticsPreviewVisible = false
     private var geminiVideoDemandActive = false
+    private var localControlDemandActive = false
     private var followVideoDemandActive = false
     private var remoteVideoDemandActive = false
     private var recordingVideoDemandActive = false
@@ -316,6 +317,14 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         }
     }
 
+    public func setLocalControlDemandActive(_ active: Bool) {
+        queue.async {
+            guard self.localControlDemandActive != active else { return }
+            self.localControlDemandActive = active
+            self.reevaluateDecoderDemand()
+        }
+    }
+
     /// Makes the stitched stream available to explicit footage recording.
     /// 3840x1920 is the Pro Camera API's documented high-resolution pano
     /// preview; nil restores the ordinary 1920x960 perception preview.
@@ -403,6 +412,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
 
     private var analysisNeedsFrames: Bool {
         geminiVideoDemandActive
+            || localControlDemandActive
             || followVideoDemandActive
             || recordingVideoDemandActive
             || remoteVideoDemandActive
@@ -748,6 +758,8 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
             let capturedAt = Date()
             let capturedAtUptime = ProcessInfo.processInfo.systemUptime
             lastFrameAt = capturedAt
+            ROBLocalObservationStore.shared.offerPanorama(jpeg: jpeg, receivedAt: capturedAt,
+                sequence: framesReceived, generation: generation)
 
             // Gemini consumes the completed JPEG directly from the service
             // queue. In particular, capture age is measured from this

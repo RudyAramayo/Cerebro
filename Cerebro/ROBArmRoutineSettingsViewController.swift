@@ -4,6 +4,7 @@ import AppKit
 /// live in the Testing Sandbox rather than growing the preferences window.
 @objcMembers final class ROBArmRoutineSettingsViewController: NSViewController {
     private let startup = NSButton(checkboxWithTitle: "Offer the arm startup route", target: nil, action: nil)
+    private let passiveStartup = NSButton(checkboxWithTitle: "Passive hardware startup (connect without automatic positioning)", target: nil, action: nil)
     private let gripperStartup = NSButton(checkboxWithTitle: "Calibrate empty grippers after connecting", target: nil, action: nil)
     private let sessionOnWake = NSButton(checkboxWithTitle: "Offer one arm session at launch / wake", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
@@ -14,6 +15,8 @@ import AppKit
         view = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 680))
         let title = NSTextField(labelWithString: "Arms and motion")
         title.font = .boldSystemFont(ofSize: 20)
+        passiveStartup.state = UserDefaults.standard.bool(forKey: "ROBPassiveHardwareStartup") ? .on : .off
+        passiveStartup.target = self; passiveStartup.action = #selector(changePassiveStartup)
         startup.state = UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) ? .on : .off
         startup.target = self; startup.action = #selector(changeStartup)
         gripperStartup.state = ROBGripperStartupCalibration.enabled ? .on : .off
@@ -48,7 +51,7 @@ import AppKit
         let stop = NSButton(title: "Stop + hold", target: self, action: #selector(stop))
         stop.bezelColor = .systemRed
         state.isSelectable = true
-        let stack = NSStackView(views: [title, gripperStartup, gripperHelp, sessionOnWake, startup,
+        let stack = NSStackView(views: [title, passiveStartup, gripperStartup, gripperHelp, sessionOnWake, startup,
                                        inspectionRow, treadRow, treadHelp, behaviorHelp, sandbox, sandboxHelp, state, stop])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
@@ -66,6 +69,7 @@ import AppKit
         refresh()
     }
     @objc private func changeStartup() { UserDefaults.standard.set(startup.state == .on, forKey: ROBArmRoutinePlan.startupDefaultsKey) }
+    @objc private func changePassiveStartup() { UserDefaults.standard.set(passiveStartup.state == .on, forKey: "ROBPassiveHardwareStartup") }
     @objc private func changeTreadAcceleration() { ROBTreadMotionRamp.selectedMode = treadAcceleration.indexOfSelectedItem }
     @objc private func changeGripperStartup() { ROBGripperStartupCalibration.enabled = gripperStartup.state == .on }
     @objc private func changeSessionOnWake() { UserDefaults.standard.set(sessionOnWake.state == .on, forKey: ROBArmRoutinePlan.sessionOnWakeKey) }

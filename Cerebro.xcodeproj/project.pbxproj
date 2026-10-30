@@ -273,6 +273,12 @@
 		AE261029A000000000000002 /* ROBAnimationDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE261029A000000000000001; };
 		AE261029A000000000000004 /* ROBAnimationStudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE261029A000000000000003; };
 		AE261029A000000000000006 /* ROBAnimationPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE261029A000000000000005; };
+		A558B7C30F49C7AEDDDFDF97 /* ROBLocalControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2177A15E23AEAE96A1DB2E51 /* ROBLocalControlProtocol.swift */; };
+		F7A5D56065A095F17CD599F4 /* ROBLocalControlSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4544D58FA2DF6463C866DA72 /* ROBLocalControlSocket.swift */; };
+		740C02A1240EBB4A1B6FC7F5 /* ROBLocalObservationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D702CAA05F5ED97041DA143B /* ROBLocalObservationStore.swift */; };
+		DB9CDA12D1354336F938AC18 /* ROBLocalControlService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2EF21BA858053DFC24D1136 /* ROBLocalControlService.swift */; };
+		0B75892F09575DEC2EA274C5 /* ROBRecycleShuttlePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90BB47C01F0CCE74AB916AD /* ROBRecycleShuttlePlan.swift */; };
+		CE1A0B3A7D3B3A0E8976586B /* ROBPassiveViewSettling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99E95864CBCD98D586552C52 /* ROBPassiveViewSettling.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -586,6 +592,12 @@
 		AE261029A000000000000001 /* ROBAnimationDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAnimationDocument.swift; sourceTree = "<group>"; };
 		AE261029A000000000000003 /* ROBAnimationStudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAnimationStudio.swift; sourceTree = "<group>"; };
 		AE261029A000000000000005 /* ROBAnimationPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAnimationPlayback.swift; sourceTree = "<group>"; };
+		2177A15E23AEAE96A1DB2E51 /* ROBLocalControlProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLocalControlProtocol.swift; sourceTree = "<group>"; };
+		4544D58FA2DF6463C866DA72 /* ROBLocalControlSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLocalControlSocket.swift; sourceTree = "<group>"; };
+		D702CAA05F5ED97041DA143B /* ROBLocalObservationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLocalObservationStore.swift; sourceTree = "<group>"; };
+		A2EF21BA858053DFC24D1136 /* ROBLocalControlService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLocalControlService.swift; sourceTree = "<group>"; };
+		E90BB47C01F0CCE74AB916AD /* ROBRecycleShuttlePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecycleShuttlePlan.swift; sourceTree = "<group>"; };
+		99E95864CBCD98D586552C52 /* ROBPassiveViewSettling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBPassiveViewSettling.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -692,6 +704,12 @@
 				C0D4B0032F00000100000001 /* ROBVideoServer.swift */,
 				D4AE00022F51000100000001 /* ROBRemoteDesktopCaptureService.swift */,
 				AE261029A000000000000001 /* ROBAnimationDocument.swift */,
+				99E95864CBCD98D586552C52 /* ROBPassiveViewSettling.swift */,
+				E90BB47C01F0CCE74AB916AD /* ROBRecycleShuttlePlan.swift */,
+				A2EF21BA858053DFC24D1136 /* ROBLocalControlService.swift */,
+				D702CAA05F5ED97041DA143B /* ROBLocalObservationStore.swift */,
+				4544D58FA2DF6463C866DA72 /* ROBLocalControlSocket.swift */,
+				2177A15E23AEAE96A1DB2E51 /* ROBLocalControlProtocol.swift */,
 				AE261029A000000000000003 /* ROBAnimationStudio.swift */,
 				AE261029A000000000000005 /* ROBAnimationPlayback.swift */,
 				D4A2E9092E7A1D32002B5299 /* KeyframeAnimationManager.swift */,
@@ -1294,6 +1312,12 @@
 				D4F136772325E39A0084A302 /* RTSPServer.m in Sources */,
 				D4A38F731FFC77CB00092A46 /* ROBKeyboardControlsViewController.m in Sources */,
 				AE261029A000000000000002 /* ROBAnimationDocument.swift in Sources */,
+				CE1A0B3A7D3B3A0E8976586B /* ROBPassiveViewSettling.swift in Sources */,
+				0B75892F09575DEC2EA274C5 /* ROBRecycleShuttlePlan.swift in Sources */,
+				DB9CDA12D1354336F938AC18 /* ROBLocalControlService.swift in Sources */,
+				740C02A1240EBB4A1B6FC7F5 /* ROBLocalObservationStore.swift in Sources */,
+				F7A5D56065A095F17CD599F4 /* ROBLocalControlSocket.swift in Sources */,
+				A558B7C30F49C7AEDDDFDF97 /* ROBLocalControlProtocol.swift in Sources */,
 				AE261029A000000000000004 /* ROBAnimationStudio.swift in Sources */,
 				AE261029A000000000000006 /* ROBAnimationPlayback.swift in Sources */,
 				D4A2E90A2E7A1D3D002B5299 /* KeyframeAnimationManager.swift in Sources */,

@@ -90,6 +90,10 @@ extension Notification.Name {
         precondition(Thread.isMainThread)
         guard !startupOffered else { return }
         startupOffered = true
+        guard !UserDefaults.standard.bool(forKey: "ROBPassiveHardwareStartup") else {
+            update("Passive hardware startup: automatic gripper setup deferred; explicit controls remain available")
+            return
+        }
         guard Self.enabled else { update("Automatic gripper calibration is disabled"); return }
         start(borrowing: nil)
     }

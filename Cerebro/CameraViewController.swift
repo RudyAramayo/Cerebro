@@ -1011,6 +1011,13 @@ final class CameraViewController: NSViewController {
     }
 
     private var armRoutineDemand = false
+    private var localControlDemand = false
+
+    @objc func setLocalControlDemandActive(_ active: Bool) {
+        guard localControlDemand != active else { return }
+        localControlDemand = active
+        applyRecordingDemand(); reconcileCameraSession()
+    }
 
     @objc func setArmRoutineDemandActive(_ active: Bool) {
         armRoutineDemand = active
@@ -1022,6 +1029,7 @@ final class CameraViewController: NSViewController {
         guard let cameraManager else { return }
         let shouldRun = cameraViewIsVisible
             || armRoutineDemand
+            || localControlDemand
             || automaticProcessingNeedsFrames
             || followVideoIsActive
             || bubbleVideoIsActive
@@ -1149,7 +1157,7 @@ final class CameraViewController: NSViewController {
         // Live conversation, following and arm motion share a small RGB-D
         // profile. Explicit footage resolution still has priority; freshness
         // gates may refuse motion if that recording configuration is too slow.
-        let realtime = armRoutineDemand || geminiVideoIsActive || followVideoIsActive
+        let realtime = armRoutineDemand || localControlDemand || geminiVideoIsActive || followVideoIsActive
         let taskResolution = armRoutineDemand && ROBArmRoutineVision.shared.fullHeightTaskObservationRequested
             ? "640x480" : "640x400"
         cameraManager?.setArmTaskCaptureConfiguration(resolution:demand.resolutionOverride ?? (realtime ? taskResolution : nil),

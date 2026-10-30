@@ -14,6 +14,9 @@ import simd
     private var message: ROBRecycleMissionMessage?
     private var controller: UUID?
     private var networkSession: UUID?
+    private var localOwner = false
+    private var phaseStarted = ProcessInfo.processInfo.systemUptime
+    private var phaseSeconds: [String: Double] = [:]
     private var startDeadline = 0.0
     private var lastCommandSequence: UInt64 = 0
     private var usedMissions = Set<UUID>()
@@ -108,9 +111,51 @@ import simd
         usedMissions.insert(incoming.missionID)
         UserDefaults.standard.set(usedMissions.map(\.uuidString),forKey:usedKey)
         self.controller=controller;self.networkSession=networkSession
+        localOwner=false
+        begin(incoming)
+    }
+
+    /// Explicit same-user CLI Start, distinct from an authenticated remote
+    /// controller and from model text. Authority lives only for this bounded
+    /// in-process mission; a CLI disconnect is not an internet dependency.
+    @nonobjc func startLocal(configuration: ROBRecycleMissionMessage.Configuration) throws {
+        precondition(Thread.isMainThread)
+        guard configuration.valid, !active, message?.possiblePayloadHeld != true,
+              !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion,
+              !ROBAnimationPlayback.shared.isRunning,
+              takeControl != nil, stopBase != nil, driveTreads != nil else {
+            throw ROBLocalControlError("Mission busy, possible payload unresolved, invalid configuration or runtime unavailable")
+        }
+        controller=nil; networkSession=nil; localOwner=true
+        begin(ROBRecycleMissionMessage(kind: .start, missionID: UUID(), sequence: 1,
+            sentAtMilliseconds: ROBRecycleMissionMessage.now, configuration: configuration))
+    }
+
+    @nonobjc func localStatus() -> [String: Any] {
+        var result = message.flatMap { try? JSONEncoder().encode($0) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? ["active": false, "phase": "idle"]
+        var timings=phaseSeconds
+        if active, let phase=message?.phase { timings[phase.rawValue,default:0] += ProcessInfo.processInfo.systemUptime-phaseStarted }
+        result["authority_source"] = localOwner ? "explicit_local_user_command" : "authenticated_controller"
+        result["phase_seconds"] = timings
+        result["internet_required"] = false
+        result["remote_bucket_transport_commissioned"] = false
+        return result
+    }
+
+    @nonobjc func confirmEmptyLocal(missionID: String) throws {
+        guard !active,!ROBLeftArmTrial.shared.isRunning,!ROBArmRoutineCoordinator.shared.ownsPhysicalMotion,
+              !ROBAnimationPlayback.shared.isRunning,message?.missionID.uuidString.lowercased()==missionID.lowercased(),
+              message?.possiblePayloadHeld==true else { throw ROBLocalControlError("No matching inactive mission awaiting an empty-gripper observation") }
+        message?.possiblePayloadHeld=false
+        setPhase(.paused,"Local operator inspected both grippers and confirmed them empty. No jaw command or transfer credit.")
+    }
+
+    private func begin(_ incoming: ROBRecycleMissionMessage) {
         message=incoming;message?.kind = .status;message?.verifiedTransfers=0
         message?.searchedStops=0;message?.possiblePayloadHeld=false
         lastCommandSequence=incoming.sequence
+        phaseSeconds=[:];phaseStarted=ProcessInfo.processInfo.systemUptime
         startDeadline=ROBRecycleMissionMessage.now+Double(incoming.configuration.durationSeconds)*1000
         origin=nil;searched=[];goal=nil;route=[];planner=nil;routeEpoch=nil;armBaseline=[:];canApproach=nil
         takeControl?();active=true;setCameraDemand?(true)
@@ -119,7 +164,8 @@ import simd
         waitingSince=ProcessInfo.processInfo.systemUptime
         setPhase(.acquiringMap,"Waiting for the live room map and local pose")
         timer?.invalidate()
-        timer=Timer.scheduledTimer(withTimeInterval:0.05,repeats:true) { [weak self] _ in self?.tick() }
+        let clock=Timer(timeInterval:0.05,repeats:true) { [weak self] _ in self?.tick() }
+        timer=clock;RunLoop.main.add(clock,forMode:.common)
         tick()
     }
 
@@ -178,7 +224,9 @@ import simd
     }
     private func haltBase() { ramp.reset();stopBase?();progressPoint=nil;progressAt=0 }
     private var grantIsLive: Bool {
-        guard active,ROBRecycleMissionMessage.now<startDeadline,let controller,let networkSession else { return false }
+        guard active,ROBRecycleMissionMessage.now<startDeadline else { return false }
+        if localOwner { return true }
+        guard let controller,let networkSession else { return false }
         return ROBControlLiveSessionRegistry.isActiveOperator(controllerID:controller,sessionID:networkSession)
     }
     private func tick() {
@@ -465,7 +513,12 @@ import simd
     }
     private static func angle(_ value: Double) -> Double { atan2(sin(value),cos(value)) }
     private func setPhase(_ phase: ROBRecycleMissionMessage.Phase,_ detail: String) {
-        guard message != nil else { return };message?.phase=phase;message?.detail=String(detail.prefix(2048));publish()
+        guard message != nil else { return }
+        if let old=message?.phase,old != phase {
+            phaseSeconds[old.rawValue,default:0] += ProcessInfo.processInfo.systemUptime-phaseStarted
+            phaseStarted=ProcessInfo.processInfo.systemUptime
+        }
+        message?.phase=phase;message?.detail=String(detail.prefix(2048));publish()
     }
     private func publish() {
         guard var value=message else { return }

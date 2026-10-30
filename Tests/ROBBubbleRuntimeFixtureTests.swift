@@ -97,6 +97,16 @@ struct CameraFrameSet {
         precondition(box.writes == [[6, 0], [7, 0]], "Explicit OFF must still release servo pulses in dry run")
 
         var now = ProcessInfo.processInfo.systemUptime
+        defaults.set(true, forKey: "ROBPassiveHardwareStartup")
+        let passive = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults, uptime: { now })
+        let passiveHardware = ROBSerialBox(); passive.serialBox = passiveHardware
+        passive.maestroReconnected()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.8))
+        precondition(passiveHardware.writes.allSatisfy { ![6, 7].contains($0[0]) }, "Passive startup repositioned the mount")
+        now += 2
+        passive.manualPan(6200, tilt: 5800)
+        precondition(passiveHardware.writes.suffix(2) == [[7, 6200], [6, 5800]], "Passive startup blocked explicit controls")
+        defaults.set(false, forKey: "ROBPassiveHardwareStartup")
         let live = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults, uptime: { now })
         let hardware = ROBSerialBox(); live.serialBox = hardware
         live.maestroReconnected()

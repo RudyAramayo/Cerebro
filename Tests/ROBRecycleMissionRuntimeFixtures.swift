@@ -44,6 +44,7 @@ final class ROBLeftArmTrial {
 }
 final class ROBControllerArmApproval { static let shared=ROBControllerArmApproval();let standingCanCampaignMayHoldPayload=false;func cancel(reason:String) {} }
 final class ROBArmRoutineCoordinator { static let shared=ROBArmRoutineCoordinator();var ownsPhysicalMotion=false }
+final class ROBAnimationPlayback { static let shared=ROBAnimationPlayback();var isRunning=false }
 final class ROBShowMotionCoordinator { static let shared=ROBShowMotionCoordinator();var isRunning=false }
 final class ROBAmberGestureExecutor { static let shared=ROBAmberGestureExecutor();var isExecuting=false }
 struct FakeTelemetry {
@@ -119,6 +120,15 @@ final class ROBTraversabilityRuntime {
         RunLoop.main.run(until:Date().addingTimeInterval(0.12))
         check(!coordinator.active && statuses.last?.phase == .paused,"Disconnected controller kept mission running")
         check(drives==0,"Lifecycle tests emitted tread motion")
+        do {
+            try coordinator.startLocal(configuration:.init())
+            check(coordinator.active,"Explicit local mission still required an internet/controller session")
+            RunLoop.main.run(until:Date().addingTimeInterval(0.12))
+            check(coordinator.active && drives==0,"Offline local mission lost ownership or drove without a map")
+            check(coordinator.localStatus()["authority_source"] as? String=="explicit_local_user_command","Local start impersonated a remote controller")
+            coordinator.stop(reason:"Fixture local Stop")
+            check(!coordinator.active,"Local Stop did not end mission")
+        } catch { fatalError("Local mission rejected: \(error)") }
         print("Recycle mission runtime passed: authenticated Start, duplicates, owner/sequence Stop, replay, reconnect and disconnect; no hardware")
     }
 }

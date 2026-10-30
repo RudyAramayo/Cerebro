@@ -537,11 +537,13 @@ import CoreImage
         let blowerOff = serialBox?.applyBubbleTarget(calibration.blowerOff, channel: calibration.blowerChannel) == true
         let spinOff = serialBox?.applyBubbleTarget(calibration.spinOff, channel: calibration.spinChannel) == true
         relayOffEstablished = blowerOff && spinOff
-        _ = serialBox?.applyBubbleTarget(calibration.stowTilt, channel: calibration.tiltChannel)
-        let generation = stowGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
-            guard let self, self.stowGeneration == generation else { return }
-            _ = self.serialBox?.applyBubbleTarget(self.calibration.stowPan, channel: self.calibration.panChannel)
+        if !defaults.bool(forKey: "ROBPassiveHardwareStartup") {
+            _ = serialBox?.applyBubbleTarget(calibration.stowTilt, channel: calibration.tiltChannel)
+            let generation = stowGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+                guard let self, self.stowGeneration == generation else { return }
+                _ = self.serialBox?.applyBubbleTarget(self.calibration.stowPan, channel: self.calibration.panChannel)
+            }
         }
         // Start the restart cooldown when OFF is actually sent, not when the
         // operator later enables motors. Tilt/Pan remains available throughout.

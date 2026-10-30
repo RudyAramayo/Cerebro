@@ -326,6 +326,7 @@ enum ROBArmRoutineError: LocalizedError {
 
     func wakeIfEnabled() {
         precondition(Thread.isMainThread)
+        guard !UserDefaults.standard.bool(forKey: "ROBPassiveHardwareStartup") else { return }
         guard ROBArmRoutinePlan.sessionOnWake || UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey),
               !ROBControllerArmApproval.shared.armSessionActive,
               startupTicket == nil, !isRunning else { return }
@@ -337,6 +338,7 @@ enum ROBArmRoutineError: LocalizedError {
             guard let self else { return }
             guard self.startupTicket == ticket else { return }
             self.startupTicket = nil
+            guard !UserDefaults.standard.bool(forKey: "ROBPassiveHardwareStartup") else { return }
             guard ROBArmRoutinePlan.sessionOnWake || UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) else { return }
             self.performCommand(ROBArmRoutinePlan.sessionOnWake ? "arm_session" : "startup", target: "") { _ in }
         }

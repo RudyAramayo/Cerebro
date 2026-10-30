@@ -1,5 +1,10 @@
 # Local recycling task and spoken arm sessions
 
+For the newer same-user command interface and bounded offline room mission,
+see [Local robot control](local-control.md). Explicit local commands use native
+panel/executor ownership without the historical spoken-session prompts below.
+The physical scope and remote-bucket transport limitations remain explicit.
+
 Rob requested this experimental empty-Coke-can cleanup task on October 22, 2026.
 It is implemented for the physical left arm (R11 / gateway `right`), with the
 base stationary. Software validation is separate from live commissioning.
@@ -88,8 +93,10 @@ mode or jaw commands. An active/pending arm operation still owns the workspace.
 
 The shared service sweeps 32 views through the normal mechanical envelope,
 command ramps and manual-priority rules. Pan advances in 15-degree intervals,
-with table, lower-workspace/floor and upper rows. It pauses 1.5 seconds after the
-neck reports ready, then requires advancing fresh frames spanning at least
+with table, lower-workspace/floor and upper rows. After the neck reports ready,
+two advancing exposures with stationary IMU windows spanning 300 ms can complete
+the passive settling wait early. Missing evidence retains the 1.5-second wait.
+The capture still requires advancing fresh frames spanning at least
 300 ms. This is a settling/focus allowance, not a measured focus guarantee.
 Transient camera/view failures get one settled retry; delayed camera delivery
 gets up to two seconds to advance, without changing capture timestamps.

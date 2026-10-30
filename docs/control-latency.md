@@ -1,5 +1,11 @@
 # Controller latency diagnostics
 
+The [local CLI](local-control.md) reads telemetry and original camera frames
+without opening these windows. Its quiet profile skips automatic diagnostics,
+and hidden Amber diagnostics stop display work. Arm consoles keep a bounded live
+tail; full controller logs remain on Amber. A passive sampler includes the front
+RGB-D camera and Insta360 decoder in the measured process load.
+
 ## Local manual tread acceleration
 
 R.O.B. Controls uses a working 0–100% speed limit (40% on opening) and a

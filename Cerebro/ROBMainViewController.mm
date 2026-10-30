@@ -2009,6 +2009,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)requestArmedHeadlessLiveStartupIfReady
 {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"ROBPassiveHardwareStartup"]) return;
     ROBHeadlessLiveStartupAuthorization *authorization =
         [ROBHeadlessLiveStartupAuthorization shared];
     if (!authorization.isArmed || self.runtimeIsShuttingDown ||
@@ -3178,11 +3179,22 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     // this controller's SpeechBox or the embodied room-conversation session.
     [[ROBMessagesBridge shared] start];
     
-    [self showROBControls];
-    [self showROB_Torso_Controls];
-    [self showROBNavigation];
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"ROBLowOverheadDiagnostics"]) {
+        [self showROBControls];
+        [self showROB_Torso_Controls];
+        [self showROBNavigation];
+    }
     [self ensureMainCameraRuntime];
-    [self synchronizeDevelopmentCameraDiagnostics];
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"ROBLowOverheadDiagnostics"]) {
+        [self synchronizeDevelopmentCameraDiagnostics];
+    }
+
+    [[ROBLocalControlService shared] configureWithSerial:self.serialBox cameraDemand:^(BOOL active) {
+        [missionOwner ensureMainCameraRuntime];
+        [missionOwner.cameraViewController setLocalControlDemandActive:active];
+    } stopBase:^{
+        [missionOwner.serialBox stopBaseMotionAndDropHeartbeat];
+    }];
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSApp activateIgnoringOtherApps:YES];
@@ -3340,6 +3352,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
     self.runtimeIsShuttingDown = YES;
+    [[ROBLocalControlService shared] shutdown];
     [[ROBArmFeedbackAlerts shared] stop];
     [self.robotActionBridgeTimer invalidate];
     self.robotActionBridgeTimer = nil;

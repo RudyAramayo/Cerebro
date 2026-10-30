@@ -178,7 +178,14 @@ import Cocoa
                 let remaining = armTransition-nextStep
                 // Amber's minimum leased segment is 0.65 s. Use equal segments
                 // so the last one is never shorter than the transport permits.
-                let count = max(1, Int(floor(armTransition / 0.8)))
+                // Straight local targets can use longer native trajectories.
+                // Keep authored smooth curves sampled and never merge across
+                // clip corners, holds, measured-arrival gates or LACT timing.
+                // Four seconds leaves headroom beneath the 10 s transport
+                // bound when fresh measured progress extends a segment.
+                let count = clip.easing == .linear
+                    ? max(1, Int(ceil(armTransition / 4)))
+                    : max(1, Int(floor(armTransition / 0.8)))
                 let seconds = min(remaining, armTransition / Double(count))
                 let end = min(armTransition, nextStep+seconds)
                 approved = [:]; approvedDuration = seconds

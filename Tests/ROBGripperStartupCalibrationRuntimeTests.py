@@ -109,6 +109,23 @@ extension ROBGripperStartupCalibration {
             else { UserDefaults.standard.removeObject(forKey: ROBGripperStartupCalibration.preferenceKey) }
         }
         UserDefaults.standard.set(true, forKey: ROBGripperStartupCalibration.preferenceKey)
+        let originalPassive = UserDefaults.standard.object(forKey: "ROBPassiveHardwareStartup")
+        defer {
+            if let originalPassive { UserDefaults.standard.set(originalPassive, forKey: "ROBPassiveHardwareStartup") }
+            else { UserDefaults.standard.removeObject(forKey: "ROBPassiveHardwareStartup") }
+        }
+        UserDefaults.standard.set(true, forKey: "ROBPassiveHardwareStartup")
+        let passiveClient = ROBAmberGatewayClient()
+        let passive = ROBGripperStartupCalibration(gateway: passiveClient)
+        passiveClient.fixtureReady(); passive.gatewayBecameReady()
+        pump(passiveClient, seconds: 0.9)
+        expect(!passive.isRunning && passiveClient.fixturePhysical.isEmpty, "Passive startup moved jaws")
+        Task { @MainActor in try? await passive.prepareStationaryEmptyGrippers() }
+        pump(passiveClient, seconds: 0.9)
+        expect(passiveClient.fixturePhysical.count == 1, "Passive startup blocked an explicit setup command")
+        passive.stop(reason: "End inert passive fixture"); passiveClient.fixtureDisconnect()
+        pump(passiveClient, seconds: 0.1, fresh: false)
+        UserDefaults.standard.set(false, forKey: "ROBPassiveHardwareStartup")
         let client = ROBAmberGatewayClient()
         let startup = ROBGripperStartupCalibration(gateway: client)
         client.fixtureReady(); startup.gatewayBecameReady()

@@ -49,6 +49,22 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 #import "ROBSystemDependencyManager.h"
 #import "ROBTaskLaunchGuard.h"
 #import "Cerebro-Swift.h"
+
+// Keep a small live console; the complete controller log remains on Amber.
+// Repeated whole-history text layout and AX extraction delayed native input.
+static void ROBAppendArmConsole(NSTextView *console, NSString *message) {
+    if (console == nil || message.length == 0) return;
+    NSString *tail = message.length > 4096 ? [message substringFromIndex:message.length - 4096] : message;
+    NSString *combined = [console.string ?: @"" stringByAppendingString:tail];
+    if (combined.length > 4096) combined = [combined substringFromIndex:combined.length - 4096];
+    console.string = combined;
+    if (console.window.visible && !console.window.miniaturized) [console scrollToEndOfDocument:nil];
+}
+static void ROBAppendBoundedCoreData(NSMutableData *buffer, NSData *data) {
+    [buffer appendData:data];
+    if (buffer.length > 65536) [buffer replaceBytesInRange:NSMakeRange(0, buffer.length - 65536) withBytes:NULL length:0];
+}
+
 #include <sys/select.h>
 #include <errno.h>
 #include <float.h>
@@ -1305,10 +1321,14 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             if (!connectionIsStillCurrent) return;
             // Hardware readiness owns hardware startup. Do not make servo
             // activation depend on any window controller receiving the event.
-            ROBNeckCommandDisposition startupDisposition =
-                [self startSafeNeckStartup];
+            BOOL passiveStartup = [[NSUserDefaults standardUserDefaults]
+                boolForKey:@"ROBPassiveHardwareStartup"];
+            ROBNeckCommandDisposition startupDisposition = passiveStartup
+                ? ROBNeckCommandDispositionRejected : [self startSafeNeckStartup];
             [[ROBBubbleRuntime shared] maestroReconnected];
-            if (startupDisposition == ROBNeckCommandDispositionRejected) {
+            if (passiveStartup) {
+                NSLog(@"Passive hardware startup: neck targets unchanged");
+            } else if (startupDisposition == ROBNeckCommandDispositionRejected) {
                 NSLog(@"Maestro connected, but automatic safe neck startup was rejected: %@",
                       self.neckCommandSafetyStatus);
             }
@@ -4991,14 +5011,10 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
     NSLog(@"%@", [message stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.amberMasterCoreOutput_R11 != nil) {
-            self.amberMasterCoreOutput_R11.string =
-                [self.amberMasterCoreOutput_R11.string stringByAppendingString:message];
-            [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+            ROBAppendArmConsole(self.amberMasterCoreOutput_R11, message);
         }
         if (self.amberMasterCoreOutput_L10 != nil) {
-            self.amberMasterCoreOutput_L10.string =
-                [self.amberMasterCoreOutput_L10.string stringByAppendingString:message];
-            [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+            ROBAppendArmConsole(self.amberMasterCoreOutput_L10, message);
         }
     });
 }
@@ -5047,23 +5063,19 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
             self.core_R11_isOnline = false;
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
-            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_R11_log encoding:NSUTF8StringEncoding];
+            NSString *finalOutput = @"\n[Core/log stream closed]\n";
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
-                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_R11, finalOutput);
             });
 
         } else {
             // Append the new data to our storage.
             self.core_R11_isOnline = true;
-            [self.receivedData_R11_log appendData:data];
+            ROBAppendBoundedCoreData(self.receivedData_R11_log, data);
             
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
-                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_R11, partialString);
             });
         }
     };
@@ -5116,22 +5128,18 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
             self.core_R11_isOnline = false;
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
-            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_R11_Core encoding:NSUTF8StringEncoding];
+            NSString *finalOutput = @"\n[Core/log stream closed]\n";
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
-                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_R11, finalOutput);
             });
         } else {
             self.core_R11_isOnline = true;
             // Append the new data to our storage.
-            [self.receivedData_R11_Core appendData:data];
+            ROBAppendBoundedCoreData(self.receivedData_R11_Core, data);
             
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
-                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_R11, partialString);
             });
         }
     };
@@ -5316,23 +5324,19 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
             self.core_L10_isOnline = false;
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
-            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_L10_log encoding:NSUTF8StringEncoding];
+            NSString *finalOutput = @"\n[Core/log stream closed]\n";
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
-                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_L10, finalOutput);
             });
 
         } else {
             // Append the new data to our storage.
             self.core_L10_isOnline = true;
-            [self.receivedData_L10_log appendData:data];
+            ROBAppendBoundedCoreData(self.receivedData_L10_log, data);
             
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
-                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_L10, partialString);
             });
         }
     };
@@ -5385,23 +5389,19 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
             self.core_L10_isOnline = false;
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
-            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_L10_Core encoding:NSUTF8StringEncoding];
+            NSString *finalOutput = @"\n[Core/log stream closed]\n";
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
-                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_L10, finalOutput);
             });
 
         } else {
             // Append the new data to our storage.
             self.core_L10_isOnline = true;
-            [self.receivedData_L10_Core appendData:data];
+            ROBAppendBoundedCoreData(self.receivedData_L10_Core, data);
             
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
-                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_L10, partialString);
             });
         }
     };
@@ -5618,8 +5618,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
                 NSLog(@"%@", message);
                 NSTextView *console = port == 26001 ? self.amberMasterCoreOutput_L10 : self.amberMasterCoreOutput_R11;
                 if (console != nil) {
-                    console.string = [console.string stringByAppendingString:message];
-                    [console scrollRangeToVisible:NSMakeRange(console.string.length, 0)];
+                    ROBAppendArmConsole(console, message);
                 }
             }];
     });

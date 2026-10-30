@@ -972,6 +972,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         var identified = frameSet
         identified.captureStreamID = "\(markerlessStreamID.uuidString)-\(generation)"
         let identifiedFrame = identified
+        ROBLocalObservationStore.shared.offer(identifiedFrame, role: role)
 
         // Network video owns its own newest-frame gate and must not inherit the
         // latency of the synchronous Vision work performed by the UI delegate.

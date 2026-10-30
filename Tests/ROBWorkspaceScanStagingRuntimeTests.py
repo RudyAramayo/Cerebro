@@ -26,6 +26,7 @@ enum Task {
  static func checkCancellation()throws {}
  static func sleep(nanoseconds:UInt64)async throws {ProcessInfo.processInfo.systemUptime+=Double(nanoseconds)/1e9}
 }
+enum ROBVisionFrameAgeBudget {static let maximumAgeMilliseconds=1200.0}
 struct ROBWorkspaceView:Equatable {let panDegrees:Double;let upperTarget:Int}
 struct ROBGhostRobotModel {}
 enum ROBWorkspaceDepthMapError:Error {case invalidFrame;case acquisition(String)}
@@ -56,6 +57,7 @@ struct ROBWorkspaceBlockerCoverageCandidate {let view:ROBWorkspaceView;let camer
   return self.mode != "never_settled"
  }
  lazy var viewReady:((Double,Int)->Bool)? = {[unowned self] _,_ in self.mode != "never_settled"}
+ func passiveSettleExposure()->ROBPassiveViewSettling.Exposure? {nil}
  __SETTLE__
  __PREPARE__
  func targetCandidates()->[ROBWorkspaceBlockerCoverageCandidate] {
@@ -124,7 +126,7 @@ def main():
         p = Path(folder)
         swift, binary = p / "Fixture.swift", p / "fixture"
         swift.write_text(FIXTURE.replace("__SETTLE__", settle).replace("__PREPARE__", prepare).replace("__ACTUAL_CANDIDATES__", candidates))
-        subprocess.run(["xcrun", "swiftc", "-O", "-swift-version", "5", "-parse-as-library", "-module-cache-path", "/private/tmp/cerebro-swift-module-cache", str(swift), "-o", str(binary)], check=True, timeout=45)
+        subprocess.run(["xcrun", "swiftc", "-O", "-swift-version", "5", "-parse-as-library", "-module-cache-path", "/private/tmp/cerebro-swift-module-cache", str(ROOT / "Cerebro/ROBPassiveViewSettling.swift"), str(swift), "-o", str(binary)], check=True, timeout=45)
         subprocess.run([str(binary)], check=True, timeout=15)
 
 

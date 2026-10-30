@@ -323,6 +323,15 @@ final class ROBTorsoControlCenter {
         engine.start(sequence:speedRun,serial:serial); run(0.1)
         expect(engine.isRunning && engine.status.contains("motor-limited") && gateway.sends.last!.2 >= 1.5, "A faster request extends timing to retain the existing speed ceiling")
         engine.stop(reason:"Speed limit verified without hardware")
+        gateway.q["left"] = Array(repeating:0,count:7)
+        var straight=ROBAnimationClip(pose:.init(name:"gentle large target",values:["arm.right.j2":0.3]),transition:3.2)
+        straight.easing = .linear
+        let straightStart=gateway.sends.count
+        engine.start(sequence:.init(name:"Native larger segment",clips:[straight]),serial:serial);run(3.7)
+        expect(!engine.isRunning && engine.status.contains("complete") && gateway.sends.count==straightStart+1,
+            "A straight 3.2 s target should use one native trajectory instead of four stops")
+        expect(gateway.sends.last!.2>=3.2 && abs(gateway.q["left"]![1]-0.3)<0.025,
+            "Larger segment retained gentle timing and measured arrival")
         print("Animation UI/playback: \(checks) checks passed; all hardware adapters inert")
     }
 }
