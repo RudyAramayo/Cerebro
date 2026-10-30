@@ -23,7 +23,7 @@ struct ROBWorkspaceCanSections {
  let top:[Double],middle:[Double],bottom:[Double];let heightMeters:Double,diameterMeters:Double
  static func localKnownEmptyCokeCylinder(base:SIMD3<Double>,axis:SIMD3<Double>,planeRMSEMeters:Double,planePointCount:Int,
     planeSupportFraction:Double,silhouetteIoU:Double,silhouetteMaximumEdgeErrorPixels:Double)->Self? {
-  guard planeRMSEMeters<=0.008,planePointCount>=80,planeSupportFraction>=0.65,silhouetteIoU>=0.50 else{return nil}
+  guard planeRMSEMeters<=0.008,planePointCount>=80,planeSupportFraction>0,silhouetteIoU>=0.50 else{return nil}
   let top=base+axis*0.120,middle=base+axis*0.060
   return .init(top:[top.x,top.y,top.z],middle:[middle.x,middle.y,middle.z],bottom:[base.x,base.y,base.z],heightMeters:0.120,diameterMeters:0.066)
  }
@@ -86,11 +86,43 @@ FIXTURE=r'''
   let missing=estimate(detection,{_,_ in nil});precondition(missing.sections==nil && missing.diagnostics["rejection_stage"] as! String=="insufficient_local_table_support")
   let noisy=estimate(detection,{x,y in let mm=table(x,y);return ((x*13+y*7)%5==0) ? mm.map{$0+200}:mm})
   precondition(noisy.sections != nil,String(describing:noisy.diagnostics))
+  func partlyOccluded(_ x:Int,_ y:Int)->UInt16? {
+   let mm=table(x,y);return ((x*13+y*7)%5<2) ? mm.map{$0+200}:mm
+  }
+  func inImmediateRing(_ x:Int,_ y:Int)->Bool {
+   Double(x)>=low.x-15 && Double(x)<=high.x+15 && Double(y)>=low.y-15 && Double(y)<=high.y+15
+  }
+  let neighbor=ROBWorkspaceDetection(visible:true,confidence:0.7,box:[box[0]-0.22,box[1],box[2]-0.22,box[3]])
+  func corroborate(_ depth:(Int,Int)->UInt16?)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+   ROBWorkspaceLocalCanShapePrior.estimate(detection:detection,allCanDetections:[detection,neighbor],width:w,height:h,
+    fx:fx,fy:fy,cx:cx,cy:cy,depth:depth,cameraToRobot:c)
+  }
+  precondition(estimate(detection,partlyOccluded).sections==nil,"One weak ring promoted without independent strong support")
+  let corroborated=corroborate({x,y in inImmediateRing(x,y) ? partlyOccluded(x,y):table(x,y)})
+  precondition(corroborated.sections != nil,String(describing:corroborated.diagnostics))
+  precondition(corroborated.diagnostics["disjoint_table_corroboration"] as? String == "confirmed_same_source_frame")
+  precondition((corroborated.diagnostics["plane_support_fraction"] as! Double)<0.65)
+  let outer=corroborated.diagnostics["corroborating_ring_diagnostics"] as! [String:Any]
+  precondition((outer["excluded_pixel_bounds"] as! [Double]).count==4)
+  precondition((outer["plane_support_fraction"] as! Double)>=0.65)
+  precondition((corroborated.diagnostics["corroborated_base_plane_distance_m"] as! Double)<=0.006)
+  let unsupported=corroborate({x,y in inImmediateRing(x,y) ? partlyOccluded(x,y):nil})
+  precondition(unsupported.sections==nil,"Missing outer support promoted a weak immediate ring")
+  let differentTable=corroborate({x,y in
+   if inImmediateRing(x,y) {return partlyOccluded(x,y)}
+   let q=c*SIMD4((Double(x)-cx)/fx,(Double(y)-cy)/fy,1,0),t=(0.80-1.2)/q.z
+   return (0.15...3).contains(t) ? UInt16((t*1000).rounded()):nil
+  })
+  precondition(differentTable.sections==nil,"Disjoint rings on different surfaces were merged")
+  let noMajority=corroborate({x,y in
+   let mm=table(x,y);return inImmediateRing(x,y) && ((x*13+y*7)%5<3) ? mm.map{$0+200}:mm
+  })
+  precondition(noMajority.sections==nil,"A foreground majority disagrees with the independently observed table")
   let clipped=ROBWorkspaceDetection(visible:true,confidence:0.7,box:[0,box[1],box[2],box[3]])
   precondition(estimate(clipped).sections==nil)
   let wrong=ROBWorkspaceDetection(visible:true,confidence:0.7,box:[box[0]-0.12,box[1],box[2]+0.12,box[3]])
   precondition(estimate(wrong).sections==nil,"An unrelated wide silhouette passed")
-  print("PASS actual local-only cylinder estimator: fresh localtable ring robust to20% depthoutliers; known120×66upright silhouette recoverscenterwithin5mm; missing/clipped/wrongshape reject; JSON evidence explicit")
+  print("PASS actual local-only cylinder estimator: ordinary table plane and disjoint-ring corroboration under40% occlusion; missing/different outer surface, minority support, clipped/wrong silhouette rejected; true support retained; no registration or motion authority")
  }
 }
 '''

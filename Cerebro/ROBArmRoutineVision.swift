@@ -1138,10 +1138,56 @@ enum ROBWorkspaceLocalCanShapePrior {
         width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
         depth:(Int,Int)->UInt16?,cameraToRobot:simd_double4x4)
         -> (sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+        func fit(_ candidate:ROBWorkspaceDetection,_ support:Double,_ excluded:[Double]?=nil)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+            fitRing(detection:candidate,allCanDetections:allCanDetections,width:width,height:height,
+                fx:fx,fy:fy,cx:cx,cy:cy,depth:depth,cameraToRobot:cameraToRobot,
+                excludedPixelBounds:excluded,minimumSupport:support)
+        }
+        let ordinary=fit(detection,0.65)
+        guard ordinary.sections==nil,
+              ordinary.diagnostics["rejection_stage"] as? String == "no_dominant_local_table_plane",
+              (ordinary.diagnostics["plane_support_fraction"] as? Double ?? 0)>=0.55 else{return ordinary}
+        // A nearby gripper can occupy much of the immediate ring. A lower
+        // majority requires a separate region with the ordinary strong table
+        // support. Exclude every pixel of the target's ring from that fit.
+        let local=fit(detection,0.55)
+        guard let sections=local.sections,
+              let n=local.diagnostics["plane_normal_robot"] as? [Double],n.count==3 else{return ordinary}
+        let normal=SIMD3(n[0],n[1],n[2]),base=SIMD3(sections.bottom[0],sections.bottom[1],sections.bottom[2])
+        let excluded=[detection.box[0]*Double(width-1)-15,detection.box[1]*Double(height-1)-15,
+                      detection.box[2]*Double(width-1)+15,detection.box[3]*Double(height-1)+15]
+        for candidate in allCanDetections where candidate.box != detection.box {
+            let corroborating=fit(candidate,0.65,excluded).diagnostics
+            guard let other=corroborating["plane_normal_robot"] as? [Double],other.count==3,
+                  let offset=corroborating["plane_offset_m"] as? Double,
+                  let rms=corroborating["plane_rmse_m"] as? Double,rms<=0.008,
+                  let p95=corroborating["plane_p95_m"] as? Double,p95<=0.010,
+                  other[2]>=0.85 else{continue}
+            let otherNormal=SIMD3(other[0],other[1],other[2]),distance=abs(simd_dot(otherNormal,base)+offset)
+            guard simd_dot(normal,otherNormal)>=cos(5*Double.pi/180),distance<=0.006 else{continue}
+            var report=local.diagnostics
+            report["disjoint_table_corroboration"]="confirmed_same_source_frame"
+            report["corroborating_ring_diagnostics"]=corroborating
+            report["ordinary_plane_support_required"]=0.65
+            report["corroborated_plane_support_required"]=0.55
+            report["corroborated_base_plane_distance_m"]=distance
+            return(sections,report)
+        }
+        var rejected=ordinary.diagnostics;rejected["disjoint_table_corroboration"]="unconfirmed"
+        return(nil,rejected)
+    }
+
+    private static func fitRing(detection:ROBWorkspaceDetection,allCanDetections:[ROBWorkspaceDetection],
+        width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
+        depth:(Int,Int)->UInt16?,cameraToRobot:simd_double4x4,
+        excludedPixelBounds:[Double]?,minimumSupport:Double)
+        -> (sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
         var report:[String:Any]=["schema_version":1,"kind":"local_trial_known_empty_coke_cylinder",
             "status":"rejected","box":detection.box,"assumed_height_m":0.120,"assumed_diameter_m":0.066,
             "assumed_axis_robot":[0.0,0,1],"registration_verified":false,"measured_can_wall_depth":false,
-            "local_plane_is_global_floor_calibration":false,"ring_width_pixels":14]
+            "local_plane_is_global_floor_calibration":false,"ring_width_pixels":14,
+            "plane_support_required":minimumSupport]
+        if let excludedPixelBounds {report["excluded_pixel_bounds"]=excludedPixelBounds}
         func reject(_ stage:String)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
             report["rejection_stage"]=stage;return (nil,report)
         }
@@ -1163,6 +1209,7 @@ enum ROBWorkspaceLocalCanShapePrior {
         var points:[SIMD3<Double>]=[],sampled=0,missing=0
         for y in stride(from:top,through:bottom,by:step) {for x in stride(from:left,through:right,by:step) {
             let insideOwn=Double(x)>=x0 && Double(x)<=x1 && Double(y)>=y0 && Double(y)<=y1
+            if let e=excludedPixelBounds,Double(x)>=e[0],Double(x)<=e[2],Double(y)>=e[1],Double(y)<=e[3] {continue}
             let insideAnother=allCanDetections.contains { other in
                 other.visuallyUsable && other.box.count==4 && other.box != detection.box &&
                 (other.box[0]*Double(width-1)...other.box[2]*Double(width-1)).contains(Double(x)) &&
@@ -1190,7 +1237,7 @@ enum ROBWorkspaceLocalCanShapePrior {
         }
         let support=Double(best.count)/Double(points.count)
         report["plane_inlier_count"]=best.count;report["plane_support_fraction"]=support
-        guard best.count>=80,support>=0.65 else{return reject("no_dominant_local_table_plane")}
+        guard best.count>=80,support>=minimumSupport else{return reject("no_dominant_local_table_plane")}
         let inliers=best.map{points[$0]},mean=inliers.reduce(SIMD3<Double>.zero,+)/Double(inliers.count)
         var xx=0.0,xy=0.0,yy=0.0,xz=0.0,yz=0.0
         for p in inliers {let d=p-mean;xx+=d.x*d.x;xy+=d.x*d.y;yy+=d.y*d.y;xz+=d.x*d.z;yz+=d.y*d.z}
@@ -2997,7 +3044,8 @@ struct ROBWorkspaceCanSelection {
                             "rgb_output_undistorted_contract":k.rgbOutputUndistorted as Any? ?? NSNull(),
                             "estimated_camera_projection_identity":estimatedCamera?.identity as Any? ?? NSNull(),
                             "registration_id":measuredCamera?.registration.id as Any? ?? NSNull(),
-                            "capture_time_refreshed":false,"geometry_thresholds_changed":false]
+                            "capture_time_refreshed":false,"measured_section_thresholds_changed":false,
+                            "local_prior_table_support_policy":"65_percent_or_55_percent_with_disjoint_65_percent_table_and_6mm_agreement"]
                         do {
                             let sourceScope=try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame)
                             sectionSource["raw_neck_pan_target"]=sourceScope.panTarget
