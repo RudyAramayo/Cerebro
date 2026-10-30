@@ -34,6 +34,9 @@ This is the operator's October 30 debugging setting. Original packet timestamps,
 pose/mode/current checks and Stop remain active. Mode-off and Release retain
 250 ms active and 350 ms stationary limits. Other timing values are unchanged.
 
+The torso UI timer retains its separate 500 ms debug / 250 ms normal interval;
+it does not inherit the arm-feedback age. TIC freshness and watchdogs are unchanged.
+
 `camera.demand` keeps the requested streams running for up to 120 seconds.
 Renew it while needed. It neither points the neck nor moves another actuator.
 It is separate from recording, task and UI demand, so expiry releases only this

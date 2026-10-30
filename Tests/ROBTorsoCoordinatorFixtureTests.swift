@@ -243,9 +243,14 @@ final class ROBArmRoutineCoordinator {
         #if DEBUG
         UserDefaults.standard.set(true, forKey: "ROBDevelopmentMode")
         center.advance()
+        try expect(ROBArmFeedbackTiming.maximumAgeMilliseconds == 1200, "Fixture must exercise the enlarged arm-feedback budget")
         try expect(center.policy.maximumControlInterval == 0.5, "Debug UI retained the250ms torso limit")
         center.setLiveCamera(false); center.advance()
         try expect(center.policy.maximumControlInterval == 0.5, "Changing torso source lost the500ms debug budget")
+        center.arm(); center.turnToHeading(center.observedHeading + 20)
+        try wait { center.isArmed && center.commandedVelocity > 0 }
+        try expect(center.policy.mode == .heading, "The arm-feedback budget invalidated a fresh torso turn")
+        center.stop()
         UserDefaults.standard.set(false, forKey: "ROBDevelopmentMode"); center.advance()
         try expect(center.policy.maximumControlInterval == 0.25, "Normal torso mode kept the debug allowance")
         center.closeControls()

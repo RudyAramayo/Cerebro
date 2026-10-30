@@ -518,10 +518,10 @@ import Cocoa
     }
 
     @nonobjc func advance(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        // Use the operator's shared DEBUG 500 ms budget for the UI control
-        // loop too. Original sample ages, TIC freshness and its independent
-        // hardware watchdog remain unchanged.
-        policy.maximumControlInterval = ROBArmFeedbackTiming.maximumAgeMilliseconds / 1000
+        // The torso UI timer has its own 500 ms debug allowance. Do not
+        // derive it from arm sample age: the 1200 ms arm budget exceeds this
+        // policy's valid control interval. TIC freshness/watchdog stay separate.
+        policy.maximumControlInterval = ROBArmFeedbackTiming.debugEnabled ? 0.5 : 0.25
         if usesHardware && (policy.armed || arming), let reason = armClearance() {
             stop(); policy.invalidate(reason); publish(); return
         }
