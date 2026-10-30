@@ -116,13 +116,13 @@ class ManualAmberCommandTests(unittest.TestCase):
                 bus = FakeBus([0] * 7)
                 error, _ = self.run_script(filename, bus)
                 self.assertIsNone(error)
-                self.assertEqual(bus.commands, [10, 110, 10, 110])
+                self.assertEqual(bus.commands, ([110] if mode == 2 else []) + [10, 110, 10, 110])
                 self.assertEqual(bus.mode_changes, [1, mode])
 
     def test_partial_activation_never_proceeds_to_position_or_current(self):
         for filename in ("cmd_position_mode_v2.py", "cmd_current_mode_v2.py"):
             with self.subTest(filename=filename):
-                bus = FakeBus()
+                bus = FakeBus([0] * 7)
                 bus.mode_results[1] = [1, 1, 1, 1, 0, 0, 0]
                 error, _ = self.run_script(filename, bus)
                 self.assertIn("not verified", error)
@@ -130,12 +130,25 @@ class ManualAmberCommandTests(unittest.TestCase):
                 self.assertNotIn(4, bus.commands)
 
     def test_partial_final_mode_is_a_failure(self):
-        bus = FakeBus()
+        bus = FakeBus([0] * 7)
         bus.mode_results[2] = [2, 2, 2, 2, 0, 0, 0]
         error, output = self.run_script("cmd_position_mode_v2.py", bus)
         self.assertIn("[2, 2, 2, 2, 0, 0, 0]", error)
         self.assertNotIn("all seven joints in position", output)
         self.assertEqual(bus.mode_changes, [1, 2])
+
+    def test_repeated_position_mode_is_read_only(self):
+        bus = FakeBus([2] * 7)
+        error, output = self.run_script("cmd_position_mode_v2.py", bus)
+        self.assertIsNone(error)
+        self.assertEqual(bus.commands, [110])
+        self.assertIn("no mode or position command", output)
+
+    def test_position_mode_does_not_release_partially_holding_arm(self):
+        bus = FakeBus([2, 2, 0, 0, 0, 0, 0])
+        error, _ = self.run_script("cmd_position_mode_v2.py", bus)
+        self.assertIn("existing position hold", error)
+        self.assertEqual(bus.commands, [110])
 
     def test_unacknowledged_mode_is_not_retried(self):
         for response in (0, "timeout"):

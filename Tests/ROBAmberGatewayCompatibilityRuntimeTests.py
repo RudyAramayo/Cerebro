@@ -49,6 +49,11 @@ struct GatewayCompatibilityFixtures {
         // The older gateway permits telemetry but rejects gripper_state.
         // Automatic bridge refreshes must not enqueue those unsupported queries.
         try client.fixtureReceive(legacyReady)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.04))
+        expect(client.fixtureSentTypes.filter { $0 == "mode_query" }.count == 2,
+               "Reconnect must refresh both mode caches with read-only queries")
+        expect(!client.fixtureSentTypes.contains("position_mode") && !client.fixtureSentTypes.contains("activate"),
+               "Reconnect must never initialize torque or modes")
         expect(client.state == .ready, "Legacy gateway lost arm diagnostics")
         expect(client.stateDetail.contains("gateway update required"), "Missing upgrade guidance")
         for arm in ["left", "right"] {
@@ -119,6 +124,9 @@ struct GatewayCompatibilityFixtures {
             "statuses": [Double](repeating: 2.0, count: 7),
         ]
         try client.fixtureReceive(motorSample)
+        expect(client.modes(forArm: "left").isEmpty, "Fixture must reproduce the empty post-relaunch mode cache")
+        expect(client.enterPositionMode(forArm: "left") > 0 && client.fixtureSentTypes.last == "mode_query",
+               "Fresh measured position hold must query mode instead of cycling ACTIVE/POSITION")
         let capturedMotorSample = client.telemetry(forArm: "left")!
         expect(capturedMotorSample.sampleAgeAtReceiptMilliseconds == 1,
                "Historical recording quality must retain the controller and individual-joint ages")
@@ -535,7 +543,11 @@ def main():
         binary = Path(folder) / "gateway-fixtures"
         source.write_text(
             (ROOT / "Cerebro/ROBArmJointLimits.swift").read_text()
-            + (ROOT / "Cerebro/ROBAmberGatewayClient.swift").read_text()
+            + (ROOT / "Cerebro/ROBAmberGatewayClient.swift").read_text().replace(
+                "    private func send(_ message: ROBAmberGatewayMessage) {",
+                "    fileprivate var fixtureSentTypes: [String] = []\n"
+                "    private func send(_ message: ROBAmberGatewayMessage) {\n"
+                "        fixtureSentTypes.append(message.type)")
             + (ROOT / "Cerebro/ROBArmRoutinePlan.swift").read_text()
             + (ROOT / "Tests/ROBArmRoutineGatewayFixtureSupport.swift").read_text() + FIXTURES
         )

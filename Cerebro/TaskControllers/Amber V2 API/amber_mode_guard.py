@@ -63,6 +63,13 @@ def run_mode_command(mode):
     print(f"ip {args.ip}\nport {args.port}")
     arm = Amber_Robot(args.ip, args.port, joint_count=7)
     try:
+        if mode == 2:
+            modes = read_modes(arm)
+            if modes == [2] * 7:
+                print("Already in position mode; no mode or position command was sent.")
+                return
+            if 2 in modes:
+                raise RuntimeError("Mixed modes include an existing position hold; no mode command was sent.")
         if mode in (2, 4):
             # Both transitions require active mode first. The vendor helper
             # ignores its wait_for_mode result and proceeds with partial modes.

@@ -1012,7 +1012,18 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     }
 
     @discardableResult public func enterPositionMode(forArm arm: String) -> UInt64 {
-        sendArmCommand(type: "position_mode", arm: arm)
+        // Re-entering ACTIVE -> POSITION briefly releases torque on Amber.
+        // A reconnect empties the app cache, not the physical holding mode.
+        let known = modes(forArm: arm)
+        let sample = telemetry(forArm: arm)
+        let measuredHold = sample.map {
+            $0.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds
+                && $0.statuses.count == 7 && $0.statuses.allSatisfy { $0.intValue == 2 }
+        } ?? false
+        if (known.count == 7 && known.allSatisfy { $0.intValue == 2 }) || measuredHold {
+            return queryMode(forArm: arm)
+        }
+        return sendArmCommand(type: "position_mode", arm: arm)
     }
 
     @discardableResult public func holdCurrentPosition(forArm arm: String) -> UInt64 {
@@ -1600,6 +1611,13 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 ? "Amber gateway ready"
                 : "Amber gateway ready — gripper commands unavailable; gateway update required")
             startHeartbeat()
+            let readyGeneration = authenticatedSessionGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isReady(),
+                      (self.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == readyGeneration else { return }
+                _ = self.queryMode(forArm: "left")
+                _ = self.queryMode(forArm: "right")
+            }
             if self === Self.shared {
                 DispatchQueue.main.async {
                     ROBGripperStartupCalibration.shared.gatewayBecameReady()
