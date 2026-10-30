@@ -223,7 +223,8 @@ private enum ROBHeldArmFeedbackGuard {
         return ROBArmFeedbackTiming.stationaryMaximumAgeMilliseconds
     }
     static func failures(present:Bool,motorAge:Double,gripperAge:Double,q:[Double],expectedQ:[Double],
-        gatewayModes:[Int],reportedModes:[Int],expectedModes:[Int],maximumAgeMilliseconds:Double=ROBArmFeedbackTiming.maximumAgeMilliseconds)->[String] {
+        gatewayModes:[Int],reportedModes:[Int],expectedModes:[Int],hullDisplacementMeters:Double,
+        maximumAgeMilliseconds:Double=ROBArmFeedbackTiming.maximumAgeMilliseconds)->[String] {
         var fields:[String]=[]
         if !present {fields.append("telemetry_missing")}
         if !(motorAge<=maximumAgeMilliseconds) {fields.append("motor_age_ms")}
@@ -231,8 +232,9 @@ private enum ROBHeldArmFeedbackGuard {
         if q.count != 7 || expectedQ.count != 7 || !q.allSatisfy(\.isFinite) {fields.append("joint_positions")}
         if gatewayModes != expectedModes {fields.append("gateway_modes")}
         if reportedModes != expectedModes {fields.append("reported_modes")}
-        if q.count==7,expectedQ.count==7,
-           !(1.5*zip(q,expectedQ).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003) {fields.append("position_drift_m")}
+        if !hullDisplacementMeters.isFinite || !(0...0.003).contains(hullDisplacementMeters) {
+            fields.append("position_drift_m")
+        }
         return fields
     }
     static func agesOnly(_ fields:[String])->Bool {!fields.isEmpty && fields.allSatisfy{["motor_age_ms","gripper_age_ms"].contains($0)}}
@@ -355,6 +357,27 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private var initialEmptyLiftHeldEvidence: NSDictionary?
     var localVisualTrialAssumedSpatialErrorMeters = 0.05
     @nonobjc private var sceneHold: [String:(positions:[Double],modes:[Int])] = [:]
+    @nonobjc private var heldFeedbackModels: [String:ROBGhostRobotModel] = [:]
+
+    /// Compare every arm/open-jaw collision-box corner using the physical
+    /// arm's FK. A 1.5 m lever applied to every joint's summed encoder change
+    /// is not a measured displacement and rejected ordinary stationary jitter.
+    private func heldHullDrift(side:String,from:[Double],to:[Double])->Double {
+        guard ["left","right"].contains(side) else {return .infinity}
+        do {
+            let physical=side=="left" ? "right":"left"
+            let model:ROBGhostRobotModel
+            if let cached=heldFeedbackModels[side] {model=cached}
+            else {
+                let selected=try workspaceModel()
+                model=selected.physicalSide==physical ? selected
+                    : try ROBGhostRobotModel(directory:selected.directory,physicalSide:physical)
+                heldFeedbackModels[side]=model
+            }
+            return try model.maximumArmHullDisplacement(from:from,to:to,openJawPadding:0.04)
+        } catch {return .infinity}
+    }
+
     @nonobjc private var reviewedDispatchStart: ROBReviewedArmDispatchStart?
 
     private func stationaryFeedbackMaximumAge(modes:[Int])->Double {
@@ -1595,7 +1618,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                       sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
                       gateway.modes(forArm:side).map(\.intValue) == held.modes,
                       sample.statuses.map(\.intValue) == held.modes,
-                      1.5*zip(sample.positionsRadians.map(\.doubleValue),held.positions).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= 0.003 else {
+                      heldHullDrift(side:side,from:held.positions,to:sample.positionsRadians.map(\.doubleValue)) <= 0.003 else {
                     throw ROBArmRoutineError.blocked("An arm is still moving; no workspace capture or arm command was sent.")
                 }
                 if sample.sequence > (sequences[side] ?? 0) {
@@ -1800,7 +1823,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         collisionModel = command == "left_estimated_calibration" ? activeEstimated?.model : nil
         sceneCapturedForThisTask = command == "left_estimated_calibration"; reviewedDispatchStart = nil
         armTravelDispatched = false; jawCommandDispatched=false;jawSetupDispatchUncertain=false;servoPossiblePayloadUncertain=false;recyclingReachDispatched=false
-        localReceiptHeldNeckIdentity=nil;localReceiptPerceptionFailure=false;sceneHold = [:];localCampaignRecoveryReason=nil
+        localReceiptHeldNeckIdentity=nil;localReceiptPerceptionFailure=false;sceneHold = [:];heldFeedbackModels = [:];localCampaignRecoveryReason=nil
         passiveFeedbackPauseStarted=nil;lastHeldFeedbackDiagnostic=nil
         activeCommand = command;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=activeApproachCanThenHold ? 0:1; recyclingGripDispatched=false; recyclingReadyEstablished=false; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0;servoTelemetryHistory=[];servoEvidenceWriteError=nil;taskOpeningCommandAtMilliseconds=nil
@@ -1866,11 +1889,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 let modes=gateway.modes(forArm:side).map(\.intValue),reported=sample?.statuses.map(\.intValue) ?? []
                 let fields=ROBHeldArmFeedbackGuard.failures(present:sample != nil,motorAge:motor,gripperAge:gripper,q:q,expectedQ:held.positions,
                     gatewayModes:modes,reportedModes:reported,expectedModes:held.modes,
+                    hullDisplacementMeters:heldHullDrift(side:side,from:held.positions,to:q),
                     maximumAgeMilliseconds:stationaryFeedbackMaximumAge(modes:held.modes))
                 if !fields.isEmpty {
                     let delivery=sample.map{max(0,ProcessInfo.processInfo.systemUptime-$0.receivedAtUptime)*1000} ?? .infinity
-                    let drift=q.count==7 ? 1.5*zip(q,held.positions).reduce(0.0,{$0+abs($1.0-$1.1)}):Double.infinity
-                    let detail="Stationary arm guard failed: gateway=\(side), physical=\(side=="left" ? "right":"left"), fields=\(fields), motor_age_ms=\(motor), gripper_age_ms=\(gripper), delivery_elapsed_ms=\(delivery), drift_m=\(drift), sequence=\(sample?.sequence ?? 0), expected_modes=\(held.modes), gateway_modes=\(modes), reported_modes=\(reported), expected_q=\(held.positions), current_q=\(q)."
+                    let drift=heldHullDrift(side:side,from:held.positions,to:q)
+                    let detail="Stationary arm guard failed: gateway=\(side), physical=\(side=="left" ? "right":"left"), fields=\(fields), motor_age_ms=\(motor), gripper_age_ms=\(gripper), delivery_elapsed_ms=\(delivery), modeled_hull_displacement_m=\(drift), sequence=\(sample?.sequence ?? 0), expected_modes=\(held.modes), gateway_modes=\(modes), reported_modes=\(reported), expected_q=\(held.positions), current_q=\(q)."
                     if lastHeldFeedbackDiagnostic==nil {
                         lastHeldFeedbackDiagnostic=detail
                         if !lastRecordingPath.isEmpty {
@@ -1922,10 +1946,11 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     let modes=gateway.modes(forArm:side).map(\.intValue),reported=sample?.statuses.map(\.intValue) ?? []
                     let fields=ROBHeldArmFeedbackGuard.failures(present:sample != nil,motorAge:motor,gripperAge:gripper,
                         q:q,expectedQ:baseline.positions,gatewayModes:modes,reportedModes:reported,expectedModes:baseline.modes,
+                        hullDisplacementMeters:heldHullDrift(side:side,from:baseline.positions,to:q),
                         maximumAgeMilliseconds:stationaryFeedbackMaximumAge(modes:baseline.modes))
                     if !fields.isEmpty {
-                        let drift=q.count==7 ? 1.5*zip(q,baseline.positions).reduce(0.0,{$0+abs($1.0-$1.1)}):Double.infinity
-                        throw ROBArmRoutineError.blocked("An arm changed pose, mode or feedback freshness during the stationary neck scan: gateway=\(side), fields=\(fields), motor_age_ms=\(motor), gripper_age_ms=\(gripper), drift_m=\(drift), expected_modes=\(baseline.modes), gateway_modes=\(modes), reported_modes=\(reported), expected_q=\(baseline.positions), current_q=\(q).")
+                        let drift=heldHullDrift(side:side,from:baseline.positions,to:q)
+                        throw ROBArmRoutineError.blocked("An arm changed pose, mode or feedback freshness during the stationary neck scan: gateway=\(side), fields=\(fields), motor_age_ms=\(motor), gripper_age_ms=\(gripper), modeled_hull_displacement_m=\(drift), expected_modes=\(baseline.modes), gateway_modes=\(modes), reported_modes=\(reported), expected_q=\(baseline.positions), current_q=\(q).")
                     }
                 }
             }
@@ -1995,7 +2020,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                               sample.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),sample.sequence>(last[side] ?? 0),
                               sample.statuses.count==7,sample.statuses.allSatisfy({[0,2].contains($0.intValue)}) else {healthy=false;break}
                         let q=sample.positionsRadians.map(\.doubleValue)
-                        if let p=previous[side],1.5*zip(q,p).reduce(0.0,{$0+abs($1.0-$1.1)})>0.003 {healthy=false;break}
+                        if let p=previous[side],self.heldHullDrift(side:side,from:p,to:q)>0.003 {healthy=false;break}
                         next[side]=q;seq[side]=sample.sequence
                     }
                     if healthy,next.count==2 {
@@ -2034,7 +2059,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             motorAge:sample.effectiveSampleAgeMilliseconds,gripperAge:sample.effectiveGripperFeedbackAgeMilliseconds,
             q:sample.positionsRadians.map(\.doubleValue),expectedQ:held.positions,
             gatewayModes:gateway.modes(forArm:arm).map(\.intValue),reportedModes:sample.statuses.map(\.intValue),
-            expectedModes:expectedModes,maximumAgeMilliseconds:maximumAge)
+            expectedModes:expectedModes,
+            hullDisplacementMeters:heldHullDrift(side:arm,from:held.positions,to:sample.positionsRadians.map(\.doubleValue)),
+            maximumAgeMilliseconds:maximumAge)
         return fields.isEmpty ? maximumAge:ROBArmFeedbackTiming.maximumAgeMilliseconds
     }
 
@@ -3886,7 +3913,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             return ["left","right"].allSatisfy { side in
                 guard let sample=self.gateway.telemetry(forArm:side),sample.sequence>(sequences[side] ?? 0),
                       sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,let q=baselines[side] else{return false}
-                return sample.positionsRadians.count==7 && 1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
+                return sample.positionsRadians.count==7 && self.heldHullDrift(side:side,from:q,to:sample.positionsRadians.map(\.doubleValue))<=0.003
             }
         }
         // Finish a deferred startup only at the already-established hanging
@@ -3917,7 +3944,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                       sample.effectiveGripperFeedbackAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,let q=baselines[side],
                       sample.statuses.map(\.intValue)==Array(repeating:1,count:7),
                       sample.positionsRadians.count==7,
-                      1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+                      self.heldHullDrift(side:side,from:q,to:sample.positionsRadians.map(\.doubleValue))<=0.003 else {
                     throw ROBArmRoutineError.blocked("An arm changed before entering its measured stationary hold.")
                 }
                 try await accepted { gateway.enterPositionMode(forArm:side) }
@@ -3925,7 +3952,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                     guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
                           sample.statuses.map(\.intValue)==Array(repeating:2,count:7),let q=baselines[side] else{return false}
                     return self.gateway.modes(forArm:side).map(\.intValue)==Array(repeating:2,count:7) &&
-                        1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
+                        self.heldHullDrift(side:side,from:q,to:sample.positionsRadians.map(\.doubleValue))<=0.003
                 }
                 try await accepted(requiresConfirmedHold:true) { gateway.priorityHold(forArm:side) }
             }

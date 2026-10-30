@@ -84,6 +84,18 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
    let decoded=try JSONDecoder().decode(ROBWorkspaceStagedEmptyLift.self,from:JSONEncoder().encode(proof));precondition(decoded==proof)
    print("PASS staged modeled lift",proof.checkedPoseCount,"poses; initial horizontal mm",geometry.maximumInitialHorizontalTravelMeters*1000,"final delta m",geometry.finalTip-geometry.initialTip)
   }
+  // Recorded unused LEFT-arm hold rejected during the first can pickup after
+  // base repositioning. Use its own physical model, including open jaws.
+  let heldLeft=try ROBGhostRobotModel(directory:model.directory,physicalSide:"left")
+  let heldBefore=[-0.4424682361501249,0.2067124332830784,-1.1515082447728213,0.6752242543653062,-0.9250245035569946,-1.5796593269026804,0.29506972666529135]
+  let heldAfter=[-0.4432863592369973,0.2067124332830784,-1.1501447062947008,0.6752242543653062,-0.9250245035569946,-1.5796593269026804,0.29506972666529135]
+  let heldOld=1.5*zip(heldBefore,heldAfter).reduce(0.0){$0+abs($1.0-$1.1)}
+  let heldActual=try heldLeft.maximumArmHullDisplacement(from:heldBefore,to:heldAfter,openJawPadding:0.04)
+  precondition(heldOld>0.003 && heldActual<0.003)
+  var heldMoved=heldBefore;heldMoved[0]+=0.05
+  let heldExcess=try heldLeft.maximumArmHullDisplacement(from:heldBefore,to:heldMoved,openJawPadding:0.04)
+  precondition(heldExcess>0.003)
+  print("PASS stationary left-arm recorded jitter: summed-lever",heldOld*1000,"mm, complete modeled hull",heldActual*1000,"mm; real displacement still rejected")
   let actual=[0.0,-0.0272707695624114,0,-0.01308996938995747,0,0,0]
   let firstBaseline=[0.0,-0.01949860023712415,0,0,0,0,0]
   let firstGoal=[0.0,-0.1282092619004997,0,-0.1435886966215985,0,0,0]

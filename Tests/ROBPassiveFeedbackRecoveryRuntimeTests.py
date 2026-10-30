@@ -42,6 +42,10 @@ final class Gateway {
 }
 @MainActor final class Hold {
  let gateway=Gateway(),arm="left";var localReceiptCommand:String?="right_recycle_cans"
+ var modeledHullDisplacement:Double?
+ func heldHullDrift(side:String,from:[Double],to:[Double])->Double {
+  modeledHullDisplacement ?? 1.5*zip(from,to).reduce(0.0){$0+abs($1.0-$1.1)}
+ }
  var inactiveWorkspaceSearch=true,leased=false,positionReady=false,armTravelDispatched=false,jawCommandDispatched=false,jawSetupDispatchUncertain=false,recyclingGripDispatched=false
  var sceneHold:[String:(positions:[Double],modes:[Int])]=["left":(Array(repeating:0,count:7),Array(repeating:0,count:7)),"right":(Array(repeating:0,count:7),Array(repeating:0,count:7))]
  var passiveFeedbackPauseStarted:Double?,lastHeldFeedbackDiagnostic:String?,lastRecordingPath="",phase="passive search"
@@ -109,6 +113,13 @@ final class ROBWorkspaceSearch {
 @main enum Test {
  @MainActor static func fatal(_ h:Hold,_ expected:String){do{try h.check();preconditionFailure("Unsafe hold admitted")}catch is ROBPassiveFeedbackPause {preconditionFailure("Unsafe mode/q/missing state incorrectly deferred")}catch{precondition(String(describing:error).contains(expected))}}
  @MainActor static func main()async throws {
+  let quantized=Hold();quantized.gateway.samples["right"]!.positionsRadians[0]=0.0008181230868724
+  quantized.gateway.samples["right"]!.positionsRadians[2]=0.0013635384781205
+  quantized.modeledHullDisplacement=0.0008
+  try quantized.check() // Recorded encoder jitter: the old summed-lever bound exceeded3mm.
+  for invalid in [0.00301,Double.infinity,Double.nan,-0.0001] {
+   quantized.modeledHullDisplacement=invalid;fatal(quantized,"position_drift_m")
+  }
   let changedPolicy=Hold();changedPolicy.approachUnknownAdvisoryEnabled=true;fatal(changedPolicy,"frozen UNKNOWN advisory")
   for age in [300.0,350.0] {
    let within=Hold()
