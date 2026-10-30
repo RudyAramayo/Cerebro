@@ -511,7 +511,7 @@ final class ROBArmRoutineVision {
               !scopeIdentity.isEmpty, scopeIdentity.utf8.count<=8192,
               poseHeldDuringCapture, jointPositions.count==7,
               jointPositions.allSatisfy(\.isFinite), jointCapturedAtMilliseconds.isFinite,
-              openingCommandAtMilliseconds.map({$0.isFinite && (0...30_000).contains(nowMilliseconds-$0)}) ?? true,
+              openingCommandAtMilliseconds.map({$0.isFinite && $0<=nowMilliseconds}) ?? true,
               // Exposure-matched historical feedback is distinct from live
               // dispatch feedback, which the executor checks independently.
               (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(nowMilliseconds-jointCapturedAtMilliseconds),
@@ -523,7 +523,15 @@ final class ROBArmRoutineVision {
               k.depthRGBGeometryCorrespondence?.status=="matched",
               let source=context.createCGImage(frame.image,from:frame.image.extent),
               source.width==depth.width, source.height==depth.height else {
-            throw ROBVisualGraspVerifier.Unavailable.evidence("Observed-jaw tracking needs current native aligned RGB-D, a held scope and synchronized measured joint feedback.")
+            let openingAge=openingCommandAtMilliseconds.map{String(nowMilliseconds-$0)} ?? "none"
+            throw ROBVisualGraspVerifier.Unavailable.evidence("Observed-jaw tracking needs current native aligned RGB-D, a held scope and synchronized measured joint feedback. Camera age \(nowMilliseconds-frame.capturedAt) ms; joint age \(nowMilliseconds-jointCapturedAtMilliseconds) ms; exposure/joint difference \(abs(frame.capturedAt-jointCapturedAtMilliseconds)) ms; opening-event age \(openingAge) ms.")
+        }
+        // The entry can take longer than the opening-event window. Expire
+        // that optional identity cue without invalidating otherwise fresh
+        // images. Actual symmetric opening still needs a recent request
+        // between its held before/after images in the jaw controller.
+        let recentOpeningCommand=openingCommandAtMilliseconds.flatMap {
+            (0...30_000).contains(nowMilliseconds-$0) ? $0:nil
         }
         let width=min(320,source.width)
         let height=max(1,Int((Double(source.height)*Double(width)/Double(source.width)).rounded()))
@@ -556,7 +564,7 @@ final class ROBArmRoutineVision {
             fx:k.fx*sx,fy:k.fy*sy,cx:(k.cx+0.5)*sx-0.5,cy:(k.cy+0.5)*sy-0.5,
             sequence:frame.sequence,capturedAtMilliseconds:frame.capturedAt,scopeIdentity:scopeIdentity,
             jointPositions:jointPositions,jointCapturedAtMilliseconds:jointCapturedAtMilliseconds,
-            poseHeldDuringCapture:poseHeldDuringCapture,openingCommandAtMilliseconds:openingCommandAtMilliseconds)
+            poseHeldDuringCapture:poseHeldDuringCapture,openingCommandAtMilliseconds:recentOpeningCommand)
     }
 
     /// Lightweight offline grasp evidence. Does not run a detector, move the

@@ -41,6 +41,10 @@ enum ROBGripperVisualServo {
  }
 }
 struct Match {var status="matched"}
+struct ROBWorkspaceVisualCalibrationTrial {
+ var usesOperatorClearedCameraCollisionAdvisory=false
+ var cameraGeneration=UUID()
+}
 struct K {
  var stereoMode:String?,stereoModeSource:String?
  var fx=600.0,fy=610.0,cx=319.5,cy=239.5
@@ -105,9 +109,9 @@ final class Adapter {
   adapter.active=false;adapter.ensureActiveForTaskObservation()
   precondition(adapter.active && !adapter.teaching && adapter.epoch != enrolledEpoch && adapter.frames.isEmpty && adapter.busy.isEmpty)
   precondition(adapter.cameraGeneration==enrolledGeneration,"Consumer enrollment must not invent a physical camera restart")
-  func convert(_ frame:Adapter.Frame=input,_ q:[Double]=Array(repeating:0,count:7),_ time:Double?=nil,_ held:Bool=true,_ scope:String="exact-held-scope")throws->ROBGripperVisualServo.Frame {
+  func convert(_ frame:Adapter.Frame=input,_ q:[Double]=Array(repeating:0,count:7),_ time:Double?=nil,_ held:Bool=true,_ scope:String="exact-held-scope",opening:Double?=nil)throws->ROBGripperVisualServo.Frame {
    try adapter.makeGripperVisualServoFrame(frame:frame,scopeIdentity:scope,jointPositions:q,
-    jointCapturedAtMilliseconds:time ?? now-10,poseHeldDuringCapture:held,nowMilliseconds:now)
+    jointCapturedAtMilliseconds:time ?? now-10,poseHeldDuringCapture:held,openingCommandAtMilliseconds:opening,nowMilliseconds:now)
   }
   func rejects(_ body:()throws->Void) {do{try body();fatalError("Invalid native jaw frame admitted")}catch{}}
   let output=try convert()
@@ -119,6 +123,13 @@ final class Adapter {
   precondition(top[0]>200 && top[2]<20 && bottom[0]<20 && bottom[2]>200,"RGB orientation/channel mismatch")
   precondition(output.depthMillimeters[20*320+20]==800 && output.depthMillimeters[220*320+20]==1400,"RGB/depth row mismatch")
   precondition(output.depthMillimeters[0]==0,"Missing depth must stay missing")
+  let recent=try convert(opening:now-30_000)
+  precondition(recent.openingCommandAtMilliseconds==now-30_000)
+  let expired=try convert(opening:now-30_001)
+  precondition(expired.openingCommandAtMilliseconds==nil && expired.capturedAtMilliseconds==input.capturedAt,
+   "An expired opening event must not invalidate or retimestamp a fresh observation")
+  rejects{_=try convert(opening:now+1)}
+  rejects{_=try convert(opening:.nan)}
   var historical=input;historical.capturedAt=now-260
   let synchronized=try convert(historical,Array(repeating:0,count:7),now-265)
   precondition(synchronized.jointCapturedAtMilliseconds==now-265,"Historical feedback must retain its real exposure-matched time")
@@ -143,5 +154,5 @@ with tempfile.TemporaryDirectory(prefix='rob-jaw-frame-') as tmp:
     swift = folder / 'Fixture.swift'
     swift.write_text(support)
     binary = folder / 'fixture'
-    subprocess.run(['xcrun', 'swiftc', '-O', '-parse-as-library', str(swift), '-o', str(binary)], check=True)
+    subprocess.run(['xcrun', 'swiftc', '-O', '-parse-as-library', str(ROOT / 'Cerebro/ROBArmJointLimits.swift'), str(swift), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
