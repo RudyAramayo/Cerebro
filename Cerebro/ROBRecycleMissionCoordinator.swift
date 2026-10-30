@@ -229,6 +229,9 @@ import simd
         guard let controller,let networkSession else { return false }
         return ROBControlLiveSessionRegistry.isActiveOperator(controllerID:controller,sessionID:networkSession)
     }
+    /// The initial stationary survey precedes the arm trial. It still owns
+    /// the native neck adapter, only while this mission's search is live.
+    var ownsWorkspaceSearchView: Bool { grantIsLive && message?.phase == .searching }
     private func tick() {
         guard active else { return }
         guard grantIsLive else { pause("Mission ended: controller connection or duration expired. Holding the current arm pose.");return }

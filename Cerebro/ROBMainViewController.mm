@@ -5806,7 +5806,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     workspace.prepareView = ^BOOL(double pan, NSInteger upper) {
         ROBMainViewController *owner = weakSelf;
         if (owner == nil || (![ROBLeftArmTrial shared].isRunning &&
-            ![ROBLeftArmTrial shared].isPreparingPreviewedCanObservation && ![ROBNeckQRCalibration shared].isRunning) || owner.stageShowCoordinator.isRunning ||
+            ![ROBLeftArmTrial shared].isPreparingPreviewedCanObservation && ![ROBNeckQRCalibration shared].isRunning &&
+            ![ROBRecycleMissionCoordinator shared].ownsWorkspaceSearchView) || owner.stageShowCoordinator.isRunning ||
             owner.pendingRobotActionRequests.count > 0 || [ROBAmberStackMaintenanceController shared].isRunning ||
             [ROBTorsoControlCenter shared].isArmed) { return NO; }
         if (!armViewPreparationStarted) {

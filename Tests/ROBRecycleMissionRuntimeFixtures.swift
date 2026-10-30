@@ -116,7 +116,10 @@ final class ROBTraversabilityRuntime {
         deliver(request(.query,id:second.missionID),nil,freshSession)
         check(!coordinator.active && statuses.last?.phase == .paused,"Reconnect inherited old authorization")
         let third=request(.start);deliver(third,nil,freshSession)
+        coordinator.fixturePhase(.searching)
+        check(coordinator.ownsWorkspaceSearchView,"Authenticated survey did not own the camera")
         ROBControlLiveSessionRegistry.connected=false
+        check(!coordinator.ownsWorkspaceSearchView,"Disconnected survey retained camera control before the next timer tick")
         RunLoop.main.run(until:Date().addingTimeInterval(0.12))
         check(!coordinator.active && statuses.last?.phase == .paused,"Disconnected controller kept mission running")
         check(drives==0,"Lifecycle tests emitted tread motion")
@@ -126,8 +129,16 @@ final class ROBTraversabilityRuntime {
             RunLoop.main.run(until:Date().addingTimeInterval(0.12))
             check(coordinator.active && drives==0,"Offline local mission lost ownership or drove without a map")
             check(coordinator.localStatus()["authority_source"] as? String=="explicit_local_user_command","Local start impersonated a remote controller")
+            check(!coordinator.ownsWorkspaceSearchView,"Map acquisition owned the survey camera")
+            coordinator.fixturePhase(.searching)
+            check(coordinator.ownsWorkspaceSearchView,"Offline local survey could not own its camera")
+            coordinator.fixturePhase(.navigating)
+            check(!coordinator.ownsWorkspaceSearchView,"Base navigation acquired stationary survey camera control")
+            coordinator.fixturePhase(.recycling)
+            check(!coordinator.ownsWorkspaceSearchView,"Transfer phase bypassed the arm trial's own camera ownership")
+            coordinator.fixturePhase(.searching)
             coordinator.stop(reason:"Fixture local Stop")
-            check(!coordinator.active,"Local Stop did not end mission")
+            check(!coordinator.active && !coordinator.ownsWorkspaceSearchView,"Local Stop did not end mission camera ownership")
         } catch { fatalError("Local mission rejected: \(error)") }
         print("Recycle mission runtime passed: authenticated Start, duplicates, owner/sequence Stop, replay, reconnect and disconnect; no hardware")
     }
