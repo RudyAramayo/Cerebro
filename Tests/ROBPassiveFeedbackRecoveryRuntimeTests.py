@@ -10,6 +10,7 @@ guard=braced_declaration(source,'private enum ROBHeldArmFeedbackGuard {').replac
 pause=braced_declaration(source,'private struct ROBPassiveFeedbackPause:').replace('private struct','struct',1)
 check=braced_declaration(source,'    private func check() throws {')
 fullCheck=check.replace('private func','func',1)
+cameraGap=braced_declaration(source,'    private func checkEmptyHoldCameraGap(').replace('private func','func',1)
 timing=(root/'Cerebro/ROBArmJointLimits.swift').read_text()
 diagnostics=braced_declaration(source,'    private func stationaryFeedbackMaximumAge(modes:').replace('private ','',1)
 methods='\n'.join(braced_declaration(source,m).replace('private func','func',1)for m in ['    @MainActor private func passiveFeedbackCheckpoint()','    @MainActor private func wait(_ seconds:','    @MainActor private func accepted('])
@@ -52,6 +53,8 @@ final class Gateway {
  var servoPossiblePayloadUncertain=false
  /* DIAGNOSTICS */
  var waiting=Set<UInt64>(),acks:[UInt64:Bool]=[:],holdConfirmations:[UInt64:Bool]=[:],dispatches=0
+ var emptyOpeningInProgress=false,emptyHoldCameraPauseStarted:Double?,emptyHoldCameraPausePositions:[Double]?,emptyHoldCameraPauseSequence:UInt64=0
+ var reviewedDispatchStart:Int?
  static let neckOnlyCommands=Set<String>()
  var defersOneDegreeCameraInspection=false,defersInitialLiftCameraInspection=false,activeCameraCollisionAdvisory=false
  var activeApproachUnknownAdvisory=false,approachUnknownAdvisoryEnabled=false
@@ -66,6 +69,7 @@ final class Gateway {
  func requireLocalReceipt()throws->Bool{true}
  func measured()throws->Sample{gateway.samples[arm]!}
  func checkCollisionContext()throws{}
+ func update(_ text:String){}
  /* FULL CHECK */
  /* METHODS */
 }
@@ -240,6 +244,37 @@ final class ROBWorkspaceSearch {
   ROBArmRoutineCoordinator.shared.viewIsStationary={false};fatal(advisory,"body_stationary=false")
   ROBArmRoutineCoordinator.shared.viewIsStationary={true}
   advisory.failure="Stop requested";fatal(advisory,"Stop requested")
+  #if DEBUG
+  UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
+  func cameraHold()->Hold {
+   let h=Hold();h.inactiveWorkspaceSearch=false;h.positionReady=true;h.cameraReady=true;h.activeCameraCollisionAdvisory=true
+   h.gateway.mode["left"]=2;h.gateway.samples["left"]!.statuses=Array(repeating:2,count:7)
+   h.vision.enrolled=true
+   return h
+  }
+  let gap=cameraHold();try gap.check();precondition(gap.emptyHoldCameraPauseStarted != nil)
+  Task {try await Task.sleep(nanoseconds:60_000_000);precondition(gap.dispatches==0);gap.vision.available=true;gap.vision.sequence=2}
+  try await gap.accepted {gap.dispatches+=1;gap.acks[99]=true;return 99}
+  precondition(gap.dispatches==1 && gap.emptyHoldCameraPauseStarted==nil)
+  let expiry=cameraHold();let paused=try expiry.checkEmptyHoldCameraGap(fresh:false,stationary:true,now:10);precondition(paused)
+  do {_=try expiry.checkEmptyHoldCameraGap(fresh:false,stationary:true,now:12.01);preconditionFailure("Unbounded camera wait")}catch{}
+  let drifting=cameraHold();_=try drifting.checkEmptyHoldCameraGap(fresh:false,stationary:true,now:10);drifting.gateway.samples["left"]!.positionsRadians[0]=0.01
+  do {_=try drifting.checkEmptyHoldCameraGap(fresh:true,stationary:true,now:10.1);preconditionFailure("Fresh image erased arm drift")}catch{}
+  for forbidden in 0..<5 {
+   let h=cameraHold()
+   if forbidden==0 {h.leased=true}
+   if forbidden==1 {h.reviewedDispatchStart=1}
+   if forbidden==2 {h.recyclingGripDispatched=true}
+   if forbidden==3 {h.waiting.insert(1)}
+   if forbidden==4 {h.servoPossiblePayloadUncertain=true}
+   fatal(h,"camera_fresh=false")
+  }
+  let opening=cameraHold();opening.waiting.insert(1);opening.emptyOpeningInProgress=true;try opening.check()
+  precondition(opening.emptyHoldCameraPauseStarted != nil)
+  opening.failure="Stop requested";fatal(opening,"Stop requested")
+  UserDefaults.standard.removeVolatileDomain(forName:UserDefaults.argumentDomain)
+  print("PASS empty held camera gap: no dispatch before fresh advancing frame; two-second timeout; drift/active lease/pending arm/payload/Stop reject; empty opening may settle")
+  #endif
   let camera=CameraPrepare();var completed=false
   camera.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){r in completed=r["status"]as?String=="prepared"}
   precondition(camera.vision.enrolled && camera.prepared==0)
@@ -250,7 +285,7 @@ final class ROBWorkspaceSearch {
   print("PASS stationary inactive/position holds accept350ms; complete actual local/nonlocal/active check; inactive age-only same-q/mode defers≤2s; q/mode/missing/active-age/timeout fatal; direct local Prepare enrolls then waits fresh; source expiry capped2; no hardware")
  }
 }
-'''.replace('/* TIMING */',timing).replace('/* GUARD */',guard).replace('/* PAUSE */',pause).replace('/* BATCH */',batch).replace('/* FULL CHECK */',fullCheck).replace('/* METHODS */',methods).replace('/* ENROLL */',enroll).replace('/* DIAGNOSTICS */',diagnostics)
+'''.replace('/* TIMING */',timing).replace('/* GUARD */',guard).replace('/* PAUSE */',pause).replace('/* BATCH */',batch).replace('/* FULL CHECK */',fullCheck+'\n'+cameraGap).replace('/* METHODS */',methods).replace('/* ENROLL */',enroll).replace('/* DIAGNOSTICS */',diagnostics)
 with tempfile.TemporaryDirectory(prefix='rob-passive-feedback-',dir='/private/tmp')as folder:
  p=Path(folder);(p/'Fixture.swift').write_text(fixture)
  for flags in [[],['-D','DEBUG']]:

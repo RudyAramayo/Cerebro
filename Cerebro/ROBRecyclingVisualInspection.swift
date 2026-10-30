@@ -416,6 +416,8 @@ import CoreImage
         checkpoint("jaw_analysis_completed")
         var evidence:[String:Any]=["sequence":NSNumber(value:frame.sequence),"captured_at_ms":frame.capturedAt,
             "can_box":box,"status":String(describing:decision.status),"reason":decision.reason,
+            "nominal_jaw_search_roi":[roi.xMin,roi.yMin,roi.xMax,roi.yMax],
+            "nominal_tool_pixel":[basePixel.x,basePixel.y],
             "joint_positions":feedback.positionsRadians.map(\.doubleValue),"joint_captured_at_ms":historicalTime,
             "diagnostics":decision.diagnostics.mapValues{value->Any in if value.isFinite{return value};return NSNull()},"jaw_location_source":"observed_pixels_only_FK_ROI_is_not_a_measurement",
             "geometry_assumed":geometryAssumed,"ready_to_grip_image_alignment_only":decision.readyToGrip]

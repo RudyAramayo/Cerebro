@@ -459,6 +459,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private var jawIntensity = 10
     @nonobjc private var taskJawTarget: [Double]?
     private var taskOpeningCommandAtMilliseconds:Double?
+    private var emptyOpeningInProgress=false
+    private var emptyHoldCameraPauseStarted:Double?
+    private var emptyHoldCameraPausePositions:[Double]?
+    private var emptyHoldCameraPauseSequence:UInt64=0
     private var servoEvidenceWriteError:String?
     @nonobjc private var proposal: ROBLeftGestureProposal?
     private var proposalStep = -1
@@ -1825,6 +1829,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         armTravelDispatched = false; jawCommandDispatched=false;jawSetupDispatchUncertain=false;servoPossiblePayloadUncertain=false;recyclingReachDispatched=false
         localReceiptHeldNeckIdentity=nil;localReceiptPerceptionFailure=false;sceneHold = [:];heldFeedbackModels = [:];localCampaignRecoveryReason=nil
         passiveFeedbackPauseStarted=nil;lastHeldFeedbackDiagnostic=nil
+        emptyOpeningInProgress=false;emptyHoldCameraPauseStarted=nil;emptyHoldCameraPausePositions=nil;emptyHoldCameraPauseSequence=0
         activeCommand = command;activeNominalRetreat=nil;activeOneDegreeCalibration=nil; recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=activeApproachCanThenHold ? 0:1; recyclingGripDispatched=false; recyclingReadyEstablished=false; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0;servoTelemetryHistory=[];servoEvidenceWriteError=nil;taskOpeningCommandAtMilliseconds=nil
         currentSpikeCompletionTask?.cancel();currentSpikeCompletionTask=nil
@@ -1958,12 +1963,15 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         if activeCommand == "left_estimated_calibration", generation > 0 { try checkCollisionContext() }
         if cameraReady {
             let fresh=vision.fresh,stationary=ROBArmRoutineCoordinator.shared.viewIsStationary?() == true
-            guard (fresh || defersOneDegreeCameraInspection || defersInitialLiftCameraInspection),stationary else {
+            let heldCameraPause=try checkEmptyHoldCameraGap(fresh:fresh,stationary:stationary)
+            guard (fresh || heldCameraPause || defersOneDegreeCameraInspection || defersInitialLiftCameraInspection),stationary else {
                 throw ROBArmRoutineError.blocked("Live camera or stationary body view lost; \(physicalSide)-arm hold requested. camera_fresh=\(fresh), body_stationary=\(stationary). \(vision.readinessDescription)")
             }
             if !activeCameraCollisionAdvisory && (fresh || !defersOneDegreeCameraInspection) && !vision.handsClear {
                 throw ROBArmRoutineError.blocked("Person or hand clearance was lost; an arm hold was requested.")
             }
+        } else {
+            emptyHoldCameraPauseStarted=nil;emptyHoldCameraPausePositions=nil
         }
         if positionReady {
             let modes = gateway.modes(forArm: arm).map(\.intValue)
@@ -1980,6 +1988,44 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 throw ROBArmRoutineError.blocked("Left arm drifted from the task's stationary jaw position; hold requested.")
             }
         }
+    }
+
+    /// A camera gap may delay an EMPTY stationary task, never an arm segment,
+    /// grasp, payload operation or command dispatch. The ordinary monitor keeps
+    /// recording current/feedback while the asynchronous checkpoint waits.
+    private func checkEmptyHoldCameraGap(fresh:Bool,stationary:Bool,
+        now:Double=ProcessInfo.processInfo.systemUptime)throws->Bool {
+        if fresh,emptyHoldCameraPauseStarted==nil {return false}
+        let eligible=ROBArmFeedbackTiming.debugEnabled && localReceiptCommand != nil && activeCameraCollisionAdvisory &&
+            activeCommand=="left_recycle_can" && positionReady && stationary && !leased && leaseRenewals.isEmpty &&
+            reviewedDispatchStart==nil && (waiting.isEmpty || emptyOpeningInProgress) &&
+            !jawSetupDispatchUncertain && !recyclingGripDispatched && !servoPossiblePayloadUncertain
+        guard eligible else {
+            emptyHoldCameraPauseStarted=nil;emptyHoldCameraPausePositions=nil
+            return false
+        }
+        let sample=try measured(),q=sample.positionsRadians.map(\.doubleValue)
+        guard gateway.modes(forArm:arm).map(\.intValue)==Array(repeating:2,count:7),
+              sample.statuses.map(\.intValue)==Array(repeating:2,count:7) else {
+            throw ROBArmRoutineError.blocked("The empty camera wait lost measured position hold.")
+        }
+        if emptyHoldCameraPauseStarted==nil {
+            emptyHoldCameraPauseStarted=now;emptyHoldCameraPausePositions=q
+            emptyHoldCameraPauseSequence=vision.snapshot()["face"]?.sequence ?? 0
+            update("Holding the empty arm for a fresh camera frame; no next command while the image is stale")
+        }
+        guard let began=emptyHoldCameraPauseStarted,let baseline=emptyHoldCameraPausePositions,
+              heldHullDrift(side:arm,from:baseline,to:q)<=0.003 else {
+            throw ROBArmRoutineError.blocked("The empty arm moved during the stationary camera wait.")
+        }
+        guard now-began<=2 else {
+            throw ROBArmRoutineError.blocked("No fresh advancing camera frame recovered within two seconds at the empty hold.")
+        }
+        if fresh,(vision.snapshot()["face"]?.sequence ?? 0)>emptyHoldCameraPauseSequence {
+            emptyHoldCameraPauseStarted=nil;emptyHoldCameraPausePositions=nil
+            return false
+        }
+        return true
     }
 
     private func captureActualCampaignInterruption() {
@@ -2088,7 +2134,11 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
 
     @MainActor private func passiveFeedbackCheckpoint() async throws {
         while true {
-            do {try check();return}
+            do {
+                try check()
+                if emptyHoldCameraPauseStarted != nil {try await Task.sleep(nanoseconds:20_000_000);continue}
+                return
+            }
             catch is ROBPassiveFeedbackPause {try Task.checkCancellation();try await Task.sleep(nanoseconds:20_000_000)}
         }
     }
@@ -2106,6 +2156,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     @MainActor private func accepted(requiresConfirmedHold: Bool = false, _ dispatch: () -> UInt64) async throws {
         try await passiveFeedbackCheckpoint()
         try check() // Never dispatch on a stale/passively paused packet.
+        guard emptyHoldCameraPauseStarted==nil else {throw ROBArmRoutineError.blocked("A fresh camera frame is still required before dispatch.")}
         let id = dispatch()
         guard id != 0 else { throw ROBArmRoutineError.blocked("Gateway refused left-arm command during \(phase), before submission.") }
         waiting.insert(id)
@@ -4034,6 +4085,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             }
             try await requireGripperCalibration(allowEmptyCalibration: false)
         } else { try await requireGripperCalibration(allowEmptyCalibration: action == .prepare) }
+        emptyOpeningInProgress=action == .prepare && localReceiptCommand != nil &&
+            !recyclingGripDispatched && !servoPossiblePayloadUncertain && !jawSetupDispatchUncertain
+        defer {emptyOpeningInProgress=false}
         phase = "tabletop \(action.rawValue)"
         update(action == .grip ? "Local task: gripping empty can at intensity 2" : "Local task: opening gripper at the planned position")
         ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my \(physicalSide) hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
@@ -4383,7 +4437,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 throw ROBGhostMotionError.blocked("The held arm or body moved during nonactuating can reacquisition.")
             }
         }
-        let result=try await observation(heldCheck)
+        let result=try await observation {try heldCheck()}
         try await wait(2) {self.vision.fresh && ROBArmRoutineCoordinator.shared.viewIsStationary?()==true}
         try heldCheck()
         return result
