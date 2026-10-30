@@ -4095,7 +4095,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             guard taskGripperReady else {
                 throw ROBArmRoutineError.blocked("Stationary startup gripper setup is unavailable; no grasp was sent.")
             }
-            try await requireGripperCalibration(allowEmptyCalibration: false)
+            try await requireTaskGripperState()
         } else { try await requireGripperCalibration(allowEmptyCalibration: action == .prepare) }
         emptyOpeningInProgress=action == .prepare && localReceiptCommand != nil &&
             !recyclingGripDispatched && !servoPossiblePayloadUncertain && !jawSetupDispatchUncertain
@@ -4107,7 +4107,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my \(physicalSide) hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
         try await beforeDispatch?()
         try await accepted { accountedJawCommand {
-            let id=gateway.controlGripper(forArm:arm,action:action == .grip ? "hold":"release",force:intensity)
+            let id=sendTaskGripperAction(action == .grip ? "hold":"release",intensity:intensity)
             if id != 0,action != .grip {taskOpeningCommandAtMilliseconds=Date().timeIntervalSince1970*1000}
             return id
         } }
@@ -4201,12 +4201,30 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     private var taskGripperReady: Bool {
         ROBGripperStartupCalibration.shared.calibrationReady(forArm:arm) ||
             (usesHeldCanPreparation && heldGripperReadyGeneration == generation && generation > 0 &&
-             gateway.gripperSnapshot(forArm:arm)["calibrationState"] as? String == "command_accepted_unverified")
+             gateway.isReady() && (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation)
+    }
+
+    /// This task has accepted an explicit open at its measured empty hold.
+    /// That permits the existing-device command path, not a calibration claim.
+    @MainActor private func requireTaskGripperState() async throws {
+        if usesHeldCanPreparation,heldGripperReadyGeneration == generation,generation > 0 {
+            try await accepted {gateway.queryGripperState(forArm:arm)}
+        } else {try await requireGripperCalibration(allowEmptyCalibration:false)}
+    }
+
+    private func sendTaskGripperAction(_ action:String,intensity:Int)->UInt64 {
+        if usesHeldCanPreparation,heldGripperReadyGeneration == generation,generation > 0 {
+            return gateway.controlGripperUsingExistingDeviceState(forArm:arm,action:action,
+                holdIntensity:action == "hold" ? intensity:ROBTabletopPickPlace.recyclingIntensity)
+        }
+        return gateway.controlGripper(forArm:arm,action:action,force:intensity)
     }
 
     /// Opening at a held grasp pose is distinct from empty-jaw initialization.
     /// A can can already be inside the aperture without being held. Query the
-    /// gateway's current calibration; never prime or recalibrate beside it.
+    /// gateway's current state and use the same explicit existing-device
+    /// command as the local panel. Never prime or recalibrate beside a can.
+    /// Accepted opening remains unverified until the subsequent visual check.
     @MainActor private func prepareHeldCanGripper(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot) async throws {
         if taskGripperReady {return}
         guard usesHeldCanPreparation,!recyclingGripDispatched,
@@ -4239,18 +4257,18 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         }
         try await holdTaskPosition(q)
         defer {taskJawTarget=nil}
-        try await requireGripperCalibration(allowEmptyCalibration:false)
+        try await accepted {gateway.queryGripperState(forArm:arm)}
         jawSetupDispatchUncertain=true
         phase="opening empty right gripper at held pose"
         update("Opening the empty right gripper while the arm remains held")
         try await accepted {accountedJawCommand {
-            let id=gateway.controlGripper(forArm:arm,action:"release",force:10)
+            let id=gateway.controlGripperUsingExistingDeviceState(forArm:arm,action:"release")
             if id != 0 {taskOpeningCommandAtMilliseconds=Date().timeIntervalSince1970*1000}
             return id
         }}
         let end=ProcessInfo.processInfo.systemUptime+1.5
         try await wait(3){ProcessInfo.processInfo.systemUptime>=end}
-        try await requireGripperCalibration(allowEmptyCalibration:false)
+        try await accepted {gateway.queryGripperState(forArm:arm)}
         heldGripperReadyGeneration=generation
         jawSetupDispatchUncertain=false // Accepted sequence; physical opening remains unmeasured.
     }
@@ -4795,12 +4813,12 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         // cannot be visually resolved, remain stopped rather than infer opening.
         try ROBControllerArmApproval.shared.markLocalCanCampaignPossiblePayloadHeld()
         jawSetupDispatchUncertain=true;servoPossiblePayloadUncertain=true
-        try await accepted{accountedJawCommand{gateway.controlGripper(forArm:arm,action:"hold",force:2)}}
+        try await accepted{accountedJawCommand{sendTaskGripperAction("hold",intensity:ROBTabletopPickPlace.recyclingIntensity)}}
         let closed=ProcessInfo.processInfo.systemUptime+1.5
         try await wait(2){ProcessInfo.processInfo.systemUptime>=closed}
         _ = try await servoObservation(context,model:model,heldSince:heldSince,openingAt:nil)
         try await accepted{accountedJawCommand{
-            let id=gateway.controlGripper(forArm:arm,action:"release",force:10)
+            let id=sendTaskGripperAction("release",intensity:10)
             if id != 0 {taskOpeningCommandAtMilliseconds=Date().timeIntervalSince1970*1000};return id
         }}
         let opened=ProcessInfo.processInfo.systemUptime+1.5
