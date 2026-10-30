@@ -10,6 +10,7 @@ from ROBMainCameraHeadlessStaticTests import braced_declaration
 root = Path(__file__).resolve().parents[1]
 source = (root / 'Cerebro/ROBLeftArmTrial.swift').read_text()
 method = braced_declaration(source, '    @MainActor private func captureIncrementalCanContext(').replace('private func', 'func', 1)
+held_method = braced_declaration(source, '    @MainActor private func observeAtEmptyArmHold<T>(').replace('private func', 'func', 1)
 fixture = r'''
 import Foundation
 enum ROBGhostMotionError:Error {case blocked(String)}
@@ -82,7 +83,7 @@ final class Vision {var fresh=true}
   print("PASS actual stationary capture wrapper: no in-flight motion/jaws/payload; bounded fresh-view wait; Stop/arm/body change reject; live camera gate always restored")
  }
 }
-'''.replace('/* METHOD */', method)
+'''.replace('/* METHOD */', held_method+'\n'+method)
 with tempfile.TemporaryDirectory(prefix='rob-stationary-servo-', dir='/private/tmp') as folder:
     path = Path(folder)
     (path / 'Fixture.swift').write_text(fixture)

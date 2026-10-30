@@ -4366,8 +4366,8 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     /// Detector inference is nonactuating and can briefly contend with camera
     /// delivery. Keep the actual arm hold, ownership and motor checks active;
     /// restore the ordinary live camera gate before any jaw or arm dispatch.
-    @MainActor private func captureIncrementalCanContext(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
-        map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial) async throws->ROBRecyclingVisualInspection.ServoContext {
+    @MainActor private func observeAtEmptyArmHold<T>(
+        _ observation:(_ heldCheck:() throws->Void) async throws->T) async throws->T {
         try check()
         guard cameraReady,positionReady,!leased,leaseRenewals.isEmpty,taskJawTarget==nil,
               !jawSetupDispatchUncertain,!recyclingGripDispatched,!servoPossiblePayloadUncertain else {
@@ -4383,13 +4383,20 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 throw ROBGhostMotionError.blocked("The held arm or body moved during nonactuating can reacquisition.")
             }
         }
-        phase="stationary visual-servo can reacquisition"
-        update("Holding both arms while reacquiring the can; fresh live view required before dispatch")
-        let context=try await ROBRecyclingVisualInspection.beginIncrementalVisualServo(model:model,can:can,map:map,trial:trial,gatewayArm:arm,
-            feedbackForFrame:{[weak self] in self?.exposureMatchedServoFeedback($0)},check:heldCheck)
+        let result=try await observation(heldCheck)
         try await wait(2) {self.vision.fresh && ROBArmRoutineCoordinator.shared.viewIsStationary?()==true}
         try heldCheck()
-        return context
+        return result
+    }
+
+    @MainActor private func captureIncrementalCanContext(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
+        map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial) async throws->ROBRecyclingVisualInspection.ServoContext {
+        phase="stationary visual-servo can reacquisition"
+        update("Holding both arms while reacquiring the can; fresh live view required before dispatch")
+        return try await observeAtEmptyArmHold { heldCheck in
+            try await ROBRecyclingVisualInspection.beginIncrementalVisualServo(model:model,can:can,map:map,trial:trial,gatewayArm:arm,
+                feedbackForFrame:{[weak self] in self?.exposureMatchedServoFeedback($0)},check:heldCheck)
+        }
     }
 
     @MainActor private func performIncrementalCanGrasp(_ entry:ROBLeftGestureProposal) async throws->NSDictionary {
@@ -4692,7 +4699,11 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         // Entire uncertain search region must be separate from the selected
         // object; this is additional to the current full-arm observed-space proof.
         guard u+0.22<b[0]-0.03 || u-0.22>b[2]+0.03 || v+0.22<b[1]-0.03 || v-0.22>b[3]+0.03 else{return false}
-        let(observation,observedFrame)=try await vision.observeWorkspace()
+        let(observation,observedFrame)=try await observeAtEmptyArmHold { heldCheck in
+            let result=try await vision.observeWorkspace()
+            try heldCheck()
+            return result
+        }
         try check()
         guard (0...700).contains(Date().timeIntervalSince1970*1000-observedFrame.capturedAt),(activeCameraCollisionAdvisory || observedFrame.handsClear),
               try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:observedFrame)==context.baseline.scope else{return false}
