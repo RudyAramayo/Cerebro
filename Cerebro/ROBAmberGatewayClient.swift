@@ -707,6 +707,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         "gripper_state", "gripper_calibrate", "gripper_control",
     ]
     private var gripperCommandsAvailable = false
+    private var existingDeviceGripperControlAvailable = false
     private static let jointBoundsRadians = ROBArmJointLimits.radians
     private let queue = DispatchQueue(label: "com.orbitusrobotics.amber-gateway")
     private var connection: NWConnection?
@@ -1120,6 +1121,15 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         )
     }
 
+    /// Explicit local-panel attempt using the device's current state. Does
+    /// not run calibration or promote unknown calibration to accepted.
+    @discardableResult public func controlGripperUsingExistingDeviceState(
+        forArm arm: String, action: String
+    ) -> UInt64 {
+        sendGripperCommand(type: "gripper_control_existing", arm: arm,
+            action: action, force: action == "hold" ? 2 : 10)
+    }
+
     /// Queue-consistent snapshots for motion validation and rendering. The
     /// returned telemetry objects and arrays are immutable.
     public func telemetry(forArm arm: String) -> ROBAmberGatewayTelemetry? {
@@ -1270,11 +1280,11 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                     && message.calibrationState == Self.gripperCalibrationAcceptedUnverified
                     && message.action == nil
                     && message.force == nil
-            case "gripper_control":
+            case "gripper_control", "gripper_control_existing":
                 operationFieldsAreValid = message.amberResponse == 1
                     && message.calibrationCommandAccepted == nil
                     && message.completionVerified == false
-                    && message.calibrationState == Self.gripperCalibrationAcceptedUnverified
+                    && (operation == "gripper_control_existing" || message.calibrationState == Self.gripperCalibrationAcceptedUnverified)
                     && message.action == pending?.action
                     && message.force == pending?.force
             default:
@@ -1308,7 +1318,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                     ?? Self.gripperCalibrationRequired
                 snapshot.calibrationVerified = false
                 snapshot.feedbackAvailable = false
-                if operation == "gripper_control" {
+                if ["gripper_control", "gripper_control_existing"].contains(operation) {
                     snapshot.lastAction = message.action
                     snapshot.lastForce = message.force
                 } else if snapshot.calibrationState == Self.gripperCalibrationRequired {
@@ -1318,7 +1328,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 switch operation {
                 case "gripper_calibrate":
                     snapshot.detail = "Calibration dispatch accepted; physical completion is unverified"
-                case "gripper_control":
+                case "gripper_control", "gripper_control_existing":
                     snapshot.detail = "Gripper dispatch accepted; position, force, and completion are unverified"
                 default:
                     snapshot.detail = snapshot.calibrationState
@@ -1413,13 +1423,21 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             switch type {
             case "gripper_state", "gripper_calibrate":
                 guard action == nil, force == nil else { return 0 }
-            case "gripper_control":
+            case "gripper_control", "gripper_control_existing":
                 guard let action,
                       Self.gripperActions.contains(action),
                       let force,
                       Self.gripperForceRange.contains(force),
-                      current.calibrationState == Self.gripperCalibrationAcceptedUnverified
+                      type == "gripper_control_existing" || current.calibrationState == Self.gripperCalibrationAcceptedUnverified
                 else { return 0 }
+                if type == "gripper_control_existing" {
+                    guard existingDeviceGripperControlAvailable,
+                          force == (action == "hold" ? 2 : 10),
+                          let sample = arm == "left" ? leftTelemetry : rightTelemetry,
+                          sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                          sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                          sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }) else { return 0 }
+                }
             default:
                 return 0
             }
@@ -1448,7 +1466,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 updated.lastAction = nil
                 updated.lastForce = nil
                 updated.detail = "Calibration dispatch is awaiting acknowledgement"
-            case "gripper_control":
+            case "gripper_control", "gripper_control_existing":
                 updated.detail = "Gripper \(action ?? "action") dispatch is awaiting acknowledgement"
             default:
                 updated.detail = "Gripper state query is awaiting acknowledgement"
@@ -1471,6 +1489,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         var dictionary: [String: Any] = [
             "arm": arm,
             "commandsAvailable": gripperCommandsAvailable,
+            "existingDeviceControlAvailable": existingDeviceGripperControlAvailable,
             "calibrationState": snapshot.calibrationState,
             "calibrationVerified": snapshot.calibrationVerified,
             "feedbackAvailable": snapshot.feedbackAvailable,
@@ -1566,6 +1585,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             gripperCommandsAvailable = Self.requiredGripperCommands.isSubset(
                 of: Set(message.supportedCommands ?? [])
             )
+            existingDeviceGripperControlAvailable = message.supportedCommands?.contains("gripper_control_existing") == true
             authenticatedSessionGeneration &+= 1
             if authenticatedSessionGeneration == 0 {
                 authenticatedSessionGeneration = 1
@@ -1776,6 +1796,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         leftTargetPositionsRadians = []
         rightTargetPositionsRadians = []
         gripperCommandsAvailable = false
+        existingDeviceGripperControlAvailable = false
         startupGripperOwner = nil
         resetGripperStates(
             detail: "Gateway session unavailable; calibration acceptance reset (\(detail))"

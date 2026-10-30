@@ -206,6 +206,56 @@ struct GatewayCompatibilityFixtures {
         expect(client.gripperSnapshot(forArm: "left")["commandInFlight"] as? Bool == false,
                "State query did not complete")
 
+        // Explicit manual attempts are separately advertised, remain bounded,
+        // and must not invent calibration acceptance from a successful grip.
+        let existing = ROBAmberGatewayClient()
+        defer { existing.fixtureDisconnect() }
+        try existing.fixtureReceive(modernReady)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
+               "Old gateway gained an unadvertised device-state command")
+        existing.fixtureDisconnect()
+        var existingReady = modernReady
+        existingReady["supported_commands"] = ["gripper_state", "gripper_calibrate", "gripper_control", "gripper_control_existing"]
+        try existing.fixtureReceive(existingReady)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
+               "Unknown calibration attempt bypassed fresh position hold")
+        func existingFeedback(mode: Double = 2, age: Double = 1) throws {
+            try existing.fixtureReceive([
+                "type": "telemetry", "arm": "left", "sequence": 1,
+                "sample_age_ms": age, "controller_sample_age_ms": age,
+                "joint_feedback_age_ms": [Double](repeating: age, count: 7),
+                "gripper_feedback_age_ms": age,
+                "positions_rad": [Double](repeating: 0.3, count: 7),
+                "currents": [Double](repeating: 0, count: 7),
+                "statuses": [Double](repeating: mode, count: 7),
+                "velocities_available": false,
+            ])
+        }
+        try existingFeedback(mode: 0)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
+               "Inactive arm admitted an existing-device attempt")
+        try existingFeedback(age: 1500)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
+               "Stale feedback admitted an existing-device attempt")
+        try existingFeedback()
+        for (action, force) in [("hold", 2), ("release", 10)] {
+            let id = existing.controlGripperUsingExistingDeviceState(forArm: "left", action: action)
+            expect(id > 0, "Explicit bounded attempt was rejected")
+            try existing.fixtureReceive([
+                "type": "gripper_control_existing_ack", "command_id": id, "arm": "left",
+                "accepted": true, "amber_response": 1, "action": action, "force": force,
+                "calibration_state": "required", "calibration_verified": false,
+                "completion_verified": false, "feedback_available": false, "command_in_flight": false,
+                "force_min": 1, "force_max": 300, "force_unit": "vendor_intensity",
+                "supported_actions": ["release", "hold"], "gateway_latency_ms": 1.0,
+            ])
+            expect(existing.state == .ready, "Truthful unknown-calibration acknowledgement was rejected")
+            expect(existing.gripperSnapshot(forArm: "left")["calibrationState"] as? String == "required",
+                   "A grip attempt manufactured calibration acceptance")
+        }
+        expect(existing.controlGripper(forArm: "left", action: "hold", force: 20) == 0,
+               "Explicit bounded attempt enabled ordinary uncalibrated force control")
+
         // Capability and calibration claims never survive a reconnect.
         client.fixtureDisconnect()
         try client.fixtureReceive(legacyReady)

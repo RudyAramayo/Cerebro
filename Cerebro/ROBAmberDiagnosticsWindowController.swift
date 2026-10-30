@@ -59,6 +59,7 @@ private struct ROBAmberDiagnosticsConnectionSnapshot {
 /// calibration is not presented as physically verified/ready.
 private struct ROBAmberDiagnosticsGripperSnapshot {
     var commandsAvailable = false
+    var existingDeviceControlAvailable = false
     var calibrationState = "unknown"
     var calibrationVerified = false
     var feedbackAvailable = false
@@ -1392,7 +1393,7 @@ private final class ROBAmberArmSchematicView: NSView {
                 let physicalArm = ROBAmberDiagnosticsArm(amberGatewayArm: arm)?.amberRoutingDescription
                     ?? "Unknown gateway arm \(arm)"
                 if operation.hasPrefix("gripper_") {
-                    let physical = ["gripper_calibrate", "gripper_control"].contains(operation)
+                    let physical = ["gripper_calibrate", "gripper_control", "gripper_control_existing"].contains(operation)
                     var parts = [
                         "\(physicalArm) \(operation)",
                         "command \(command) \(accepted ? "accepted" : "rejected")",
@@ -1473,6 +1474,9 @@ private final class ROBAmberArmSchematicView: NSView {
         var snapshot = gripperSnapshots[arm] ?? ROBAmberDiagnosticsGripperSnapshot()
         if let value = boolValue(in: dictionary, keys: ["commandsAvailable"]) {
             snapshot.commandsAvailable = value
+        }
+        if let value = boolValue(in: dictionary, keys: ["existingDeviceControlAvailable"]) {
+            snapshot.existingDeviceControlAvailable = value
         }
         if let value = stringValue(in: dictionary, keys: ["calibrationState"]) {
             snapshot.calibrationState = value
@@ -1737,7 +1741,9 @@ private final class ROBAmberArmSchematicView: NSView {
                 stateText = "Calibration accepted — physical state unverified"
                 stateColor = .systemOrange
             } else if snapshot.calibrationState == "required" {
-                stateText = "Uncalibrated for this gateway session"
+                stateText = snapshot.existingDeviceControlAvailable
+                    ? "Device calibration unverified — Hold 2 / Release 10 available"
+                    : "Uncalibrated for this gateway session"
                 stateColor = .systemOrange
             } else {
                 stateText = connection.state == .ready ? "State unknown — refresh required" : "Gateway unavailable"
@@ -1778,11 +1784,14 @@ private final class ROBAmberArmSchematicView: NSView {
                 && !snapshot.commandInFlight
             controls.releaseButton.isEnabled = gripperInterlocksPass
                 && !snapshot.commandInFlight
-                && calibrationAccepted
+                && (calibrationAccepted || snapshot.existingDeviceControlAvailable)
             controls.holdButton.isEnabled = gripperInterlocksPass
                 && !snapshot.commandInFlight
-                && calibrationAccepted
-            controls.forceSlider.isEnabled = controls.holdButton.isEnabled
+                && (calibrationAccepted || snapshot.existingDeviceControlAvailable)
+            controls.forceSlider.isEnabled = controls.holdButton.isEnabled && calibrationAccepted
+            if !calibrationAccepted, snapshot.existingDeviceControlAvailable {
+                controls.forceLabel.stringValue = "Hold 2 • Release 10"
+            }
             controls.stopButton.isEnabled = false
         }
     }
@@ -2155,9 +2164,13 @@ private final class ROBAmberArmSchematicView: NSView {
         displayName: String
     ) {
         guard let arm = diagnosticsArm(forTag: sender.tag),
-              let controls = gripperControls[arm],
-              validateGripperInterlocks(for: arm, requiresCalibration: true, allowAutomaticTakeover: true) else { return }
-        let force = min(20, max(2, Int(controls.forceSlider.doubleValue.rounded())))
+              let controls = gripperControls[arm] else { return }
+        let snapshot = gripperSnapshots[arm] ?? ROBAmberDiagnosticsGripperSnapshot()
+        let existingDeviceState = snapshot.calibrationState != "command_accepted_unverified"
+            && snapshot.existingDeviceControlAvailable
+        guard validateGripperInterlocks(for: arm, requiresCalibration: !existingDeviceState, allowAutomaticTakeover: true) else { return }
+        let force = existingDeviceState ? (action == "hold" ? 2 : 10)
+            : min(20, max(2, Int(controls.forceSlider.doubleValue.rounded())))
         controls.forceSlider.integerValue = force
         controls.forceLabel.stringValue = "Cmd force \(force)"
 
@@ -2166,8 +2179,10 @@ private final class ROBAmberArmSchematicView: NSView {
             operation: action == "hold" ? "close_gripper" : "open_gripper", arm: arm.rawValue,
             summary: "\(displayName.capitalized) the physical \(arm.rawValue) gripper at raw intensity \(force). \(caution) Jaw position and force remain unverified.",
             command: { [weak self] in
-                guard let self, self.validateGripperInterlocks(for: arm, requiresCalibration: true) else { return 0 }
-                let id = self.gateway.controlGripper(forArm: arm.amberGatewayArm, action: action, force: force)
+                guard let self, self.validateGripperInterlocks(for: arm, requiresCalibration: !existingDeviceState) else { return 0 }
+                let id = existingDeviceState
+                    ? self.gateway.controlGripperUsingExistingDeviceState(forArm: arm.amberGatewayArm, action: action)
+                    : self.gateway.controlGripper(forArm: arm.amberGatewayArm, action: action, force: force)
                 self.recordSubmittedGripperCommand(id, operation: "gripper_\(action)", arm: arm)
                 return id
             }, completion: { [weak self] result in self?.appendEvent(result["detail"] as? String ?? "Gripper operation ended") })
@@ -2384,7 +2399,7 @@ private final class ROBAmberArmSchematicView: NSView {
                 snapshot.calibrationState = "command_accepted_unverified"
                 snapshot.calibrationVerified = false
                 snapshot.detail = "Calibration dispatch accepted; physical completion is not reported"
-            case "gripper_control":
+            case "gripper_control", "gripper_control_existing":
                 let acknowledgedAction = stringValue(in: info, keys: ["action"])
                 let action: String
                 if submittedOperation == "gripper_release" || acknowledgedAction == "release" {
