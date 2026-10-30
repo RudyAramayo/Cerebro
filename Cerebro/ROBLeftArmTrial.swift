@@ -2908,7 +2908,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             if let map = ROBWorkspaceSearch.shared.collisionSnapshot {
                 collisionMap = map; collisionModel = model
                 publishCollisionReview(map:map,detail:map.registrationDetail,blocked:map.registrationID == nil && localReceiptCommand == nil)
-                if localReceiptCommand != nil {
+                // Search has already ranked, centered and remeasured its can.
+                // Keep that exact target/view; reranking the full scan here can
+                // silently replace it with an older observation of another can.
+                if localReceiptCommand != nil, objects[.can] == nil {
                     let selected=await ROBWorkspaceSearch.shared.nearestReachableCan(model:model,baseline:model.positions(vendorLeft:q),
                         map:map,calibrationFile:calibrationFile)
                     objects[.can]=selected.object

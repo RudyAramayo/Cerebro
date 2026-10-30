@@ -8,6 +8,9 @@ from ROBMainCameraHeadlessStaticTests import braced_declaration
 ROOT = Path(__file__).resolve().parents[1]
 vision = (ROOT / 'Cerebro/ROBArmRoutineVision.swift').read_text()
 plan = (ROOT / 'Cerebro/ROBWorkspaceSearchPlan.swift').read_text()
+trial = (ROOT / 'Cerebro/ROBLeftArmTrial.swift').read_text()
+handoff_start = trial.index('            if let map = ROBWorkspaceSearch.shared.collisionSnapshot {', trial.index('            let searchBaseline = q'))
+handoff = braced_declaration(trial[handoff_start:], '            if let map = ROBWorkspaceSearch.shared.collisionSnapshot {')
 helper = braced_declaration(vision, '    static func graspFocusView(')
 start = vision.index('            if armAlreadyAtGraspReady,let selected=localReachSelection?.object,')
 brace = vision.index('}) {\n                try await searchCheckpoint', start) + 3
@@ -28,7 +31,27 @@ struct ROBWorkspaceLocatedObject {
  let position:[Double],capturedAt:Double,sequence:UInt64,view:ROBWorkspaceView
  var point:SIMD3<Double> {SIMD3(position[0],position[1],position[2])}
 }
-struct Selection {let object:ROBWorkspaceLocatedObject?}
+struct Selection {let object:ROBWorkspaceLocatedObject?;var diagnostics:[[String:Any]]=[]}
+struct Map {let registrationID:String?=nil;let registrationDetail="unmeasured"}
+struct Model {func positions(vendorLeft:[Double])->[String:Double] {[:]}}
+@MainActor final class ROBWorkspaceSearch {
+ static let shared=ROBWorkspaceSearch()
+ var collisionSnapshot:Map?=Map(),calls=0,replacement:ROBWorkspaceLocatedObject?
+ func nearestReachableCan(model:Model,baseline:[String:Double],map:Map,calibrationFile:URL?)async->Selection {
+  calls+=1;return Selection(object:replacement)
+ }
+}
+@MainActor func handoffToPickup(_ selected:ROBWorkspaceLocatedObject?,local:Bool=true)async->ROBWorkspaceLocatedObject? {
+ var objects:[ROBWorkspaceTarget:ROBWorkspaceLocatedObject]=[:]
+ objects[.can]=selected
+ let model=Model(),q:[Double]=[],calibrationFile:URL?=nil
+ let localReceiptCommand:String?=local ? "right_recycle_cans":nil
+ var collisionMap:Map?,collisionModel:Model?,collisionReviewStatus:NSDictionary=[:]
+ func publishCollisionReview(map:Map,detail:String,blocked:Bool) {}
+ __HANDOFF__
+ _=collisionMap;_=collisionModel
+ return objects[.can]
+}
 struct Candidates {
  var values:[ROBWorkspaceLocatedObject]=[]
  func confirmed(nowMilliseconds:Double)->[ROBWorkspaceLocatedObject] {values}
@@ -74,6 +97,21 @@ enum Failure:Error {case changed}
   precondition(result.0.count==1 && abs(result.0[0].panDegrees+1.338)<0.01 && result.0[0].upperTarget>6400)
   precondition(result.1?.object?.sequence==11 && result.1?.object?.view==result.0[0])
   precondition(result.2.count==1 && result.2[0]["path_admitted"] as? Bool==false)
+  let search=ROBWorkspaceSearch.shared
+  // A nearer older can remains in the scan after the selected can's dedicated
+  // centered remeasurement. The production pickup handoff must not switch.
+  search.replacement=ROBWorkspaceLocatedObject(position:[0.55,0.03,0.84],capturedAt:1000,sequence:8,
+    view:.init(panDegrees:0,upperTarget:6306))
+  let retained=await handoffToPickup(result.1!.object)
+  precondition(retained?.sequence==11 && retained?.view==result.0[0] && search.calls==0,
+    "Pickup replaced the freshly centered can with another scan candidate")
+  let fallback=await handoffToPickup(nil)
+  precondition(fallback?.sequence==8 && search.calls==1,"Missing target lost ordinary reach selection")
+  search.replacement=nil
+  let missing=await handoffToPickup(nil)
+  precondition(missing==nil && search.calls==2,"Unavailable target was invented")
+  let nonlocal=await handoffToPickup(nil,local:false)
+  precondition(nonlocal==nil && search.calls==2,"Nonlocal task acquired local fallback behavior")
   let hanging=try await exercise("fresh",raised:false)
   precondition(hanging.0.isEmpty && hanging.1?.object?.sequence==10)
   for mode in ["different_can","old_time","old_sequence","old_view","unconfirmed","unreachable"] {
@@ -92,7 +130,7 @@ enum Failure:Error {case changed}
   print("PASS actual grasp focus: clipped finger workspace centered, fresh same-can/source remeasurement required; old view/time/sequence, changed can/body, missing confirmation/reach and cancellation rejected. No hardware or authority.")
  }
 }
-'''.replace('__HELPER__', helper).replace('__SIGHTING__', sighting).replace('__INTEGRATION__', integration)
+'''.replace('__HELPER__', helper).replace('__SIGHTING__', sighting).replace('__INTEGRATION__', integration).replace('__HANDOFF__',handoff)
 with tempfile.TemporaryDirectory(prefix='rob-grasp-focus-') as folder:
     path = Path(folder)
     source, binary = path / 'Fixture.swift', path / 'fixture'

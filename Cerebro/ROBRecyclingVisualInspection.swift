@@ -285,7 +285,9 @@ import CoreImage
         guard p.z>0 else {throw ROBGhostMotionError.blocked("Selected can is outside the fixed visual-servo view.")}
         let u=(k.fx*p.x/p.z+k.cx)/Double(depth.width-1),v=(k.fy*p.y/p.z+k.cy)/Double(depth.height-1)
         let detections=(observation.cans ?? [observation.can]).filter{$0.visuallyUsable && $0.box[0]<=u && $0.box[2]>=u && $0.box[1]<=v && $0.box[3]>=v}
-        guard detections.count==1 else {throw ROBGhostMotionError.blocked("The selected can was not uniquely reacquired for incremental servo.")}
+        guard detections.count==1 else {
+            throw ROBGhostMotionError.blocked("The selected can was not uniquely reacquired for incremental servo: \(detections.count) matching boxes at normalized pixel (\(u), \(v)); selected source \(can.sequence), fresh frame \(reference.sequence). No reach sent.")
+        }
         let projection=VisualProjection(trial:trial,map:map,cameraToModel:matrix,frameContractIdentity:try visualFrameContract(reference),pendingID:pending)
         try validateVisualProjection(projection,scope:scope,frame:reference,model:model)
         let view=try incrementalCanViewIdentity(scope:scope,trial:trial,frame:reference)
