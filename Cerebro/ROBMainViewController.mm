@@ -6070,12 +6070,21 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void) showROB_Torso_Controls
 {
-    NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil]; // get a reference to the storyboard
-    self.torsoControlsWindowController = [storyBoard instantiateControllerWithIdentifier:@"TorsoControlsWindowController"]; // instantiate your window controller
-    [self.torsoControlsWindowController showWindow:self]; // show the window}
-    self.torsoControlsViewController = (ROBTorsoControlsViewController *)self.torsoControlsWindowController.contentViewController;
-    [self.torsoControlsViewController setRobMainViewController:self];
-    [self.torsoControlsViewController bindArm_controls];
+    if (self.torsoControlsWindowController == nil) {
+        NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil];
+        self.torsoControlsWindowController = [storyBoard instantiateControllerWithIdentifier:@"TorsoControlsWindowController"];
+        self.torsoControlsViewController = (ROBTorsoControlsViewController *)self.torsoControlsWindowController.contentViewController;
+        (void)self.torsoControlsViewController.view;
+        [self.torsoControlsViewController setRobMainViewController:self];
+        [self.torsoControlsViewController bindArm_controls];
+    }
+    [self.torsoControlsWindowController showWindow:self];
+    [self.torsoControlsWindowController.window makeKeyAndOrderFront:self];
+}
+
+- (IBAction)showTorsoServoControls:(id)sender
+{
+    [self showROB_Torso_Controls];
 }
 
 

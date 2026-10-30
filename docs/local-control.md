@@ -61,7 +61,7 @@ bounds and Stop paths as Cerebro. They do not ask for another spoken approval.
 | `motion.move` | `values`: sparse Animation Studio channels; `seconds`: 0.65–600. One coordinated linear clip from fresh native state. Omitted channels retain their values. |
 | `animation.play` | Exact `sequence_id` and current `revision` from `animation.list`; freezes that saved sequence for native playback. |
 | `arm.mode` | Physical `arm`: `left`/`right`; `action`: `position`/`deactivate`. CLI deactivation requires fresh measured hanging. |
-| `gripper.command` | Physical `arm`, `action`: `hold`/`release`. Hold defaults to vendor intensity 1; optional `intensity` accepts 1 or 2. Release stays 10. No full-travel calibration or automatic force escalation. Accepted jaw dispatch is unverified travel/retention. |
+| `gripper.command` | Physical `arm`, `action`: `hold`/`release`. Hold defaults to vendor intensity 2; optional `intensity` accepts 1 or 2. Release stays 10. No full-travel calibration or automatic force escalation. Accepted jaw dispatch is unverified travel/retention. |
 | `neck.pose` | Integer `pan`, `lower`, `upper` Maestro targets through the native coupled neck gateway; returns submitted, not measured arrival. |
 | `torso.configure` | `source`: `tic_counts`. Selects native count feedback without energizing, resetting the counter or asserting alignment. |
 | `torso.reference` | `observed_degrees`: actual observed torso-to-base angle, −180…180, with fresh stopped feedback. Sets only the host's software reference. |
@@ -76,10 +76,12 @@ handles this mapping. Other channels are `maestro.N` in quarter-microseconds,
 canonical Animation Studio channel limits. Maestro 6–9 remain owned by Bubble
 controls. LACT is timed output, not measured lean position.
 
-The October 30 can task reduces native recycling grasps to intensity 1 after
-the operator reported crushing at the previous setting. This is the vendor's
-minimum command value, not half the measured pressure. A failed grasp does not
-automatically escalate force. Local camera observations must verify retention.
+The operator restored the previous can-grip intensity 2 on October 30 after
+identifying startup jaw calibration as a possible cause of crushing. Automatic
+startup calibration remains disabled by passive startup. Intensity is a vendor
+command, not measured pressure; local camera observations must verify retention.
+Explicit intensity 1 remains available, and a failed grasp does not automatically
+escalate force.
 `status.navigation` exposes authenticated SLAM pose and map freshness; those
 fields alone do not certify a travel corridor.
 
@@ -136,6 +138,11 @@ For an inactive mission whose payload uncertainty has been physically resolved,
 operator's observation only; it sends no jaw command and adds no transfer credit.
 
 ## Quiet, passive overnight operation
+
+The **Servos** menu opens **Torso Servo Controls…** (arms, Maestro channels and
+Animation Studio) and **Torso Rotation…** (stepper power, alignment and motion).
+Reopening the servo panel reuses its existing controls and edits. These windows
+remain available when automatic diagnostic windows are suppressed.
 
 ```sh
 Scripts/cerebroctl.py runtime.profile --params '{"quiet_diagnostics":true,"passive_startup":true}'

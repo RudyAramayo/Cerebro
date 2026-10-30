@@ -139,7 +139,7 @@ import CoreFoundation
                       let action=request.parameters["action"] as? String else { throw ROBLocalControlError("Specify a physical arm and action") }
                 let gripper=operation == "gripper.command"
                 guard (gripper ? ["hold","release"] : ["position","deactivate"]).contains(action) else { throw ROBLocalControlError("Unsupported action") }
-                let intensity = gripper && action == "hold" ? try request.number("intensity",default:1,range:1...2) : 10
+                let intensity = gripper && action == "hold" ? try request.number("intensity",default:Double(ROBTabletopPickPlace.recyclingIntensity),range:1...2) : 10
                 guard intensity.rounded()==intensity,
                       request.parameters["intensity"] == nil || (gripper && action == "hold") else {
                     throw ROBLocalControlError("Hold intensity must be 1 or 2; release remains 10")
@@ -154,7 +154,7 @@ import CoreFoundation
                 let nativeOperation=gripper ? (action == "hold" ? "close_gripper" : "open_gripper") : action
                 ROBControllerArmApproval.shared.performLocalPanelGatewayCommand(operation:nativeOperation,arm:arm,
                     summary:"Explicit local CLI \(arm) \(action)",command:{
-                        if gripper {return gateway.controlGripperUsingExistingDeviceState(forArm:wire,action:action,holdIntensity:action == "hold" ? Int(intensity) : 1)}
+                        if gripper {return gateway.controlGripperUsingExistingDeviceState(forArm:wire,action:action,holdIntensity:action == "hold" ? Int(intensity) : ROBTabletopPickPlace.recyclingIntensity)}
                         return action == "position" ? gateway.enterPositionMode(forArm:wire) : gateway.deactivateArm(wire)
                     },completion:{ result in
                         let status=result["status"] as? String ?? "failed"

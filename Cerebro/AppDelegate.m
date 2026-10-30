@@ -165,6 +165,18 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     openItem.target = self;
     [submenu addItem:openItem];
 
+    NSMenuItem *torsoServosItem = [[NSMenuItem alloc] initWithTitle:@"Torso Servo Controls…"
+        action:@selector(showTorsoServoControls:) keyEquivalent:@""];
+    torsoServosItem.target = self;
+    torsoServosItem.toolTip = @"Open arm, Maestro servo, and animation controls.";
+    [submenu addItem:torsoServosItem];
+
+    NSMenuItem *torsoRotationItem = [[NSMenuItem alloc] initWithTitle:@"Torso Rotation…"
+        action:@selector(showTorsoRotation:) keyEquivalent:@""];
+    torsoRotationItem.target = self;
+    torsoRotationItem.toolTip = @"Open torso stepper power, alignment, and rotation controls.";
+    [submenu addItem:torsoRotationItem];
+
     NSMenuItem *bubbleItem = [[NSMenuItem alloc] initWithTitle:@"Bubble Targeting…"
         action:@selector(showBubbleTargeting:) keyEquivalent:@""];
     bubbleItem.target = self;
@@ -196,6 +208,24 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (IBAction)showBubbleTargeting:(id)sender
 {
     [[ROBBubbleWindowController shared] showWindow:sender];
+}
+
+- (IBAction)showTorsoServoControls:(id)sender
+{
+    for (NSWindow *window in NSApp.windows) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:window.contentViewController];
+        if (mainViewController != nil) {
+            [mainViewController showTorsoServoControls:sender];
+            return;
+        }
+    }
+    NSBeep();
+}
+
+- (IBAction)showTorsoRotation:(id)sender
+{
+    [[ROBTorsoControlCenter shared] showControls:sender];
 }
 
 - (void)installDevelopmentMenu
