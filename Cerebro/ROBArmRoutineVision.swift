@@ -1248,6 +1248,18 @@ enum ROBWorkspaceLocalCanShapePrior {
 /// Attention only: current detector boxes can request at most two fresh
 /// views. A rejected plane/shape never becomes an accepted can by recentering.
 enum ROBWorkspaceCanRecenterPlan {
+    /// A grasp needs room around the can for both fingers. This is only a
+    /// requested view; the caller must reacquire the same can and fresh depth.
+    static func graspFocusView(sighting:ROBWorkspaceRecall.Sighting,
+        nowMilliseconds:Double,boundedPan:(Double)->Double)->ROBWorkspaceView? {
+        guard sighting.target == .can,sighting.valid,nowMilliseconds.isFinite,
+              (0...30_000).contains(nowMilliseconds-sighting.capturedAt),
+              sighting.box[0]<0.15 || sighting.box[1]<0.20 || sighting.box[2]>0.85 || sighting.box[3]>0.80 else{return nil}
+        let centered=sighting.centeredView,pan=boundedPan(centered.panDegrees)
+        guard pan.isFinite,abs(pan-sighting.view.panDegrees)>3 || abs(centered.upperTarget-sighting.view.upperTarget)>100 else{return nil}
+        return .init(panDegrees:pan,upperTarget:centered.upperTarget)
+    }
+
     /// One current RGB exposure may request attention, never object geometry.
     /// Recenter a clipped silhouette before another full workspace raster.
     static func clippedAttentionViews(sightings:[ROBWorkspaceRecall.Sighting],
@@ -2714,6 +2726,7 @@ struct ROBWorkspaceCanSelection {
         else { tabletopCanBaseHeight = nil }
         var selectedCanMeasurement: ROBWorkspaceLocatedObject?
         var currentCanSightings:[ROBWorkspaceRecall.Sighting]=[]
+        var canSourceSightings:[UInt64:[(object:ROBWorkspaceLocatedObject,sighting:ROBWorkspaceRecall.Sighting)]]=[:]
         var reachSelections:[[String:Any]]=[]
         var localReachSelection:ROBWorkspaceCanSelection?
         var localReachSelectionRequired=false
@@ -3062,6 +3075,11 @@ struct ROBWorkspaceCanSelection {
                             estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
                         confirmedCanCandidates.observe(candidates.map(\.object),context:candidateContext,
                             nowMilliseconds:Date().timeIntervalSince1970*1000)
+                        canSourceSightings[frame.sequence]=candidates.map { candidate in
+                            (candidate.object,ROBWorkspaceRecall.Sighting(target:.can,view:view,box:candidate.detection.box,
+                                confidence:candidate.object.confidence,capturedAt:frame.capturedAt))
+                        }
+                        if canSourceSightings.count>32,let oldest=canSourceSightings.keys.min() {canSourceSightings.removeValue(forKey:oldest)}
                         // Keep the same currently observed instance across
                         // frames; a remembered point only ranks fresh objects.
                         let selected: (detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)?
@@ -3325,7 +3343,7 @@ struct ROBWorkspaceCanSelection {
                     throw ROBWorkspaceDepthMapError.invalidFrame
                 }
             }
-            func rankCurrentCans(_ stage:String) async throws ->ROBWorkspaceCanSelection {
+            func rankCurrentCans(_ stage:String,candidates:[ROBWorkspaceLocatedObject]?=nil) async throws ->ROBWorkspaceCanSelection {
                 try await searchCheckpoint();try requireTargetedContext()
                 guard let input=collisionMap,
                       let snapshot=await Task.detached(priority:.userInitiated,operation:{input.snapshot()}).value else {
@@ -3336,7 +3354,7 @@ struct ROBWorkspaceCanSelection {
                     sessionGeneration:sceneGatewayGeneration,bodyMotionIdentity:body,modelID:model.modelID,
                     geometryID:model.geometryID,mappingID:model.selectedMappingID,
                     estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
-                let result=await selectReachableCan(candidates:confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000),
+                let result=await selectReachableCan(candidates:candidates ?? confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000),
                     model:model,baseline:reachBaseline,map:snapshot,nowMilliseconds:Date().timeIntervalSince1970*1000,
                     contextIsCurrent:{(try? requireTargetedContext()) != nil && confirmedCanCandidates.context==expected})
                 try await searchCheckpoint();try requireTargetedContext()
@@ -3362,6 +3380,29 @@ struct ROBWorkspaceCanSelection {
                         "shape_thresholds_changed":false,"path_admitted":false])
                     if localReachSelection?.object != nil {found[.can]=localReachSelection!.object;break}
                 }
+            }
+            if armAlreadyAtGraspReady,let selected=localReachSelection?.object,
+               let source=canSourceSightings[selected.sequence]?.first(where:{$0.object.position==selected.position})?.sighting,
+               let focus=ROBWorkspaceCanRecenterPlan.graspFocusView(sighting:source,
+                    nowMilliseconds:Date().timeIntervalSince1970*1000,boundedPan:boundedPan ?? {max(-45,min(45,$0))}) {
+                try await searchCheckpoint();try requireTargetedContext()
+                let began=Date().timeIntervalSince1970*1000
+                found.removeValue(forKey:.can);locationConfirmation.invalidate(.can);selectedCanMeasurement=selected
+                progress("Centering the selected can and finger workspace, then measuring it again.")
+                try await inspectWithRetry(focus)
+                try await searchCheckpoint();try requireTargetedContext()
+                let centered=confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000).filter {
+                    $0.sequence>selected.sequence && $0.capturedAt>=began && $0.view==focus &&
+                        simd_distance($0.point,selected.point)<=0.05
+                }
+                localReachSelection=try await rankCurrentCans("centered_grasp_view",candidates:centered)
+                guard let reacquired=localReachSelection?.object else {
+                    throw ROBArmRoutineError.blocked("The selected can needs fresh confirmed geometry in its centered grasp view; no reach sent.")
+                }
+                found[.can]=reacquired
+                evidence.append(["centered_grasp_view":true,"pan":focus.panDegrees,"upper":focus.upperTarget,
+                    "original_sequence":NSNumber(value:selected.sequence),"reacquired_sequence":NSNumber(value:reacquired.sequence),
+                    "reacquired_captured_at_ms":reacquired.capturedAt,"path_admitted":false])
             }
         }
         // The fast object search need not see the selected hanging arm. Add
