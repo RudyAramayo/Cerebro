@@ -108,6 +108,15 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
   let unsettledMotion=try model.maximumArmHullDisplacement(from:imageQ,to:unsettled,openJawPadding:0.04)
   precondition(unsettledMotion>0.003)
   print("PASS recorded can-entry exposure/current hold: summed-lever",imageOld*1000,"mm; complete modeled hull",imageMotion*1000,"mm; larger wrist settlement still needs a newer image")
+  let holdingModes=Array(repeating:2,count:7)
+  precondition(!ROBCanRecyclingReadyPose.matches(currentQ,physicalSide:"right"))
+  precondition(ROBCanRecyclingReadyPose.isRaisedSearchHold(model:model,measured:currentQ,modes:holdingModes))
+  precondition(!ROBCanRecyclingReadyPose.isRaisedSearchHold(model:model,measured:Array(repeating:0,count:7),modes:holdingModes))
+  precondition(!ROBCanRecyclingReadyPose.isRaisedSearchHold(model:model,measured:currentQ,modes:[2,2,2,0,2,2,2]))
+  precondition(!ROBCanRecyclingReadyPose.isRaisedSearchHold(model:model,measured:[],modes:holdingModes))
+  var invalidHold=currentQ;invalidHold[4] = .nan
+  precondition(!ROBCanRecyclingReadyPose.isRaisedSearchHold(model:model,measured:invalidHold,modes:holdingModes))
+  print("PASS actual raised approach hold avoids taught-pose detour; hanging, inactive and invalid feedback remain ineligible")
   let actual=[0.0,-0.0272707695624114,0,-0.01308996938995747,0,0,0]
   let firstBaseline=[0.0,-0.01949860023712415,0,0,0,0,0]
   let firstGoal=[0.0,-0.1282092619004997,0,-0.1435886966215985,0,0,0]

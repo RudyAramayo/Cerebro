@@ -352,6 +352,13 @@ enum ROBCanRecyclingReadyPose {
         guard measured.count==7,measured.allSatisfy(\.isFinite),let goal=try?target(physicalSide:physicalSide) else{return false}
         return reached(measured,goal:goal)
     }
+    /// Only omits an unnecessary empty preparation move. The caller still
+    /// needs fresh stationary feedback and a new workspace/approach review.
+    /// This does not make the measured pose a saved calibration target.
+    static func isRaisedSearchHold(model:ROBGhostRobotModel,measured:[Double],modes:[Int])->Bool {
+        modes.count==7 && modes.allSatisfy{$0==2} &&
+            model.torsoTurnVerticalClearance(vendorJoints:measured).map{$0>=0.03}==true
+    }
     static func reached(_ measured:[Double],goal:[Double])->Bool {
         ROBArmRoutinePlan.near(measured,goal,tolerance:jointTolerance)
     }

@@ -14,7 +14,9 @@ fixture=r'''
 import Foundation
 enum ROBArmRoutineError:Error {case blocked(String)}
 enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double],tolerance:Double=0.08)->Bool {a.count==7 && b.count==7 && zip(a,b).allSatisfy{abs($0-$1)<=tolerance}}}
-struct ROBGhostRobotModel {}
+struct ROBGhostRobotModel {var raised=false}
+enum ROBCanRecyclingReadyPose {static func isRaisedSearchHold(model:ROBGhostRobotModel,measured:[Double],modes:[Int])->Bool {model.raised}}
+struct Gateway {func modes(forArm:String)->[NSNumber] {Array(repeating:2,count:7)}}
 enum ROBEmptyArmLiftGeometry {static func acceptsOperatorClearedInitialStart(_ q:[Double])->Bool {false}}
 struct Map {}
 struct Step {let positions:[Double];var jawAction:String?=nil}
@@ -26,6 +28,7 @@ struct Sample {let positionsRadians:[NSNumber]}
  var recyclingCan:Int?,generation:UInt64=1,referencedGeneration:UInt64=0
  var phase="",collisionMap:Map?,collisionModel:ROBGhostRobotModel?,collisionReviewProposal:Proposal?,proposal:Proposal?,proposalStep = -1
  var activeCameraCollisionAdvisory=false
+ var usesHeldCanPreparation=false,arm="left",gateway=Gateway(),model=ROBGhostRobotModel()
  var activeApproachCanThenHold=false,activeHoldAfterInitialEmptyLift=false,inactiveWorkspaceSearch=false,taskJawTarget:[Double]?,cameraReady=false,positionReady=false,sceneCapturedForThisTask=false,localReceiptHeldNeckIdentity:String?
  var q=Array(repeating:0.0,count:7),events:[String]=[],failureAt="",retreat=false,stopAfterMove=false
  func check()throws{if failureAt=="stop"{throw ROBArmRoutineError.blocked("Stop")}}
@@ -43,7 +46,7 @@ struct Sample {let positionsRadians:[NSNumber]}
  func move(_ p:Proposal)async throws{events.append("move");if failureAt=="dispatch"{throw ROBArmRoutineError.blocked("fresh proof expired")};q=p.steps.last!.positions;armTravelDispatched=true;if stopAfterMove{failureAt="stop"}}
  func holdTaskPosition(_ goal:[Double])async throws{events.append("hold");if failureAt=="endpoint"{q[0]+=0.1};if failureAt=="possession"{servoPossiblePayloadUncertain=true}}
  /* ACTUAL */
- func task()async throws {if try await prepareRecyclingBeforeTargetSearch(model:.init())==nil{events.append("target search")}}
+ func task()async throws {if try await prepareRecyclingBeforeTargetSearch(model:model)==nil{events.append("target search")}}
 }
 @main enum Test {
  @MainActor static func main()async throws {
@@ -56,6 +59,14 @@ struct Sample {let positionsRadians:[NSNumber]}
   let resumed=Trial();resumed.activeCameraCollisionAdvisory=true;resumed.q[5]=0.03
   try await resumed.task()
   precondition(resumed.events.contains("staged path"),"Interrupted taught move required a return to hanging")
+  let raised=Trial();raised.activeCameraCollisionAdvisory=true;raised.usesHeldCanPreparation=true;raised.model.raised=true;raised.q[1] = -1.48
+  let originalRaised=raised.q;try await raised.task()
+  precondition(raised.events==["target search"] && raised.q==originalRaised && raised.recyclingReadyEstablished && !raised.armTravelDispatched && !raised.jawCommandDispatched,"Raised hold took a preparation detour")
+  for failure in ["receipt","feedback","stop"] {
+   let t=Trial();t.activeCameraCollisionAdvisory=true;t.usesHeldCanPreparation=true;t.model.raised=true;t.failureAt=failure
+   do {try await t.task();preconditionFailure("Raised hold bypassed current context: \(failure)")}catch{}
+   precondition(t.events.isEmpty && !t.recyclingReadyEstablished)
+  }
   for failure in ["receipt","feedback","stop","map","retreat","endpoint","possession"] {
    let t=Trial();t.failureAt=failure
    do {try await t.task();preconditionFailure("Rejected preparation continued: \(failure)")}catch{}

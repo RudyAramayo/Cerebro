@@ -21,7 +21,7 @@ assert 'activeHoldAfterInitialEmptyLift = localReceiptCommand != nil && holdAfte
 assert 'if holdAfterInitialEmptyLiftEnabled {value["holdAfterInitialEmptyLiftEnabled"]=true}' in context
 assert '#if !DEBUG' in source and 'Initial empty lift-and-hold is available only in DEBUG' in source
 assert 'No jaw commands or startup jaw calibration, grasp, payload, carry, release, return, rescan after lifting, next can or chained motion' in source
-assert 'if !activeHoldAfterInitialEmptyLift,!ROBGripperStartupCalibration.shared.calibrationReady' in single
+assert 'if !activeHoldAfterInitialEmptyLift,!usesHeldCanPreparation,!ROBGripperStartupCalibration.shared.calibrationReady' in single
 assert branch.index('initialEmptyLiftHoldResult(performed:true)')<branch.index('return try await executeSingle(command)')
 assert 'initialEmptyLiftHoldResult(performed:false)' in branch
 for guard in ['reviewInitialRetreatWithCoverage','reviewInitialLocalRetreat','requireLiveVisualTrial','checkCollisionContext','proof.maximumHullTravelMeters+admissionDrift<=0.060','!jawCommandDispatched','!jawSetupDispatchUncertain']:
@@ -38,12 +38,20 @@ fixture=r'''
 import Foundation
 enum ROBArmRoutineError:Error {case blocked(String)}
 typealias ROBGhostRobotModel=Int
+enum ROBCanRecyclingReadyPose {
+ static func isRaisedSearchHold(model:ROBGhostRobotModel,measured:[Double],modes:[Int])->Bool {false}
+ static func matches(_ q:[Double],physicalSide:String)->Bool {false}
+}
+extension Int {var registrationID:String? {nil}}
+struct Gateway {func modes(forArm:String)->[NSNumber] {Array(repeating:2,count:7)}}
 enum ROBEmptyArmLiftGeometry {static func acceptsOperatorClearedInitialStart(_ q:[Double])->Bool {false}}
 enum ROBArmRoutinePlan {static func near(_ a:[Double],_ b:[Double],tolerance:Double=0.025)->Bool {zip(a,b).allSatisfy{abs($0-$1)<=tolerance}}}
 enum ROBRecyclingBatchRequest {static func executionCount(requestedCount:Int,standingRemainingTransfers:Int?)->Int? {requestedCount}}
 struct Feedback {let positionsRadians=[NSNumber](repeating:0,count:7)}
 @MainActor final class Harness {
  var activeCameraCollisionAdvisory=false
+ var usesHeldCanPreparation=false,arm="left",gateway=Gateway()
+ var missionTaskAuthorization:(()->Bool)?,q=Array(repeating:0.0,count:7),activeCanGraspAndHold=false
  var activeHoldAfterInitialEmptyLift=false,holdAfterInitialEmptyLiftEnabled=false,activeApproachCanThenHold=false
  var localReceiptCommand:String?="right_recycle_cans",physicalSide="right"
  var jawCommandDispatched=false,jawSetupDispatchUncertain=false,recyclingGripDispatched=false,stopped=false

@@ -2833,7 +2833,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             let calibrationFile = selectedCanReachCalibrationFile
             var objects = try await ROBWorkspaceSearch.shared.run(targets: (activeHoldAfterInitialEmptyLift || activeApproachCanThenHold || activeCanGraspAndHold) ? [.can]:ROBWorkspaceTarget.allCases,
                 model: model, requireDepth: true,surveyFrontTable:usesHeldCanPreparation,
-                armAlreadyAtGraspReady:usesHeldCanPreparation && ROBCanRecyclingReadyPose.matches(searchBaseline,physicalSide:physicalSide),
+                armAlreadyAtGraspReady:usesHeldCanPreparation && (recyclingReadyEstablished || ROBCanRecyclingReadyPose.matches(searchBaseline,physicalSide:physicalSide)),
                 permitsLocalCanShapePrior:{
                     guard self.localReceiptCommand != nil else {return false}
                     _ = try self.requireLocalReceipt()
@@ -3211,6 +3211,15 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         guard referencedGeneration == generation || activeCameraCollisionAdvisory ||
               ROBArmRoutinePlan.near(start,Array(repeating:0,count:7)) else {
             throw ROBArmRoutineError.blocked("Empty preparation needs the current joint reference; no blind return or encoder reset.")
+        }
+        if usesHeldCanPreparation,activeCameraCollisionAdvisory,
+           ROBCanRecyclingReadyPose.isRaisedSearchHold(model:model,measured:start,
+                modes:gateway.modes(forArm:arm).map(\.intValue)) {
+            // Continue from the actual raised hold after an interrupted empty
+            // approach. Do not send the historical ready pose to obtain it.
+            referencedGeneration=generation;recyclingReadyEstablished=true
+            update("Searching from the current measured raised hold; no ready-pose detour")
+            return nil
         }
         phase="empty preparation: workspace clearance"
         update(activeCameraCollisionAdvisory ? "Checking the taught ready pose from current measured feedback" : "Checking a J2/J4 empty lift from the current arm pose before searching for cans")
