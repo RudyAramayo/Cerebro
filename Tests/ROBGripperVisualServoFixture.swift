@@ -13,6 +13,17 @@ import Foundation
   let cfg=ROBGripperVisualServo.Configuration(jointBounds:Array(repeating:-1.0...1.0,count:7),correctingJointIndices:[0,1])
   let roi=ROBGripperVisualServo.ROI(xMin:0.25,yMin:0.2,xMax:0.70,yMax:0.8)
   let target=ROBGripperVisualServo.Target(id:"unique-can",boxNormalized:[0.60,0.42,0.66,0.51],geometryAssumed:true,assumedDepthMeters:0.60,assumedDiameterMeters:0.066)
+  // A measured cylinder must pass actual jaw/target range agreement rather
+  // than inheriting the local prior's explicitly assumed range admission.
+  for z in [0.60,0.70] {
+   var measuredController=ROBGripperVisualServo.Controller(configuration:cfg)
+   let measuredTarget=ROBGripperVisualServo.Target(id:"measured-can",boxNormalized:[0.47,0.42,0.53,0.51],measuredDepthMeters:z)
+   _=measuredController.update(frame:frame(1,1000,open:false),target:measuredTarget,searchROI:roi,nowMilliseconds:1020)
+   _=measuredController.update(frame:frame(2,1200,command:1100),target:measuredTarget,searchROI:roi,nowMilliseconds:1220)
+   let result=measuredController.update(frame:frame(3,1400),target:measuredTarget,searchROI:roi,nowMilliseconds:1420)
+   precondition(result.observation != nil && result.readyToGrip == (z==0.60))
+   precondition(result.diagnostics["geometry_assumed"]==0 && result.diagnostics["range_verified"]==(z==0.60 ? 1:0))
+  }
   var controller=ROBGripperVisualServo.Controller(configuration:cfg)
   let before=controller.update(frame:frame(1,1000,open:false),target:target,searchROI:roi,nowMilliseconds:1020)
   precondition(before.observation==nil && before.jointTarget==nil)

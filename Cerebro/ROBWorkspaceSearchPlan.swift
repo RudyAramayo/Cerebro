@@ -408,6 +408,19 @@ struct ROBWorkspaceCanSections: Codable {
     /// them to an estimated cylinder axis; legacy section records lack this.
     var surfaceToAxisOffsetMeters: [Double]? = nil
     var shapePriorEvidence: ShapePriorEvidence? = nil
+    /// A servo target needs an axis cylinder, rather than legacy surface-only
+    /// bands. Measured bands and the explicitly scoped local prior are distinct
+    /// sources; subsequent frames must retain the selected source.
+    var hasCylinderAxisGeometry: Bool {
+        valid && (surfaceToAxisOffsetMeters != nil || shapePriorEvidence?.valid == true)
+    }
+    func reacquireForVisualServo(measured: () -> Self?, assumed: () -> Self?) -> Self? {
+        guard hasCylinderAxisGeometry else { return nil }
+        let current = shapePriorEvidence == nil ? measured() : assumed()
+        guard let current, current.hasCylinderAxisGeometry,
+              (current.shapePriorEvidence == nil) == (shapePriorEvidence == nil) else { return nil }
+        return current
+    }
     var valid: Bool {
         guard [top,middle,bottom].allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
               heightMeters.isFinite, (0.09...0.18).contains(heightMeters),

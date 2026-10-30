@@ -4348,9 +4348,9 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
     @MainActor private func performIncrementalCanGrasp(_ entry:ROBLeftGestureProposal) async throws->NSDictionary {
         guard localReceiptCommand != nil,!nominalEmptyCommissioningStepEnabled,!oneDegreeEmptyCalibrationStepEnabled,
               let map=collisionMap,let model=collisionModel,let trial=entry.workspaceCollisionPlan?.context.visualTrial,
-              let can=recyclingCan,can.sections?.shapePriorEvidence?.valid==true,!recyclingGripDispatched,
+              let can=recyclingCan,can.sections?.hasCylinderAxisGeometry==true,!recyclingGripDispatched,
               entry.recyclingActions?.values.contains(.grip)==true else {
-            throw ROBGhostMotionError.blocked("The incremental grasp needs its exact local receipt, real checked entry and selected can; no imported or calibration-only path is accepted.")
+            throw ROBGhostMotionError.blocked("The incremental grasp needs its exact local receipt, real checked entry and selected measured or explicitly assumed can cylinder; no imported or calibration-only path is accepted.")
         }
         try requireLiveVisualTrial(trial,map:map,model:model)
         let context=try await ROBRecyclingVisualInspection.beginIncrementalVisualServo(model:model,can:can,map:map,trial:trial,gatewayArm:arm,

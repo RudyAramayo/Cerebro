@@ -337,20 +337,29 @@ import CoreImage
         context.request.inputObservation=tracked
         let b=tracked.boundingBox,box=[Double(b.minX),Double(1-b.maxY),Double(b.maxX),Double(1-b.minY)]
         context.targetBox=box;context.lastSequence=frame.sequence
-        var assumedDepth:Double?
+        let geometryAssumed=context.can.sections?.shapePriorEvidence != nil
+        var targetDepth:Double?
         if requireTableSupport {
             let d=ROBWorkspaceDetection(visible:true,confidence:Double(tracked.confidence),box:box,
                 aim:[(box[0]+box[2])/2,(box[1]+box[3])/2],depthPoint:[(box[0]+box[2])/2,(box[1]+box[3])/2],confidenceThreshold:0.35)
-            let prior=ROBWorkspaceSearch.shared.localCanShapePrior(detection:d,allCanDetections:[d],frame:frame,
-                view:context.can.view,model:model,cameraToRobot:projection.cameraToModel)
-            guard let sections=prior.sections,sections.shapePriorEvidence?.valid==true else {
-                throw ROBGhostMotionError.blocked("Current can/table silhouette no longer supports the assumed middle-grasp geometry.")
+            guard let original=context.can.sections,let k=frame.intrinsics,let depth=frame.depth,
+                  let sections=original.reacquireForVisualServo(measured:{
+                      ROBWorkspaceCanSections.measure(detection:d,width:depth.width,height:depth.height,
+                          fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,depth:{depth.distanceMillimeters(x:$0,y:$1)},
+                          view:context.can.view,model:model,cameraToRobot:projection.cameraToModel)
+                  },assumed:{
+                      ROBWorkspaceSearch.shared.localCanShapePrior(detection:d,allCanDetections:[d],frame:frame,
+                          view:context.can.view,model:model,cameraToRobot:projection.cameraToModel).sections
+                  }) else {
+                throw ROBGhostMotionError.blocked(geometryAssumed
+                    ? "Current can/table silhouette no longer supports the assumed middle-grasp geometry."
+                    : "Current can depth bands no longer support the measured middle-grasp cylinder; no assumed replacement or grip was sent.")
             }
             let middle=SIMD3(sections.middle[0],sections.middle[1],sections.middle[2])
             let displacement=simd_distance(middle,context.can.point)
             guard displacement<=0.012 else {throw TargetMoved.displacement(displacement)}
             let optical=simd_inverse(projection.cameraToModel)*SIMD4(middle.x,middle.y,middle.z,1)
-            assumedDepth=optical.z>0 ? optical.z:nil
+            targetDepth=optical.z>0 ? optical.z:nil
         }
         var pixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:frame,scopeIdentity:context.baseline.viewIdentity,
             jointPositions:feedback.positionsRadians.map(\.doubleValue),jointCapturedAtMilliseconds:historicalTime,
@@ -373,14 +382,16 @@ import CoreImage
         }
         pixels.estimatedImageJacobian=estimated // explicitly estimated FK direction, never observed jaw pixels
 
-        let target=ROBGripperVisualServo.Target(id:context.baseline.targetIdentity,boxNormalized:box,geometryAssumed:true,
-            assumedDepthMeters:assumedDepth,assumedDiameterMeters:context.can.sections?.diameterMeters)
+        let target=ROBGripperVisualServo.Target(id:context.baseline.targetIdentity,boxNormalized:box,geometryAssumed:geometryAssumed,
+            assumedDepthMeters:geometryAssumed ? targetDepth:nil,
+            assumedDiameterMeters:geometryAssumed ? context.can.sections?.diameterMeters:nil,
+            measuredDepthMeters:geometryAssumed ? nil:targetDepth)
         let decision=context.controller.update(frame:pixels,target:target,searchROI:roi,nowMilliseconds:now,observationOnly:!requireTableSupport)
         var evidence:[String:Any]=["sequence":NSNumber(value:frame.sequence),"captured_at_ms":frame.capturedAt,
             "can_box":box,"status":String(describing:decision.status),"reason":decision.reason,
             "joint_positions":feedback.positionsRadians.map(\.doubleValue),"joint_captured_at_ms":historicalTime,
             "diagnostics":decision.diagnostics.mapValues{value->Any in if value.isFinite{return value};return NSNull()},"jaw_location_source":"observed_pixels_only_FK_ROI_is_not_a_measurement",
-            "geometry_assumed":true,"ready_to_grip_image_alignment_only":decision.readyToGrip]
+            "geometry_assumed":geometryAssumed,"ready_to_grip_image_alignment_only":decision.readyToGrip]
         if let jaw=decision.observation {evidence["jaw_center_pixels"]=jaw.centerPixels;evidence["jaw_tips_pixels"]=jaw.tipsPixels;evidence["jaw_confidence"]=jaw.confidence;evidence["jaw_evidence_kind"]=jaw.evidenceKind}
         context.observations.append(evidence)
         if context.firstCanMiddlePixels==nil {context.firstCanMiddlePixels=decision.canMiddlePixels}
