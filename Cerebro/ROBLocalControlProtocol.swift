@@ -10,7 +10,7 @@ struct ROBLocalControlRequest {
     let session: String?
     let sentAt: Double
     static let readOperations: Set<String> = ["status", "camera.frame", "animation.list", "mission.status", "mission.plan"]
-    static let operations = readOperations.union(["camera.demand", "runtime.profile", "motion.move", "arm.mode", "gripper.command", "animation.play", "torso.turn", "mission.start", "mission.confirm_empty", "stop"])
+    static let operations = readOperations.union(["camera.demand", "runtime.profile", "motion.move", "arm.mode", "gripper.command", "animation.play", "neck.pose", "torso.configure", "torso.reference", "torso.turn", "mission.start", "mission.confirm_empty", "stop"])
     var mutates: Bool { !Self.readOperations.contains(operation) }
 
     init(data: Data, now: Double = Date().timeIntervalSince1970 * 1000) throws {

@@ -1079,6 +1079,9 @@ enum ROBTabletopPickPlace {
     static let stages = ["Pickup approach", "Grasp can", "Small lift", "Bucket release", "Retreat"]
     static let savedKey = "ROBTabletopPickPlace.v1"
     static let intensity = 2
+    // Empty aluminum cans dented at the previous setting. Vendor units are
+    // not calibrated force; verify possession after this minimum-intensity grip.
+    static let recyclingIntensity = 1
 
     static func saved() -> ROBGhostGesture? {
         guard let data = UserDefaults.standard.data(forKey: savedKey), data.count <= 200_000,

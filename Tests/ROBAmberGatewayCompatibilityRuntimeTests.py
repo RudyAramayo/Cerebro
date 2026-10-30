@@ -238,8 +238,12 @@ struct GatewayCompatibilityFixtures {
         expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
                "Stale feedback admitted an existing-device attempt")
         try existingFeedback()
-        for (action, force) in [("hold", 2), ("release", 10)] {
-            let id = existing.controlGripperUsingExistingDeviceState(forArm: "left", action: action)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold", holdIntensity: 0) == 0,
+               "Zero-intensity attempt was admitted")
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold", holdIntensity: 3) == 0,
+               "Existing-device intensity escalated")
+        for (action, force) in [("hold", 1), ("hold", 2), ("release", 10)] {
+            let id = existing.controlGripperUsingExistingDeviceState(forArm: "left", action: action, holdIntensity: action == "hold" ? force : 1)
             expect(id > 0, "Explicit bounded attempt was rejected")
             try existing.fixtureReceive([
                 "type": "gripper_control_existing_ack", "command_id": id, "arm": "left",

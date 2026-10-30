@@ -1124,10 +1124,11 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     /// Explicit local-panel attempt using the device's current state. Does
     /// not run calibration or promote unknown calibration to accepted.
     @discardableResult public func controlGripperUsingExistingDeviceState(
-        forArm arm: String, action: String
+        forArm arm: String, action: String, holdIntensity: Int = 2
     ) -> UInt64 {
-        sendGripperCommand(type: "gripper_control_existing", arm: arm,
-            action: action, force: action == "hold" ? 2 : 10)
+        guard (1...2).contains(holdIntensity) else { return 0 }
+        return sendGripperCommand(type: "gripper_control_existing", arm: arm,
+            action: action, force: action == "hold" ? holdIntensity : 10)
     }
 
     /// Queue-consistent snapshots for motion validation and rendering. The
@@ -1432,7 +1433,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 else { return 0 }
                 if type == "gripper_control_existing" {
                     guard existingDeviceGripperControlAvailable,
-                          force == (action == "hold" ? 2 : 10),
+                          (action == "hold" ? (1...2).contains(force) : force == 10),
                           let sample = arm == "left" ? leftTelemetry : rightTelemetry,
                           sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
                           sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,

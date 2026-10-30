@@ -134,11 +134,16 @@ import CoreFoundation
                 clip.easing = .linear
                 finish(.success(try play(.init(name:"Local command \(request.id.uuidString)",clips:[clip]),id:request.id)))
             case "arm.mode", "gripper.command":
-                try request.only(["arm","action"])
+                try request.only(operation == "gripper.command" ? ["arm","action","intensity"] : ["arm","action"])
                 guard let arm=request.parameters["arm"] as? String,["left","right"].contains(arm),
                       let action=request.parameters["action"] as? String else { throw ROBLocalControlError("Specify a physical arm and action") }
                 let gripper=operation == "gripper.command"
                 guard (gripper ? ["hold","release"] : ["position","deactivate"]).contains(action) else { throw ROBLocalControlError("Unsupported action") }
+                let intensity = gripper && action == "hold" ? try request.number("intensity",default:1,range:1...2) : 10
+                guard intensity.rounded()==intensity,
+                      request.parameters["intensity"] == nil || (gripper && action == "hold") else {
+                    throw ROBLocalControlError("Hold intensity must be 1 or 2; release remains 10")
+                }
                 let wire=arm == "right" ? "left" : "right", gateway=ROBAmberGatewayClient.shared
                 if !gripper,action == "deactivate" {
                     guard let feedback=gateway.telemetry(forArm:wire),feedback.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds,
@@ -149,7 +154,7 @@ import CoreFoundation
                 let nativeOperation=gripper ? (action == "hold" ? "close_gripper" : "open_gripper") : action
                 ROBControllerArmApproval.shared.performLocalPanelGatewayCommand(operation:nativeOperation,arm:arm,
                     summary:"Explicit local CLI \(arm) \(action)",command:{
-                        if gripper {return gateway.controlGripperUsingExistingDeviceState(forArm:wire,action:action)}
+                        if gripper {return gateway.controlGripperUsingExistingDeviceState(forArm:wire,action:action,holdIntensity:action == "hold" ? Int(intensity) : 1)}
                         return action == "position" ? gateway.enterPositionMode(forArm:wire) : gateway.deactivateArm(wire)
                     },completion:{ result in
                         let status=result["status"] as? String ?? "failed"
@@ -157,6 +162,26 @@ import CoreFoundation
                             finish(.success(result as? [String:Any] ?? ["status":status]))
                         } else {finish(.failure(ROBLocalControlError(result["detail"] as? String ?? status)))}
                     })
+            case "neck.pose":
+                try request.only(["pan","lower","upper"])
+                guard let serial,!ROBRecycleMissionCoordinator.shared.active,!ROBAnimationPlayback.shared.isRunning else { throw ROBLocalControlError("Neck runtime unavailable or native motion busy") }
+                let pan=try request.number("pan",range:4000...8000),lower=try request.number("lower",range:4000...8000),upper=try request.number("upper",range:4000...8000)
+                guard [pan,lower,upper].allSatisfy({$0.rounded()==$0}) else { throw ROBLocalControlError("Neck targets must be whole quarter-microseconds") }
+                let result=serial.requestOperatorNeckPosePanTarget(Int(pan),lowerTarget:Int(lower),upperTarget:Int(upper))
+                guard result != .rejected else { throw ROBLocalControlError(serial.neckCommandSafetyStatus) }
+                finish(.success(["status":"submitted","measured_arrival":false,"detail":serial.neckCommandSafetyStatus]))
+            case "torso.configure":
+                try request.only(["source"])
+                guard request.parameters["source"] as? String == "tic_counts",
+                      !ROBRecycleMissionCoordinator.shared.active,!ROBAnimationPlayback.shared.isRunning else { throw ROBLocalControlError("Use tic_counts while native motion is idle") }
+                ROBTorsoControlCenter.shared.setCountEstimate()
+                finish(.success(["status":"reading_controller","motor_energized":false,"counter_reset":false]))
+            case "torso.reference":
+                try request.only(["observed_degrees"])
+                let torso=ROBTorsoControlCenter.shared,observed=try request.number("observed_degrees",range:-180...180)
+                guard torso.canSetSoftwareReference,!ROBRecycleMissionCoordinator.shared.active,!ROBAnimationPlayback.shared.isRunning else { throw ROBLocalControlError("Software alignment requires fresh stopped TIC feedback and idle motion") }
+                torso.setSoftwareReference(observed)
+                finish(.success(["software_reference_degrees":observed,"motor_output":false,"counter_reset":false]))
             case "torso.turn":
                 try request.only(["heading_degrees"])
                 let heading=try request.number("heading_degrees",range:-3600...3600)
@@ -212,6 +237,7 @@ import CoreFoundation
     private func status() -> [String:Any] {
         func finite(_ value:Double)->Any { value.isFinite ? value : NSNull() }
         let gateway=ROBAmberGatewayClient.shared, torso=ROBTorsoControlCenter.shared
+        let room=ROBRoomSpatialStore.shared,scan=ROBRoomSpatialStore.shared.scan
         var arms:[String:Any]=[:]
         for (physical,wire) in [("right","left"),("left","right")] {
             guard let sample=gateway.telemetry(forArm:wire) else { arms[physical]=["available":false]; continue }
@@ -229,7 +255,16 @@ import CoreFoundation
             "motion":["id":motionID as Any? ?? NSNull(),"running":ROBAnimationPlayback.shared.isRunning,"detail":ROBAnimationPlayback.shared.status],
             "mission":ROBRecycleMissionCoordinator.shared.localStatus(),
             "torso":["count":finite(torso.currentCount),"heading_degrees":finite(torso.observedHeading),
-                "hardware_selected":torso.usesHardware,"detail":torso.status,"pulse_ceiling":torso.maximumPulseRate],
+                "hardware_selected":torso.usesHardware,"has_software_reference":torso.hasSoftwareBaseReference,
+                "front_count":torso.countReference,"detail":torso.status,"pulse_ceiling":torso.maximumPulseRate],
+            "neck":["known":serial?.isNeckCommandStateKnown ?? false,"pan":serial?.commandedNeckPanTarget ?? 0,
+                "lower":serial?.commandedLowerNeckTiltTarget ?? 0,"upper":serial?.commandedUpperNeckTiltTarget ?? 0,
+                "detail":serial?.neckCommandSafetyStatus ?? "Unavailable"],
+            "navigation":["pose_fresh":room.poseIsFresh(at:ProcessInfo.processInfo.systemUptime),
+                "map_fresh":room.mapIsFresh(at:ProcessInfo.processInfo.systemUptime),
+                "x_m":finite(Double(scan?.x ?? .nan)),"y_m":finite(Double(scan?.y ?? .nan)),
+                "yaw_radians":finite(Double(scan?.yaw ?? .nan)),"map_revision":room.map?.revision ?? 0,
+                "can_approach_detail":room.canApproachDetail],
             "cameras":ROBLocalObservationStore.shared.statistics(),
             "panorama":["enabled":pano.desiredRunning,"decoder_active":pano.decoderActive,"fps":pano.framesPerSecond,
                 "frames_received":pano.framesReceived,"state":pano.state],

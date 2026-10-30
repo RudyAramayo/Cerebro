@@ -61,7 +61,10 @@ bounds and Stop paths as Cerebro. They do not ask for another spoken approval.
 | `motion.move` | `values`: sparse Animation Studio channels; `seconds`: 0.65–600. One coordinated linear clip from fresh native state. Omitted channels retain their values. |
 | `animation.play` | Exact `sequence_id` and current `revision` from `animation.list`; freezes that saved sequence for native playback. |
 | `arm.mode` | Physical `arm`: `left`/`right`; `action`: `position`/`deactivate`. CLI deactivation requires fresh measured hanging. |
-| `gripper.command` | Physical `arm`, `action`: `hold`/`release`. Uses existing device state and commissioned intensities 2/10; no automatic full-travel calibration or force escalation. Accepted jaw dispatch is unverified travel/retention. |
+| `gripper.command` | Physical `arm`, `action`: `hold`/`release`. Hold defaults to vendor intensity 1; optional `intensity` accepts 1 or 2. Release stays 10. No full-travel calibration or automatic force escalation. Accepted jaw dispatch is unverified travel/retention. |
+| `neck.pose` | Integer `pan`, `lower`, `upper` Maestro targets through the native coupled neck gateway; returns submitted, not measured arrival. |
+| `torso.configure` | `source`: `tic_counts`. Selects native count feedback without energizing, resetting the counter or asserting alignment. |
+| `torso.reference` | `observed_degrees`: actual observed torso-to-base angle, −180…180, with fresh stopped feedback. Sets only the host's software reference. |
 | `torso.turn` | `heading_degrees` relative to the tread base. Requires the native hardware mode/reference already configured, both-arm clearance and fresh feedback. Returns submitted, not arrived. |
 | `mission.start` | Starts the native bounded local Recycle Cans loop described below. |
 | `stop` | Cancels native mission, animation, arm and torso owners; stops base demand and holds active position-mode arms. Does not energize inactive arms. |
@@ -72,6 +75,13 @@ handles this mapping. Other channels are `maestro.N` in quarter-microseconds,
 `torso.heading` in degrees, and `lact.speed` in signed timed percent. Use the
 canonical Animation Studio channel limits. Maestro 6–9 remain owned by Bubble
 controls. LACT is timed output, not measured lean position.
+
+The October 30 can task reduces native recycling grasps to intensity 1 after
+the operator reported crushing at the previous setting. This is the vendor's
+minimum command value, not half the measured pressure. A failed grasp does not
+automatically escalate force. Local camera observations must verify retention.
+`status.navigation` exposes authenticated SLAM pose and map freshness; those
+fields alone do not certify a travel corridor.
 
 For example, feed a reviewed sparse target file containing `values` and
 `seconds` into `Scripts/cerebroctl.py motion.move --params -`. Do not substitute

@@ -1140,7 +1140,7 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
         case "left_scan_clearance": action = "Scan the current workspace with the neck RGB-D camera while both arms remain still. Retain occupied surfaces and observed free space for a full-arm collision review. A provisional camera transform does not authorize movement."
         case "left_search_workspace": action = "Search locally for \(workspaceSearchTargets == [.can] ? "a Coke can" : "a Coke can and an orange bucket") by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using the offline object detector. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
         case "left_check_hanging": action = "Inspect both robot arms by panning/tilting the neck camera using on-device MLX; report whether each is visibly hanging. This observation never resets encoders or activates/moves either arm."
-        case "left_recycle_can": action = "One experimental recycling test: hold the current arm pose while the neck camera finds the empty can, bucket opening and workspace depth. Check measured camera/arm registration and the complete arm, open jaws and payload sweep. Dynamically plan the entire approach, middle grasp, carry, gravity release and retreat before moving; no blind parking or taught-route exemption. Reuse stationary startup gripper setup. Open at intensity 10 before approaching, grip at intensity 2, and release above the opening at intensity 10. Deferred empty-jaw setup may happen only after a collision-checked empty return to hanging/inactive. One authorization covers all waypoints. No force escalation, driving, blind retries or torque-off with a payload. Pickup and placement remain unmeasured."
+        case "left_recycle_can": action = "One experimental recycling test: hold the current arm pose while the neck camera finds the empty can, bucket opening and workspace depth. Check measured camera/arm registration and the complete arm, open jaws and payload sweep. Dynamically plan the entire approach, middle grasp, carry, gravity release and retreat before moving; no blind parking or taught-route exemption. Reuse stationary startup gripper setup. Open at intensity 10 before approaching, grip at intensity 1, and release above the opening at intensity 10. Deferred empty-jaw setup may happen only after a collision-checked empty return to hanging/inactive. One authorization covers all waypoints. No force escalation, driving, blind retries or torque-off with a payload. Pickup and placement remain unmeasured."
         case "left_wave": action = "Scan current geometry, dynamically connect the empty LEFT arm to the wave targets, check each complete arm sweep, wave and leave raised. Jaws unchanged."
         case "left_prepare": action = "Present the confirmed-EMPTY physical LEFT arm using a fresh full-arm collision-checked connector. Reuse startup gripper readiness; explicit jaw setup is stationary. Confirm no object is held and supervise actual jaw opening. No encoder reset or unreviewed return path."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity \(intensity) around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
@@ -3229,10 +3229,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
                 return ["status": "accepted_unverified", "measured": false, "motion_completed": true,
                     "gripper_measured": false, "placement_verified": false,
                     "grasp_visually_supported":lastVisualGraspEvidence?.verdict == .supported,
-                    "gripper_intensity": ROBTabletopPickPlace.intensity,
+                    "gripper_intensity": proposal.kind == "recycling" ? ROBTabletopPickPlace.recyclingIntensity : ROBTabletopPickPlace.intensity,
                     "gripper_opening_intensity": proposal.kind == "recycling" ? 10 : 2,
                     "workspace_search": command == "left_recycle_can" ? ROBWorkspaceSearch.shared.lastReport : [:],
-                    "physical_arm":physicalSide, "detail": "The \(physicalSide) arm reached all recycling-task positions; closing at intensity 2 and opening at intensity \(proposal.kind == "recycling" ? 10 : 2) were accepted. It is holding at the retreat pose. Object retention, jaw opening and placement in the bucket are unverified; inspect the result."]
+                    "physical_arm":physicalSide, "detail": "The \(physicalSide) arm reached all recycling-task positions; closing at intensity \(proposal.kind == "recycling" ? ROBTabletopPickPlace.recyclingIntensity : ROBTabletopPickPlace.intensity) and opening at intensity \(proposal.kind == "recycling" ? 10 : 2) were accepted. It is holding at the retreat pose. Object retention, jaw opening and placement in the bucket are unverified; inspect the result."]
             }
             return ["status": "completed", "measured": true, "motion_proposal_id": proposal.id.uuidString,
                 "motion_proposal_sha256": proposal.fingerprint,
@@ -4101,9 +4101,10 @@ private struct ROBPassiveFeedbackPause:LocalizedError {
             !recyclingGripDispatched && !servoPossiblePayloadUncertain && !jawSetupDispatchUncertain
         defer {emptyOpeningInProgress=false}
         phase = "tabletop \(action.rawValue)"
-        update(action == .grip ? "Local task: gripping empty can at intensity 2" : "Local task: opening gripper at the planned position")
+        let recycling = ["recycling","recycling_grasp_hold","incremental_visual_servo_grasp_hold","recycling_carry_release"].contains(proposal?.kind ?? "")
+        let intensity = recycling ? (action == .grip ? ROBTabletopPickPlace.recyclingIntensity : 10) : ROBTabletopPickPlace.intensity
+        update(action == .grip ? "Local task: gripping at vendor intensity \(intensity)" : "Local task: opening gripper at the planned position")
         ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my \(physicalSide) hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
-        let intensity = action != .grip && ["recycling","recycling_grasp_hold","incremental_visual_servo_grasp_hold","recycling_carry_release"].contains(proposal?.kind ?? "") ? 10 : ROBTabletopPickPlace.intensity
         try await beforeDispatch?()
         try await accepted { accountedJawCommand {
             let id=gateway.controlGripper(forArm:arm,action:action == .grip ? "hold":"release",force:intensity)
