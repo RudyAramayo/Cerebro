@@ -1293,14 +1293,17 @@ struct ROBCanGrabPreview {
             let name=side+"_joint\(index)",range=allowed[name]!
             var result=pose;result[name]=max(range.lowerBound,min(range.upperBound,pose[name,default:0]+delta));return result
         }
-        // Only the physical RIGHT pose has been taught and exercised in this
-        // campaign. A mirrored LEFT model target is not a measured ready pose.
+        // A previously raised physical RIGHT hold must not repeat the hanging
+        // corkscrew after a partial approach. This is a geometric choice of
+        // entry path, not a saved calibration or an obstacle-clearance claim.
+        // LEFT retains its separate preparation policy.
         let alreadyReady=side=="right" && model.physicalSide==side &&
-            ROBCanRecyclingReadyPose.matches(model.vendorLeft(baseline),physicalSide:side)
+            (ROBCanRecyclingReadyPose.matches(model.vendorLeft(baseline),physicalSide:side) ||
+             model.torsoTurnVerticalClearance(vendorJoints:model.vendorLeft(baseline)).map{$0>=0.03}==true)
         let raised:[String:Double]
         let approachOffset:SIMD3<Double>
         if alreadyReady {
-            // The taught ready hold already completed the shoulder lift.
+            // This measured raised hold already completed the shoulder lift.
             // Enter beside the can at its grasp height, then approach through
             // the horizontal plane with horizontal jaws. Every connector still
             // receives the caller's full-arm geometry and timing review.
