@@ -38,6 +38,7 @@ final class ROBAmberGatewayClient {
     struct Motion { let start: [Double], end: [Double], sent: Double, seconds: Double }
     var motions: [String: Motion] = [:]
     var q = ["left": Array(repeating: 0.0, count: 7), "right": Array(repeating: 0.0, count: 7)]
+    var currents = ["left": Array(repeating: 0.0, count: 7), "right": Array(repeating: 0.0, count: 7)]
     func actual(_ arm: String) -> [Double] {
         guard let motion = motions[arm] else { return q[arm]! }
         let t = max(0, min(1, (ProcessInfo.processInfo.systemUptime - motion.sent - (travelDelay[arm] ?? 0)) / motion.seconds))
@@ -45,7 +46,7 @@ final class ROBAmberGatewayClient {
     }
     func connectionSnapshot() -> [String:Any] { ["sessionGeneration": NSNumber(value: generation)] }
     func isReady() -> Bool { ready }
-    func telemetry(forArm arm: String) -> Sample? { count += 1; return Sample(sequence: count, positionsRadians: actual(arm).map(NSNumber.init(value:)), effectiveSampleAgeMilliseconds: stale ? 1000 : 0) }
+    func telemetry(forArm arm: String) -> Sample? { count += 1; return Sample(sequence: count, positionsRadians: actual(arm).map(NSNumber.init(value:)), currents: currents[arm]!.map(NSNumber.init(value:)), effectiveSampleAgeMilliseconds: stale ? 1000 : 0) }
     func modes(forArm arm: String) -> [NSNumber] { Array(repeating: NSNumber(value: 2), count: 7) }
     func enterPositionMode(forArm arm: String) -> UInt64 { count += 1; return count }
     func renewLease(forArm arm: String, leaseMilliseconds: UInt32) -> UInt64 { 1 }
@@ -332,6 +333,24 @@ final class ROBTorsoControlCenter {
             "A straight 3.2 s target should use one native trajectory instead of four stops")
         expect(gateway.sends.last!.2>=3.2 && abs(gateway.q["left"]![1]-0.3)<0.025,
             "Larger segment retained gentle timing and measured arrival")
+        // A power-cycle/manual recovery changes the load between runs. Only
+        // fresh samples in the same run can establish a current jump.
+        UserDefaults.standard.set(2.0, forKey: ROBLeftArmTrial.currentLimitKey)
+        defer { UserDefaults.standard.removeObject(forKey: ROBLeftArmTrial.currentLimitKey) }
+        gateway.currents["left"]![0] = 3
+        let recovery = ROBAnimationSequence(name:"Recovery baseline",clips:[straight])
+        engine.start(sequence:recovery,serial:serial);run(0.1)
+        expect(engine.isRunning, "Initial fresh current establishes the run baseline")
+        engine.stop(reason:"Fixture arm reset")
+        gateway.currents["left"]![0] = 0
+        let beforeRecovery = gateway.sends.count
+        engine.start(sequence:recovery,serial:serial);run(0.1)
+        expect(engine.isRunning && gateway.sends.count > beforeRecovery,
+            "A new explicit run must not compare current with pre-reset samples: \(engine.status)")
+        let beforeSpikeHold = gateway.holds.count
+        gateway.currents["left"]![0] = 3;run(0.1)
+        expect(!engine.isRunning && engine.status.contains("current jump") && gateway.holds.count > beforeSpikeHold,
+            "The unchanged current-jump limit still stops a spike within the new run")
         print("Animation UI/playback: \(checks) checks passed; all hardware adapters inert")
     }
 }

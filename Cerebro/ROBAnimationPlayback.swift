@@ -77,14 +77,17 @@ import Cocoa
             try require(!usesTorso || ROBTorsoControlCenter.shared.usesHardware, "Select live hardware in Torso Rotation before running a torso track.")
             generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
             if !arms.isEmpty { try require(gateway.isReady() && generation > 0, "Connect Amber before playing arm tracks.") }
+            // Current deltas belong to this explicit run. A previous run may
+            // have ended before manual recovery or a motor power cycle.
+            lastCurrents = [:]; lastSequences = [:]
+            currentLimit = UserDefaults.standard.double(forKey: ROBLeftArmTrial.currentLimitKey)
             for arm in arms { _ = try measured(arm, requirePosition: false) }
             // The local click supersedes automatic owners once for the whole
             // sequence; it never creates a reusable model/voice approval.
             ROBControllerArmApproval.shared.takeLocalPanelControl()
             self.sequence = sequence; self.serial = serial; owner = UUID(); isRunning = true
-            currentLimit = UserDefaults.standard.double(forKey: ROBLeftArmTrial.currentLimitKey)
             preparing = true; modesRequested = false; deadline = now + 2; lastTick = now
-            index = -1; pending = [:]; leasedArms = []; lastCurrents = [:]; lastSequences = [:]
+            index = -1; pending = [:]; leasedArms = []
             publish("Taking local control for \(sequence.name)…")
             let clock = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
             timer = clock; RunLoop.main.add(clock, forMode: .common)
