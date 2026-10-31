@@ -15,6 +15,12 @@ enum ROBArmJointLimits {
     ]
 }
 
+/// Local animation/CLI motion is commissioned separately from incremental
+/// remote-controller targets. A faster cap never skips measured settling.
+enum ROBArmAnimationTiming {
+    static let maximumAverageSpeedRadiansPerSecond = 0.30
+}
+
 /// Physical L10 ↔ R11 pose mapping shared by both UI directions and ready
 /// planning. This commissioning candidate retains J5's encoder sign and
 /// reverses the other six joints. Startup zero offsets remain unverified;

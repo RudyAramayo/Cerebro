@@ -602,7 +602,7 @@ import UniformTypeIdentifiers
         armSpeedPercent.target = self; armSpeedPercent.action = #selector(armSpeedChanged(_:))
         armSpeedPercent.widthAnchor.constraint(equalToConstant: 55).isActive = true
         armSpeedPercent.setAccessibilityLabel("Arm speed percent")
-        armSpeed.toolTip = "25–200% of saved arm transition speed. Applies on the next Run; maximum 0.20 rad/s (11.5°/s). Other tracks retain their timing."
+        armSpeed.toolTip = "25–200% of saved arm transition speed. Applies on the next Run; maximum 0.30 rad/s (17.2°/s). Other tracks retain their timing."
         armSpeedPercent.toolTip = armSpeed.toolTip
         root.addArrangedSubview(row([heading("Arm speed"), armSpeed, armSpeedPercent, heading("%"), button("Apply speed", #selector(armSpeedChanged(_:))), NSTextField(labelWithString: "Next Run · motor limits apply · other tracks keep their timing")]))
         let a = tablePane("Pose library", role: .library, actions: [button("New draft", #selector(newDraft)), button("Add →", #selector(addSelectedPose)), button("Delete pose", #selector(deletePose))])

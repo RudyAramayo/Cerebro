@@ -902,9 +902,9 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             return "\(side) arm animation segment exceeds joint or duration bounds."
         }
         for (joint, pair) in zip(step.values, positions).enumerated() {
-            let needed = abs(pair.0-pair.1) / ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond
+            let needed = abs(pair.0-pair.1) / ROBArmAnimationTiming.maximumAverageSpeedRadiansPerSecond
             if needed > step.seconds {
-                return String(format: "%@ arm J%d animation segment needs %.3f s from measured feedback; scheduled %.3f s (limit %.2f rad/s).", side, joint+1, needed, step.seconds, ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond)
+                return String(format: "%@ arm J%d animation segment needs %.3f s from measured feedback; scheduled %.3f s (limit %.2f rad/s).", side, joint+1, needed, step.seconds, ROBArmAnimationTiming.maximumAverageSpeedRadiansPerSecond)
             }
         }
         return queue.sync {

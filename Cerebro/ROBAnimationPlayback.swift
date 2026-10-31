@@ -225,7 +225,7 @@ import Cocoa
                 // plus one scheduler interval for dispatch/readback skew.
                 for (arm, q) in approved {
                     let current = try measured(arm)
-                    let required = zip(q, current).map { abs($0-$1) / ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond }.max() ?? 0
+                    let required = zip(q, current).map { abs($0-$1) / ROBArmAnimationTiming.maximumAverageSpeedRadiansPerSecond }.max() ?? 0
                     approvedDuration = max(approvedDuration, required + 0.05)
                 }
                 try require(approved.isEmpty || time + approvedDuration <= clipStarted + clipDuration - clip.hold + settlingAllowance,
@@ -289,7 +289,7 @@ import Cocoa
                 for j in 1...7 {
                     let key = "arm.\(physical).j\(j)"
                     if let target = clip.pose.values[key] {
-                        let minimum = abs(target-q[j-1])*peak/ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond
+                        let minimum = abs(target-q[j-1])*peak/ROBArmAnimationTiming.maximumAverageSpeedRadiansPerSecond
                         armTransition = max(armTransition, minimum)
                     }
                 }

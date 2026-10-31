@@ -12,7 +12,6 @@ final class ROBAmberArmMotionArbiter {
     func isReserved(_ side: ROBArmSide, owner: UUID) -> Bool { owners[side] == owner }
 }
 enum ROBArmRoutinePlan { static let tolerance = 0.025; static let minimumLeasedTrajectorySeconds = 0.65 }
-enum ROBArmTargetExecutionContext { static let maximumAverageSpeedRadiansPerSecond = 0.20 }
 enum ROBLeftArmTrial { static let currentLimitKey = "ROBAnimationFixtureCurrentLimit" }
 extension Notification.Name { static let ROBAmberGatewayCommandDidComplete = Notification.Name("FixtureGatewayResult") }
 final class ROBControllerArmApproval {
@@ -55,7 +54,7 @@ final class ROBAmberGatewayClient {
     func localAnimationStepRejection(arm: String, expectedSessionGeneration: UInt64) -> String? {
         if blockedArm == arm { return "Fixture: second arm is not in position mode" }
         guard let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration) else { return "Fixture: no local segment" }
-        if zip(step.values, actual(arm)).contains(where: { abs($0-$1)/step.seconds > ROBArmTargetExecutionContext.maximumAverageSpeedRadiansPerSecond }) {
+        if zip(step.values, actual(arm)).contains(where: { abs($0-$1)/step.seconds > ROBArmAnimationTiming.maximumAverageSpeedRadiansPerSecond }) {
             return "Fixture: measured-start rate exceeded"
         }
         return nil
@@ -96,6 +95,11 @@ final class ROBTorsoControlCenter {
 
 @main struct AnimationRuntimeTests {
     static func main() throws {
+        // This fixture uses real wall-clock deadlines while running offscreen.
+        // Prevent App Nap from manufacturing scheduler stalls between samples.
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
+            reason: "Exercise measured animation handoffs at real controller deadlines")
+        defer { ProcessInfo.processInfo.endActivity(activity) }
         _ = NSApplication.shared
         var checks = 0
         func expect(_ value: @autoclosure () -> Bool, _ text: String) { precondition(value(), text); checks += 1 }
@@ -343,7 +347,7 @@ final class ROBTorsoControlCenter {
         gateway.q["left"] = Array(repeating:0,count:7)
         speedRun = .init(name:"Capped speed",clips:[.init(pose:.init(name:"capped",values:["arm.right.j2":0.2]),transition:1)],armSpeedMultiplier:2)
         engine.start(sequence:speedRun,serial:serial); run(0.1)
-        expect(engine.isRunning && engine.status.contains("motor-limited") && gateway.sends.last!.2 >= 1.5, "A faster request extends timing to retain the existing speed ceiling")
+        expect(engine.isRunning && engine.status.contains("motor-limited") && gateway.sends.last!.2 >= 1.0 && gateway.sends.last!.2 < 1.5, "The raised cap shortens this move while retaining easing-aware rate admission")
         engine.stop(reason:"Speed limit verified without hardware")
         gateway.q["left"] = Array(repeating:0,count:7)
         var straight=ROBAnimationClip(pose:.init(name:"gentle large target",values:["arm.right.j2":0.3]),transition:3.2)
