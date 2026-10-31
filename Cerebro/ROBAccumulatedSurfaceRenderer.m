@@ -47,6 +47,13 @@
     if (!source || stride<(size_t)view.width*4) {CVPixelBufferUnlockBaseAddress(rgb,kCVPixelBufferLock_ReadOnly);return;}
     uint32_t *output=pixels.mutableBytes;NSUInteger added=0;
     const double *m=view.cameraToMap;
+    // Visibility tolerance is a perpendicular plane distance, like the fit
+    // and its RMS. An optical-Z tolerance rejected valid oblique surfaces:
+    // a few millimetres of depth noise can span many Z millimetres there.
+    double nx=plane->normal.x*m[0]+plane->normal.y*m[4]+plane->normal.z*m[8];
+    double ny=plane->normal.x*m[1]+plane->normal.y*m[5]+plane->normal.z*m[9];
+    double nz=plane->normal.x*m[2]+plane->normal.y*m[6]+plane->normal.z*m[10];
+    double d=plane->normal.x*m[3]+plane->normal.y*m[7]+plane->normal.z*m[11]+plane->offset;
     for (int y=0;y<height;y++) for (int x=0;x<width;x++) {
         size_t index=(size_t)y*width+x;if (output[index]) continue;
         double u=originU+(x+.5)*texelMeters,v=originV+(y+.5)*texelMeters;
@@ -63,7 +70,8 @@
         for (int j=0;j<5;j++) {
             size_t offset=((size_t)(iy+oy[j])*view.width+ix+ox[j])*2;
             unsigned mm=view.depthLittleEndian[offset] | ((unsigned)view.depthLittleEndian[offset+1]<<8);
-            bool matches=mm>=150 && mm<=10000 && fabs(mm*.001-z)<=fmax(.018,plane->rms*3);
+            double residual=mm*.001*(nx*(ix+ox[j]-view.cx)/view.fx+ny*(iy+oy[j]-view.cy)/view.fy+nz)+d;
+            bool matches=mm>=150 && mm<=10000 && fabs(residual)<=fmax(.018,plane->rms*3);
             if (!j && !matches) break;
             if (matches) agreement++;
         }
@@ -82,8 +90,17 @@
         hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bitmapFormat:NSBitmapFormatAlphaNonpremultiplied bytesPerRow:width*4 bitsPerPixel:32];
     if (!bitmap.bitmapData) return;
     for (int y=0;y<height;y++) for (int x=0;x<width;x++) {
-        uint32_t c=output[(size_t)y*width+x] ?: 0x70808CFF;uint8_t *p=bitmap.bitmapData+(size_t)y*bitmap.bytesPerRow+x*4;
-        p[0]=(c>>24)&255;p[1]=(c>>16)&255;p[2]=(c>>8)&255;p[3]=255;
+        uint32_t c=output[(size_t)y*width+x];
+        if (!c) {
+            // RGB-D holes/occlusion may prevent a photographic sample. Keep
+            // observed voxel colour visible instead of covering it in gray;
+            // leave output[index] empty so a later valid photo can fill it.
+            int u=(int)floor((originU+(x+.5)*texelMeters)/ROBSurfaceTexelSize)-plane->originU;
+            int v=(int)floor((originV+(y+.5)*texelMeters)/ROBSurfaceTexelSize)-plane->originV;
+            if (u>=0 && u<plane->width && v>=0 && v<plane->height) c=plane->rgba[(size_t)v*plane->width+u];
+        }
+        uint8_t *p=bitmap.bitmapData+(size_t)y*bitmap.bytesPerRow+x*4;
+        p[0]=(c>>24)&255;p[1]=(c>>16)&255;p[2]=(c>>8)&255;p[3]=c&255;
     }
 }
 @end

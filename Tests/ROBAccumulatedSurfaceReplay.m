@@ -95,7 +95,7 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
                     ROBSurfacePoint world;[probe[@"world"] getValue:&world];ROBSurfacePoint delta=ROBDepthFloorSubtract(world,a);
                     double u=uv[0]+ROBDepthFloorDot(delta,edgeU)/ROBDepthFloorDot(edgeU,edgeU)*(uv[2]-uv[0]);
                     double v=uv[1]+ROBDepthFloorDot(delta,edgeV)/ROBDepthFloorDot(edgeV,edgeV)*(uv[7]-uv[1]);
-                    int x=(int)floor(u*bitmap.pixelsWide),y=(int)floor((1-v)*bitmap.pixelsHigh);
+                    int x=(int)floor(u*bitmap.pixelsWide),y=(int)floor(v*bitmap.pixelsHigh);
                     if (x>=0 && x<bitmap.pixelsWide && y>=0 && y<bitmap.pixelsHigh) {checked++;if (rgbAt(bitmap,x,y)!=[probe[@"rgba"] unsignedIntValue]) changed++;}
                 }
                 if (!previous) {
@@ -105,7 +105,7 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
                         int px=(int)floor((box.origin.x+box.size.width*(x+.5)/5)*bitmap.pixelsWide),py=(int)floor((1-box.origin.y-box.size.height*(y+.5)/5)*bitmap.pixelsHigh);
                         if (px<0 || px>=bitmap.pixelsWide || py<0 || py>=bitmap.pixelsHigh) continue;
                         uint32_t rgba=rgbAt(bitmap,px,py);if (rgba==0x70808CFF) continue;
-                        double u=(px+.5)/bitmap.pixelsWide,v=1-(py+.5)/bitmap.pixelsHigh;
+                        double u=(px+.5)/bitmap.pixelsWide,v=(py+.5)/bitmap.pixelsHigh;
                         ROBSurfacePoint world=ROBSurfaceAdd(a,ROBSurfaceAdd(ROBDepthFloorScale(edgeU,(u-uv[0])/(uv[2]-uv[0])),ROBDepthFloorScale(edgeV,(v-uv[1])/(uv[7]-uv[1]))));
                         [newProbes addObject:@{@"world":[NSValue valueWithBytes:&world objCType:@encode(ROBSurfacePoint)],@"rgba":@(rgba)}];
                     }

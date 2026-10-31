@@ -140,14 +140,20 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     frame.sequence++;offer(h,samples,frame,view);assert([h.headSurfaceSummary containsString:@"2 frames"]);
     SCNNode *map=h.headSurfaceNode.childNodes.firstObject;assert(map.childNodes.count>=4 && h.liveRGBCloudNode.hidden && h.headUsesSurfaces);
     assert([h.surfaceStatusLabel.stringValue containsString:@"cyan = inferred"] && [h.headSurfaceSummary containsString:@"1 inferred cans"]);
-    size_t triangles=0;
+    size_t triangles=0;BOOL observedRed=NO,observedBlue=NO;
     for (SCNNode *node in map.childNodes) if ([node.name hasPrefix:@"Observed plane"]) {
         SCNGeometrySource *vertices=[node.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticVertex].firstObject;
         SCNGeometrySource *uv=[node.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticTexcoord].firstObject;
         assert(vertices.bytesPerComponent==4 && vertices.dataStride==12 && uv.dataStride==8);
         triangles+=node.geometry.geometryElements.firstObject.primitiveCount;assert(node.geometry.firstMaterial.diffuse.contents);
+        NSBitmapImageRep *texture=[[NSBitmapImageRep alloc] initWithCGImage:(__bridge CGImageRef)node.geometry.firstMaterial.diffuse.contents];
+        for (NSInteger y=0;y<texture.pixelsHigh;y++) for (NSInteger x=0;x<texture.pixelsWide;x++) {
+            NSColor *c=[[texture colorAtX:x y:y] colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
+            observedRed|=c.redComponent>.7 && c.blueComponent<.2;
+            observedBlue|=c.blueComponent>.7 && c.redComponent<.2;
+        }
     }
-    assert(triangles>0 && triangles<100);
+    assert(triangles>0 && triangles<100 && observedRed && observedBlue);
     double captured=h.lastHeadSurfaceCapture;offer(h,samples,frame,view);
     assert(h.headSurfaceNode.childNodes.firstObject==map && h.lastHeadSurfaceCapture==captured);
     /* A capture/calibration stream change invalidates only its camera. */
