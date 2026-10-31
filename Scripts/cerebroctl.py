@@ -11,7 +11,7 @@ import time
 import uuid
 
 DIRECTORY = Path.home() / "Library/Application Support/Cerebro/LocalControl"
-READ_ONLY = {"status", "camera.frame", "animation.list", "mission.status", "mission.plan"}
+READ_ONLY = {"status", "camera.frame", "camera.depth", "animation.list", "mission.status", "mission.plan"}
 
 
 def request(operation, parameters=None, *, socket_path=None, session=None, request_id=None, timeout=8):
@@ -65,7 +65,8 @@ def save_frame(response, output=None):
             file.write(data)
         os.replace(temporary, target)
         return str(target.resolve())
-    result["rgb_file"] = write("rgb.jpg", base64.b64decode(result.pop("jpeg_base64"), validate=True))
+    if "jpeg_base64" in result:
+        result["rgb_file"] = write("rgb.jpg", base64.b64decode(result.pop("jpeg_base64"), validate=True))
     if "depth" in result:
         result["depth"] = dict(result["depth"])
         raw = base64.b64decode(result["depth"].pop("base64"), validate=True)
@@ -79,7 +80,7 @@ def save_frame(response, output=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", help="status, camera.demand, camera.frame, runtime.profile, mission.start, mission.status, mission.plan, mission.confirm_empty, motion.move, arm.mode, gripper.command, animation.list, animation.play, torso.turn, stop")
+    parser.add_argument("operation", help="status, camera.demand, camera.frame, camera.depth, runtime.profile, mission.start, mission.status, mission.plan, mission.confirm_empty, motion.move, arm.mode, gripper.command, animation.list, animation.play, torso.turn, stop")
     parser.add_argument("--params", default="{}", help="JSON object, or - to read JSON from stdin")
     parser.add_argument("--socket", type=Path)
     parser.add_argument("--output", type=Path, help="Camera snapshot directory; defaults to a private local capture folder")
@@ -90,7 +91,7 @@ def main():
         if not isinstance(parameters, dict):
             raise ValueError("Parameters must be a JSON object")
         response = request(args.operation, parameters, socket_path=args.socket)
-        if args.operation == "camera.frame" and response.get("ok"):
+        if args.operation in ("camera.frame", "camera.depth") and response.get("ok"):
             response = save_frame(response, args.output)
         print(json.dumps(response, indent=2, allow_nan=False))
         return 0 if response.get("ok") else 1

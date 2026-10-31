@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from types import SimpleNamespace
 
 os.environ.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1", TOKENIZERS_PARALLELISM="false")
 
@@ -48,16 +49,35 @@ class Detector:
         self.device = "mps" if device == "auto" and torch.backends.mps.is_available() else ("cpu" if device == "auto" else device)
         self.processor = Owlv2Processor.from_pretrained(model_directory, local_files_only=True, use_fast=False)
         self.model = Owlv2ForObjectDetection.from_pretrained(model_directory, local_files_only=True, use_safetensors=True).eval().to(self.device)
+        # The query vocabulary never changes during this worker's lifetime.
+        # Cache only its text features; every image still runs the full vision
+        # encoder and box/class heads with the original thresholds.
+        self.text_inputs = self.processor(text=[[query for _, query in QUERIES]], return_tensors="pt").to(self.device)
+        with torch.inference_mode():
+            features = self.model.owlv2.get_text_features(**self.text_inputs)
+            self.query_embeds = (features / torch.linalg.norm(features, ord=2, dim=-1, keepdim=True)).unsqueeze(0)
+            self.query_mask = (self.text_inputs["input_ids"][:, 0] > 0).unsqueeze(0)
 
-    def detect(self, jpeg):
+    def predict(self, image_inputs, *, cached_text=True):
+        """Same OWLv2 box/class calculation; uncached branch is a parity oracle."""
+        if not cached_text:
+            return self.model(**image_inputs, **self.text_inputs)
+        feature_map, _ = self.model.image_embedder(image_inputs["pixel_values"])
+        image_features = feature_map.reshape(feature_map.shape[0], -1, feature_map.shape[-1])
+        logits, _ = self.model.class_predictor(image_features, self.query_embeds, self.query_mask)
+        boxes = self.model.box_predictor(image_features, feature_map)
+        return SimpleNamespace(logits=logits, pred_boxes=boxes)
+
+    def detect(self, jpeg, *, cached_text=True):
         from PIL import Image
         image = Image.open(io.BytesIO(jpeg)).convert("RGB")
         if image.width * image.height > 4_000_000:
             raise ValueError("Camera image exceeds detector bound")
         started = time.monotonic()
-        inputs = self.processor(text=[[query for _, query in QUERIES]], images=image, return_tensors="pt").to(self.device)
+        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        prepared = time.monotonic()
         with self.torch.inference_mode():
-            outputs = self.model(**inputs)
+            outputs = self.predict(inputs, cached_text=cached_text)
         result = self.processor.post_process_object_detection(outputs, threshold=0.08, target_sizes=self.torch.tensor([[image.height, image.width]], device=self.device))[0]
         candidates = []
         for box, score, label in zip(result["boxes"].cpu().tolist(), result["scores"].cpu().tolist(), result["labels"].cpu().tolist()):
@@ -68,6 +88,8 @@ class Detector:
             candidates.append({"target": target, "query": query, "score": score, "box": normalized})
         return {"provider": "owlv2", "model": "google/owlv2-base-patch16-ensemble", "device": self.device,
                 "width": image.width, "height": image.height, "inference_ms": (time.monotonic()-started)*1000,
+                "preprocess_ms": (prepared-started)*1000, "text_features_cached":cached_text,
+                "network_required":False,
                 "candidates": sorted(candidates, key=lambda candidate: candidate["score"], reverse=True)[:32]}
 
 
@@ -83,6 +105,7 @@ def main():
         return
     print(json.dumps({"ready": True, "provider": "owlv2", "device": detector.device}), flush=True)
     for line in sys.stdin:
+        request = None
         try:
             if len(line) > 4_000_000:
                 raise ValueError("Camera request exceeds detector bound")

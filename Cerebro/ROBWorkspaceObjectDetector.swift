@@ -46,6 +46,8 @@ final class ROBWorkspaceObjectDetector: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
     private var operation: UUID?
+    private var queued = Set<UUID>()
+    private var cancelled = Set<UUID>()
     private var input: FileHandle?
     private var output: FileHandle?
     private var buffer = Data()
@@ -84,14 +86,23 @@ final class ROBWorkspaceObjectDetector: @unchecked Sendable {
     private func perform<Value: Sendable>(_ work: @escaping @Sendable () throws -> Value) async throws -> Value {
         try Task.checkCancellation()
         let token = UUID()
+        lock.withLock { _ = queued.insert(token) }
         let result: Value = try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async {
-                    self.lock.lock(); self.operation = token; self.lock.unlock()
+                    self.lock.lock()
+                    self.queued.remove(token)
+                    if self.cancelled.remove(token) != nil {
+                        self.lock.unlock()
+                        continuation.resume(throwing: CancellationError()); return
+                    }
+                    self.operation = token; self.lock.unlock()
                     let timeout = DispatchWorkItem { self.stop(operation: token) }
                     DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 45, execute: timeout)
                     defer {
-                        self.lock.lock(); if self.operation == token { self.operation = nil }; self.lock.unlock()
+                        self.lock.lock()
+                        if self.operation == token { self.operation = nil }
+                        self.cancelled.remove(token); self.lock.unlock()
                         timeout.cancel()
                     }
                     do { continuation.resume(returning: try work()) }
@@ -101,9 +112,16 @@ final class ROBWorkspaceObjectDetector: @unchecked Sendable {
                     }
                 }
             }
-        }, onCancel: { self.stop(operation: token) })
+        }, onCancel: { self.cancel(operation: token) })
         try Task.checkCancellation()
         return result
+    }
+
+    private func cancel(operation token: UUID) {
+        lock.lock()
+        if queued.contains(token) || operation == token { cancelled.insert(token) }
+        lock.unlock()
+        stop(operation:token)
     }
 
     private func stop(operation token: UUID?) {
@@ -116,7 +134,10 @@ final class ROBWorkspaceObjectDetector: @unchecked Sendable {
     }
 
     private func ensureReady() throws {
-        lock.lock(); let existing = process; lock.unlock()
+        lock.lock()
+        let wasCancelled = operation.map { cancelled.contains($0) } ?? false
+        let existing = process; lock.unlock()
+        if wasCancelled { throw CancellationError() }
         if existing?.isRunning == true { return }
         let python = directory.appendingPathComponent("venv/bin/python3")
         let model = directory.appendingPathComponent("model")
@@ -139,8 +160,14 @@ final class ROBWorkspaceObjectDetector: @unchecked Sendable {
         #if canImport(Darwin)
         _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         #endif
-        lock.lock(); process = child; lock.unlock()
-        try child.run()
+        // Bind launch to the current request under the same lock as cancel.
+        // Otherwise cancellation between the readiness check and run() could
+        // launch a new unowned worker after stop had already returned.
+        try lock.withLock {
+            guard !(operation.map { cancelled.contains($0) } ?? false) else { throw CancellationError() }
+            process = child
+            try child.run()
+        }
         let ready = try JSONSerialization.jsonObject(with: readLine()) as? [String: Any]
         guard ready?["ready"] as? Bool == true, ready?["provider"] as? String == "owlv2" else {
             throw ROBWorkspaceDetectorError.failure("Local detector did not become ready. Inspect WorkspaceDetector/worker.log.")

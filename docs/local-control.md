@@ -16,6 +16,7 @@ weights and Python dependencies must already be installed.
 Scripts/cerebroctl.py status
 Scripts/cerebroctl.py camera.demand --params '{"front":true,"panorama":true,"seconds":120}'
 Scripts/cerebroctl.py camera.frame --params '{"camera":"front","depth":true}'
+Scripts/cerebroctl.py camera.depth --params '{"camera":"front"}'
 Scripts/cerebroctl.py camera.frame --params '{"camera":"panorama"}'
 Scripts/cerebroctl.py animation.list
 Scripts/cerebroctl.py mission.status
@@ -27,6 +28,11 @@ throughput. `service_ms` measures handling after the main queue receives the
 request; client round-trip timing also includes queueing and socket transfer.
 It is not motor response time. `rpc_timings` retains the latest 120 timings per
 operation. A submitted target is not measured arrival.
+
+Arm status includes `gripper_age_ms` and the individual `joint_feedback_age_ms`
+values. Missing/non-finite feedback is `null`, not zero. A recent joint packet
+does not establish that the gripper is still replying. Ages include elapsed time
+since packet receipt, so cached packets cannot keep reporting a fresh age.
 
 In a DEBUG build with Development Mode enabled, arm motor and gripper feedback
 admission allows up to 1200 ms during stationary planning, jaw setup and motion.
@@ -51,6 +57,12 @@ Use the RGB file as LLM image input and the raw depth plus intrinsics for local
 geometry. Depth is unsigned 16-bit little-endian millimeters; zero is invalid.
 RGB, depth and intrinsics come from the same frame. A snapshot is encoded only
 on request; only the latest frame is retained and encodes never accumulate.
+
+`camera.depth` returns aligned depth and the same exposure metadata without a
+JPEG. Its bounded worker is separate from RGB encoding, so a video recorder
+cannot occupy its encoder slot. It supports front/belly cameras, rejects absent
+depth and retains the original freshness checks. The CLI saves depth and
+metadata only. No depth is inferred for Insta360.
 
 Front/belly timestamps remain the original capture times. Snapshot admission
 defaults to 1200 ms and can be chosen from 50–2000 ms using `maximum_age_ms`.
@@ -142,11 +154,49 @@ Lost motor replies are never retried; an owned unfinished operation is stopped,
 and a manual takeover is preserved. Camera reads can retry a shared encoder's
 busy response for up to 1.2 seconds without queuing more work.
 
+When the running app advertises `camera.depth`, preparation uses it for initial
+and in-motion calculations, then requests RGB-D for the final post-arrival
+handoff. Older app builds retain the bounded RGB-D fallback. Gripper feedback
+age is checked before dispatch when exposed; native checks still apply on all
+builds. This distinguishes a gripper CAN failure from otherwise fresh joints.
+
 `events.jsonl` separates overlapping depth calculations from motion completion.
 The final RGB-D files and `result.json` are ready for the next local calculation
 or visual inspection. No subsequent arm target or jaw command is dispatched.
 This preparation tool is available now; it is not yet wired into the native
 Recycle Cans mission state machine and does not claim autonomous grasp success.
+
+### Local detector and stage scheduling
+
+The native workspace observer starts object inference and depth-map processing
+from the exact same frozen exposure concurrently. Both must finish successfully;
+a failed depth callback cancels its inference. Cancelled queued detector work
+is discarded before launch, and cancellation cannot start a replacement worker.
+The initial mission survey seeks cans only; the transfer executor still observes
+the bucket when required instead of repeating that search at every table survey.
+
+The persistent OWLv2 worker caches the fixed query vocabulary's normalized text
+features. Each image still runs the vision encoder and box/class heads with the
+same thresholds. Dependencies/model revision are pinned by the setup script.
+Downloaded local weights are required; inference uses offline loading flags.
+On three saved images with network connections denied, the cached path returned
+identical candidate identities, boxes and scores. Three alternating timing
+samples per mode gave median improvements of 11.7%, 2.6% and 22.5%. Desktop load
+varied; this is an inference microbenchmark, not a measured recycling-cycle gain.
+
+Reproduce with saved images and the installed detector environment; this command
+has no robot interfaces and denies socket connections/DNS:
+
+```sh
+"$HOME/Library/Application Support/Cerebro/WorkspaceDetector/venv/bin/python3" \
+  Scripts/benchmark-workspace-detector.py --images /private/path/table.jpg \
+  /private/path/bucket.jpg --output /private/path/detector-benchmark.json
+```
+
+Offline runtime means no Internet/cloud LLM is required for these stages. The
+local robot LAN remains necessary. Keep the worker warm before taking the
+planning exposure; observed cold import/model loads were about 13-19 seconds
+(the slower run overlapped an Xcode dependency build).
 
 One explicit local command can own the bounded mission after the CLI exits:
 
@@ -242,6 +292,13 @@ linear trajectories, disconnected-controller local mission ownership, measured
 endpoint gates, unknown-map rejection and the original settling fallback.
 Gripper startup and Bubble fixtures verify passive reconnect and explicit
 controls separately. Hardware commissioning remains a separate daytime test.
+
+Additional software-only checks are `python3 -m unittest discover -s Tests -p
+test_cerebro_prepare.py`, `python3 Tests/ROBWorkspaceParallelProcessingRuntimeTests.py`,
+`bash Scripts/test-workspace-object-detector.sh` and
+`bash Scripts/test-recycle-mission.sh`. They cover one-shot preparation, faults,
+post-arrival exposures, parallel native processing, detector cancellation and
+offline mission ownership without linking hardware transports.
 
 The October 29 passive live check used the installed optimized Debug build with
 both cameras running and the arms inactive. Twenty status calls had a median

@@ -101,6 +101,9 @@ def arm_check(status, plan, maximum_age_ms, initial=False):
         arm = status["arms"][side]
         require(arm["available"] and 0 <= arm["age_ms"] <= maximum_age_ms
                 and arm["modes"] == [2]*7, f"{side} feedback or position hold unavailable")
+        if "gripper_age_ms" in arm:
+            require(number(arm["gripper_age_ms"]) and 0 <= arm["gripper_age_ms"] <= maximum_age_ms,
+                    f"{side} gripper CAN feedback unavailable")
         require(len(arm["q_radians"]) == 7 and all(number(q) for q in arm["q_radians"]), "Invalid joint feedback")
         for j, q in enumerate(arm["q_radians"], 1):
             key = f"arm.{side}.j{j}"
@@ -137,18 +140,23 @@ def prepare(plan, rois, output, *, request=cerebroctl.request, maximum_age_ms=35
     require(state["gateway"].get("exclusiveControllerSession"), "Gateway ownership unavailable")
     arm_check(state, plan, maximum_age_ms, initial=True)
     context = body_context(state)
+    depth_only_available = "camera.depth" in state.get("operations", [])
     event("context", session=session, body=context, baseline=plan["baseline"])
 
-    def observe():
+    def observe(include_rgb=False):
         began = time.monotonic()
+        operation = "camera.depth" if depth_only_available and not include_rgb else "camera.frame"
+        params = {"camera":"front", "maximum_age_ms":maximum_age_ms}
+        if operation == "camera.frame":
+            params["depth"] = True
         while True:
-            reply = request("camera.frame", {"camera":"front", "depth":True, "maximum_age_ms":maximum_age_ms}, timeout=2)
+            reply = request(operation, params, timeout=2)
             if reply.get("ok"):
                 break
             # A shared video recorder can be encoding a JPEG. Retry this
             # read-only observation within a bound; never replay a motor RPC.
-            require("Snapshot encoder busy" in str(reply.get("error")) and time.monotonic()-began < 1.2,
-                    f"camera.frame: {reply.get('error')}")
+            require(any(text in str(reply.get("error")) for text in ("Snapshot encoder busy", "Depth snapshot busy"))
+                    and time.monotonic()-began < 1.2, f"{operation}: {reply.get('error')}")
             time.sleep(.03)
         fetched = time.monotonic()
         require(reply["session"] == session, "Camera app session changed")
@@ -209,13 +217,13 @@ def prepare(plan, rois, output, *, request=cerebroctl.request, maximum_age_ms=35
                 event("depth", during_motion=final_at is None, **sample)
                 # Moving-arm depth remains provisional: a gripper may occlude a
                 # can. A fresh exposure after measured arrival is the handoff.
-                if final_at is not None and sample["captured_at_ms"] >= final_at:
+                if final_at is not None and sample["captured_at_ms"] >= final_at and "jpeg_base64" in frame_reply["result"]:
                     final = (frame_reply, sample)
                     break
                 future = None
             require(now <= deadline, "Preparation or post-arrival observation timed out")
             if future is None and now >= next_frame:
-                future = worker.submit(observe)
+                future = worker.submit(observe, final_at is not None)
                 next_frame = now+frame_interval
             time.sleep(.1)
         saved = cerebroctl.save_frame(final[0], output / "final-frame")

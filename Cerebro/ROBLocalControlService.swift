@@ -98,6 +98,11 @@ import CoreFoundation
                 let age=try request.number("maximum_age_ms",default:1200,range:50...2000)
                 ROBLocalObservationStore.shared.snapshot(camera:camera,includeDepth:request.parameters["depth"] as? Bool ?? false,
                     maximumAge:age,completion:finish)
+            case "camera.depth":
+                try request.only(["camera","maximum_age_ms"])
+                guard let camera=request.parameters["camera"] as? String,["front","belly"].contains(camera) else { throw ROBLocalControlError("Depth requires front or belly camera") }
+                let age=try request.number("maximum_age_ms",default:1200,range:50...2000)
+                ROBLocalObservationStore.shared.snapshot(camera:camera,includeDepth:true,maximumAge:age,includeRGB:false,completion:finish)
             case "camera.demand":
                 try request.only(["front","panorama","seconds"])
                 guard let front=request.parameters["front"] as? Bool,let panorama=request.parameters["panorama"] as? Bool else {
@@ -241,7 +246,13 @@ import CoreFoundation
         var arms:[String:Any]=[:]
         for (physical,wire) in [("right","left"),("left","right")] {
             guard let sample=gateway.telemetry(forArm:wire) else { arms[physical]=["available":false]; continue }
+            let packetElapsed = max(0, ProcessInfo.processInfo.systemUptime - sample.receivedAtUptime) * 1000
+            let jointAges: [Any] = sample.jointFeedbackAgeMilliseconds.map {
+                $0.doubleValue >= 0 ? finite($0.doubleValue + packetElapsed) : NSNull()
+            }
             arms[physical]=["available":true,"sequence":sample.sequence,"age_ms":finite(sample.effectiveSampleAgeMilliseconds),
+                "gripper_age_ms":finite(sample.effectiveGripperFeedbackAgeMilliseconds),
+                "joint_feedback_age_ms":jointAges,
                 "q_radians":sample.positionsRadians,"currents_raw":sample.currents,"statuses":sample.statuses,
                 "modes":gateway.modes(forArm:wire),"target_radians":gateway.targetPositions(forArm:wire)]
         }

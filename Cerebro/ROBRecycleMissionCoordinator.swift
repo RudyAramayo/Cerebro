@@ -253,7 +253,7 @@ import simd
     private func beginSurvey() {
         guard active,task==nil,let at=pose,let id=message?.missionID else { return }
         haltBase();goal=nil;route=[];canApproach=nil
-        setPhase(.searching,"Scanning the immediate right and left table areas for cans and the orange bucket")
+        setPhase(.searching,"Scanning the immediate right and left table areas for cans")
         task=Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -262,7 +262,9 @@ import simd
                 let right=ROBAmberGatewayClient.shared.telemetry(forArm:"left")
                 let ready=right.map { $0.effectiveSampleAgeMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds &&
                     ROBCanRecyclingReadyPose.matches($0.positionsRadians.map(\.doubleValue),physicalSide:"right") } ?? false
-                let found=try await ROBWorkspaceSearch.shared.run(targets:[.can,.orangeBucket],model:model,
+                // This phase selects a can or a base approach. The transfer
+                // executor separately observes its destination when needed.
+                let found=try await ROBWorkspaceSearch.shared.run(targets:[.can],model:model,
                     surveyFrontTable:true,armAlreadyAtGraspReady:ready,
                     check:{
                         guard self.grantIsLive,self.message?.missionID==id,!Task.isCancelled,

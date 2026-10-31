@@ -968,7 +968,6 @@ final class ROBArmRoutineVision {
             // RGB objects. Other callers retain ordinary readiness admission.
             let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false,
                 depthMappingOnly:nonactuatingSparseDepth,allowStationaryIMUPassiveFrame:nonactuatingSparseDepth)
-            try await onCaptured(frame)
             try Task.checkCancellation()
             guard frame.cameraGeneration == cameraGeneration else { throw CancellationError() }
             guard let cg = context.createCGImage(frame.image, from: frame.image.extent),
@@ -978,7 +977,12 @@ final class ROBArmRoutineVision {
             let inputURL = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support/Cerebro/WorkspaceDetector/latest-input.jpg")
             try? jpeg.write(to: inputURL, options: .atomic)
-            let result = try await ROBWorkspaceObjectDetector.shared.detect(jpeg: jpeg)
+            // Both consumers own this exact exposure. Depth-map construction
+            // and object inference are independent; do not serialize their
+            // processing time or replace the frame with a newer one mid-flight.
+            async let detection = ROBWorkspaceObjectDetector.shared.detect(jpeg: jpeg)
+            try await onCaptured(frame)
+            let result = try await detection
             if result.candidates.contains(where: { $0.target == "orangeBucket" && $0.score >= 0.35 }) {
                 let directory = inputURL.deletingLastPathComponent()
                 try? jpeg.write(to: directory.appendingPathComponent("last-bucket-input.jpg"), options: .atomic)

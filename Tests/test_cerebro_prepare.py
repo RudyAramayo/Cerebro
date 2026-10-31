@@ -44,7 +44,7 @@ class Fake:
         elif op == "status":
             result = {"motion":{"running":running, "id":self.operation,
                                 "detail":"Running" if running else "Sequence complete; robot holding."},
-                      "mission":{"active":False},
+                      "mission":{"active":False}, "operations":["camera.depth"],
                       "gateway":{"exclusiveControllerSession":True, "sessionGeneration":1},
                       "neck":{"known":True,"pan":6000,"lower":6000,"upper":6000},
                       "torso":{"has_software_reference":True,"count":0,"front_count":0},
@@ -69,7 +69,7 @@ class Fake:
                     result["motion"] = {"id":self.operation,"running":False,"detail":"Stopped: current guard"}
             elif self.failure == "busy":
                 result["motion"]["running"] = True
-        elif op == "camera.frame":
+        elif op in ("camera.frame", "camera.depth"):
             self.frames += 1
             if self.failure == "encoder_busy" and self.frames in (1, 3):
                 return {"ok":False,"session":"app-1","error":"Snapshot encoder busy; no camera frame queued"}
@@ -83,6 +83,8 @@ class Fake:
                 result["stream_id"] = "camera-2"
             if self.started and self.failure == "old_exposure":
                 result["captured_at_ms"] -= 10000
+            if op == "camera.depth":
+                result.pop("jpeg_base64")
         else:
             raise AssertionError(op)
         return {"ok":True,"session":"app-1","result":result}
@@ -98,6 +100,8 @@ class PreparationTests(unittest.TestCase):
         fake = Fake()
         result = self.run_fake(fake)
         self.assertGreater(fake.overlapped, 0)
+        self.assertIn("camera.depth", fake.calls)
+        self.assertIn("camera.frame", fake.calls)
         self.assertEqual(fake.calls.count("motion.move"), 1)
         self.assertNotIn("stop", fake.calls)
         self.assertTrue(result["motion_complete"])
@@ -162,6 +166,13 @@ class PreparationTests(unittest.TestCase):
         region = prep.depth_regions(frame, REGIONS)["can"]
         self.assertIn("unavailable", region)
         self.assertNotIn("optical_xyz_m", region)
+
+    def test_gripper_feedback_is_checked_when_exposed(self):
+        state=Fake()("status")["result"]
+        for age in (None, 1500, float('nan')):
+            state["arms"]["right"]["gripper_age_ms"]=age
+            with self.assertRaisesRegex(RuntimeError, 'gripper CAN'):
+                prep.arm_check(state, PLAN, 1200)
 
     def test_nonarm_and_nonfinite_targets_are_rejected(self):
         for values in ({"lact.speed":40}, {"arm.left.j1":float("nan")}, {}):

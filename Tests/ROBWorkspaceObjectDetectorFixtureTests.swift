@@ -10,10 +10,12 @@ import Foundation
         let script = root.appendingPathComponent("fixture.py")
         try """
         import base64, json, sys, time
+        from pathlib import Path
         print(json.dumps({'ready':True,'provider':'owlv2'}),flush=True)
         for line in sys.stdin:
             request=json.loads(line)
             mode=base64.b64decode(request['jpeg']).decode()
+            with Path(__file__).with_name('calls.log').open('a') as log: log.write(mode+'\\n')
             if mode=='hang': time.sleep(60)
             box=[0.66,0.26,0.76,0.51] if mode!='invalid' else [0.66,0.26,0.76,1.5]
             print(json.dumps({'id':request['id'] if mode!='mismatch' else 'old-frame',
@@ -34,11 +36,17 @@ import Foundation
         }
         let hanging = Task { try await detector.detect(jpeg: Data("hang".utf8)) }
         try await Task.sleep(nanoseconds: 200_000_000)
+        let queued = Task { try await detector.detect(jpeg:Data("cancelled-before-start".utf8)) }
+        try await Task.sleep(nanoseconds:50_000_000)
+        queued.cancel()
         hanging.cancel()
         var cancelled = false
         do { _ = try await hanging.value } catch { cancelled = true }
         precondition(cancelled, "Cancelled camera inference supplied a result")
+        do { _ = try await queued.value; preconditionFailure("Cancelled queued request ran") } catch {}
         _ = try await detector.detect(jpeg: Data("valid".utf8))
+        let calls = try String(contentsOf: root.appendingPathComponent("calls.log"), encoding: .utf8)
+        precondition(!calls.contains("cancelled-before-start"))
         print("Object detector transport: persistent worker, matching frame IDs, invalid boxes rejected, cancellation terminates inference, fresh request after failure. No robot transport linked.")
     }
 }

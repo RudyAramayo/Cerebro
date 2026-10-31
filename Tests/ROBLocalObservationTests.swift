@@ -23,9 +23,9 @@ struct CameraFrameSet {let source=CameraSource.depthAIService;let sequence:UInt6
   func offer(_ sequence:UInt64,_ time:Double) {
    store.offer(.init(sequence:sequence,rgbSampleBuffer:sample!,alignedDepth:.init(width:64,height:40,millimetersLittleEndian:raw),intrinsics:.init(fx:50,fy:50,cx:32,cy:20),capturedAtMilliseconds:time,captureStreamID:"fixture"),role:.face)
   }
-  func get(_ camera:String)->Result<[String:Any],Error> {
+  func get(_ camera:String, rgb:Bool=true)->Result<[String:Any],Error> {
    let wait=DispatchSemaphore(value:0);var result:Result<[String:Any],Error>!
-   store.snapshot(camera:camera,includeDepth:true,maximumAge:1200){result=$0;wait.signal()}
+   store.snapshot(camera:camera,includeDepth:true,maximumAge:1200,includeRGB:rgb){result=$0;wait.signal()}
    precondition(wait.wait(timeout:.now()+3) == .success)
    return result
   }
@@ -39,11 +39,17 @@ struct CameraFrameSet {let source=CameraSource.depthAIService;let sequence:UInt6
   let depth=result["depth"]as![String:Any]
   precondition(Data(base64Encoded:depth["base64"]as!String)==raw)
   precondition(result["motion_authority"]as?Bool==false && result["robot_registration_verified"]as?Bool==false)
+  let onlyDepth=try get("front",rgb:false).get()
+  precondition(onlyDepth["jpeg_base64"]==nil && onlyDepth["rgb_included"]as?Bool==false)
+  precondition(onlyDepth["sequence"]as?UInt64==2 && onlyDepth["captured_at_ms"]as?Double==capture)
+  precondition(Data(base64Encoded:(onlyDepth["depth"]as![String:Any])["base64"]as!String)==raw)
   offer(3,capture-5000)
   if case .success=get("front") {fatalError("Stale pixels accepted")}
+  if case .success=get("front",rgb:false) {fatalError("Stale depth accepted")}
   store.offerPanorama(jpeg:jpeg,receivedAt:Date(),sequence:8,generation:2)
   let pano=try get("panorama").get()
   precondition(pano["timestamp_kind"]as?String=="decoder_receipt_not_sensor_exposure" && pano["depth_available"]as?Bool==false)
-  print("PASS actual snapshot encoder: latest frame, JPEG geometry, same-frame depth, original timestamps, stale rejection, panorama provenance; no camera/device IO")
+  if case .success=get("panorama",rgb:false) {fatalError("Panorama invented depth")}
+  print("PASS actual snapshot encoder: latest frame, JPEG geometry, independent depth-only copy, original timestamps, stale rejection, panorama provenance; no camera/device IO")
  }
 }
