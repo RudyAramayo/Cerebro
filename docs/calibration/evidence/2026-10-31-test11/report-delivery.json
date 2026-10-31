@@ -1,0 +1,26 @@
+{
+  "report": "ROB Test 11 - Can recycling",
+  "private_relative_path": "output/pdf/ROB-Test-11-Can-Recycling-Report.pdf",
+  "sha256": "c02a0ee5a68429cbb613cc810b8c34720a312c7452e279890e479b9e655cf8a6",
+  "bytes": 570842,
+  "pages": 11,
+  "rendered_pages_visually_reviewed": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "verified_at": "2026-10-31T14:05:38.592393-07:00",
+  "messages_destination": "Verified existing one-to-one God conversation",
+  "messages_report_sent": false,
+  "messages_blocker": "Computer Use repeatedly returned cgWindowNotFound (-10005), including after app reacquisition by name/bundle ID and a fresh UI session. No PDF attachment was sent.",
+  "earlier_video_delivery": "Two reviewed first-can clips with audio showed Delivered at approximately 13:47 PDT.",
+  "next_action": "When Messages UI is available, verify direct God recipient, send the existing verified PDF, verify attachment delivery, and update this record. Do not move robot hardware."
+}
