@@ -107,6 +107,47 @@ endpoint feedback and Stop remain active throughout.
 
 ## Native offline mission and remaining commissioning
 
+### Overlap preparation with depth work
+
+`Scripts/cerebro_prepare.py` sends one already-reviewed arm-only preparation
+target through `motion.move` and processes selected RGB-D regions while that
+trajectory runs. Both arms can share the same target. A single depth worker
+samples at 2 Hz; it never queues frames behind a slow calculation. Status and
+the native feedback/current/settling guards remain active. No cloud call or
+diagnostic window is needed.
+
+The plan JSON contains `baseline` (all 14 freshly measured `arm.left.j1` through
+`arm.right.j7` values), sparse target `values`, and `seconds`. Review the complete
+path and surroundings before dispatch, as for any explicit local arm command.
+This script does not certify a route or treat stored values as calibration.
+The regions JSON maps names to `[x0, y0, x1, y1]` integer pixels in the fixed
+front-camera view, with exclusive upper bounds. For example:
+
+```sh
+python3 Scripts/cerebro_prepare.py --plan /private/path/ready.json \
+  --regions /private/path/can-regions.json --output /private/path/new-run \
+  --maximum-age-ms 1200
+```
+
+Use 1200 ms only for the current debug workflow; the script defaults to 350 ms
+and cannot relax native motion limits. Output contains original exposure times,
+valid-depth fractions, range spread and optical-frame XYZ estimates. These are
+region statistics, not detected object identities or calibrated robot targets.
+An arm can occlude a region while it moves. The final handoff therefore uses a
+new exposure after native measured completion, without an arbitrary settling
+sleep. Changed camera streams, app/gateway sessions, neck targets, torso counts
+or arm feedback invalidate the run. SLAM updates are recorded separately; an
+optical depth calculation does not use or validate a world-frame transform.
+Lost motor replies are never retried; an owned unfinished operation is stopped,
+and a manual takeover is preserved. Camera reads can retry a shared encoder's
+busy response for up to 1.2 seconds without queuing more work.
+
+`events.jsonl` separates overlapping depth calculations from motion completion.
+The final RGB-D files and `result.json` are ready for the next local calculation
+or visual inspection. No subsequent arm target or jaw command is dispatched.
+This preparation tool is available now; it is not yet wired into the native
+Recycle Cans mission state machine and does not claim autonomous grasp success.
+
 One explicit local command can own the bounded mission after the CLI exits:
 
 ```sh
