@@ -11,6 +11,7 @@
 import AppKit
 import Foundation
 import UniformTypeIdentifiers
+import simd
 
 private typealias ROBAmberDiagnosticsArm = ROBArmSide
 
@@ -511,7 +512,55 @@ enum ROBAmberPhotoReferenceSilhouette {
     }
 }
 
+/// Display-only FK. Vendor zero is ROB's hanging reference, not the standalone
+/// B1 URDF's straight-up zero. Share the animation model's physical-side mapping
+/// and shoulder mounts; never write an encoder offset or command an arm here.
+private struct ROBAmberArmSchematicGeometry {
+    let model: ROBGhostRobotModel
+    private let links: [String]
+
+    init(model: ROBGhostRobotModel) {
+        self.model = model
+        links = (1...7).compactMap { index in
+            model.joints.first { $0.name == "\(model.armJointPrefix)\(index)" }?.child
+        } + [model.toolLink]
+    }
+
+    func points(vendorPositions: [Double], measuredMount: ROBAmberArmMount? = nil) -> [SIMD3<Double>]? {
+        guard vendorPositions.count == 7, vendorPositions.allSatisfy(\.isFinite),
+              links.count == 8 else { return nil }
+        let frames = model.frames(model.positions(vendorLeft: vendorPositions))
+        var placement = matrix_identity_double4x4
+        if let measuredMount {
+            guard measuredMount.isValid,
+                  let canonicalMount = frames[model.physicalSide + "_base_link"] else { return nil }
+            // Preserve an explicitly measured base placement, when configured.
+            placement = measuredMount.transform * simd_inverse(canonicalMount)
+        }
+        var points: [SIMD3<Double>] = []
+        for link in links {
+            guard let frame = frames[link] else { return nil }
+            let point = placement * frame.columns.3
+            guard point.x.isFinite, point.y.isFinite, point.z.isFinite else { return nil }
+            points.append(SIMD3(point.x, point.y, point.z))
+        }
+        return points
+    }
+}
+
 private final class ROBAmberArmSchematicView: NSView {
+    // Hashing/loading the model and hulls happens once off the UI thread, never
+    // in draw(_:), so telemetry refreshes only perform the small FK calculation.
+    private static let bundledGeometry: Result<[ROBAmberDiagnosticsArm: ROBAmberArmSchematicGeometry], Error> = Result {
+        guard let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
+            throw ROBGhostMotionError.blocked("Bundled arm pose model is missing.")
+        }
+        return try Dictionary(uniqueKeysWithValues: ROBAmberDiagnosticsArm.allCases.map { arm in
+            (arm, ROBAmberArmSchematicGeometry(model: try ROBGhostRobotModel(directory: directory, physicalSide: arm.rawValue)))
+        })
+    }
+    private var geometry: [ROBAmberDiagnosticsArm: ROBAmberArmSchematicGeometry] = [:]
+    private var modelLoadFinished = false
     var leftSample: ROBAmberDiagnosticsSample? { didSet { needsDisplay = true } }
     var rightSample: ROBAmberDiagnosticsSample? { didSet { needsDisplay = true } }
     var leftTarget: [Double]? { didSet { needsDisplay = true } }
@@ -520,7 +569,17 @@ private final class ROBAmberArmSchematicView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        setAccessibilityLabel("Amber arm pose schematic; reference silhouettes are not measured telemetry")
+        setAccessibilityLabel("Amber arm pose estimated from telemetry and each arm's hanging reference; not camera-calibrated")
+        toolTip = "Encoder angles use the same side-specific hanging reference as Animation Studio. Solid lines are modeled feedback; orange dashed lines are targets. Gray silhouettes have no telemetry."
+        DispatchQueue.global(qos: .utility).async {
+            let loaded = Self.bundledGeometry
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if case .success(let geometry) = loaded { self.geometry = geometry }
+                self.modelLoadFinished = true
+                self.needsDisplay = true
+            }
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -538,7 +597,7 @@ private final class ROBAmberArmSchematicView: NSView {
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
             .foregroundColor: NSColor.labelColor,
         ]
-        ("Arm pose — measured telemetry when available" as NSString).draw(
+        ("Arm pose — hanging-reference model" as NSString).draw(
             at: NSPoint(x: 10, y: bounds.maxY - 20), withAttributes: attributes
         )
 
@@ -564,13 +623,15 @@ private final class ROBAmberArmSchematicView: NSView {
         }
 
         let mount = ROBAmberMountConfiguration.shared.mount(for: arm.rawValue)
-            ?? ROBAmberArmMount(translationMeters: [0, 0, 0], rotationRPYRadians: [0, 0, 0])
-        guard let actual3D = ROBAmberB1Kinematics.jointOriginsInRobot(
-            angles: sample.positionsRadians, mount: mount
-        ) else { return }
+        guard let armGeometry = geometry[arm],
+              let actual3D = armGeometry.points(vendorPositions: sample.positionsRadians, measuredMount: mount) else {
+            let message = modelLoadFinished ? "Pose unavailable" : "Loading pose model…"
+            (message as NSString).draw(at: NSPoint(x: rect.minX + 2, y: rect.midY), withAttributes: labelAttributes)
+            return
+        }
         let actual = projected(actual3D)
         let targetPoints = target.flatMap {
-            ROBAmberB1Kinematics.jointOriginsInRobot(angles: $0, mount: mount)
+            armGeometry.points(vendorPositions: $0, measuredMount: mount)
         }.map(projected)
         let all = actual + (targetPoints ?? [])
         guard let minX = all.map(\.x).min(), let maxX = all.map(\.x).max(),
@@ -598,6 +659,9 @@ private final class ROBAmberArmSchematicView: NSView {
                 ? .systemRed : (arm == .left ? .systemTeal : .systemBlue),
             dashed: false
         )
+        if let shoulder = actual.first.map(mapped) {
+            ("J1" as NSString).draw(at: NSPoint(x: shoulder.x + 6, y: shoulder.y + 3), withAttributes: labelAttributes)
+        }
     }
 
     private func drawPhotoReferenceSilhouette(
