@@ -3189,7 +3189,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [self synchronizeDevelopmentCameraDiagnostics];
     }
 
-    [[ROBLocalControlService shared] configureWithSerial:self.serialBox cameraDemand:^(BOOL active) {
+    [[ROBLocalControlService shared] configureWithSerial:self.serialBox speech:self.speechBox recordAssistantStatus:^(NSString *text) {
+        [missionOwner appendConversationText:[NSString stringWithFormat:@"Codex assistant status: %@", text] fromUser:NO];
+    } cameraDemand:^(BOOL active) {
         [missionOwner ensureMainCameraRuntime];
         [missionOwner.cameraViewController setLocalControlDemandActive:active];
     } stopBase:^{

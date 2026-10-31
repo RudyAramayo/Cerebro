@@ -1,0 +1,523 @@
+{
+  "core_coordinates": "degrees: UDP radians converted by 180/pi; launch dynamics copied directly",
+  "core_sha256": "554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100",
+  "core_version": "V0.2.0",
+  "date": "2026-10-31",
+  "historical_cause_proven": false,
+  "historical_seed_state_recorded": false,
+  "model_audit": {
+    "arms": [
+      {
+        "base": "base_link",
+        "boot_directory": "L-10",
+        "chain": [
+          {
+            "axis": {
+              "xyz": "0 0 1"
+            },
+            "child": "Lone_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Lone",
+            "origin": {
+              "rpy": "1.138 0 0",
+              "xyz": "0 -0.13364 0.061738"
+            },
+            "parent": "base_link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 -1"
+            },
+            "child": "Ltwo_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Ltwo",
+            "origin": {
+              "rpy": "-1.5708 0 0",
+              "xyz": "0 0 0.0853"
+            },
+            "parent": "Lone_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 1"
+            },
+            "child": "Lthree_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Lthree",
+            "origin": {
+              "rpy": "1.5708 0 0",
+              "xyz": "0 -0.1289 0"
+            },
+            "parent": "Ltwo_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 -1"
+            },
+            "child": "Lfour_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Lfour",
+            "origin": {
+              "rpy": "1.5707963267949 0 0",
+              "xyz": "0 0 0.0853000000000002"
+            },
+            "parent": "Lthree_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 1"
+            },
+            "child": "Lfive_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Lfive",
+            "origin": {
+              "rpy": "-1.5708 0 0",
+              "xyz": "0 0.1251 0"
+            },
+            "parent": "Lfour_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 -1"
+            },
+            "child": "Lsix_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Lsix",
+            "origin": {
+              "rpy": "-1.5707963267949 0 0",
+              "xyz": "0 0 0.0891000000000001"
+            },
+            "parent": "Lfive_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 1"
+            },
+            "child": "Lseven_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Lseven",
+            "origin": {
+              "rpy": "1.5707963267949 0 0",
+              "xyz": "0 -0.1591 0"
+            },
+            "parent": "Lsix_Link",
+            "type": "revolute"
+          }
+        ],
+        "collision_geometry_counts": {
+          "Lfive_Link": 1,
+          "Lfour_Link": 1,
+          "Lone_Link": 1,
+          "Lseven_Link": 1,
+          "Lsix_Link": 1,
+          "Lthree_Link": 1,
+          "Ltwo_Link": 1,
+          "base_link": 1
+        },
+        "enabled": true,
+        "launch": "L-10/launch.json",
+        "launch_dynamics": {
+          "Control_Frequency": 200,
+          "Gear_Ratio": [
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50
+          ],
+          "Max_Acceleration": [
+            90000,
+            90000,
+            90000,
+            90000,
+            90000,
+            90000,
+            90000
+          ],
+          "Max_Jerk": [
+            5000,
+            5000,
+            5000,
+            5000,
+            5000,
+            5000,
+            5000
+          ],
+          "Max_Velocity": [
+            5400.0,
+            5400.0,
+            5400.0,
+            5400.0,
+            4200.0,
+            4200.0,
+            4200.0
+          ],
+          "Robot_DOF": 7
+        },
+        "launch_sha256": "baea5d73603f3e44eb603fde26c8d06268e2949b1adc4fb880f65a73a901f572",
+        "lcm_prefix": "Left_",
+        "model_links": [
+          "base_link",
+          "Lone_Link",
+          "Ltwo_Link",
+          "Lthree_Link",
+          "Lfour_Link",
+          "Lfive_Link",
+          "Lsix_Link",
+          "Lseven_Link"
+        ],
+        "robot_direction": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "selected_urdf": "L-10/urdf/dual_b1/DualArmL.urdf",
+        "solver_direction": [
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          1
+        ],
+        "solver_ignore_ruckig": 0.05,
+        "solver_type": "Drake",
+        "tip": "Lseven_Link",
+        "urdf_sha256": "e792056cea50b24172c29b6d66b6d7161550338be9ef63fc0936e38a6cffcb1e"
+      },
+      {
+        "base": "base_link",
+        "boot_directory": "R-11",
+        "chain": [
+          {
+            "axis": {
+              "xyz": "0 0 1"
+            },
+            "child": "Rone_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Rone",
+            "origin": {
+              "rpy": "-1.13804396130002 0 0",
+              "xyz": "0 0.133644731508115 0.0617380553162488"
+            },
+            "parent": "base_link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 -1"
+            },
+            "child": "Rtwo_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Rtwo",
+            "origin": {
+              "rpy": "1.5707963267949 0 0",
+              "xyz": "0 0 0.0853"
+            },
+            "parent": "Rone_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 1"
+            },
+            "child": "Rthree_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Rthree",
+            "origin": {
+              "rpy": "-1.5707963267949 0 0",
+              "xyz": "0 0.1289 0"
+            },
+            "parent": "Rtwo_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 -1"
+            },
+            "child": "Rfour_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Rfour",
+            "origin": {
+              "rpy": "-1.5708 0 0",
+              "xyz": "0 0 0.0853"
+            },
+            "parent": "Rthree_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 1"
+            },
+            "child": "Rfive_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Rfive",
+            "origin": {
+              "rpy": "1.5707963267949 0 0",
+              "xyz": "0 -0.1251 0"
+            },
+            "parent": "Rfour_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 -1"
+            },
+            "child": "Rsix_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Rsix",
+            "origin": {
+              "rpy": "1.5708 0 0",
+              "xyz": "0 0 0.0891"
+            },
+            "parent": "Rfive_Link",
+            "type": "revolute"
+          },
+          {
+            "axis": {
+              "xyz": "0 0 1"
+            },
+            "child": "Rseven_Link",
+            "limit": {
+              "effort": "100000",
+              "lower": "-2.09",
+              "upper": "2.09",
+              "velocity": "1000000"
+            },
+            "name": "Rseven",
+            "origin": {
+              "rpy": "-1.5708 0 0",
+              "xyz": "0 0.1591 0"
+            },
+            "parent": "Rsix_Link",
+            "type": "revolute"
+          }
+        ],
+        "collision_geometry_counts": {
+          "Rfive_Link": 1,
+          "Rfour_Link": 1,
+          "Rone_Link": 1,
+          "Rseven_Link": 1,
+          "Rsix_Link": 1,
+          "Rthree_Link": 1,
+          "Rtwo_Link": 1,
+          "base_link": 1
+        },
+        "enabled": true,
+        "launch": "R-11/launch.json",
+        "launch_dynamics": {
+          "Control_Frequency": 200,
+          "Gear_Ratio": [
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50
+          ],
+          "Max_Acceleration": [
+            90000,
+            90000,
+            90000,
+            90000,
+            90000,
+            90000,
+            90000
+          ],
+          "Max_Jerk": [
+            5000,
+            5000,
+            5000,
+            5000,
+            5000,
+            5000,
+            5000
+          ],
+          "Max_Velocity": [
+            5400.0,
+            5400.0,
+            5400.0,
+            5400.0,
+            4200.0,
+            4200.0,
+            4200.0
+          ],
+          "Robot_DOF": 7
+        },
+        "launch_sha256": "5de7ef5c9e8f2315b5fc88d6b4db4dac54065cb2d0b1569484636435f649410d",
+        "lcm_prefix": "Right_",
+        "model_links": [
+          "base_link",
+          "Rone_Link",
+          "Rtwo_Link",
+          "Rthree_Link",
+          "Rfour_Link",
+          "Rfive_Link",
+          "Rsix_Link",
+          "Rseven_Link"
+        ],
+        "robot_direction": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "selected_urdf": "R-11/urdf/dual_b1/DualArmR.urdf",
+        "solver_direction": [
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          1
+        ],
+        "solver_ignore_ruckig": 0.05,
+        "solver_type": "Drake",
+        "tip": "Rseven_Link",
+        "urdf_sha256": "13855c949b70fe7df8194960e4379ca4bab19f3f5bdbd26b89cf25cb8ca5240c"
+      }
+    ],
+    "scope": "Files under the supplied Amber root; this is not proof of what a running core loaded.",
+    "units": {
+      "launch_dynamics": "Not declared by launch.json; inspect the selected core's conversion before comparing with URDF limits.",
+      "rotation": "radians",
+      "translation": "meters"
+    }
+  },
+  "raw_file_hashes": {
+    "L-10/core.log": "284a60b317acaedb91a7aa362d52c96624c18fef63a1bae7fcec056fc79387f9",
+    "R-11/core.log": "caf6a458db8f8d0d7bac0997ecc214759e8bebf75768211f704590dafe470b5a",
+    "rob_gateway/PROTOCOL.md": "1b78502cfa9da01eb92f7b8c9c4bca549b3501ea0065726f9354a3950f64c8aa",
+    "rob_gateway/rob_amber_gateway.py": "6903063cbcaf9e74fe84b506b1566c09b5d5650a6a2bd81b060ebea1f14997d2",
+    "ruckig-disassembly.txt": "55964cfcdfbefd5620128693ab1b8701040ccb3d84aec32f054b22f4c24d9da9"
+  },
+  "ruckig_package": "ros-humble-ruckig 0.9.2-1jammy.20231117.163632",
+  "scope": "Read-only production inspection and isolated trajectory math; no actuator/mode/core-restart command",
+  "simulation": [
+    {
+      "case": "consistent_command_state",
+      "duration_s": 2,
+      "maximum_rad": 1.05,
+      "minimum_rad": 0.34,
+      "seed_acceleration_rad_s2": 0,
+      "seed_velocity_rad_s": 0.2,
+      "start_rad": 0.34,
+      "target_rad": 1.05
+    },
+    {
+      "case": "hypothetical_missed_sample",
+      "duration_s": 2.05691587591,
+      "maximum_rad": 1.05,
+      "minimum_rad": -5.26259621712,
+      "seed_acceleration_rad_s2": -40,
+      "seed_velocity_rad_s": 0,
+      "start_rad": 0.34,
+      "target_rad": 1.05
+    },
+    {
+      "case": "stationary_handoff",
+      "duration_s": 2,
+      "maximum_rad": 1.05,
+      "minimum_rad": 0.34,
+      "seed_acceleration_rad_s2": 0,
+      "seed_velocity_rad_s": 0,
+      "start_rad": 0.34,
+      "target_rad": 1.05
+    },
+    {
+      "case": "persistent_latest_target_prototype",
+      "changes_while_moving": 155,
+      "final_rad": 0.7,
+      "max_acceleration_rad_s2": 0.6,
+      "max_jerk_rad_s3": 2,
+      "max_step_rad": 0.0015,
+      "max_velocity_rad_s": 0.3,
+      "planner_hz": 200,
+      "target_updates_hz": 20
+    }
+  ],
+  "source_sha256": "88e001ae279f5a7c55b60b8c97488d8b6f157ef4fd777502f45658e8d6197634"
+}

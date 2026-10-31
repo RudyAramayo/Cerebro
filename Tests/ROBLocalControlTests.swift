@@ -11,6 +11,21 @@ import Foundation
         }
         func rejected(_ run:()throws->Void) { do {try run();fatalError("Expected rejection")} catch {} }
         try admission.admit(request("status"),now:now)
+        try admission.admit(request("speech.status"),now:now)
+        rejected {try admission.admit(request("speech.say"),now:now)}
+        for (parameters, valid): ([String:Any], Bool) in [
+            (["text":"Status only","source":"codex"],true),
+            (["text":"  ","source":"codex"],false),
+            (["text":"yes proceed","source":"microphone"],false),
+            (["text":String(repeating:"x",count:2001),"source":"codex"],false),
+            (["text":"Status","source":"codex","execute":true],false),
+        ] {
+            let encoded=try JSONSerialization.data(withJSONObject:["version":1,"id":UUID().uuidString,
+                "operation":"speech.say","parameters":parameters,"sent_at_ms":now])
+            let speech=try ROBLocalControlRequest(data:encoded,now:now)
+            if valid {let text=try speech.assistantSpeechText();precondition(text=="Status only")}
+            else {rejected {_=try speech.assistantSpeechText()}}
+        }
         rejected {try admission.admit(request("motion.move"),now:now)}
         rejected {try admission.admit(request("mission.start","old-launch"),now:now)}
         let command=try request("mission.start",admission.session)

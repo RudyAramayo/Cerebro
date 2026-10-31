@@ -8,6 +8,10 @@ import CoreFoundation
     private let socket = ROBLocalControlSocket()
     private var admission = ROBLocalControlAdmission()
     private weak var serial: ROBSerialBox?
+    private weak var speech: ROBSpeechBox?
+    private var recordAssistantStatus: ((String) -> Void)?
+    private var speechJobs: [String: [String: Any]] = [:]
+    private var speechOrder: [String] = []
     private var cameraDemand: ((Bool) -> Void)?
     private var stopBase: (() -> Void)?
     private var demandTimer: Timer?
@@ -18,18 +22,21 @@ import CoreFoundation
     static let directory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cerebro/LocalControl")
 
-    @objc(configureWithSerial:cameraDemand:stopBase:)
-    func configure(serial: ROBSerialBox, cameraDemand: @escaping (Bool) -> Void, stopBase: @escaping () -> Void) {
+    @objc(configureWithSerial:speech:recordAssistantStatus:cameraDemand:stopBase:)
+    func configure(serial: ROBSerialBox, speech: ROBSpeechBox, recordAssistantStatus: @escaping (String) -> Void,
+                   cameraDemand: @escaping (Bool) -> Void, stopBase: @escaping () -> Void) {
         precondition(Thread.isMainThread)
         guard !running else { return }
         self.serial=serial; self.cameraDemand=cameraDemand; self.stopBase=stopBase
+        self.speech=speech; self.recordAssistantStatus=recordAssistantStatus
         do {
             try socket.start(directory: Self.directory) { [weak self] data, reply in
                 DispatchQueue.main.async { self?.handle(data, reply: reply) }
             }
             running=true
             sleepObserver=NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.willSleepNotification,
-                object:nil,queue:.main) { _ in
+                object:nil,queue:.main) { [weak self] _ in
+                if self?.speech?.assistantStatusInputSuppressed == true { self?.speech?.stopIt(nil) }
                 ROBRecycleMissionCoordinator.shared.stop(reason:"System sleep ended the local mission")
             }
             NSLog("Local Cerebro control ready at %@", Self.directory.appendingPathComponent("control.sock").path)
@@ -65,6 +72,28 @@ import CoreFoundation
             try admission.admit(request)
             switch operation {
             case "status": try request.only([]); finish(.success(status()))
+            case "speech.say":
+                let text = try request.assistantSpeechText()
+                guard let speech else { throw ROBLocalControlError("Native speech is unavailable") }
+                let id = request.id.uuidString
+                guard speech.sayAssistantStatus(text, completion: { [weak self] completed in
+                    self?.speechJobs[id]?["status"] = completed ? "finished" : "cancelled"
+                }) else { throw ROBLocalControlError("Speech is busy, shutting down, or microphone recording owns audio") }
+                speechJobs[id] = ["utterance_id": id, "status": "queued", "source": "codex", "role": "assistant_status", "motor_output": false]
+                speechOrder.append(id)
+                while speechOrder.count > 64 { speechJobs.removeValue(forKey: speechOrder.removeFirst()) }
+                recordAssistantStatus?(text)
+                finish(.success(speechJobs[id]!))
+            case "speech.status":
+                try request.only(["utterance_id"])
+                var result: [String: Any] = ["microphone_suppressed": speech?.assistantStatusInputSuppressed ?? false,
+                    "speaking": speech?.isSpeaking ?? false, "motor_output": false]
+                if let supplied = request.parameters["utterance_id"] {
+                    guard let raw = supplied as? String, let uuid = UUID(uuidString: raw),
+                          let job = speechJobs[uuid.uuidString] else { throw ROBLocalControlError("Unknown utterance in this app session") }
+                    result["utterance"] = job
+                } else { result["utterances"] = speechOrder.compactMap { speechJobs[$0] } }
+                finish(.success(result))
             case "mission.status": try request.only([]); finish(.success(ROBRecycleMissionCoordinator.shared.localStatus()))
             case "mission.confirm_empty":
                 try request.only(["mission_id"])
