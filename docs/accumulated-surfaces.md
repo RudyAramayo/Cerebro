@@ -171,6 +171,18 @@ complete reconstruction, QR detection of every target or robot registration.
 Sanitized results and private-artifact hashes are in the
 [October 31 renderer validation](calibration/evidence/2026-10-31-surface-texture/renderer-validation.json).
 
+The native Debug build was installed and relaunched in coordination with the
+active can-pour session, combining texture commit `43e63bb` (cherry-picked as
+`c9e7e67`) with that session's changes. Code-signature verification passed, and
+all installed Mach-O files, including `Cerebro.debug.dylib`, matched the build
+product. The running process loaded those installed images. Both arms remained
+inactive with unchanged joint positions. The passive restart left the neck pose
+unknown, so a fresh live HEAD scan still needs an established neck pose. Native
+renderer fixtures and recorded replay provide the texture verification above;
+this verification used no actuator commands. See the
+[deployment record](calibration/evidence/2026-10-31-surface-texture/deployment-validation.json)
+for exact hashes and runtime identity.
+
 To replay local saved calibration evidence through the actual accumulator and
 SceneKit renderer (without opening a camera or robot service):
 
