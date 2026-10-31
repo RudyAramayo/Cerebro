@@ -39,7 +39,13 @@ can-sized geometry; the colored voxels are the actual measured returns.
   foreground objects out of a table's texture. Filled photographic texels stay
   fixed; later views fill only missing regions. Plane/profile reset or expiry
   discards the keyframe. This is texture history, not a live video surface.
-  Without a usable keyframe a plane is neutral gray, not a coarse RGB mosaic.
+  Until a usable photograph is available, a plane keeps its measured voxel
+  colours. Partly filled photographs use those coarse colours only in missing
+  regions; they are never locked into the photographic history, so later valid
+  views can fill them. Missing depth does not create new measured geometry.
+  Photo visibility uses perpendicular distance to the fitted plane, in the same
+  units as its RMS, rather than an optical-Z threshold that rejects oblique
+  surfaces. Foreground/invalid-depth rejection remains in place.
 - Extraction stops at 2,048 rectangles. Up to 4,000 residual points preserve
   irregular details. The HUD reports when a detail limit is reached. It also
   reports capture age; retained history never gets described as current data.
@@ -146,6 +152,24 @@ depth noise: no can identity/dropout transitions, fixed plane UV axes, brief
 occlusion/reacquisition, bounded disappearance and two-frame see-through removal.
 The photographic fixture generates a real QR and requires 11 consecutive decodes
 and a bit-identical keyframe despite exposure changes in later input frames.
+It also compares an off-centre QR's rendered position with its source image,
+checks observed colours when RGB is unavailable, and checks depth-hole fallback,
+later photographic refill and noisy oblique-plane coverage.
+
+The October 31 texture correction removed a duplicate vertical flip when
+SceneKit samples a `CGImage`. The previous centred-code/decode tests missed it:
+an off-centre QR stayed readable but moved 129.201 pixels within the plane. The
+corrected source/render centre error is 0.000 pixels in the synthetic fixture.
+The saved tabletop replay's neutral fallback covered 143,918 of 256,000 pixels
+before the fix and zero afterward. Its mean absolute RGB-channel difference
+from the input fell from 69.453 to 29.024 on an 8-bit scale. This includes
+unmodeled gaps and inferred geometry; it is not a calibration measurement.
+This replay repeats one stationary RGB-D snapshot to isolate rendering, rather
+than testing moving-camera registration. The floor QR in that difficult capture still lacks a complete readable texture
+because of depth/plane coverage. Do not equate the texture-orientation fix with
+complete reconstruction, QR detection of every target or robot registration.
+Sanitized results and private-artifact hashes are in the
+[October 31 renderer validation](calibration/evidence/2026-10-31-surface-texture/renderer-validation.json).
 
 To replay local saved calibration evidence through the actual accumulator and
 SceneKit renderer (without opening a camera or robot service):

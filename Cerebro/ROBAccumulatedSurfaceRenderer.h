@@ -32,8 +32,8 @@ static inline SCNGeometry *ROBSurfacePlaneGeometryWithPhoto(const ROBSurfacePlan
                               ROBDepthFloorScale(plane->v,(plane->originV+y[j])*ROBSurfaceTexelSize)));
             vertices[i*4+j]=(Vertex){(float)p.x,(float)p.y,(float)p.z};
             uv[i*4+j]=photo ? (UV){(float)(((plane->originU+x[j])*ROBSurfaceTexelSize-originU)/spanU),
-                (float)(1-((plane->originV+y[j])*ROBSurfaceTexelSize-originV)/spanV)} :
-                (UV){(float)(x[j]/plane->width),(float)(1-y[j]/plane->height)};
+                (float)(((plane->originV+y[j])*ROBSurfaceTexelSize-originV)/spanV)} :
+                (UV){(float)(x[j]/plane->width),(float)(y[j]/plane->height)};
         }
         uint32_t b=(uint32_t)(i*4);uint32_t t[6]={b,b+1,b+2,b,b+2,b+3};memcpy(triangles+i*6,t,sizeof(t));
     }
@@ -49,11 +49,13 @@ static inline SCNGeometry *ROBSurfacePlaneGeometryWithPhoto(const ROBSurfacePlan
         bitmapFormat:NSBitmapFormatAlphaNonpremultiplied bytesPerRow:plane->width*4 bitsPerPixel:32];
     if (!bitmap.bitmapData) return nil;
     for (int y=0;y<plane->height;y++) for (int x=0;x<plane->width;x++) {
-        /* Without a photographic keyframe show neutral geometry. Repainting
-         * coarse voxel RGB cells destroys small printed features such as QR. */
-        uint32_t c=plane->rgba[(size_t)y*plane->width+x] ? 0x70808CFF : 0;uint8_t *pixel=bitmap.bitmapData+y*bitmap.bytesPerRow+x*4;
+        /* Keep measured colour while photographic coverage is pending. These
+         * coarse samples are never promoted to locked photographic texels. */
+        uint32_t c=plane->rgba[(size_t)y*plane->width+x];uint8_t *pixel=bitmap.bitmapData+y*bitmap.bytesPerRow+x*4;
         pixel[0]=(c>>24)&255;pixel[1]=(c>>16)&255;pixel[2]=(c>>8)&255;pixel[3]=c&255;
     }
+    // SceneKit maps CGImage bitmap row zero to texture v=0. A second 1-v flip
+    // reflected the photograph inside each independently oriented plane.
     SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=(__bridge id)(photo ?: bitmap.CGImage);
     material.lightingModelName=SCNLightingModelConstant;material.doubleSided=YES;
     material.diffuse.minificationFilter=photo ? SCNFilterModeLinear : SCNFilterModeNearest;
