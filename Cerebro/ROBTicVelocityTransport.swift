@@ -177,6 +177,20 @@ final class ROBTicVelocityTransport {
         return token == generation
     }
 
+    /// Startup can span several USB transactions. Only a newer supervised
+    /// request for this same target may renew its deadline; a changed target,
+    /// manual demand or Stop supersedes the in-flight request.
+    private func positionDeadline(_ count: Int32, original: TimeInterval, token: UInt64) -> TimeInterval? {
+        lock.lock(); defer { lock.unlock() }
+        guard token == generation else { return nil }
+        switch pending {
+        case .position(let target, let deadline):
+            return target == count && deadline.isFinite ? max(original, deadline) : nil
+        case .velocity, .arm, .stop: return nil
+        case .read, .none: return original
+        }
+    }
+
     private func publish(_ ready: Bool, _ detail: String, token: UInt64) {
         if detail != lastPublishedDetail {
             lastPublishedDetail = detail
@@ -270,19 +284,29 @@ final class ROBTicVelocityTransport {
                     }
                     if !driveActive {
                         release = nil
-                        try Self.checkStatus(execute(["--status", "--full"]), starting: true)
+                        let preflightAt = ProcessInfo.processInfo.systemUptime
+                        let preflightStatus = try execute(["--status", "--full"])
+                        try Self.checkStatus(preflightStatus, starting: true)
+                        try publishPosition(preflightStatus, capturedAt: preflightAt, token: token)
                         guard current(token) else { continue }
-                        guard ProcessInfo.processInfo.systemUptime <= validUntil else {
+                        guard let deadline = positionDeadline(count, original: validUntil, token: token) else { continue }
+                        guard ProcessInfo.processInfo.systemUptime <= deadline else {
                             throw Self.error("Torso position supervision expired before energizing")
                         }
                         motorMayBeEnergized = true
-                        _ = try execute(["--velocity", "0", "--energize", "--exit-safe-start"])
+                        let heldAt = ProcessInfo.processInfo.systemUptime
+                        let heldStatus = try execute(["--velocity", "0", "--energize", "--exit-safe-start", "--status", "--full"])
                         guard current(token) else { continue }
-                        try Self.checkStatus(execute(["--status", "--full"]), starting: false)
+                        try Self.checkStatus(heldStatus, starting: false)
+                        guard try Self.currentVelocity(heldStatus) == 0 else {
+                            throw Self.error("Tic did not confirm zero velocity before the position turn")
+                        }
+                        try publishPosition(heldStatus, capturedAt: heldAt, token: token)
                         driveActive = true
                     }
                     guard current(token) else { continue }
-                    guard ProcessInfo.processInfo.systemUptime <= validUntil else {
+                    guard let deadline = positionDeadline(count, original: validUntil, token: token) else { continue }
+                    guard ProcessInfo.processInfo.systemUptime <= deadline else {
                         throw Self.error("Torso position supervision expired before movement")
                     }
                     onMotionDispatch?()

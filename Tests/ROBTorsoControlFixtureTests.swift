@@ -44,6 +44,7 @@ import Foundation
     }
     static func main() throws {
         try stationaryCounterContinuity()
+        try positionStartupRenewal()
         let echo = try ROBTicVelocityTransport.runCommand(executable: "/bin/echo", arguments: ["torso fixture"], operation: "fixture")
         try expect(echo == "torso fixture\n", "Direct child completion lost output")
         for (program, args, timeout, expected) in [
@@ -443,6 +444,40 @@ import Foundation
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         try expect(!blocking.calls.contains(where: { $0.contains("--energize") }), "Cancelled preflight still energized")
         print("Torso fixtures passed: exact supervised position targets, circular goals, camera gates, bounded braking/reversal, observed stall, zero-before-wake, measured-stop power release, idle resume, watchdog, stale wake, fault/release latches, cancelled arm, no homing or counter reset")
+    }
+
+    static func positionStartupRenewal() throws {
+        for scenario in ["renewed", "expired", "superseded", "stopped", "invalid"] {
+            let motor = FakeTic(), entered = DispatchSemaphore(value: 0), gate = DispatchSemaphore(value: 0)
+            let transport = ROBTicVelocityTransport { args in
+                let result = try motor.execute(args)
+                if args.contains("--energize") { entered.signal(); _ = gate.wait(timeout: .now() + 2) }
+                return result
+            }
+            var ready = false, count: Int32?
+            transport.onState = { ready = $0; _ = $1 }
+            transport.onPosition = { count = $0.count }
+            transport.arm(profile: .init()); try wait { ready }
+            transport.position(-8907, validUntil: ProcessInfo.processInfo.systemUptime + 0.04)
+            try expect(entered.wait(timeout: .now() + 1) == .success, "Position startup did not reach energized hold")
+            RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+            if scenario == "renewed" { transport.position(-8907, validUntil: ProcessInfo.processInfo.systemUptime + 0.3) }
+            if scenario == "superseded" { transport.position(9091, validUntil: ProcessInfo.processInfo.systemUptime + 0.3) }
+            if scenario == "stopped" { transport.stop() }
+            if scenario == "invalid" { transport.position(-8907, validUntil: .infinity) }
+            gate.signal()
+            if scenario == "renewed" || scenario == "superseded" {
+                let target: Int32 = scenario == "renewed" ? -8907 : 9091
+                try wait { count == target }
+                try expect(motor.calls.filter { $0.contains("--position") }.allSatisfy { $0.prefix(2) == ["--position", String(target)] },
+                    "Startup emitted a superseded position")
+            } else {
+                try wait { !ready && !motor.energized }
+                try expect(!motor.calls.contains { $0.contains("--position") }, "Expired or cancelled startup moved")
+            }
+            try expect(!motor.movedWithoutPower, "Position moved before verified energization")
+            try expect(transport.stopAndWait(), "Startup fixture could not stop")
+        }
     }
 }
 
