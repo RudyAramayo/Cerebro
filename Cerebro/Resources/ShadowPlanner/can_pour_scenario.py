@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Saved-scene pour planning only. Never imports a hardware/transport API."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+import numpy as np
+
+DIRECTORY = Path(__file__).resolve().parent
+sys.path.insert(0, str(DIRECTORY))
+from can_pour import (CanGeometry, CupGeometry, GhostPourRobot, PourWorkspace,
+                      PourPlanError, PourWaypoint, transform, rigid, vector,
+                      upright_can, geometry_path, geometry_audit,
+                      fixed_timed_chain, glass_push_plan, horizontal_table_frame, convex_table_outline)
+
+
+def load(path):
+    return json.loads(Path(path).read_text(), parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
+
+
+def json_default(value):
+    if isinstance(value, np.generic): return value.item()
+    if isinstance(value, np.ndarray): return value.tolist()
+    raise TypeError('Unsupported report value: ' + type(value).__name__)
+
+
+def plan(scene, status, advance=0., hold=.35):
+    if not np.isfinite(advance) or not 0 <= advance <= .40:
+        raise PourPlanError('Base-advance hypothesis must be between 0 and 0.40 meters')
+    robot = GhostPourRobot(DIRECTORY)
+    q0 = robot.from_status(status)
+    can = CanGeometry(**scene['can'])
+    cup = CupGeometry(**scene['cup'])
+    source = upright_can(scene['canCenter'], scene['openingDirection'])
+    approach = vector(scene['graspApproach']); approach[2] = 0
+    if np.linalg.norm(approach) < .1: raise PourPlanError('Missing horizontal grasp approach')
+    approach /= np.linalg.norm(approach)
+    up = np.array([0., 0., 1.])
+    grasp_center = vector(scene['canCenter']).copy()
+    grasp_offset = float(scene.get('graspHeightOffset', 0.))
+    if not np.isfinite(grasp_offset) or abs(grasp_offset) > can.height / 4:
+        raise PourPlanError('Grasp center must remain in the middle half of the can')
+    grasp_center[2] += grasp_offset
+    grasp = transform(np.column_stack([up, np.cross(approach, up), approach]), grasp_center)
+    payload_path = geometry_path(can, cup, source, grasp)
+    pregrasp = grasp.copy(); pregrasp[:3, 3] -= approach * .08
+    steps = [PourWaypoint('Approach open gripper 8 cm before can', source, pregrasp, False,
+                          'Entry from current posture requires swept full-robot clearance')]
+    steps += payload_path
+    retreat = grasp.copy(); retreat[:3, 3] -= approach * .08
+    steps += [PourWaypoint('Retract empty gripper after supported release', source, retreat, False)]
+    model_from_scene, table_alignment = horizontal_table_frame(scene['modelFromScene'])
+    model_from_scene[0, 3] -= advance
+    bounds=np.asarray(scene['tableBoundsXY'],float)
+    outline=convex_table_outline(scene.get('tableOutlineXY',
+        [bounds[0],[bounds[1][0],bounds[0][1]],bounds[1],[bounds[0][0],bounds[1][1]]]))
+    workspace = PourWorkspace(robot, can, cup, bounds, scene['tableZ'], model_from_scene, outline)
+    can_in_tool = np.linalg.inv(grasp) @ source
+    baseline_self = robot.engine.clearance.check(q0)
+    baseline_world = workspace.check(q0, source, supported=True)
+    reports, seed = [], q0.copy()
+    previous_pour = None
+    raw_pour, pour_solved = [], True
+    # Seed the pregrasp from a solved grasp rather than forcing a local IK
+    # branch directly out of hanging. The connector is still reviewed from q0.
+    grasp_seed, grasp_seed_report = robot.solve(model_from_scene @ grasp, q0)
+    for index, step in enumerate(steps):
+        target = model_from_scene @ step.world_tool
+        continuation = seed.copy()
+        if index == 0 and grasp_seed_report['solved']: continuation = grasp_seed
+        if step.stage.startswith('Tilt toward') and previous_pour is not None:
+            # Extrapolate the local IK branch to discourage redundant-joint
+            # wandering, which otherwise turns a smooth tilt into a jerky fit.
+            continuation[robot.indices] += (seed - previous_pour)[robot.indices]
+        old_seed = seed.copy()
+        q, ik = robot.solve(target, continuation)
+        report = dict(index=index, stage=step.stage, attached=step.attached,
+                      positions={name:float(q[j.position_start()]) for name,j in robot.engine.joints.items()},
+                      checkpoint=step.checkpoint, ik=ik,
+                      desiredCanPose=(model_from_scene @ step.world_can).tolist(),
+                      targetToolPose=target.tolist(), ghostFrames=robot.ghost_frames(q))
+        if ik['solved']:
+            report['selfClearance'] = robot.review(seed, q)
+            # Release is a stationary state change; payload remains at support.
+            moving_attached = step.attached and step.stage != 'Verify jaw closure'
+            report['worldClearance'] = workspace.transition(seed, q, can_in_tool, source,
+                attached=moving_attached,
+                supported=step.stage in ('Approach open gripper 8 cm before can', 'Grasp at source',
+                    'Verify jaw closure', 'Retention test lift', 'Return to source support',
+                    'Release supported can', 'Retract empty gripper after supported release'))
+            seed = q
+        if step.stage == 'Position opening over cup' or step.stage.startswith('Tilt toward'):
+            raw_pour.append(ik['rawRadians'])
+            pour_solved = pour_solved and ik['solved']
+            previous_pour = old_seed if step.stage.startswith('Tilt toward') else None
+        reports.append(report)
+    timed = None
+    quick = None
+    if pour_solved:
+        try: timed = fixed_timed_chain(raw_pour, hold_seconds=hold)
+        except PourPlanError as error: timed = dict(executable=False, error=str(error))
+        # A prepared tilt below the ideal flow threshold shortens the active
+        # pour/cutoff portion. It is not guaranteed dry with uncertain fill/lip.
+        onset = can.tilt_for_fraction(can.initial_fraction)
+        final = can.tilt_for_fraction(can.final_fraction)
+        first = max(0, int((onset - np.deg2rad(10)) / final * (len(raw_pour)-1)))
+        if len(raw_pour) - first >= 6:
+            try:
+                quick = fixed_timed_chain(raw_pour[first:], hold_seconds=hold)
+                quick['preparedTiltDegrees'] = float(np.rad2deg(final * first / (len(raw_pour)-1)))
+                quick['returnsToPreparedTiltBeforeFullUpright'] = True
+                quick['preparedTiltDrynessVerified'] = False
+            except PourPlanError as error: quick = dict(executable=False, error=str(error))
+    for chain in (timed, quick):
+        if chain and 'samples' in chain:
+            chain['sweptReview'] = workspace.review_timed_curve(chain, q0, can_in_tool)
+    native_timed = []
+    if quick and 'samples' in quick:
+        for sample in quick['samples']:
+            q=q0.copy();q[robot.indices]=np.array(sample['rawRadians'])-robot.priors[robot.side]
+            native_timed.append(dict(timeSeconds=sample['timeSeconds'],stage=sample['stage'],
+                positions={name:float(q[j.position_start()]) for name,j in robot.engine.joints.items()},
+                desiredCanPose=(robot.frame(q) @ can_in_tool).tolist(),
+                attached=True,detail='Fixed-time candidate; full task remains non-executable'))
+    push = dict(executable=False, reason='Recipient direction not yet confirmed in this scene')
+    if 'recipientXY' in scene:
+        try: push = glass_push_plan(cup, scene['tableBoundsXY'], scene['recipientXY'],table_outline_xy=outline)
+        except PourPlanError as error: push = dict(executable=False, reason=str(error))
+    failed = [r['stage'] for r in reports if not r['ik']['solved']]
+    blocked = [r['stage'] for r in reports if r['ik']['solved'] and
+               (not r['selfClearance']['clear'] or not r['worldClearance']['clear'])]
+    return dict(schemaVersion=1, hardwareOutputEnabled=False, executable=False,
+                physicalArm='right', nominalBaseAdvanceMeters=advance,
+                baseline={name:float(q0[j.position_start()]) for name,j in robot.engine.joints.items()},
+                nativeTimedPreview=native_timed,
+                baseRouteChecked=False, sceneEvidence=scene.get('evidence', {}),
+                tableAlignment=table_alignment,
+                sceneGeometry=dict(can=scene['can'],cup=scene['cup'],tableBoundsXY=scene['tableBoundsXY'],
+                    tableOutlineXY=outline.tolist(),tableExtentComplete=False,
+                    tableZ=scene['tableZ'],modelFromScene=model_from_scene.tolist()),
+                modelID=robot.engine.reference['modelID'], modelReferenceID=robot.engine.reference['referenceID'],
+                modelSource='pinned ghost scan; simulation only; supplied saved status gives both arms and head targets',
+                baselineSelf=baseline_self, baselineWorld=baseline_world,
+                geometryAudit=geometry_audit(payload_path, can, cup), liquid=can.liquid_report(),
+                failedIKStages=failed, blockedClearanceStages=blocked, fixedTimedPour=timed, preparedTimedPour=quick,
+                leftGlassPush=push, steps=reports,
+                blockers=['Camera-to-arm registration and body/torso posture remain unverified',
+                          'Gripper contact offset and open-jaw envelope are not measured',
+                          'Base travel corridor and measured stopping distance require current review',
+                          'Known arm/head model mismatch remains unresolved',
+                          'Fixed-time compiled curve is not executable through overlapping cmd4 commands'])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--scene', required=True, type=Path)
+    parser.add_argument('--status', required=True, type=Path)
+    parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--base-advance', type=float, default=0.)
+    parser.add_argument('--hold-seconds', type=float, default=.35)
+    args = parser.parse_args()
+    try:
+        report = plan(load(args.scene), load(args.status), args.base_advance, args.hold_seconds)
+    except (PourPlanError, ValueError, KeyError) as error:
+        report = dict(schemaVersion=1, executable=False, hardwareOutputEnabled=False, error=str(error))
+    report['inputHashes'] = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in (args.scene, args.status)}
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2, allow_nan=False, default=json_default) + '\n')
+    summary = {k:v for k,v in report.items() if k not in ('steps','fixedTimedPour','preparedTimedPour','nativeTimedPreview')}
+    for name in ('fixedTimedPour','preparedTimedPour'):
+        if report.get(name): summary[name] = {k:v for k,v in report[name].items() if k not in ('samples','spline')}
+    print(json.dumps(summary, indent=2, allow_nan=False, default=json_default))
+    return 0 if 'error' not in report else 2
+
+
+if __name__ == '__main__': raise SystemExit(main())

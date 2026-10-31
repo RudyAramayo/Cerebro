@@ -1,0 +1,16 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+task_pour_native_dir="$(mktemp -d /private/tmp/rob-pour-native.XXXXXX)"
+trap 'rm -rf "$task_pour_native_dir"' EXIT
+python_bin="${ROB_SHADOW_TEST_PYTHON:-$HOME/Library/Application Support/Cerebro/ShadowPlanner/venv/bin/python3}"
+OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 "$python_bin" -B Scripts/plan-can-pour.py \
+  --scene Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-scene.json \
+  --status Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-status.json \
+  --base-advance .40 --output "$task_pour_native_dir/report.json" > "$task_pour_native_dir/summary.json"
+xcrun swiftc -O -whole-module-optimization -swift-version 5 -parse-as-library \
+  -module-cache-path /private/tmp/cerebro-swift-module-cache \
+  Cerebro/ROBArmRoutinePlan.swift Cerebro/ROBArmJointLimits.swift Cerebro/ROBArmControlProtocol.swift \
+  Cerebro/ROBGhostMotionPlan.swift Cerebro/ROBWorkspaceSearchPlan.swift Cerebro/ROBWorkspaceCollisionPlan.swift \
+  Tests/ROBCanPourPreviewFixtureTests.swift -o "$task_pour_native_dir/fixture"
+"$task_pour_native_dir/fixture" "$PWD" "$task_pour_native_dir/report.json"

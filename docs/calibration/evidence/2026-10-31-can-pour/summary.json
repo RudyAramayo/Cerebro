@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "hardwareOutputEnabled": false,
+  "executable": false,
+  "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+  "modelReferenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
+  "nominalBaseAdvanceMeters": 0.4,
+  "baseRouteChecked": false,
+  "baselineSelf": {
+    "clear": false,
+    "distance": -0.07687208848806654,
+    "pair": [
+      "left_tool",
+      "left_track_upper_idler_link"
+    ],
+    "required": 0.025
+  },
+  "tableAlignment": {
+    "horizontalConstraintSource": "operator-stated horizontal tabletop",
+    "sourceTiltDegrees": 18.15226920199337,
+    "tableNormalInModel": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "modelBaseGravityVerified": false,
+    "registrationVerified": false,
+    "anchorTranslationStillEstimated": true
+  },
+  "geometryAudit": {
+    "valid": true,
+    "errors": [],
+    "hardwareOutputEnabled": false,
+    "worldAndRobotClearanceIncluded": false
+  },
+  "liquid": {
+    "initialFractionOfCapacity": 0.5,
+    "requestedFractionOfRemaining": 0.5,
+    "requestedFractionOfCapacity": 0.25,
+    "finalFractionOfCapacity": 0.25,
+    "idealOnsetTiltDegrees": 67.38013505195886,
+    "idealFinalTiltDegrees": 79.30289518176824,
+    "metered": false,
+    "timedPour": false,
+    "note": "Static cylinder estimate only. A timed test does not establish volume; foam and flow lag are not modeled."
+  },
+  "failedIKStages": [],
+  "blockedClearanceStages": [
+    "Approach open gripper 8 cm before can",
+    "Grasp at source",
+    "Verify jaw closure",
+    "Retention test lift",
+    "Raise only to computed cup clearance",
+    "Return to source support",
+    "Release supported can",
+    "Retract empty gripper after supported release"
+  ],
+  "leftGlassPush": {
+    "executable": false,
+    "reason": "Slide would leave the supported tabletop margin"
+  },
+  "fixedTimedPour": {
+    "schemaVersion": 1,
+    "hardwareOutputEnabled": false,
+    "executable": false,
+    "requiresCoherentTrajectoryOwner": true,
+    "volumeMetered": false,
+    "tiltSeconds": 10.955823662991495,
+    "fixedHoldSeconds": 0.35,
+    "uprightRecallAtSeconds": 11.305823662991495,
+    "completeAtSeconds": 22.26164732598299,
+    "peakVelocity": 0.2997002997002997,
+    "peakVelocityByJoint": [
+      0.11439858885501394,
+      0.043043959615562975,
+      0.08562833342612226,
+      0.13672858819171704,
+      0.06743136914810063,
+      0.03021484420785332,
+      0.2997002997002997
+    ],
+    "peakAcceleration": 0.3095305448913876,
+    "peakJerk": 1.5713787857131984,
+    "peakBoundsAreConservative": true,
+    "peakAbsoluteRawRadians": 2.0442777884616703,
+    "sweptReview": {
+      "clear": true,
+      "checkedSamples": 1098,
+      "maximumOpeningErrorMeters": 8.2797510614636e-05,
+      "staticSelfConflictsMustAlsoPass": true,
+      "hardwareOutputEnabled": false
+    }
+  },
+  "preparedTimedPour": {
+    "schemaVersion": 1,
+    "hardwareOutputEnabled": false,
+    "executable": false,
+    "requiresCoherentTrajectoryOwner": true,
+    "volumeMetered": false,
+    "tiltSeconds": 3.246169988304918,
+    "fixedHoldSeconds": 0.35,
+    "uprightRecallAtSeconds": 3.596169988304918,
+    "completeAtSeconds": 6.842339976609836,
+    "peakVelocity": 0.2997002997002997,
+    "peakVelocityByJoint": [
+      0.11439859037816776,
+      0.02766760833815688,
+      0.08562833353279099,
+      0.1367285899733619,
+      0.05503220030271467,
+      0.014332668286626448,
+      0.2997002997002997
+    ],
+    "peakAcceleration": 0.29014261497796456,
+    "peakJerk": 0.9303472330932457,
+    "peakBoundsAreConservative": true,
+    "peakAbsoluteRawRadians": 2.0442777884616703,
+    "preparedTiltDegrees": 55.80574105383691,
+    "returnsToPreparedTiltBeforeFullUpright": true,
+    "preparedTiltDrynessVerified": false,
+    "sweptReview": {
+      "clear": true,
+      "checkedSamples": 328,
+      "maximumOpeningErrorMeters": 4.788974097298607e-07,
+      "staticSelfConflictsMustAlsoPass": true,
+      "hardwareOutputEnabled": false
+    }
+  },
+  "status": "Corrected horizontal-table candidate only. Zero grasps, pours, base travel or pushes executed.",
+  "supersedes": "Earlier tilted-table 25cm approach and5.07s cycle are invalidated.",
+  "assumptions": [
+    "66mm diameter by120mm cylindrical can; opening lip25mm from axis",
+    "Half full initially; requested half remaining",
+    "40cm hypothetical base approach;20mm higher grasp",
+    "Operator-stated horizontal tabletop; only visible convex patch represented",
+    "Camera-to-arm translation, body lean, torso heading and open gripper unverified",
+    "Transparent glass rim uses assumed154.6mm height; background depth rejected",
+    "Left slide fails observed table support margin"
+  ]
+}

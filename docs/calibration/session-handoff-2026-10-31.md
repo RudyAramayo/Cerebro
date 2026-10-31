@@ -1,5 +1,17 @@
 # ROB session handoff - October 31, 2026
 
+## Later pour-test task
+
+After the incident handoff below, Rudy requested a right-arm Coke pour, a
+left-arm glass slide toward him, and a closer base approach. He then explicitly
+requested a reproducible native Testing Sandbox test using Cerebro's ghost
+planner. See [the saved can-pour test and current blockers](can-pour-test-2026-10-31.md).
+That task retained the incident lessons, preserved the other session's native
+speech change and performed no arm, gripper, tread or torso-turn motion. The
+earlier stop instruction below records the Test 11 session; it is not a claim
+that the later pour request was never given. A numerical rehearsal is not
+physical task completion or a measured calibration.
+
 ## Start here
 
 **Rudy's latest instruction is: "do not run anymore arm motions as of now."**

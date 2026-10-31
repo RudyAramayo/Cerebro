@@ -19,6 +19,8 @@ import UniformTypeIdentifiers
         let actions: [Action]
     }
     private static let trials: [Trial] = [
+        Trial(id: "can-pour", title: "Coke can · timed pour", detail: "Recompute the saved right-arm grasp, half-remaining pour, fixed-time return and supported set-down in Cerebro's ghost planner. The can starts half full, with its opening facing the glass. A hypothetical base approach and left-arm glass-slide proposal are recorded. This reproducible saved-scene test sends no motor commands; the complete physical route is still blocked by calibration and approach clearance.", parameters: .none,
+              actions: [Action(title: "Run saved pour test + open ghost", command: "pour:run"), Action(title: "Review complete path in ghost…", command: "ghost:pour"), Action(title: "Play timed pour and return…", command: "ghost:pour-timed")]),
         Trial(id: "torso-preparation", title: "Grasp-ready for torso test", detail: "Raise both empty arms into grasp-ready holds before a torso test. Each whole arm moves in coordinated segments, with fresh feedback, current monitoring and tread-proxy review. The operator observes external clearance; left ready geometry and camera registration remain unmeasured. No jaw or torso command is included. A private one-use record binds the existing explicit task instruction to this app and current arm context.", parameters: .current,
               actions: [Action(title: "Export task template…", command: "torso-ready:export"), Action(title: "Prepare both arms from task receipt…", command: "torso-ready:run")]),
         Trial(id: "right-recycling", title: "Recycle can · right arm", detail: "Use ROB's physical right arm (Amber L10). Find an empty upright can, grasp its middle, verify a small lift with fixed-head visual evidence, then carry and gravity-drop above the bucket. Right-arm calibration is separate from left-arm reach tuning. One task approval covers both arms holding at their measured positions and only the right arm travelling.", parameters: .current,
@@ -82,6 +84,7 @@ import UniformTypeIdentifiers
     private var displayedCycleStage = ""
     private var parameterMessage = ""
     private var observingLeftOperation = false
+    private var pourTestProcess: Process?
     private var hasCalibrationFields = false
     private var startSessionButton: NSButton!
     private var endSessionButton: NSButton!
@@ -218,6 +221,14 @@ import UniformTypeIdentifiers
         let title = NSTextField(labelWithString: trial.title); title.font = .boldSystemFont(ofSize: 18)
         detailStack.addArrangedSubview(title)
         addHelp(trial.detail)
+        if trial.id == "can-pour" {
+            addField("pourInitialFill", "Starting can fill (%)", 50, note: "10–90")
+            addField("pourRemainingFraction", "Pour remaining liquid (%)", 50, note: "10–90")
+            addField("pourHold", "Fixed tilt hold (seconds)", 0.35, note: "0–2")
+            addField("pourBaseAdvance", "Hypothetical base approach (cm)", 40, note: "0–40; no driving")
+            addField("pourGraspOffset", "Grasp above can center (mm)", 20, note: "−25–25")
+            addHelp("Inputs, model hashes, joint solutions, timing and collision results are saved for every run. Rehearsal is a recorded fixture, not a live-scene execution grant.")
+        }
         if trial.id == "neck-qr-calibration" {
             qrTarget.removeAllItems()
             qrTarget.addItems(withTitles: ROBNeckQRMeasurement.supportedTargetIDs)
@@ -511,6 +522,7 @@ import UniformTypeIdentifiers
             protractorPitch.stringValue = ""; refresh(); return
         }
         guard canEdit else { return }
+        if command == "pour:run" { runCanPourTest(); return }
         if selectedTrial.parameters != .none && selectedTrial.parameters != .depthAlignment && !["left_search_workspace", "left_scan_clearance", "right_search_workspace", "right_scan_clearance"].contains(command) && !storeParameters() { return }
         if command == "registration:open" {
             ROBFixedHeadCalibrationWindowController.shared.showWindow(self); return
@@ -872,6 +884,9 @@ import UniformTypeIdentifiers
         _ = ROBLeftArmTrial.shared.continueOperation(stage: displayedCycleStage); refresh()
     }
     @objc private func showRecording() {
+        if selectedTrial.id == "can-pour" {
+            NSWorkspace.shared.activateFileViewerSelecting([ROBCanPourRehearsal.latestReport]);return
+        }
         if selectedTrial.id == "belly-qr-calibration" {
             ROBBellyQRCalibrationWindowController.shared.showEvidence(); return
         }
@@ -886,6 +901,7 @@ import UniformTypeIdentifiers
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
     @objc private func stop() {
+        if let process=pourTestProcess,process.isRunning {process.terminate()}
         ROBBellyQRCalibrationWindowController.shared.stop()
         ROBFixedHeadCalibrationWindowController.shared.stop()
         ROBNeckQRCalibration.shared.stop()
@@ -895,6 +911,61 @@ import UniformTypeIdentifiers
         _ = ROBAmberGestureExecutor.shared.cancelCurrentGesture(reason: "Stop requested in Testing Sandbox")
         _ = ROBAmberGestureExecutor.shared.requestPriorityHold()
         refresh()
+    }
+
+    private func runCanPourTest() {
+        guard pourTestProcess == nil else {parameterMessage="The saved pour test is already running.";refresh();return}
+        do {
+            window?.makeFirstResponder(nil)
+            guard let resources=Bundle.main.url(forResource:"ShadowPlanner",withExtension:nil) else {throw ROBGhostMotionError.blocked("Ghost planner resources are missing.")}
+            let fill=try value("pourInitialFill",within:10...90)/100
+            let amount=try value("pourRemainingFraction",within:10...90)/100
+            let hold=try value("pourHold",within:0...2)
+            let advance=try value("pourBaseAdvance",within:0...40)/100
+            let offset=try value("pourGraspOffset",within:-25...25)/1000
+            let source=resources.appendingPathComponent("fixtures/coke-pour-scene.json")
+            guard var scene=try JSONSerialization.jsonObject(with:Data(contentsOf:source)) as? [String:Any],var can=scene["can"] as? [String:Any] else {throw ROBGhostMotionError.blocked("Saved pour scene is invalid.")}
+            can["initial_fraction"]=fill;can["fraction_of_remaining_to_pour"]=amount;scene["can"]=can;scene["graspHeightOffset"]=offset
+            let directory=ROBCanPourRehearsal.directory.appendingPathComponent(UUID().uuidString,isDirectory:true)
+            try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+            let sceneURL=directory.appendingPathComponent("scene.json"),statusURL=directory.appendingPathComponent("baseline.json"),reportURL=directory.appendingPathComponent("report.json")
+            try JSONSerialization.data(withJSONObject:scene,options:[.prettyPrinted,.sortedKeys]).write(to:sceneURL,options:.atomic)
+            try FileManager.default.copyItem(at:resources.appendingPathComponent("fixtures/coke-pour-status.json"),to:statusURL)
+            let python=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/ShadowPlanner/venv/bin/python3")
+            guard FileManager.default.isExecutableFile(atPath:python.path) else {throw ROBGhostMotionError.blocked("The existing ghost-planner Python environment is unavailable.")}
+            let logURL=directory.appendingPathComponent("planner.log")
+            FileManager.default.createFile(atPath:logURL.path,contents:nil)
+            let log=try FileHandle(forWritingTo:logURL)
+            let process=Process();process.executableURL=python
+            process.arguments=["-B",resources.appendingPathComponent("can_pour_scenario.py").path,"--scene",sceneURL.path,"--status",statusURL.path,"--base-advance",String(advance),"--hold-seconds",String(hold),"--output",reportURL.path]
+            process.environment=ProcessInfo.processInfo.environment.merging(["OPENBLAS_NUM_THREADS":"1","VECLIB_MAXIMUM_THREADS":"1"]){_,new in new}
+            process.standardOutput=log;process.standardError=log
+            try process.run();pourTestProcess=process;observingLeftOperation=false
+            parameterMessage="Recomputing saved pour test with full ghost geometry. No motor output.\nRun: \(directory.lastPathComponent)";refresh()
+            DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+                process.waitUntilExit();try? log.close()
+                DispatchQueue.main.async {
+                    guard let self,self.pourTestProcess === process else {return}
+                    self.pourTestProcess=nil
+                    do {
+                        guard process.terminationStatus==0 else {throw ROBGhostMotionError.blocked("Planner failed or was stopped; inspect \(logURL.path)")}
+                        let data=try Data(contentsOf:reportURL)
+                        // Preserve the latest attempt, including a failed IK
+                        // result, so an older passing replay cannot masquerade
+                        // as the result of newly selected parameters.
+                        try data.write(to:ROBCanPourRehearsal.latestReport,options:.atomic)
+                        let model=try ROBGhostRobotModel(directory:resources,physicalSide:"right")
+                        let rehearsal=try ROBCanPourRehearsal(data:data,model:model,timed:false)
+                        self.parameterMessage="Saved pour test finished.\n"+rehearsal.summary+"\nResults: "+directory.path
+                        self.refresh()
+                        NotificationCenter.default.post(name:Notification.Name("ROBShowControllerInputDiagnostics"),object:self,userInfo:["ghostPreset":"pour"])
+                    } catch {self.parameterMessage=error.localizedDescription+"\nResults: "+directory.path;self.refresh()}
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline:.now()+600) { [weak process] in
+                if let process,process.isRunning {process.terminate()}
+            }
+        } catch {parameterMessage=error.localizedDescription;refresh()}
     }
     private func refreshCollisionInfo() {
         let search = ROBWorkspaceSearch.shared, snapshot = search.collisionPreviewSnapshot

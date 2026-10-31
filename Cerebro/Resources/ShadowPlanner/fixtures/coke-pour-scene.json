@@ -1,0 +1,105 @@
+{
+  "can": {
+    "radius": 0.033,
+    "height": 0.12,
+    "spout_radius": 0.025,
+    "initial_fraction": 0.5,
+    "fraction_of_remaining_to_pour": 0.5
+  },
+  "cup": {
+    "rim_center": [
+      0.002329417631275117,
+      0.1513789491704279,
+      0.1546212326313119
+    ],
+    "inner_radius": 0.032,
+    "outer_radius": 0.038,
+    "height": 0.15462123263131194
+  },
+  "canCenter": [
+    0.0,
+    0.0,
+    0.06
+  ],
+  "openingDirection": [
+    0.015386167636662163,
+    0.9998816259165164,
+    0.0
+  ],
+  "graspApproach": [
+    1,
+    0,
+    0
+  ],
+  "modelFromScene": [
+    [
+      0.8701231749225588,
+      -0.38386488488008214,
+      -0.3090847951916879,
+      0.8540318870493149
+    ],
+    [
+      0.41490340232973844,
+      0.9090265510449883,
+      0.03906272174926395,
+      0.04027855355512828
+    ],
+    [
+      0.26597147816616273,
+      -0.16222971260300767,
+      0.9502319154558281,
+      0.9550155575243748
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "tableBoundsXY": [
+    [
+      -0.08801736709264632,
+      -0.5454406044449349
+    ],
+    [
+      1.0103881765295264,
+      0.4385365452415079
+    ]
+  ],
+  "tableZ": 0,
+  "evidence": {
+    "fixture": "2026-10-31 saved can/glass geometry hypothesis",
+    "registrationVerified": false,
+    "dimensions": "66x120mm can and lip25mm assumed; transparent glass rim located using assumed154.6mm height because live glass depth hits background",
+    "worldCompleteness": "Partial table proxy; not a live scene or drive corridor",
+    "horizontalTable": "operator-stated; constrained to Z-up model, not an extrinsic calibration",
+    "tableExtent": "Visible convex patch from front-camera boundary rays; far table extent outside image remains unknown",
+    "tablePlaneRMSMeters": 0.007742507828087309,
+    "tablePlaneInlierFraction": 0.5606948054325146,
+    "sourceTiltDegrees": 18.15226920199337
+  },
+  "graspHeightOffset": 0.02,
+  "recipientXY": [
+    0,
+    0.65
+  ],
+  "tableOutlineXY": [
+    [
+      -0.0880173670926463,
+      0.3693176266460904
+    ],
+    [
+      -0.08801736709264632,
+      -0.47099146884157866
+    ],
+    [
+      0.3952688242739535,
+      -0.5454406044449349
+    ],
+    [
+      1.0103881765295264,
+      0.4385365452415079
+    ]
+  ]
+}

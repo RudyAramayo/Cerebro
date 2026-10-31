@@ -2,6 +2,109 @@ import Foundation
 import CryptoKit
 import simd
 
+/// A saved numerical rehearsal can be displayed, never granted execution.
+struct ROBCanPourRehearsal {
+    struct Frame {
+        let time: Double, stage: String, positions: [String: Double]
+        let canPose: simd_double4x4
+        let detail: String
+    }
+    static var directory: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/CanPourTests")
+    }
+    static var latestReport: URL { directory.appendingPathComponent("latest-report.json") }
+    let baseline: [String: Double], frames: [Frame], timed: Bool
+    let sceneTransform: simd_double4x4
+    let cupCenter: SIMD3<Double>, cupRadius: Double, cupHeight: Double
+    let canRadius: Double, canHeight: Double, canSpoutRadius: Double, tableBounds: [[Double]], tableZ: Double
+    let tableOutline: [SIMD2<Double>]
+    let summary: String
+    var duration: Double { frames.last?.time ?? 0 }
+
+    init(data: Data, model: ROBGhostRobotModel, timed: Bool) throws {
+        func fail(_ message: String) -> ROBGhostMotionError { .blocked("Pour rehearsal: " + message) }
+        guard data.count <= 16_000_000,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              root["schemaVersion"] as? Int == 1, root["hardwareOutputEnabled"] as? Bool == false,
+              root["executable"] as? Bool == false,
+              root["modelID"] as? String == model.modelID,
+              root["modelReferenceID"] as? String == model.referenceID else {
+            throw fail("missing non-executable marker or mismatched robot model.")
+        }
+        func positions(_ value: Any?) throws -> [String: Double] {
+            guard let values = value as? [String: Double], values.values.allSatisfy(\.isFinite) else { throw fail("invalid joint pose.") }
+            let active = model.joints.filter { $0.kind != "fixed" }
+            guard Set(values.keys) == Set(active.map(\.name)), active.allSatisfy({ joint in
+                let q=values[joint.name]!
+                return joint.kind == "continuous" || (q >= joint.lower-1e-8 && q <= joint.upper+1e-8)
+            }) else { throw fail("incomplete pose or joint bounds exceeded.") }
+            for side in ["left","right"] {
+                let prior = side == "left" ? ROBGhostRobotModel.uprightPrior : (1...7).map { -(model.reference["right_joint\($0)"] ?? 0) }
+                guard (1...7).allSatisfy({abs(values["\(side)_joint\($0)"]! + prior[$0-1]) <= 2.09+1e-8}) else { throw fail("final vendor joint bounds exceeded.") }
+            }
+            return values
+        }
+        func matrix(_ value: Any?) throws -> simd_double4x4 {
+            guard let rows=value as? [[Double]],rows.count==4,rows.allSatisfy({$0.count==4 && $0.allSatisfy(\.isFinite)}),
+                  abs(rows[3][0])+abs(rows[3][1])+abs(rows[3][2])+abs(rows[3][3]-1)<1e-8 else {throw fail("invalid rigid transform.")}
+            let m=simd_double4x4(columns:(SIMD4(rows[0][0],rows[1][0],rows[2][0],0),SIMD4(rows[0][1],rows[1][1],rows[2][1],0),SIMD4(rows[0][2],rows[1][2],rows[2][2],0),SIMD4(rows[0][3],rows[1][3],rows[2][3],1)))
+            let r=simd_double3x3(columns:(SIMD3(m.columns.0.x,m.columns.0.y,m.columns.0.z),SIMD3(m.columns.1.x,m.columns.1.y,m.columns.1.z),SIMD3(m.columns.2.x,m.columns.2.y,m.columns.2.z)))
+            guard abs(simd_determinant(r)-1)<1e-5,(0..<3).allSatisfy({abs(simd_length(r[$0])-1)<1e-5}),
+                  abs(simd_dot(r[0],r[1]))+abs(simd_dot(r[0],r[2]))+abs(simd_dot(r[1],r[2]))<1e-5,
+                  (0..<3).allSatisfy({abs(m.columns.3[$0])<5}) else {throw fail("nonrigid or unbounded transform.")}
+            return m
+        }
+        func number(_ value: Any?, _ range: ClosedRange<Double>) throws -> Double {
+            guard let n=value as? Double,n.isFinite,range.contains(n) else {throw fail("invalid geometry dimension.")};return n
+        }
+        baseline=try positions(root["baseline"])
+        guard let geometry=root["sceneGeometry"] as? [String:Any],let can=geometry["can"] as? [String:Any],
+              let cup=geometry["cup"] as? [String:Any],let center=cup["rim_center"] as? [Double],center.count==3,center.allSatisfy(\.isFinite),
+              let bounds=geometry["tableBoundsXY"] as? [[Double]],bounds.count==2,bounds.allSatisfy({$0.count==2 && $0.allSatisfy(\.isFinite)}),
+              bounds[1][0]>bounds[0][0],bounds[1][1]>bounds[0][1] else {throw fail("missing can, cup or table geometry.")}
+        sceneTransform=try matrix(geometry["modelFromScene"])
+        let tableUp=SIMD3(sceneTransform.columns.2.x,sceneTransform.columns.2.y,sceneTransform.columns.2.z)
+        guard simd_length(tableUp-SIMD3<Double>(0,0,1))<1e-6,
+              let outline=geometry["tableOutlineXY"] as? [[Double]],(3...64).contains(outline.count),
+              outline.allSatisfy({$0.count==2 && $0.allSatisfy({$0.isFinite && abs($0)<3})}) else {
+            throw fail("table must be horizontal and retain its observed outline; rerun the saved test.")
+        }
+        let polygon=outline.map {SIMD2($0[0],$0[1])}
+        guard polygon.indices.allSatisfy({ i in
+            let a=polygon[(i+1)%polygon.count]-polygon[i]
+            let b=polygon[(i+2)%polygon.count]-polygon[(i+1)%polygon.count]
+            return a.x*b.y-a.y*b.x>1e-9
+        }) else {throw fail("invalid convex tabletop outline.")}
+        tableOutline=polygon
+        cupCenter=SIMD3(center[0],center[1],center[2]);cupRadius=try number(cup["outer_radius"],0.015 ... 0.12)
+        cupHeight=try number(cup["height"],0.05 ... 0.3);canRadius=try number(can["radius"],0.015 ... 0.06)
+        canHeight=try number(can["height"],0.05 ... 0.25);tableBounds=bounds;tableZ=try number(geometry["tableZ"],-2 ... 3)
+        canSpoutRadius=try number(can["spout_radius"],0 ... canRadius)
+        guard let rows=root[timed ? "nativeTimedPreview":"steps"] as? [[String:Any]],(2...5000).contains(rows.count) else {throw fail("no solved timeline available; run the saved test first.")}
+        var built:[Frame]=[]
+        for (index,row) in rows.enumerated() {
+            if !timed {
+                guard let ik=row["ik"] as? [String:Any],ik["solved"] as? Bool == true else {
+                    throw fail("IK did not reach every target; inspect the saved report before changing the approach.")
+                }
+            }
+            let time=timed ? try number(row["timeSeconds"],0 ... 600):Double(index)
+            guard time >= (built.last?.time ?? 0),let stage=row["stage"] as? String,stage.count<=200 else {throw fail("invalid timeline.")}
+            let checks=["ik","selfClearance","worldClearance"].compactMap { key -> String? in
+                guard let value=row[key] as? [String:Any] else {return nil}
+                return "\(key): \((value["clear"] as? Bool ?? value["solved"] as? Bool ?? false) ? "passed":"blocked")"
+            }.joined(separator:" · ")
+            built.append(Frame(time:time,stage:stage,positions:try positions(row["positions"]),canPose:try matrix(row["desiredCanPose"]),detail:checks))
+        }
+        guard (built.last?.time ?? 0)>0 else {throw fail("empty duration.")}
+        frames=built;self.timed=timed
+        let quick=root["preparedTimedPour"] as? [String:Any]
+        summary=String(format:"Saved test · hypothetical base approach %.0f cm\nActive tilt %.2f s + hold %.2f s; return begins %.2f s.\nFull task blocked; volume and registration unverified.",
+            (root["nominalBaseAdvanceMeters"] as? Double ?? 0)*100,quick?["tiltSeconds"] as? Double ?? 0,
+            quick?["fixedHoldSeconds"] as? Double ?? 0,quick?["uprightRecallAtSeconds"] as? Double ?? 0)
+    }
+}
+
 enum ROBGhostMotionError: LocalizedError {
     case blocked(String)
     var errorDescription: String? { if case .blocked(let text) = self { return text }; return nil }

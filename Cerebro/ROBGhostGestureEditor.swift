@@ -31,6 +31,8 @@ import simd
     @nonobjc private var saved: [ROBGhostGesture] = []
     @nonobjc private var proposal: ROBLeftGestureProposal?
     @nonobjc private var canPreview: ROBCanGrabPreview?
+    @nonobjc private var pourPreview: ROBCanPourRehearsal?
+    @nonobjc private let pourCan = SCNNode()
     @nonobjc private var collisionPreview: ROBLeftGestureProposal?
     @nonobjc private var displayedCan: ROBWorkspaceLocatedObject?
     private var lastCanInfoUpdate = 0.0
@@ -70,6 +72,8 @@ import simd
     private let identity = NSTextField(wrappingLabelWithString: "")
     private let timeline = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let clock = NSTextField(labelWithString: "0.0 s")
+    private let playButton = NSButton(title:"Play ×4",target:nil,action:nil)
+    private var playbackRate: Double { pourPreview?.timed == true ? 1:4 }
     private let executeButton = NSButton(title: "Request execution of reviewed path", target: nil, action: nil)
     private let currentPlot = ROBGhostCurrentPlot()
     @nonobjc private var record: [ROBGhostRecordingSample] = []
@@ -375,6 +379,7 @@ import simd
     }
 
     @nonobjc private func renderPositions(_ positions: [String: Double], preview: Bool) -> [String: Double] {
+        if pourPreview != nil { return positions }
         var result = positions
         for (joint, value) in headEstimate ?? [:] {
             // Live estimates are render-only: saved poses and execution hashes
@@ -391,11 +396,88 @@ import simd
     }
 
     func reviewPresetNamed(_ name: String) {
+        if name == "pour" || name == "pour-timed" { showPourRehearsal(timed:name == "pour-timed"); return }
         if name == "can" { findAndPreviewCan(); return }
         if name == "collision" { showLatestCollisionReview(); return }
         presets.selectItem(at: name == "wave" ? 1 : 0)
         selectPreset()
         timeline.doubleValue = 0; play()
+    }
+
+    @nonobjc private func showPourRehearsal(timed: Bool) {
+        guard let model else {return}
+        do {
+            let preview=try ROBCanPourRehearsal(data:Data(contentsOf:ROBCanPourRehearsal.latestReport),model:model,timed:timed)
+            invalidateReview();animationOutputActive=false;updateAnimationProp(nil);pourPreview=preview
+            displayedRGBProfileID=ROBNeckRGBPoseDisplay.configurationIdentity(model:model) ?? fittedHeadPose()?.profileID
+            displayedCan=nil;canArm.selectItem(at:1)
+            updateOriginal(preview.baseline)
+            referenceInfo.stringValue="Saved test baseline · both arms and head from recorded input. No live pose or motion claim."
+            let canMaterial=SCNMaterial();canMaterial.diffuse.contents=NSColor.systemRed;canMaterial.transparency=0.7
+            pourCan.geometry=SCNCylinder(radius:CGFloat(preview.canRadius),height:CGFloat(preview.canHeight))
+            pourCan.geometry?.materials=[canMaterial];pourCan.name="Pour test can · rigid grasp transform"
+            pourCan.childNodes.forEach { $0.removeFromParentNode() }
+            let spout=SCNNode(geometry:SCNSphere(radius:0.006))
+            let spoutMaterial=SCNMaterial();spoutMaterial.diffuse.contents=NSColor.white;spoutMaterial.lightingModel = .constant
+            spout.geometry?.materials=[spoutMaterial];spout.name="Opening lip · fixed to can"
+            spout.position=SCNVector3(preview.canSpoutRadius,preview.canHeight/2,0)
+            pourCan.addChildNode(spout)
+            canMotionOverlay.addChildNode(pourCan)
+            let cupMaterial=SCNMaterial();cupMaterial.diffuse.contents=NSColor.systemGreen;cupMaterial.transparency=0.3
+            let cup=SCNNode(geometry:SCNCylinder(radius:CGFloat(preview.cupRadius),height:CGFloat(preview.cupHeight)))
+            cup.geometry?.materials=[cupMaterial];cup.name="Pour test glass"
+            var cupPose=simd_double4x4(simd_quatd(angle:.pi/2,axis:[1,0,0]))
+            cupPose.columns.3=SIMD4(preview.cupCenter.x,preview.cupCenter.y,preview.cupCenter.z-preview.cupHeight/2,1)
+            cup.simdTransform=floatMatrix(preview.sceneTransform*cupPose);canMotionOverlay.addChildNode(cup)
+            let count=preview.tableOutline.count
+            let vertices=[preview.tableZ-0.06,preview.tableZ].flatMap { z in
+                preview.tableOutline.map {SCNVector3($0.x,$0.y,z)}
+            }
+            var triangles:[UInt32]=[]
+            for i in 1..<(count-1) {
+                triangles += [0,UInt32(i+1),UInt32(i),UInt32(count),UInt32(count+i),UInt32(count+i+1)]
+            }
+            for i in 0..<count {
+                let j=(i+1)%count
+                triangles += [UInt32(i),UInt32(j),UInt32(count+j),UInt32(i),UInt32(count+j),UInt32(count+i)]
+            }
+            let table=SCNNode(geometry:SCNGeometry(sources:[SCNGeometrySource(vertices:vertices)],
+                elements:[SCNGeometryElement(indices:triangles,primitiveType:.triangles)]))
+            let tableMaterial=SCNMaterial();tableMaterial.diffuse.contents=NSColor.brown;tableMaterial.transparency=0.2
+            tableMaterial.isDoubleSided=true
+            table.geometry?.materials=[tableMaterial];table.name="Horizontal observed table patch · unseen extent unknown"
+            table.simdTransform=floatMatrix(preview.sceneTransform);canMotionOverlay.addChildNode(table)
+            let points=preview.frames.map { SCNVector3($0.canPose.columns.3.x,$0.canPose.columns.3.y,$0.canPose.columns.3.z) }
+            let path=SCNGeometry(sources:[SCNGeometrySource(vertices:points)],elements:[SCNGeometryElement(indices:(0..<(points.count-1)).flatMap{[UInt32($0),UInt32($0+1)]},primitiveType:.line)])
+            let pathMaterial=SCNMaterial();pathMaterial.diffuse.contents=NSColor.systemYellow;pathMaterial.lightingModel = .constant
+            path.materials=[pathMaterial];canMotionOverlay.addChildNode(SCNNode(geometry:path))
+            name.stringValue="Coke can · timed pour test"
+            poseCount.stringValue="\(preview.frames.count) saved \(timed ? "timed samples":"review poses")"
+            timeline.minValue=0;timeline.maxValue=preview.duration;timeline.doubleValue=0
+            playButton.title=timed ? "Play real time":"Play pose sequence"
+            identity.stringValue=preview.summary
+            executeButton.isEnabled=false;executeButton.title="Pour rehearsal only · execution unavailable"
+            canInfo.stringValue="Saved can/glass test · horizontal observed table patch.\nUnseen table extent, left slide and base approach remain unverified."
+            renderTime(0)
+            if timed { play() }
+        } catch {status.stringValue="Run Coke can · timed pour in Testing Sandbox first.\n"+error.localizedDescription}
+    }
+    @nonobjc private func floatMatrix(_ value:simd_double4x4)->simd_float4x4 {
+        simd_float4x4(columns:(SIMD4<Float>(value.columns.0),SIMD4<Float>(value.columns.1),SIMD4<Float>(value.columns.2),SIMD4<Float>(value.columns.3)))
+    }
+    @nonobjc private func renderPourTime(_ time:Double,preview:ROBCanPourRehearsal) {
+        let index=preview.frames.lastIndex(where:{$0.time<=time}) ?? 0
+        let a=preview.frames[index],b=preview.frames[min(index+1,preview.frames.count-1)]
+        let u=b.time>a.time ? max(0,min(1,(time-a.time)/(b.time-a.time))):0
+        var positions=a.positions
+        for (key,value) in b.positions {positions[key]=a.positions[key,default:value]+(value-a.positions[key,default:value])*u}
+        updateGhost(positions,updateFields:false)
+        let rotation=simd_slerp(simd_quatd(a.canPose),simd_quatd(b.canPose),u)
+        var pose=simd_double4x4(rotation);pose.columns.3=a.canPose.columns.3+(b.canPose.columns.3-a.canPose.columns.3)*u
+        pourCan.simdTransform=floatMatrix(pose*simd_double4x4(simd_quatd(angle:.pi/2,axis:[1,0,0])))
+        clock.stringValue=preview.timed ? String(format:"%.2f s",time):"Pose \(index+1)/\(preview.frames.count)"
+        status.stringValue="\(a.stage) · GHOST TEST ONLY\n\(a.detail)\n"+preview.summary
+        executeButton.isEnabled=false
     }
 
     private func button(_ title: String, _ selector: Selector) -> NSButton { NSButton(title: title, target: self, action: selector) }
@@ -429,7 +511,8 @@ import simd
         timeline.identifier = NSUserInterfaceItemIdentifier("ghost-timeline")
         executeButton.target = self; executeButton.action = #selector(executeReviewed)
         executeButton.identifier = NSUserInterfaceItemIdentifier("ghost-execute")
-        let preview = row([button("Review path", #selector(review)), button("Play ×4", #selector(play)), clock])
+        playButton.target=self;playButton.action=#selector(play)
+        let preview = row([button("Review path", #selector(review)), playButton, clock])
         let stop = button("Stop + hold", #selector(stop)); stop.bezelColor = .systemRed
         collisionMapVisible.state = .on; collisionPathVisible.state = .on
         for toggle in [collisionMapVisible, collisionPathVisible] {
@@ -733,8 +816,14 @@ import simd
         carriedCan.isHidden = !stage.hasPrefix("Lift")
         if !carriedCan.isHidden, let model, let grasp = preview.steps.first(where: { $0.stage == "Grasp pose" }),
            let start = model.frames(grasp.pose)[preview.side + "_tool"], let current = model.frames(pose)[preview.side + "_tool"] {
-            let delta = current.columns.3 - start.columns.3
-            carriedCan.simdPosition = SIMD3<Float>(preview.can.point + SIMD3(delta.x, delta.y, delta.z))
+            // Carry the full rigid pose, including rotation about the grasp.
+            // Translation-only rendering falsely leaves a tilted can upright.
+            var canAtGrasp = simd_double4x4(simd_quatd(angle: .pi / 2, axis: [1, 0, 0]))
+            canAtGrasp.columns.3 = SIMD4(preview.can.point.x, preview.can.point.y, preview.can.point.z, 1)
+            let carriedPose = current * simd_inverse(start) * canAtGrasp
+            carriedCan.simdTransform = simd_float4x4(columns: (
+                SIMD4<Float>(carriedPose.columns.0), SIMD4<Float>(carriedPose.columns.1),
+                SIMD4<Float>(carriedPose.columns.2), SIMD4<Float>(carriedPose.columns.3)))
         }
         refreshCanInfo()
         status.stringValue = "\(stage) · GHOST ONLY\n" + (preview.reachesCan
@@ -924,6 +1013,8 @@ import simd
         executeButton.isEnabled=false
     }
     private func invalidateReview() {
+        pourPreview=nil
+        playButton.title="Play ×4"
         canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil; collisionPreview = nil
         collisionPathOverlay.childNodes.forEach { $0.removeFromParentNode() }
         canMotionOverlay.childNodes.forEach { $0.removeFromParentNode() }
@@ -1040,6 +1131,7 @@ import simd
         reloadPresets(); presets.selectItem(at: saved.count + 2); review()
     }
     @objc private func review() {
+        if let pourPreview {renderPourTime(timeline.doubleValue,preview:pourPreview);return}
         guard !ROBLeftArmTrial.shared.isRunning, let model else { return }
         invalidateReview()
         let fresh = freshBaseline(); liveBaseline = fresh != nil
@@ -1072,6 +1164,7 @@ import simd
         renderTime(0)
     }
     @objc private func executeReviewed() {
+        guard pourPreview == nil else {status.stringValue="Saved pour tests never authorize motor output.";return}
         if let preview=canPreview,preview.side=="right",preview.reachesCan {
             guard !ROBLeftArmTrial.shared.isRunning else{return}
             playing=false;executeButton.isEnabled=false;setPreviewFrozen(true)
@@ -1107,14 +1200,15 @@ import simd
         status.stringValue = "Stop + hold requested. A stopped custom path needs a newly reviewed return."
     }
     @objc private func play() {
-        guard canPreview != nil || collisionPreview != nil || proposal != nil || !record.isEmpty else { return }
+        guard pourPreview != nil || canPreview != nil || collisionPreview != nil || proposal != nil || !record.isEmpty else { return }
         if timeline.doubleValue >= timeline.maxValue - 0.001 { timeline.doubleValue = 0 }
-        playing = true; animationStarted = ProcessInfo.processInfo.systemUptime - timeline.doubleValue / 4
+        playing = true; animationStarted = ProcessInfo.processInfo.systemUptime - timeline.doubleValue / playbackRate
     }
     @objc private func scrub() { playing = false; renderTime(timeline.doubleValue) }
     private func renderTime(_ time: Double) {
         guard let model else { return }
         clock.stringValue = String(format: "%.1f s", time)
+        if let pourPreview {renderPourTime(time,preview:pourPreview);return}
         if let collisionPreview { renderCollisionTime(time, proposal: collisionPreview); return }
         if let canPreview { renderCanTime(time, preview: canPreview); return }
         if replayingRecording, !record.isEmpty {
@@ -1150,7 +1244,7 @@ import simd
         let animationGhost = animationOutputActive && nodes.values.contains { $0.name?.hasPrefix("Blue ghost ") == true }
         // A live fitted head pose is anchored to the observed torso. It must
         // not pin the preview head in space when its proposed parent rotates.
-        let fitted = animationGhost ? nil : fittedHeadPose()
+        let fitted = animationGhost || pourPreview != nil ? nil : fittedHeadPose()
         if let fitted,["neck_pan","lower_neck","upper_neck"].allSatisfy({positions[$0]==headEstimate?[$0]}) {
             frames.merge(fitted.headFrames){_,new in new}
             if let hardware=fitted.hardwareFrames {frames.merge(hardware){_,new in new}}
@@ -1162,7 +1256,7 @@ import simd
                 frames["oak_link"]=fitted.provisionalCameraToModel * simd_inverse(simd_inverse(oak)*glass)
             }
         }
-        if let belly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) {frames.merge(belly){_,new in new}}
+        if pourPreview == nil, let belly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) {frames.merge(belly){_,new in new}}
         let optical = frames["oak_optical_frame"]
         let alignment = ROBWorkspaceDepthAlignment.snapshot()
         var changes: [(SCNNode, simd_float4x4)] = []
@@ -1178,7 +1272,7 @@ import simd
                 // Rotate the face-camera housing about its optical origin.
                 // Cloud translation is not a physical camera-mount movement;
                 // the neck and panoramic camera keep their original frames.
-                if fitted == nil,link == "oak_link", let optical, let alignment {
+                if fitted == nil,pourPreview == nil,link == "oak_link", let optical, let alignment {
                     transform = alignment.applyingPitch(to: optical) * simd_inverse(optical) * transform
                 }
                 let value = simd_float4x4(columns: (SIMD4<Float>(transform.columns.0), SIMD4<Float>(transform.columns.1),
@@ -1253,7 +1347,7 @@ import simd
             updateNodes(ghostNodes,positions:renderPositions(ghostDisplayPositions,preview:true))
             updateHeadInfo()
         }
-        let gauge=fitted?.modelToDisplay ?? matrix_identity_double4x4
+        let gauge=pourPreview == nil ? (fitted?.modelToDisplay ?? matrix_identity_double4x4):matrix_identity_double4x4
         let displayGauge=simd_float4x4(columns:(SIMD4<Float>(gauge.columns.0),SIMD4<Float>(gauge.columns.1),SIMD4<Float>(gauge.columns.2),SIMD4<Float>(gauge.columns.3)))
         let base = capturedRobot.presentation.simdWorldTransform * modelBasis * displayGauge
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
@@ -1261,10 +1355,10 @@ import simd
         let meshOffset=simd_float4x4(columns:(SIMD4<Float>(presentation.columns.0),SIMD4<Float>(presentation.columns.1),
             SIMD4<Float>(presentation.columns.2),SIMD4<Float>(presentation.columns.3)))
         if robotPresentationRoot.simdTransform != meshOffset {robotPresentationRoot.simdTransform=meshOffset}
-        if now - lastCanInfoUpdate >= 1 {
+        if pourPreview == nil, now - lastCanInfoUpdate >= 1 {
             lastCanInfoUpdate = now; refreshCanInfo(); refreshCollisionScene(force: false)
         }
-        if !replayingRecording, now - lastOriginalUpdate > 0.2 {
+        if pourPreview == nil, !replayingRecording, now - lastOriginalUpdate > 0.2 {
             lastOriginalUpdate = now
             let baseline = freshBaseline()
             updateOriginal(baseline.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
@@ -1274,7 +1368,7 @@ import simd
                 " Other joints: scan reference."
         }
         if animationOutputActive { playing = false; executeButton.isEnabled = false; return }
-        executeButton.title=canPreview == nil ? "Request execution of reviewed path" : "Grasp can + lift and hold"
+        executeButton.title=pourPreview != nil ? "Pour rehearsal only · execution unavailable" : canPreview == nil ? "Request execution of reviewed path" : "Grasp can + lift and hold"
         if let preview=canPreview,!busy,!ROBControllerArmApproval.shared.isPending,!replayingRecording {
             executeButton.isEnabled=preview.side=="right" && preview.reachesCan && freshBaseline() != nil &&
                 ROBControllerArmApproval.shared.standingLocalCanCampaignActive
@@ -1284,7 +1378,7 @@ import simd
         } else { executeButton.isEnabled = false }
         if busy, status.stringValue != ROBLeftArmTrial.shared.status { status.stringValue = ROBLeftArmTrial.shared.status }
         if playing {
-            let time = min(timeline.maxValue, (now - animationStarted) * 4)
+            let time = min(timeline.maxValue, (now - animationStarted) * playbackRate)
             timeline.doubleValue = time; renderTime(time)
             if time >= timeline.maxValue { playing = false }
         }
