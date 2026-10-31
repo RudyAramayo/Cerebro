@@ -1,0 +1,81 @@
+{
+  "private_root_hint": "~/Documents/ROB Test Reports/2026-10-31/test11",
+  "policy": "Hashes identify private originals; no images/audio/raw logs embedded in repository.",
+  "files": [
+    {
+      "relative_path": "events.jsonl",
+      "bytes": 6423536,
+      "sha256": "ba0978e7f700827956f916578d32bfac37ba06777c2e7dd69a732979f3f5577b"
+    },
+    {
+      "relative_path": "164-edge-can-lift-command.json",
+      "bytes": 335,
+      "sha256": "dbdaad3e81a43ca73ece5cc8d804133acc21641fa00be3911fc2168f0ff7309f"
+    },
+    {
+      "relative_path": "164-edge-can-lift-review.json",
+      "bytes": 1333,
+      "sha256": "3b25d6b59394e5918146b11dce6ffea7e992141faa982e9c1813d4a8182e1d26"
+    },
+    {
+      "relative_path": "168-incident.json",
+      "bytes": 808,
+      "sha256": "af0c72e7c4324c4362dbcfa8307814ab75f82e912a2a471372772dba5e14f73d"
+    },
+    {
+      "relative_path": "169-post-stop-status.json",
+      "bytes": 7618,
+      "sha256": "079fd813c4397fbe5aeb0f34cea192193c824d60be520774eabcc0b4d67534b0"
+    },
+    {
+      "relative_path": "170-offline-neck-after-lift-review.json",
+      "bytes": 1102,
+      "sha256": "7a10f3321540425e4c0ad7bfd0364651bf57c37587bf95934a9b3ca81669b1c7"
+    },
+    {
+      "relative_path": "171-lift-geometry-audit.json",
+      "bytes": 15574,
+      "sha256": "e6c828c63fb4ab73301b6085d97a52f1ee6c23ae6bf92be17a7e10a7ffbff73b"
+    },
+    {
+      "relative_path": "audit_lift_geometry.py",
+      "bytes": 4058,
+      "sha256": "f14db0325fe4e3206008529b272e51dde8aa27d0c8db1420e33f7cd77e960645"
+    },
+    {
+      "relative_path": "incident-evidence/gateway.log",
+      "bytes": 2319,
+      "sha256": "fb4ec22845082f4d2c0dddc3b4edd2261778a50ff608631b9a1b4e0afae0e831"
+    },
+    {
+      "relative_path": "incident-evidence/right-core-tail.log",
+      "bytes": 7070,
+      "sha256": "e8256c8ab4fa36257b5f589cf69d5647256686baafa7116941d4dcc8d7d7845a"
+    },
+    {
+      "relative_path": "incident-evidence/left-core-tail.log",
+      "bytes": 4902,
+      "sha256": "0b74b4e59fba3e059d4547fbb9d65a30b84f37c2b1c58c26ca608c1bdaabf59c"
+    },
+    {
+      "relative_path": "164-edge-can-lift-video/motion.mp4",
+      "bytes": 379416,
+      "sha256": "5a5a54e462ba8bafe91b53550570ae0fce4f98dee1a6fa6a36fcaf096180ff01"
+    },
+    {
+      "relative_path": "076-first-release/rgb.jpg",
+      "bytes": 107589,
+      "sha256": "adb95448547be50148d562da0cf5cefcce602ab6538f58138b335ac38d51b084"
+    },
+    {
+      "relative_path": "110-paired-tucked-check/rgb.jpg",
+      "bytes": 120140,
+      "sha256": "e662436229ef15fdf5c5f5f7656adb452359d8186b56ef0f119cacad3630fc99"
+    },
+    {
+      "relative_path": "172-handoff-readonly-status.json",
+      "bytes": 5677,
+      "sha256": "e052e1f8558f72a58038f0a0f00886e0116f8474132dde426e21cfb7a2ff35e0"
+    }
+  ]
+}
