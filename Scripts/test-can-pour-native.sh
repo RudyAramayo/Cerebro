@@ -7,7 +7,7 @@ python_bin="${ROB_SHADOW_TEST_PYTHON:-$HOME/Library/Application Support/Cerebro/
 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 "$python_bin" -B Scripts/plan-can-pour.py \
   --scene Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-scene.json \
   --status Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-status.json \
-  --base-advance .40 --output "$task_pour_native_dir/report.json" > "$task_pour_native_dir/summary.json"
+  --base-advance .25 --output "$task_pour_native_dir/report.json" > "$task_pour_native_dir/summary.json"
 xcrun swiftc -O -whole-module-optimization -swift-version 5 -parse-as-library \
   -module-cache-path /private/tmp/cerebro-swift-module-cache \
   Cerebro/ROBArmRoutinePlan.swift Cerebro/ROBArmJointLimits.swift Cerebro/ROBArmControlProtocol.swift \

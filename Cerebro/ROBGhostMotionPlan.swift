@@ -6,7 +6,7 @@ import simd
 struct ROBCanPourRehearsal {
     struct Frame {
         let time: Double, stage: String, positions: [String: Double]
-        let canPose: simd_double4x4
+        let canPose: simd_double4x4, worldFromRobot: simd_double4x4
         let detail: String
     }
     static var directory: URL {
@@ -18,6 +18,7 @@ struct ROBCanPourRehearsal {
     let cupCenter: SIMD3<Double>, cupRadius: Double, cupHeight: Double
     let canRadius: Double, canHeight: Double, canSpoutRadius: Double, tableBounds: [[Double]], tableZ: Double
     let tableOutline: [SIMD2<Double>]
+    let tableHeightAboveFloor: Double
     let summary: String
     var duration: Double { frames.last?.time ?? 0 }
 
@@ -57,7 +58,8 @@ struct ROBCanPourRehearsal {
         func number(_ value: Any?, _ range: ClosedRange<Double>) throws -> Double {
             guard let n=value as? Double,n.isFinite,range.contains(n) else {throw fail("invalid geometry dimension.")};return n
         }
-        baseline=try positions(root["baseline"])
+        let savedBaseline=try positions(root["baseline"])
+        baseline=savedBaseline
         guard let geometry=root["sceneGeometry"] as? [String:Any],let can=geometry["can"] as? [String:Any],
               let cup=geometry["cup"] as? [String:Any],let center=cup["rim_center"] as? [Double],center.count==3,center.allSatisfy(\.isFinite),
               let bounds=geometry["tableBoundsXY"] as? [[Double]],bounds.count==2,bounds.allSatisfy({$0.count==2 && $0.allSatisfy(\.isFinite)}),
@@ -79,9 +81,41 @@ struct ROBCanPourRehearsal {
         cupCenter=SIMD3(center[0],center[1],center[2]);cupRadius=try number(cup["outer_radius"],0.015 ... 0.12)
         cupHeight=try number(cup["height"],0.05 ... 0.3);canRadius=try number(can["radius"],0.015 ... 0.06)
         canHeight=try number(can["height"],0.05 ... 0.25);tableBounds=bounds;tableZ=try number(geometry["tableZ"],-2 ... 3)
+        guard let alignment=root["tableAlignment"] as? [String:Any],
+              alignment["heightSource"] as? String == "observed floor/table separation",
+              let observation=alignment["observation"] as? [String:Any],
+              observation["method"] as? String == "same-frame parallel floor/table depth planes" else {
+            throw fail("table height needs paired floor/table evidence; rerun the saved test.")
+        }
+        tableHeightAboveFloor=try number(alignment["tableHeightAboveFloorMeters"],0.3 ... 1.2)
+        let floor=try number(alignment["floorHeightInModelMeters"],-0.001 ... 0.001)
+        let measured=try number(observation["tableHeightMeters"],0.3 ... 1.2)
+        let floorOffset=try number(observation["floorOffsetOpticalMeters"],-3 ... 0)
+        let tableOffset=try number(observation["tableOffsetOpticalMeters"],-3 ... 0)
+        guard abs(tableOffset-floorOffset-measured)<1e-6,abs(measured-tableHeightAboveFloor)<1e-6,
+              abs(sceneTransform.columns.3.z+tableZ-floor-tableHeightAboveFloor)<1e-6 else {
+            throw fail("rendered table height disagrees with its floor/table measurement.")
+        }
         canSpoutRadius=try number(can["spout_radius"],0 ... canRadius)
+        guard let preparation=root["bodyPreparation"] as? [String:Any],
+              preparation["executable"] as? Bool == false,
+              preparation["torsoPerpendicularVerifiedInModel"] as? Bool == true,
+              preparation["baseRouteChecked"] as? Bool == false,
+              preparation["sequence"] as? [String] == ["drive toward fixed table","turn torso perpendicular","reach and pour"] else {
+            throw fail("missing drive and perpendicular torso preparation.")
+        }
+        let advance=try number(preparation["forwardTravelMeters"],0 ... 0.4)
+        let torsoYaw=try number(preparation["torsoTargetYawRadians"],-1.2 ... 1.2)
+        guard abs(atan2(sceneTransform.columns.0.y,sceneTransform.columns.0.x)-torsoYaw)<1e-6 else {
+            throw fail("torso is not perpendicular to the fixed tabletop front edge.")
+        }
+        var expectedBase=matrix_identity_double4x4;expectedBase.columns.3.x=advance
+        let reportedBase=try matrix(preparation["worldFromRobotAtReach"])
+        guard simd_length(reportedBase.columns.3-expectedBase.columns.3)<1e-6 else {throw fail("inconsistent base approach.")}
         guard let rows=root[timed ? "nativeTimedPreview":"steps"] as? [[String:Any]],(2...5000).contains(rows.count) else {throw fail("no solved timeline available; run the saved test first.")}
         var built:[Frame]=[]
+        var lastPhase = -1
+        var previousAdvance=0.0
         for (index,row) in rows.enumerated() {
             if !timed {
                 guard let ik=row["ik"] as? [String:Any],ik["solved"] as? Bool == true else {
@@ -94,13 +128,29 @@ struct ROBCanPourRehearsal {
                 guard let value=row[key] as? [String:Any] else {return nil}
                 return "\(key): \((value["clear"] as? Bool ?? value["solved"] as? Bool ?? false) ? "passed":"blocked")"
             }.joined(separator:" · ")
-            built.append(Frame(time:time,stage:stage,positions:try positions(row["positions"]),canPose:try matrix(row["desiredCanPose"]),detail:checks))
+            let pose=try positions(row["positions"]),base=try matrix(row["worldFromRobot"])
+            guard let phase=row["phase"] as? String,let phaseIndex=["drive","torso","arm"].firstIndex(of:phase),
+                  phaseIndex>=lastPhase,base.columns.3.x>=previousAdvance-1e-6,base.columns.3.x<=advance+1e-6,
+                  simd_length(base.columns.0-SIMD4<Double>(1,0,0,0))+simd_length(base.columns.1-SIMD4<Double>(0,1,0,0))+simd_length(base.columns.2-SIMD4<Double>(0,0,1,0))<1e-6,
+                  abs(base.columns.3.y)+abs(base.columns.3.z)<1e-6 else {throw fail("invalid drive/turn/reach sequence.")}
+            if index==0 && !timed {
+                guard phase=="drive",simd_length(base.columns.3-SIMD4<Double>(0,0,0,1))<1e-6 else {throw fail("full replay must start before the drive.")}
+            }
+            if phase != "drive" && abs(base.columns.3.x-advance)>1e-6 {throw fail("reach/turn starts before drive arrival.")}
+            if !timed && phase=="arm" && lastPhase<1 {throw fail("torso preparation is missing from full replay.")}
+            if phase=="drive" && abs(pose["torso_yaw",default:0]-baseline["torso_yaw",default:0])>1e-6 {throw fail("torso turns before drive arrival.")}
+            if phase=="arm" && abs((pose["torso_yaw"] ?? .infinity)-torsoYaw)>1e-6 {throw fail("reach starts before torso alignment.")}
+            if phase != "arm" {
+                guard pose.allSatisfy({ name,value in name=="torso_yaw" || abs(value-savedBaseline[name,default:value])<1e-6 }) else {throw fail("arm moves during base preparation.")}
+            }
+            lastPhase=phaseIndex;previousAdvance=base.columns.3.x
+            built.append(Frame(time:time,stage:stage,positions:pose,canPose:try matrix(row["desiredCanPose"]),worldFromRobot:base,detail:checks))
         }
         guard (built.last?.time ?? 0)>0 else {throw fail("empty duration.")}
         frames=built;self.timed=timed
         let quick=root["preparedTimedPour"] as? [String:Any]
-        summary=String(format:"Saved test · hypothetical base approach %.0f cm\nActive tilt %.2f s + hold %.2f s; return begins %.2f s.\nFull task blocked; volume and registration unverified.",
-            (root["nominalBaseAdvanceMeters"] as? Double ?? 0)*100,quick?["tiltSeconds"] as? Double ?? 0,
+        summary=String(format:"Saved test · drive %.0f cm, then torso %.1f° perpendicular\nActive tilt %.2f s + hold %.2f s; return begins %.2f s.\nDrive corridor, registration and full task remain unverified.",
+            advance*100,torsoYaw*180 / .pi,quick?["tiltSeconds"] as? Double ?? 0,
             quick?["fixedHoldSeconds"] as? Double ?? 0,quick?["uprightRecallAtSeconds"] as? Double ?? 0)
     }
 }

@@ -48,26 +48,6 @@ def rigid(value):
     return transform(result[:3, :3], result[:3, 3])
 
 
-def horizontal_table_frame(value):
-    """Apply the operator's horizontal-table constraint in the Z-up model.
-
-    Keep the estimated tabletop anchor and projected front-edge heading.
-    This removes the camera/neck prior's spurious roll and pitch; it does not
-    calibrate the remaining camera-to-arm translation or robot body posture.
-    """
-    source = rigid(value)
-    if source[2, 2] <= .5:
-        raise PourPlanError("Table frame is not a plausible upward-facing prior")
-    x = source[:3, 0].copy(); x[2] = 0
-    x /= np.linalg.norm(x)
-    up = np.array([0., 0., 1.])
-    result = transform(np.column_stack([x, np.cross(up, x), up]), source[:3, 3])
-    return result, dict(horizontalConstraintSource="operator-stated horizontal tabletop",
-        sourceTiltDegrees=float(np.rad2deg(np.arccos(np.clip(source[2,2],-1,1)))),
-        tableNormalInModel=up.tolist(), modelBaseGravityVerified=False,
-        registrationVerified=False, anchorTranslationStillEstimated=True)
-
-
 def convex_table_outline(value):
     points = np.asarray(value, float)
     if points.ndim != 2 or points.shape[1] != 2 or not 3 <= len(points) <= 64 or not np.isfinite(points).all():
@@ -554,19 +534,26 @@ class PourWorkspace:
                        if a != robot.side + '_tool']
         self.pairs += [('can_payload', 'table_proxy'), ('can_payload', 'cup_proxy')]
 
-    def check(self, q, scene_can, *, padding=0, supported=False):
+    def check(self, q, scene_can, *, padding=0, supported=False, robot_pose=None, whole_robot=False):
         from pydrake.geometry import FramePoseVector
         from pydrake.math import RigidTransform
         poses = FramePoseVector()
         for name, frame in self.frames.items():
             if name == 'can_payload': pose = self.model_from_scene @ rigid(scene_can)
             elif name in self.static: pose = self.static[name]
-            else: pose = self.robot.frame(q, name)
+            else:
+                pose = self.robot.frame(q, name)
+                if robot_pose is not None: pose = rigid(robot_pose)@pose
             poses.set_value(frame, RigidTransform(pose))
         self.graph.get_source_pose_port(self.source).FixValue(self.context, poses)
         query = self.graph.get_query_output_port().Eval(self.context)
         minimum, nearest, clear, slack, blocker = math.inf, None, True, math.inf, None
-        for a, b in self.pairs:
+        pairs=self.pairs
+        if whole_robot:
+            pairs=pairs+[(name,obstacle) for name in self.frames
+                if name not in self.static and name!='can_payload' and not self.robot.engine.clearance.is_arm(name)
+                for obstacle in ('table_proxy','cup_proxy')]
+        for a, b in pairs:
             distance = float(query.ComputeSignedDistancePairClosestPoints(self.ids[a], self.ids[b]).distance)
             if not math.isfinite(distance): raise PourPlanError("Nonfinite workspace distance")
             required = .015 + padding

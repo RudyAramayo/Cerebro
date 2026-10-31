@@ -12,6 +12,16 @@ earlier stop instruction below records the Test 11 session; it is not a claim
 that the later pour request was never given. A numerical rehearsal is not
 physical task completion or a measured calibration.
 
+Rudy then corrected the replay's tilt, height and missing drive/torso stages.
+The current fixture measures about 72.5 cm from paired floor/table depth planes
+(three captures: 71.7–72.6 cm), with residual normal disagreement still recorded.
+The earlier 95.5 cm horizontal anchor is invalid. The native storyboard now
+keeps the environment fixed while previewing 25 cm of forward base travel,
+a 16.6° torso turn perpendicular to the front edge, then the right-arm path.
+All 90 poses solve, but self-collision and unmeasured drive/registration
+constraints still block physical continuation. No tread, torso or arm movement
+was executed. The updated test report contains reproduction and rejection tests.
+
 ## Start here
 
 **Rudy's latest instruction is: "do not run anymore arm motions as of now."**

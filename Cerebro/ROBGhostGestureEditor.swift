@@ -32,6 +32,7 @@ import simd
     @nonobjc private var proposal: ROBLeftGestureProposal?
     @nonobjc private var canPreview: ROBCanGrabPreview?
     @nonobjc private var pourPreview: ROBCanPourRehearsal?
+    @nonobjc private var pourGhostBaseTransform=matrix_identity_double4x4
     @nonobjc private let pourCan = SCNNode()
     @nonobjc private var collisionPreview: ROBLeftGestureProposal?
     @nonobjc private var displayedCan: ROBWorkspaceLocatedObject?
@@ -288,6 +289,10 @@ import simd
     }
 
     private func updateHeadInfo() {
+        if pourPreview != nil {
+            headInfo.stringValue="Saved fixture head · floor-anchored world\nLive neck gauge and mesh display lift disabled"
+            return
+        }
         let lift=model.map{ROBNeckRGBPoseDisplay.robotModelDisplayLiftMeters(model:$0)} ?? 0
         let modelLabel=lift==0 ? "":String(format:"\nRobot display %+.2f in · presentation only",lift/0.0254)
         guard let pitch = headOpticalPitchRadians else {
@@ -412,6 +417,7 @@ import simd
             displayedRGBProfileID=ROBNeckRGBPoseDisplay.configurationIdentity(model:model) ?? fittedHeadPose()?.profileID
             displayedCan=nil;canArm.selectItem(at:1)
             updateOriginal(preview.baseline)
+            updateHeadInfo()
             referenceInfo.stringValue="Saved test baseline · both arms and head from recorded input. No live pose or motion claim."
             let canMaterial=SCNMaterial();canMaterial.diffuse.contents=NSColor.systemRed;canMaterial.transparency=0.7
             pourCan.geometry=SCNCylinder(radius:CGFloat(preview.canRadius),height:CGFloat(preview.canHeight))
@@ -451,13 +457,18 @@ import simd
             let path=SCNGeometry(sources:[SCNGeometrySource(vertices:points)],elements:[SCNGeometryElement(indices:(0..<(points.count-1)).flatMap{[UInt32($0),UInt32($0+1)]},primitiveType:.line)])
             let pathMaterial=SCNMaterial();pathMaterial.diffuse.contents=NSColor.systemYellow;pathMaterial.lightingModel = .constant
             path.materials=[pathMaterial];canMotionOverlay.addChildNode(SCNNode(geometry:path))
+            let basePoints=preview.frames.map { SCNVector3($0.worldFromRobot.columns.3.x,$0.worldFromRobot.columns.3.y,0.008) }
+            let basePath=SCNGeometry(sources:[SCNGeometrySource(vertices:basePoints)],elements:[SCNGeometryElement(indices:(0..<(basePoints.count-1)).flatMap{[UInt32($0),UInt32($0+1)]},primitiveType:.line)])
+            let baseMaterial=SCNMaterial();baseMaterial.diffuse.contents=NSColor.cyan;baseMaterial.lightingModel = .constant
+            basePath.materials=[baseMaterial];let baseRoute=SCNNode(geometry:basePath)
+            baseRoute.name="Ghost tread approach · corridor unverified";canMotionOverlay.addChildNode(baseRoute)
             name.stringValue="Coke can · timed pour test"
             poseCount.stringValue="\(preview.frames.count) saved \(timed ? "timed samples":"review poses")"
             timeline.minValue=0;timeline.maxValue=preview.duration;timeline.doubleValue=0
             playButton.title=timed ? "Play real time":"Play pose sequence"
             identity.stringValue=preview.summary
             executeButton.isEnabled=false;executeButton.title="Pour rehearsal only · execution unavailable"
-            canInfo.stringValue="Saved can/glass test · horizontal observed table patch.\nUnseen table extent, left slide and base approach remain unverified."
+            canInfo.stringValue=String(format:"Saved scene · observed tabletop %.1f cm above floor.\nVisible patch only; horizontal registration, left slide and base route unverified.",preview.tableHeightAboveFloor*100)
             renderTime(0)
             if timed { play() }
         } catch {status.stringValue="Run Coke can · timed pour in Testing Sandbox first.\n"+error.localizedDescription}
@@ -471,6 +482,11 @@ import simd
         let u=b.time>a.time ? max(0,min(1,(time-a.time)/(b.time-a.time))):0
         var positions=a.positions
         for (key,value) in b.positions {positions[key]=a.positions[key,default:value]+(value-a.positions[key,default:value])*u}
+        var robotPose=simd_double4x4(simd_slerp(simd_quatd(a.worldFromRobot),simd_quatd(b.worldFromRobot),u))
+        robotPose.columns.3=a.worldFromRobot.columns.3+(b.worldFromRobot.columns.3-a.worldFromRobot.columns.3)*u
+        // Move the ghost robot through the fixed world. Moving the table by
+        // -advance hides the required tread step and misrepresents the scene.
+        pourGhostBaseTransform=robotPose
         updateGhost(positions,updateFields:false)
         let rotation=simd_slerp(simd_quatd(a.canPose),simd_quatd(b.canPose),u)
         var pose=simd_double4x4(rotation);pose.columns.3=a.canPose.columns.3+(b.canPose.columns.3-a.canPose.columns.3)*u
@@ -1269,6 +1285,11 @@ import simd
                 if mount.eulerAngles.y != tilt {mount.eulerAngles.y=tilt}
             }
             if var transform = frames[link] {
+                // Include base travel BEFORE visibility compares each ghost
+                // frame with the original. Unchanged joints still translate.
+                if pourPreview != nil,node.name?.hasPrefix("Blue ghost ")==true {
+                    transform=pourGhostBaseTransform*transform
+                }
                 // Rotate the face-camera housing about its optical origin.
                 // Cloud translation is not a physical camera-mount movement;
                 // the neck and panoramic camera keep their original frames.
@@ -1349,9 +1370,12 @@ import simd
         }
         let gauge=pourPreview == nil ? (fitted?.modelToDisplay ?? matrix_identity_double4x4):matrix_identity_double4x4
         let displayGauge=simd_float4x4(columns:(SIMD4<Float>(gauge.columns.0),SIMD4<Float>(gauge.columns.1),SIMD4<Float>(gauge.columns.2),SIMD4<Float>(gauge.columns.3)))
-        let base = capturedRobot.presentation.simdWorldTransform * modelBasis * displayGauge
+        let worldAnchor=pourPreview == nil ? capturedRobot.presentation.simdWorldTransform:matrix_identity_float4x4
+        let base = worldAnchor * modelBasis * displayGauge
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
-        let presentation=ROBNeckRGBPoseDisplay.robotModelPresentationTransform(model:model,modelToDisplay:gauge)
+        // Frozen fixtures use the model's floor frame. The live mesh-only
+        // presentation lift must not raise their measured environment.
+        let presentation=pourPreview == nil ? ROBNeckRGBPoseDisplay.robotModelPresentationTransform(model:model,modelToDisplay:gauge):matrix_identity_double4x4
         let meshOffset=simd_float4x4(columns:(SIMD4<Float>(presentation.columns.0),SIMD4<Float>(presentation.columns.1),
             SIMD4<Float>(presentation.columns.2),SIMD4<Float>(presentation.columns.3)))
         if robotPresentationRoot.simdTransform != meshOffset {robotPresentationRoot.simdTransform=meshOffset}

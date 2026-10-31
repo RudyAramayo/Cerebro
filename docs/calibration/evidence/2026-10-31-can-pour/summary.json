@@ -4,8 +4,54 @@
   "executable": false,
   "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
   "modelReferenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
-  "nominalBaseAdvanceMeters": 0.4,
+  "nominalBaseAdvanceMeters": 0.25,
   "baseRouteChecked": false,
+  "bodyPreparation": {
+    "executable": false,
+    "worldFromRobotAtReach": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.25
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "forwardTravelMeters": 0.25,
+    "torsoStartYawRadians": 0.0,
+    "torsoTargetYawRadians": 0.2899534901456578,
+    "tableNormalHeadingRadians": 0.2899534901456578,
+    "torsoPerpendicularVerifiedInModel": true,
+    "torsoReferenceMeasured": false,
+    "baseRouteChecked": false,
+    "sequence": [
+      "drive toward fixed table",
+      "turn torso perpendicular",
+      "reach and pour"
+    ],
+    "missingEvidence": [
+      "observed complete drive corridor",
+      "measured tread stopping distance",
+      "current torso zero/reference"
+    ]
+  },
   "baselineSelf": {
     "clear": false,
     "distance": -0.07687208848806654,
@@ -15,17 +61,157 @@
     ],
     "required": 0.025
   },
-  "tableAlignment": {
-    "horizontalConstraintSource": "operator-stated horizontal tabletop",
-    "sourceTiltDegrees": 18.15226920199337,
-    "tableNormalInModel": [
-      0.0,
-      0.0,
-      1.0
+  "baselineWorld": {
+    "clear": true,
+    "minimumDistanceMeters": -5.551115123125783e-17,
+    "nearestPair": [
+      "can_payload",
+      "table_proxy"
     ],
+    "minimumSlackMeters": 0.0009999999999999445,
+    "limitingPair": [
+      "can_payload",
+      "table_proxy"
+    ],
+    "ordinaryRequiredMeters": 0.015,
+    "completeWorldObserved": false,
+    "gripperOpeningMeasured": false,
+    "registrationVerified": false
+  },
+  "tableAlignment": {
+    "horizontalConstraintSource": "observed parallel floor/table planes",
+    "sourceTiltDegrees": 21.862860043479465,
+    "tableNormalInModel": [
+      5.551115123125783e-17,
+      0.0,
+      1.0000000000000002
+    ],
+    "tableHeightAboveFloorMeters": 0.7249724151815264,
+    "floorHeightInModelMeters": 0.0,
+    "modelFromCamera": [
+      [
+        -0.02007311984595805,
+        -0.6696466919505804,
+        0.7424084979438842,
+        0.03343669141265198
+      ],
+      [
+        -0.9938762986476541,
+        0.09406751642340119,
+        0.05797590310096275,
+        2.5035921208359544e-19
+      ],
+      [
+        -0.10865989529761604,
+        -0.7366984527699089,
+        -0.6674342041282672,
+        1.1550602674963149
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "cameraHeightCorrectionMeters": 0.04108930221131413,
+    "observation": {
+      "method": "same-frame parallel floor/table depth planes",
+      "upOptical": [
+        -0.10865989529761606,
+        -0.7366984527699092,
+        -0.6674342041282674
+      ],
+      "floorOffsetOpticalMeters": -1.1550602674963149,
+      "tableOffsetOpticalMeters": -0.4300878523147884,
+      "tableHeightMeters": 0.7249724151815264,
+      "floorRMSMeters": 0.008090218508305614,
+      "tableRMSMeters": 0.006493943132239364,
+      "floorInlierFraction": 0.5431309904153354,
+      "tableInlierFraction": 0.7269157410523954,
+      "independentNormalDifferenceDegrees": 4.539847548227968,
+      "imuNormalDifferenceDegrees": 4.969513998347274,
+      "registrationVerified": false
+    },
     "modelBaseGravityVerified": false,
     "registrationVerified": false,
-    "anchorTranslationStillEstimated": true
+    "horizontalTranslationAndYawStillEstimated": true,
+    "heightSource": "observed floor/table separation"
+  },
+  "sceneGeometry": {
+    "can": {
+      "radius": 0.033,
+      "height": 0.12,
+      "spout_radius": 0.025,
+      "initial_fraction": 0.5,
+      "fraction_of_remaining_to_pour": 0.5
+    },
+    "cup": {
+      "rim_center": [
+        0.0018410195045796749,
+        0.14508230271282144,
+        0.15462123263131203
+      ],
+      "inner_radius": 0.032,
+      "outer_radius": 0.038,
+      "height": 0.15462123263131194
+    },
+    "tableBoundsXY": [
+      [
+        -0.09699675992700331,
+        -0.41271891757940093
+      ],
+      [
+        0.9999809886284626,
+        0.5789934270663059
+      ]
+    ],
+    "tableOutlineXY": [
+      [
+        -0.09699675992700331,
+        0.37739769626193614
+      ],
+      [
+        -0.0969967599270033,
+        -0.41271891757940093
+      ],
+      [
+        0.31407438368343105,
+        -0.4085064640395276
+      ],
+      [
+        0.9999809886284626,
+        0.5789934270663059
+      ]
+    ],
+    "tableExtentComplete": false,
+    "tableZ": 0,
+    "modelFromScene": [
+      [
+        0.9582571740726105,
+        -0.28590765701249615,
+        5.551115123125783e-17,
+        0.7505679533148999
+      ],
+      [
+        0.2859076570124961,
+        0.9582571740726108,
+        0.0,
+        0.06768903252073516
+      ],
+      [
+        0.0,
+        2.7755575615628914e-17,
+        1.0000000000000002,
+        0.7249724151815264
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
   },
   "geometryAudit": {
     "valid": true,
@@ -46,48 +232,174 @@
   },
   "failedIKStages": [],
   "blockedClearanceStages": [
+    "Turn torso perpendicular to table \u00b7 1.4 degrees",
+    "Turn torso perpendicular to table \u00b7 2.8 degrees",
+    "Turn torso perpendicular to table \u00b7 4.2 degrees",
+    "Turn torso perpendicular to table \u00b7 5.5 degrees",
+    "Turn torso perpendicular to table \u00b7 6.9 degrees",
+    "Turn torso perpendicular to table \u00b7 8.3 degrees",
+    "Turn torso perpendicular to table \u00b7 9.7 degrees",
+    "Turn torso perpendicular to table \u00b7 11.1 degrees",
+    "Turn torso perpendicular to table \u00b7 12.5 degrees",
+    "Turn torso perpendicular to table \u00b7 13.8 degrees",
+    "Turn torso perpendicular to table \u00b7 15.2 degrees",
+    "Turn torso perpendicular to table \u00b7 16.6 degrees",
     "Approach open gripper 8 cm before can",
     "Grasp at source",
     "Verify jaw closure",
     "Retention test lift",
     "Raise only to computed cup clearance",
+    "Position opening over cup",
+    "Tilt toward cup 2.94 degrees",
+    "Tilt toward cup 5.87 degrees",
+    "Tilt toward cup 8.81 degrees",
+    "Tilt toward cup 11.75 degrees",
+    "Tilt toward cup 14.69 degrees",
+    "Tilt toward cup 17.62 degrees",
+    "Tilt toward cup 20.56 degrees",
+    "Tilt toward cup 23.50 degrees",
+    "Tilt toward cup 26.43 degrees",
+    "Tilt toward cup 29.37 degrees",
+    "Tilt toward cup 32.31 degrees",
+    "Tilt toward cup 35.25 degrees",
+    "Tilt toward cup 38.18 degrees",
+    "Tilt toward cup 41.12 degrees",
+    "Tilt toward cup 44.06 degrees",
+    "Tilt toward cup 46.99 degrees",
+    "Tilt toward cup 49.93 degrees",
+    "Tilt toward cup 52.87 degrees",
+    "Tilt toward cup 55.81 degrees",
+    "Tilt toward cup 58.74 degrees",
+    "Tilt toward cup 61.68 degrees",
+    "Tilt toward cup 64.62 degrees",
+    "Tilt toward cup 67.55 degrees",
+    "Tilt toward cup 70.49 degrees",
+    "Tilt toward cup 73.43 degrees",
+    "Tilt toward cup 76.37 degrees",
+    "Tilt toward cup 79.30 degrees",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Controlled upright recovery",
+    "Upright above cup",
+    "Return above source",
     "Return to source support",
     "Release supported can",
     "Retract empty gripper after supported release"
   ],
   "leftGlassPush": {
+    "physicalArm": "left",
+    "startCenterXY": [
+      0.0018410195045796749,
+      0.14508230271282144
+    ],
+    "endCenterXY": [
+      0.0015493272502934599,
+      0.22508177093373394
+    ],
+    "contactPoint": [
+      0.001979573325365627,
+      0.10708255530788799,
+      0.025000000000000085
+    ],
+    "directionXY": [
+      -0.0036461531785776866,
+      0.9999933527614063
+    ],
+    "distanceMeters": 0.08,
+    "speedMetersPerSecond": 0.015,
+    "requireCanSupportedAndRightArmClear": true,
     "executable": false,
-    "reason": "Slide would leave the supported tabletop margin"
+    "tipThresholdFrictionRatio": 1.5199999999999998,
+    "note": "Unmeasured friction/contact and liquid slosh; support geometry alone is not push clearance."
   },
+  "blockers": [
+    "Camera-to-arm registration and body/torso posture remain unverified",
+    "Gripper contact offset and open-jaw envelope are not measured",
+    "Base travel corridor and measured stopping distance require current review",
+    "Known arm/head model mismatch remains unresolved",
+    "Fixed-time compiled curve is not executable through overlapping cmd4 commands"
+  ],
+  "poseCount": 90,
+  "timedSampleCount": 222,
   "fixedTimedPour": {
     "schemaVersion": 1,
     "hardwareOutputEnabled": false,
     "executable": false,
     "requiresCoherentTrajectoryOwner": true,
     "volumeMetered": false,
-    "tiltSeconds": 10.955823662991495,
+    "tiltSeconds": 8.385349090351438,
     "fixedHoldSeconds": 0.35,
-    "uprightRecallAtSeconds": 11.305823662991495,
-    "completeAtSeconds": 22.26164732598299,
-    "peakVelocity": 0.2997002997002997,
+    "uprightRecallAtSeconds": 8.735349090351438,
+    "completeAtSeconds": 17.120698180702878,
+    "peakVelocity": 0.26035026046397,
     "peakVelocityByJoint": [
-      0.11439858885501394,
-      0.043043959615562975,
-      0.08562833342612226,
-      0.13672858819171704,
-      0.06743136914810063,
-      0.03021484420785332,
-      0.2997002997002997
+      0.0686160293916683,
+      0.13245144831848768,
+      0.0852511241114365,
+      0.045648652535686056,
+      0.11167643522066632,
+      0.02857387179303987,
+      0.26035026046397
     ],
-    "peakAcceleration": 0.3095305448913876,
-    "peakJerk": 1.5713787857131984,
+    "peakAcceleration": 0.2624098020442999,
+    "peakJerk": 1.994011980029959,
     "peakBoundsAreConservative": true,
-    "peakAbsoluteRawRadians": 2.0442777884616703,
+    "peakAbsoluteRawRadians": 1.6025466575215086,
     "sweptReview": {
-      "clear": true,
-      "checkedSamples": 1098,
-      "maximumOpeningErrorMeters": 8.2797510614636e-05,
-      "staticSelfConflictsMustAlsoPass": true,
+      "clear": false,
+      "checkedSamples": 1,
+      "firstFailureTimeSeconds": 0.0,
+      "selfClearance": {
+        "clear": false,
+        "distance": 0.020327504648704642,
+        "pair": [
+          "right_two_Link",
+          "right_four_Link"
+        ],
+        "required": 0.02530318592568348
+      },
+      "worldClearance": {
+        "clear": true,
+        "minimumDistanceMeters": 0.02526520849564696,
+        "nearestPair": [
+          "can_payload",
+          "cup_proxy"
+        ],
+        "minimumSlackMeters": 0.0014315104866091388,
+        "limitingPair": [
+          "can_payload",
+          "cup_proxy"
+        ],
+        "ordinaryRequiredMeters": 0.02383369800903782,
+        "completeWorldObserved": false,
+        "gripperOpeningMeasured": false,
+        "registrationVerified": false
+      },
+      "openingErrorMeters": 8.862730714316679e-05,
+      "maximumOpeningErrorMeters": 8.862730714316679e-05,
       "hardwareOutputEnabled": false
     }
   },
@@ -97,44 +409,80 @@
     "executable": false,
     "requiresCoherentTrajectoryOwner": true,
     "volumeMetered": false,
-    "tiltSeconds": 3.246169988304918,
+    "tiltSeconds": 2.1930591435648337,
     "fixedHoldSeconds": 0.35,
-    "uprightRecallAtSeconds": 3.596169988304918,
-    "completeAtSeconds": 6.842339976609836,
-    "peakVelocity": 0.2997002997002997,
+    "uprightRecallAtSeconds": 2.5430591435648338,
+    "completeAtSeconds": 4.736118287129667,
+    "peakVelocity": 0.2949545105067875,
     "peakVelocityByJoint": [
-      0.11439859037816776,
-      0.02766760833815688,
-      0.08562833353279099,
-      0.1367285899733619,
-      0.05503220030271467,
-      0.014332668286626448,
-      0.2997002997002997
+      0.07773607487282296,
+      0.14126946985315275,
+      0.09658221062405048,
+      0.05171600743224911,
+      0.12228316717286886,
+      0.03237174590297537,
+      0.2949545105067875
     ],
-    "peakAcceleration": 0.29014261497796456,
-    "peakJerk": 0.9303472330932457,
+    "peakAcceleration": 0.42132832667617437,
+    "peakJerk": 1.9940119800299587,
     "peakBoundsAreConservative": true,
-    "peakAbsoluteRawRadians": 2.0442777884616703,
+    "peakAbsoluteRawRadians": 1.4291261436262215,
     "preparedTiltDegrees": 55.80574105383691,
     "returnsToPreparedTiltBeforeFullUpright": true,
     "preparedTiltDrynessVerified": false,
     "sweptReview": {
-      "clear": true,
-      "checkedSamples": 328,
-      "maximumOpeningErrorMeters": 4.788974097298607e-07,
-      "staticSelfConflictsMustAlsoPass": true,
+      "clear": false,
+      "checkedSamples": 1,
+      "firstFailureTimeSeconds": 0.0,
+      "selfClearance": {
+        "clear": false,
+        "distance": 0.018761919192127392,
+        "pair": [
+          "right_two_Link",
+          "right_four_Link"
+        ],
+        "required": 0.02534299821973268
+      },
+      "worldClearance": {
+        "clear": true,
+        "minimumDistanceMeters": 0.04882208441555939,
+        "nearestPair": [
+          "can_payload",
+          "right_seven_Link"
+        ],
+        "minimumSlackMeters": 0.024033833592148807,
+        "limitingPair": [
+          "can_payload",
+          "right_seven_Link"
+        ],
+        "ordinaryRequiredMeters": 0.02478825082341058,
+        "completeWorldObserved": false,
+        "gripperOpeningMeasured": false,
+        "registrationVerified": false
+      },
+      "openingErrorMeters": 2.048388270797948e-07,
+      "maximumOpeningErrorMeters": 2.048388270797948e-07,
       "hardwareOutputEnabled": false
     }
   },
-  "status": "Corrected horizontal-table candidate only. Zero grasps, pours, base travel or pushes executed.",
-  "supersedes": "Earlier tilted-table 25cm approach and5.07s cycle are invalidated.",
-  "assumptions": [
-    "66mm diameter by120mm cylindrical can; opening lip25mm from axis",
-    "Half full initially; requested half remaining",
-    "40cm hypothetical base approach;20mm higher grasp",
-    "Operator-stated horizontal tabletop; only visible convex patch represented",
-    "Camera-to-arm translation, body lean, torso heading and open gripper unverified",
-    "Transparent glass rim uses assumed154.6mm height; background depth rejected",
-    "Left slide fails observed table support margin"
-  ]
+  "observationRepeatability": {
+    "captureCount": 3,
+    "heightRangeMeters": [
+      0.7171994974977292,
+      0.7261916663277133
+    ],
+    "interpretation": "Observed spread, not calibrated uncertainty; independent normal disagreement 3.7 to 6.1 degrees"
+  },
+  "deployment": {
+    "runtimeSession": "9BB4F940-7C24-47E0-B1ED-B4309F54FD5A",
+    "installedHashes": {
+      "Cerebro": "42a16e1bdae6ae3849d1de9df24a855bac2f42469bde8aa326934ab12cfbc390",
+      "Cerebro.debug.dylib": "c690b91840604ade399336764f36f211031d9605af99739144319ffb7242a16c",
+      "__preview.dylib": "81ba5d33ed281e55e81fb73c59e51402e219c17e2fc1f07b6369e4bb93093547"
+    },
+    "reportSHA256": "211423fb6012bc2639972abb22c36afd970fed36ba7ad7532ae2fc1be3e04f1d",
+    "nativeRun": "A4A7A35F-7804-43BB-BD0E-75E61603F98E",
+    "armsUnchangedInactive": true,
+    "physicalMotionExecuted": false
+  }
 }

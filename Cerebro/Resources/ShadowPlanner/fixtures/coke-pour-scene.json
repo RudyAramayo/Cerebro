@@ -8,22 +8,22 @@
   },
   "cup": {
     "rim_center": [
-      0.002329417631275117,
-      0.1513789491704279,
-      0.1546212326313119
+      0.0018410195045796749,
+      0.14508230271282144,
+      0.15462123263131203
     ],
     "inner_radius": 0.032,
     "outer_radius": 0.038,
     "height": 0.15462123263131194
   },
   "canCenter": [
-    0.0,
-    0.0,
+    0,
+    0,
     0.06
   ],
   "openingDirection": [
-    0.015386167636662163,
-    0.9998816259165164,
+    0.012688462099231353,
+    0.9999194982245103,
     0.0
   ],
   "graspApproach": [
@@ -31,53 +31,137 @@
     0,
     0
   ],
-  "modelFromScene": [
-    [
-      0.8701231749225588,
-      -0.38386488488008214,
-      -0.3090847951916879,
-      0.8540318870493149
-    ],
-    [
-      0.41490340232973844,
-      0.9090265510449883,
-      0.03906272174926395,
-      0.04027855355512828
-    ],
-    [
-      0.26597147816616273,
-      -0.16222971260300767,
-      0.9502319154558281,
-      0.9550155575243748
-    ],
-    [
-      0.0,
-      0.0,
-      0.0,
-      1.0
-    ]
-  ],
   "tableBoundsXY": [
     [
-      -0.08801736709264632,
-      -0.5454406044449349
+      -0.09699675992700331,
+      -0.41271891757940093
     ],
     [
-      1.0103881765295264,
-      0.4385365452415079
+      0.9999809886284626,
+      0.5789934270663059
     ]
   ],
   "tableZ": 0,
   "evidence": {
-    "fixture": "2026-10-31 saved can/glass geometry hypothesis",
+    "fixture": "2026-10-31 paired floor/table saved scene",
     "registrationVerified": false,
-    "dimensions": "66x120mm can and lip25mm assumed; transparent glass rim located using assumed154.6mm height because live glass depth hits background",
-    "worldCompleteness": "Partial table proxy; not a live scene or drive corridor",
-    "horizontalTable": "operator-stated; constrained to Z-up model, not an extrinsic calibration",
-    "tableExtent": "Visible convex patch from front-camera boundary rays; far table extent outside image remains unknown",
-    "tablePlaneRMSMeters": 0.007742507828087309,
-    "tablePlaneInlierFraction": 0.5606948054325146,
-    "sourceTiltDegrees": 18.15226920199337
+    "heightSource": "same-frame parallel floor/table depth planes",
+    "dimensions": "66x120mm can and 25mm lip assumed; transparent glass rim uses assumed 154.6mm height",
+    "worldCompleteness": "Visible tabletop patch only; unseen extent and base corridor unknown",
+    "horizontalTranslationAndYaw": "Unverified camera/model prior; not an arm calibration",
+    "observedCanRimAboveTableMeters": 0.11893909345942161,
+    "inspectedImageAnnotations": {
+      "floorRegions": [
+        [
+          236,
+          280,
+          378,
+          365
+        ],
+        [
+          438,
+          202,
+          529,
+          293
+        ],
+        [
+          260,
+          363,
+          430,
+          390
+        ],
+        [
+          80,
+          275,
+          135,
+          350
+        ]
+      ],
+      "tableRegions": [
+        [
+          82,
+          152,
+          139,
+          186
+        ],
+        [
+          328,
+          14,
+          390,
+          42
+        ],
+        [
+          420,
+          40,
+          484,
+          71
+        ],
+        [
+          75,
+          75,
+          134,
+          145
+        ],
+        [
+          337,
+          117,
+          379,
+          136
+        ]
+      ],
+      "canRimRegion": [
+        278,
+        40,
+        302,
+        48
+      ],
+      "cupRimPixel": [
+        187,
+        43
+      ],
+      "frontEdgePixels": [
+        [
+          64,
+          211
+        ],
+        [
+          550,
+          77
+        ]
+      ],
+      "visibleBoundaryPixels": [
+        [
+          23,
+          1
+        ],
+        [
+          432,
+          1
+        ],
+        [
+          550,
+          77
+        ],
+        [
+          64,
+          211
+        ]
+      ]
+    },
+    "captureSequence": 14901,
+    "captureHashes": {
+      "rgb.jpg": "0a37721547bd2412f2adc2aeab9a77e714b4147642f55e3c38eb18e28e042b5a",
+      "depth-u16le.raw": "be69ed93b2abc2cc6e188068edaad7619fe36672aa3a40f7157432a0faea0552",
+      "metadata.json": "99add59cf409a108b47f728cf86d7c122eb3f36a8a52f8b3b67ad3074315317a"
+    },
+    "repeatability": {
+      "captureCount": 3,
+      "heightRangeMeters": [
+        0.7171994974977292,
+        0.7261916663277133
+      ],
+      "interpretation": "Observed spread, not calibrated uncertainty; independent normal disagreement 3.7 to 6.1 degrees"
+    }
   },
   "graspHeightOffset": 0.02,
   "recipientXY": [
@@ -86,20 +170,90 @@
   ],
   "tableOutlineXY": [
     [
-      -0.0880173670926463,
-      0.3693176266460904
+      -0.09699675992700331,
+      0.37739769626193614
     ],
     [
-      -0.08801736709264632,
-      -0.47099146884157866
+      -0.0969967599270033,
+      -0.41271891757940093
     ],
     [
-      0.3952688242739535,
-      -0.5454406044449349
+      0.31407438368343105,
+      -0.4085064640395276
     ],
     [
-      1.0103881765295264,
-      0.4385365452415079
+      0.9999809886284626,
+      0.5789934270663059
     ]
-  ]
+  ],
+  "modelFromCameraPrior": [
+    [
+      4.565824161211448e-12,
+      -0.3612991056521886,
+      0.9324499752023852,
+      0.03343669141265198
+    ],
+    [
+      -1.0,
+      -3.999579709157824e-19,
+      4.896588705164578e-12,
+      2.5035921208359544e-19
+    ],
+    [
+      -1.7691336048979226e-12,
+      -0.9324499752023852,
+      -0.3612991056521886,
+      1.1139709652850007
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "cameraFromScene": [
+    [
+      -0.30339205500501115,
+      -0.9466500346557583,
+      -0.10865989529761606,
+      -0.034936285864894445
+    ],
+    [
+      -0.6147991234340359,
+      0.2815979891816765,
+      -0.7366984527699092,
+      -0.15701218269341946
+    ],
+    [
+      0.7279940238659777,
+      -0.15670444912346643,
+      -0.6674342041282674,
+      0.8233840191828267
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "floorTableObservation": {
+    "method": "same-frame parallel floor/table depth planes",
+    "upOptical": [
+      -0.10865989529761606,
+      -0.7366984527699092,
+      -0.6674342041282674
+    ],
+    "floorOffsetOpticalMeters": -1.1550602674963149,
+    "tableOffsetOpticalMeters": -0.4300878523147884,
+    "tableHeightMeters": 0.7249724151815264,
+    "floorRMSMeters": 0.008090218508305614,
+    "tableRMSMeters": 0.006493943132239364,
+    "floorInlierFraction": 0.5431309904153354,
+    "tableInlierFraction": 0.7269157410523954,
+    "independentNormalDifferenceDegrees": 4.539847548227968,
+    "imuNormalDifferenceDegrees": 4.969513998347274,
+    "registrationVerified": false
+  }
 }

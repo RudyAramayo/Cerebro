@@ -1,169 +1,189 @@
 # Coke can timed-pour test
 
-This is a reproducible **Testing Sandbox → Coke can · timed pour** scenario.
-It recomputes a saved scene with the bundled ghost robot model and opens the
-result in Cerebro's existing controller-input ghost editor. It sends no motor
-commands. The requested physical task remains unfinished: approach the table,
-grasp with the right arm, pour half of the remaining liquid, return the can to
-support, then slide the glass toward the occupied keyboard seat using the left
-arm.
+**Testing Sandbox → Coke can · timed pour** reproduces the saved scene in
+Cerebro's native ghost planner. The current sequence explicitly previews a
+25 cm tread approach, a 16.6° torso turn perpendicular to the observed table
+front edge, then the right-arm grasp, pour and supported set-down. The table,
+can and glass remain fixed in the world during preparation. No motor commands
+are sent. The physical pour and subsequent left-arm glass slide remain unfinished.
 
-The can is reported half full; half of the remaining contents is one quarter
-of full capacity. The user requested a fixed-time tilt/hold/return chain and
-said the opening already faces the glass. The scenario preserves that opening
-direction instead of silently yawing the can. The user subsequently requested
-the test live in Cerebro's native Sandbox and ghost planner.
+Rudy requested half of the remaining contents of an already half-full can,
+a fixed-time tilt/hold/return, and preservation of the opening's existing
+orientation toward the glass. He also requested a reproducible native test,
+corrected the initially tilted and overly tall table, and required the drive
+and torso turn to appear before the reach. These corrections invalidate the
+previous geometry and its timing results.
 
 ## Repeat in Cerebro
 
 1. Open **Testing Sandbox**, select **Coke can · timed pour**.
-2. Set starting fill, fraction of remaining liquid to pour, fixed hold time,
-   hypothetical base approach and grasp height offset.
-3. Choose **Run saved pour test + open ghost**. Each run retains its input scene,
-   baseline, planner log and report in `~/Library/Application Support/Cerebro/CanPourTests/<run UUID>/`.
-4. Scrub the complete native ghost pose sequence. **Play timed pour and return…**
-   opens the compiled active pour at real-time playback speed. The full pose
-   sequence is a storyboard, not a claim about complete-task execution timing.
-5. **Show latest recording** reveals the latest report. Reopening either native
-   ghost action loads that saved result, without recomputing or moving hardware.
+2. Set fill, fraction to pour, hold time, ghost tread approach and grasp offset.
+   The revised saved fixture defaults to **25 cm**, not the previous 40 cm.
+3. Choose **Run saved pour test + open ghost**. Each run saves its inputs,
+   baseline, log and report in
+   `~/Library/Application Support/Cerebro/CanPourTests/<run UUID>/`.
+4. Scrub the full 90-pose storyboard: drive first, torso alignment second,
+   reach third. The storyboard is not a complete physical execution schedule.
+5. **Play timed pour and return…** shows the active wrist segment at real time
+   from the already prepared base/torso pose. Full upright recovery remains
+   part of the complete storyboard. Reopening a report never actuates hardware.
 
-The run records the exact inputs, model/reference identities, final joint
-solutions, timing and clearance results. The bundled scene and baseline are
-numerical fixtures, not live observations. No photos or private camera/audio
-artifacts are included in the repository.
-
-The same planner can be run headlessly with the existing ShadowPlanner Python
-environment:
+Run the same fixture with the existing ShadowPlanner Python environment:
 
 ```sh
 python3 Scripts/plan-can-pour.py \
   --scene Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-scene.json \
   --status Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-status.json \
-  --base-advance .40 --hold-seconds .35 --output /tmp/pour-report.json
+  --base-advance .25 --hold-seconds .35 --output /tmp/pour-report.json
 ```
 
-## Implemented geometry and checks
+## Measured height and remaining registration uncertainty
 
-- The cylindrical liquid estimate solves the volume below the horizontal plane
-  through the opening lip. Defaults assume a 66 mm diameter, 120 mm tall can
-  and a lip 25 mm from its axis. The ideal onset is 67.38°; retaining one quarter
-  capacity gives 79.30°. Can shoulders, venting, foam and transient flow are not
-  modeled. Time or tilt alone does not establish a measured volume.
-- The can and tool remain rigidly attached. The opening stays over the cup as
-  the entire can pivots. The whole cylinder stays above the protected rim plane.
-  Retention and supported release are explicit checkpoints. Jaw ACK is not
-  possession; no automatic intensity escalation or loaded jaw calibration is
-  added.
-- Full seven-joint IK preserves the supplied other-arm and head coordinates.
-  Final raw targets and interpolated extrema remain within the conservative
-  ±2.09 rad bounds. No post-solver wrist amendment is allowed.
-- A smooth quintic clock drives the interpolated joint curve. Analytical
-  derivative bounds enforce 0.30 rad/s, 0.60 rad/s² and 2 rad/s³. The return
-  retraces the same curve. It is not a stream of overlapping vendor cmd4 calls.
-- Full scan hulls, the table proxy, cup and carried can are reviewed. The swept
-  self-clearance calculation now bounds each pair's relative motion; fast wrist
-  travel no longer inflates a nearly stationary shoulder pair. Existing static
-  overlaps and between-endpoint collisions still reject a complete route.
-- The tabletop obeys Rudy's horizontal constraint in the Z-up simulation frame.
-  A convex outline records the visible table patch; unseen far corners are not
-  filled by its bounding rectangle. The same 6 cm thick prism is used for
-  collision review and rendering. Frozen pour previews do not inherit a live
-  neck display gauge. The input camera/neck prior and its removed tilt remain
-  in the report; camera-to-arm translation and body posture remain unverified.
-- Native payload rendering applies the complete rigid grasp transform, including
-  rotation. A white opening-lip marker stays attached to the can. Imported test
-  reports must match the model and carry non-executable
-  markers; incomplete/out-of-bounds poses, unsolved IK, tilted tables and invalid
-  transforms are rejected. A failed attempt replaces the latest report instead
-  of silently retaining a prior passing replay.
-  Imported rehearsal never supplies motion approval or enters the grasp executor.
+Three inspected stationary RGB-D captures gave paired floor/table separations
+of **0.7172, 0.7250 and 0.7262 m**. The fixture uses the middle observation,
+0.724972 m. Its retained floor and tabletop residual RMS are 8.09 mm and
+6.49 mm. The independent plane normals disagree by 4.54° in this capture
+(3.72–6.07° over the three captures); this is an estimated plane fit, not a
+calibrated uncertainty bound. The observed can rim is 118.9 mm above the
+plane, consistent with the explicitly assumed 120 mm can height.
 
-For the corrected 40 cm approach hypothesis with the grasp 20 mm above the can
-center, the active portion starts from a prepared 55.81° tilt. It takes about
-3.25 s to reach 79.30°, holds 0.35 s, starts returning at 3.60 s, and reaches the
-prepared angle again at 6.84 s. Full upright recovery follows separately.
-The prepared angle is below the ideal onset; its actual dryness is unverified.
-All 328 active-cycle samples pass the model's moving-pair and workspace review.
-This does **not** make the complete task executable.
+`table_planes.py` fits the inspected floor and table regions independently,
+checks agreement and spatial support, then fits their stated parallel-plane
+constraint. Plane separation supplies height without neck FK. The complete
+camera rotation is corrected to observed up and its vertical origin is
+anchored to the floor. Every object uses that same transform. Camera XY/yaw,
+robot body attitude and camera-to-arm registration remain estimated.
 
-Rudy caught a tilted table in the first native rehearsal. That rehearsal
-composed IMU gravity with an unverified neck FK transform, leaving the tabletop
-normal about 18° away from model up, and displayed an oversized bounding box.
-The earlier 25 cm / 5.07 s result is superseded and must not be reused. A fresh
-stationary frame provided a horizontal-plane-constrained visible outline
-(7.74 mm residual RMS among retained samples). Transparent-glass depth returned
-background, so the glass rim uses its image location and the explicitly assumed
-154.6 mm height. This is not a measured glass or camera-to-arm calibration.
-The corrected geometry makes the 25 cm and 35 cm candidates fail IK; the 40 cm
-candidate solves all poses without relaxing the joint limits.
+The scene stores optical observations and the camera prior separately; it no
+longer accepts the previous precomputed, vertically wrong table anchor.
+Native decoding requires the transformed tabletop height to match the paired
+plane evidence. Frozen replay also removes the live presentation-only mesh
+lift, which must not raise the measured environment.
 
-## Remaining physical failures
+The table shape is the visible convex patch reconstructed from inspected
+boundary rays. Far corners outside the image remain unknown. Renderer and
+collision model use the same polygon and assumed 6 cm thickness. Glass depth
+returns background; its rim location still uses its image ray and an assumed
+154.6 mm glass height. Raw images/depth stay outside Git; fixture annotations,
+input hashes and numerical measurements are committed.
 
-The full approach still encounters torso/right-upper-arm overlap and inadequate
-upper-arm/forearm clearance. Its first workspace connector exceeds the current
-sweep budget. The saved baseline has a roughly 77 mm modeled left-tool /
-track overlap. The earlier right-arm/head strike was missed by the model;
-camera/body registration, tool offset and open-jaw geometry remain unresolved.
-The current base map was stale. The requested left-glass slide is now rejected
-by the visible-table support margin; the earlier bounding rectangle had admitted
-it. No force-controlled left-arm trajectory is solved or verified. See the
-sanitized numerical summary alongside this report.
+To repeat perception on an inspected private capture:
 
-During this task only neck search commands and read-only torso counter selection
-were used. No arm mode, gripper, arm trajectory, base travel or torso-turn command
-was sent. The counter read 92, matching the historical front count, but software
-alignment remained unset. The occupied keyboard seat was located on ROB's left
-using the front camera. The can and ice-filled glass remained on the table in
-the final inspected still. Camera artifacts remain private and outside Git.
+```sh
+python3 Scripts/measure-pour-table.py \
+  --capture /path/to/private/capture \
+  --observations /path/to/inspected-pixel-annotations.json \
+  --scene-template Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-scene.json \
+  --status Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-status.json \
+  --output /tmp/new-pour-scene.json
+```
 
-The other session's native assistant speech work (078d7d7, preserved here by
-cherry-pick cb67fde) is retained. Its controller diagnosis remains applicable;
-no Amber core change or streaming commissioning is included in this test.
+The fixture's `evidence.inspectedImageAnnotations` contains the pixel region
+format. Inspect a new image before reusing those regions; they are not an
+object detector and do not authorize automatic physical continuation.
 
-## Validation
+## Base, torso and arm planning
 
-- `Scripts/test-can-pour.sh`: cylinder volume, rigid payload/pivot, recovery,
-  final interpolation bounds, timing/derivative limits, supported slide geometry,
-  current head/other-arm preservation and real collision regressions; also
-  compiles the actual native payload rendering transform.
-- `Scripts/test-can-pour-native.sh`: reruns the bundled numerical fixture and
-  checks native full/timed decoding plus tampered model/authority/pose/time/
-  transform rejection.
-- Existing `ROBShadowSafetyTests.py` retains the between-endpoints head collision
-  and static-overlap regressions. Existing `ROBShadowPlannerTests.py` covers the
-  ordinary ghost workflow.
+The report contains explicit per-pose `worldFromRobot` transforms. The ghost
+robot moves toward a stationary table instead of subtracting a base advance
+from the displayed table. Both arms retain the baseline during preparation.
+Torso yaw is solved against the table front edge, and the model's forward axis
+is checked for perpendicularity. Only after base arrival and torso alignment
+does arm IK begin. Native validation rejects missing preparation, early arm
+motion, inconsistent base transforms and misaligned torso targets.
 
-The 14 pour tests and native payload-transform fixture passed, including the
-new horizontal-table and clipped-outline support regressions. Native full/timed
-decoding and eight invalid-report cases passed against the corrected scene.
-The native decoder respects
-continuous URDF joints while retaining bounded-joint and final arm limits.
-The 14 existing shadow-safety tests and 10 shadow-planner tests also passed.
+The saved torso zero is a model prior, not a measured TIC reference. A 25 cm
+geometric drive is not a tread duration or motor command. Sampled whole-body
+separation from the visible table/cup is recorded; a complete drive corridor,
+chair/table legs, cables, stopping distance and current torso reference remain
+unverified. `baseRouteChecked` therefore remains false.
 
-The combined build preserves the other session's accumulated-surface texture
-fix (43e63bb, included here as c9e7e67), in addition to its native speech work.
-Its photo-orientation/color fixes do not provide camera-to-arm calibration.
+The corrected lower table required another IK branch. A numerical descent
+from a solved raised grasp supplies a seed for the low grasp; this adds no
+physical preparation motion and does not relax collision or joint limits.
+20, 25 and 30 cm candidates solved the complete arm pose sequence; 40 cm did
+not. The saved 25 cm candidate yields 90 complete body/arm review poses.
 
-The combined Debug build succeeded and was installed with strict code-signature
-verification. A coordinated passive relaunch retained inactive arms and their
-unchanged feedback; no neck target was replayed after its command state became
-unknown. The native Sandbox run `7D61FA16-4512-41A3-AD94-466C4F9A3933`
-completed, opened 64 solved review poses, and saved the corrected horizontal
-outline. The table/floor alignment was inspected from two viewing angles.
-The native timed action played 328 samples to 6.84 s and showed the final phase
-as `return`; execution remained disabled. No physical pour or glass slide was
-performed. The earlier browser viewer is retired.
+The cylinder model assumes a 66 mm diameter, 120 mm height and 25 mm opening
+lip radius. Ideal onset is 67.38°; one quarter capacity remaining corresponds
+to 79.30°. The opening remains attached to the can and pivots over the cup.
+Foam, venting, shoulders and flow transients are not modeled; this is not
+metered volume. The entire can clears the protected cup rim plane.
 
-The saved report SHA-256 is
-`2810debf87f74bb01f366d4712b956a9fbb4e497faa5ed0746bbb189390192c3`.
-The installed `Cerebro.debug.dylib` matches the combined build at
-`c5a4f5e91ede34907c43db1dcdf6d9d8fa25be4ac4db70623c6a39530254d7bb`.
-Private inputs, complete reports and build logs stay outside Git; the numerical
-summary in this directory is sanitized. Offline and UI validation do not
-establish physical clearance or metered liquid volume.
+The revised active segment starts at a prepared 55.81° tilt, reaches 79.30° in
+**2.193 s**, holds **0.350 s**, starts its reverse at **2.543 s**, and returns to
+the prepared angle at **4.736 s**. Its actual dryness is unverified. A quintic
+clock and analytical derivative bounds enforce 0.30 rad/s, 0.60 rad/s² and
+2 rad/s³; the reverse retraces the same curve. Final interpolated raw targets
+remain within ±2.09 rad. No overlapping vendor cmd4 dispatch was added.
 
-Build coordination lesson: pass `CEREBRO_INSTALL_AFTER_BUILD=NO` as an
-**xcodebuild setting argument**. An environment assignment alone is overridden
-by this project's `YES` setting and can install a bundle passively. The explicit
-setting was verified on the final builds; installation and relaunch were then
-handled separately.
+## Physical blockers and corrected history
+
+All current poses solve kinematically, but the route is **not collision clear**.
+The model reports a baseline left-tool/track overlap of about 77 mm, blocked
+torso rotation and inadequate right upper-arm/forearm separation. The active
+pour now also fails that self-clearance requirement; the old claim that its
+328 samples passed applies only to the invalid-height fixture. The visible
+outline rejects the requested left-glass slide's support margin. No verified
+left-arm pushing trajectory exists.
+
+The historical right-arm/head strike was missed by the model. Tool offset,
+open-jaw geometry, body posture and camera/arm registration remain unresolved.
+Native completion and successful IK are not evidence of physical clearance.
+The controller handoff investigation and measured-completion guard remain
+unchanged; no core or streaming fix was commissioned.
+
+The first scene inherited about 18° of tilt from a nominal neck transform and
+used an oversized rectangle. The first correction made it horizontal but
+retained a wrong **95.5 cm** anchor, with an additional live mesh display lift.
+Rudy identified both failures. The earlier 25 cm / 5.07 s and 40 cm / 6.84 s
+results are superseded. The current paired-plane source and native rejection
+tests prevent those scenes from being silently replayed as current evidence.
+
+No arm mode, jaw command, arm trajectory, base travel or torso turn was sent
+by this task. Earlier neck-only search and read-only torso counter selection
+located the can, ice-filled glass and occupied keyboard seat on ROB's left.
+Counter 92 matched historical forward count, but software alignment was unset.
+Latest inspected frames show the can and glass still on the table.
+
+## Validation and installation
+
+`Scripts/test-can-pour.sh` covers 17 geometry, timing, collision and perception
+regressions, including synthetic noisy/outlier plane recovery, independence
+from neck-prior height, and drive/torso ordering with stationary arms/world.
+It also compiles the actual native rigid-payload rendering transform.
+`Scripts/test-can-pour-native.sh` reruns the fixture, checks full/timed native
+decoding and rejects sixteen invalid model, authority, pose, time, table-height
+and body-preparation cases. Existing full-scan collision tests are preserved.
+
+The combined build retains the other session's native assistant speech and
+surface texture fixes (cb67fde, c9e7e67 and 733e0dd). Those changes do not supply
+registration. Build verification uses `CEREBRO_INSTALL_AFTER_BUILD=NO` as an
+xcodebuild **setting argument**; an environment variable alone is overridden
+by the project's install setting. Installation/relaunch must remain coordinated.
+
+The final combined Debug build passed and its strict signature was verified.
+All three installed Mach-O hashes match the tested build. Passive relaunches
+kept both arms inactive with identical feedback; no neck target was replayed.
+Native run `A4A7A35F-7804-43BB-BD0E-75E61603F98E` generated the 90-pose report.
+The final renderer visibly showed the entire blue robot at the 25 cm arrival,
+then the torso at 16.6°, while the table/can/glass stayed fixed. The 72.5 cm
+height and disabled live display offsets were visible in the native panel.
+
+UI inspection caught an extra renderer defect: body translation was initially
+applied after ghost-visibility comparison, hiding links whose joints had not
+changed. Translation now participates in each link's frame before comparison;
+whole-body travel was then verified in the installed app. Frozen fixture world
+coordinates are also independent of the live robot/map presentation transform.
+
+The native timed action replayed 222 samples through the final `return` phase
+at 4.736118 s. Execution remained disabled. The final running session was
+`9BB4F940-7C24-47E0-B1ED-B4309F54FD5A`.
+The report SHA-256 is
+`211423fb6012bc2639972abb22c36afd970fed36ba7ad7532ae2fc1be3e04f1d`;
+the installed `Cerebro.debug.dylib` SHA-256 is
+`c690b91840604ade399336764f36f211031d9605af99739144319ffb7242a16c`.
+All installed hashes are recorded in the sanitized evidence JSON.
+The previous run `7D61FA16-4512-41A3-AD94-466C4F9A3933` and report hash
+`2810debf87f74bb01f366d4712b956a9fbb4e497faa5ed0746bbb189390192c3`
+are retained only as superseded history. The earlier browser viewer is retired.

@@ -19,7 +19,7 @@ import UniformTypeIdentifiers
         let actions: [Action]
     }
     private static let trials: [Trial] = [
-        Trial(id: "can-pour", title: "Coke can · timed pour", detail: "Recompute the saved right-arm grasp, half-remaining pour, fixed-time return and supported set-down in Cerebro's ghost planner. The can starts half full, with its opening facing the glass. A hypothetical base approach and left-arm glass-slide proposal are recorded. This reproducible saved-scene test sends no motor commands; the complete physical route is still blocked by calibration and approach clearance.", parameters: .none,
+        Trial(id: "can-pour", title: "Coke can · timed pour", detail: "Rehearse driving toward the fixed table, turning the torso perpendicular to its front edge, then the right-arm grasp, half-remaining pour and supported set-down. Table height comes from paired floor/table depth measurements. The can starts half full with its opening facing the glass. The saved test shows every preparation stage but sends no motor commands; drive clearance and registration remain unverified.", parameters: .none,
               actions: [Action(title: "Run saved pour test + open ghost", command: "pour:run"), Action(title: "Review complete path in ghost…", command: "ghost:pour"), Action(title: "Play timed pour and return…", command: "ghost:pour-timed")]),
         Trial(id: "torso-preparation", title: "Grasp-ready for torso test", detail: "Raise both empty arms into grasp-ready holds before a torso test. Each whole arm moves in coordinated segments, with fresh feedback, current monitoring and tread-proxy review. The operator observes external clearance; left ready geometry and camera registration remain unmeasured. No jaw or torso command is included. A private one-use record binds the existing explicit task instruction to this app and current arm context.", parameters: .current,
               actions: [Action(title: "Export task template…", command: "torso-ready:export"), Action(title: "Prepare both arms from task receipt…", command: "torso-ready:run")]),
@@ -225,7 +225,7 @@ import UniformTypeIdentifiers
             addField("pourInitialFill", "Starting can fill (%)", 50, note: "10–90")
             addField("pourRemainingFraction", "Pour remaining liquid (%)", 50, note: "10–90")
             addField("pourHold", "Fixed tilt hold (seconds)", 0.35, note: "0–2")
-            addField("pourBaseAdvance", "Hypothetical base approach (cm)", 40, note: "0–40; no driving")
+            addField("pourBaseAdvance", "Ghost tread approach (cm)", 25, note: "0–40; then torso faces table")
             addField("pourGraspOffset", "Grasp above can center (mm)", 20, note: "−25–25")
             addHelp("Inputs, model hashes, joint solutions, timing and collision results are saved for every run. Rehearsal is a recorded fixture, not a live-scene execution grant.")
         }

@@ -21,6 +21,34 @@ import simd
         try rejected {$0["executable"]=true}
         try rejected {$0["hardwareOutputEnabled"]=true}
         try rejected {$0["modelID"]="wrong model"}
+        try rejected {$0.removeValue(forKey:"tableAlignment")}
+        try rejected {$0.removeValue(forKey:"bodyPreparation")}
+        try rejected { root in
+            var rows=root["steps"] as! [[String:Any]]
+            rows[0].removeValue(forKey:"worldFromRobot");root["steps"]=rows
+        }
+        try rejected { root in
+            var prep=root["bodyPreparation"] as! [String:Any]
+            prep["torsoTargetYawRadians"]=0;root["bodyPreparation"]=prep
+        }
+        try rejected { root in
+            var rows=root["steps"] as! [[String:Any]]
+            rows.removeAll {($0["phase"] as? String)=="torso"};root["steps"]=rows
+        }
+        try rejected { root in
+            var rows=root["steps"] as! [[String:Any]]
+            let arm=rows.firstIndex {($0["phase"] as? String)=="arm"}!
+            rows[arm]["worldFromRobot"]=[[1.0,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]];root["steps"]=rows
+        }
+        try rejected { root in
+            var geometry=root["sceneGeometry"] as! [String:Any]
+            var matrix=geometry["modelFromScene"] as! [[Double]];matrix[2][3] += 0.24
+            geometry["modelFromScene"]=matrix;root["sceneGeometry"]=geometry
+        }
+        try rejected { root in
+            var alignment=root["tableAlignment"] as! [String:Any]
+            alignment["tableHeightAboveFloorMeters"]=0.96;root["tableAlignment"]=alignment
+        }
         try rejected { root in
             var rows=root["steps"] as! [[String:Any]]
             rows[0]["ik"]=["solved":false];root["steps"]=rows
@@ -42,6 +70,12 @@ import simd
             var poses=root["steps"] as! [[String:Any]],m=poses[0]["desiredCanPose"] as! [[Double]]
             m[0][0]=7;poses[0]["desiredCanPose"]=m;root["steps"]=poses
         }
-        print("Native pour preview: valid full/timed fixtures and eight invalid-input cases passed")
+        precondition(abs(full.sceneTransform.columns.3.z+full.tableZ-full.tableHeightAboveFloor)<1e-6)
+        precondition(full.frames.first!.worldFromRobot.columns.3.x==0)
+        precondition(abs(full.frames.last!.worldFromRobot.columns.3.x-0.25)<1e-8)
+        for frame in full.frames where frame.stage.hasPrefix("Drive") || frame.stage.hasPrefix("Turn torso") {
+            precondition(simd_length(frame.canPose.columns.3-full.frames.first!.canPose.columns.3)<1e-8)
+        }
+        print("Native pour preview: measured height, fixed world, staged drive/torso and sixteen invalid-input cases passed")
     }
 }
