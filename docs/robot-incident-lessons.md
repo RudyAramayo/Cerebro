@@ -77,6 +77,16 @@ their on-disk URDF velocity numbers were 1,000,000, not the assumed modest limit
 Launch constraints, firmware behavior and Cerebro's rate ceiling are distinct.
 Untimestamped Drake/core logs do not prove a kinematic-collision cause.
 
+The [October 31 controller investigation](calibration/arm-transition-review-2026-10-31.md)
+subsequently found detached per-target Ruckig workers and unsynchronized
+commanded-state derivative sampling in the installed binary. Its isolated
+Ruckig 0.9.2 experiment reproduced a large backward excursion when a forward
+target was seeded with a hypothetical missed-sample acceleration. The original
+internal seed was not recorded, so this does not prove the historical cause.
+A persistent planner retained coherent derivatives through 155 moving target
+changes in a bounded offline test. No production controller/model fix was
+deployed; the physical head-strike/model mismatch remains separate.
+
 Operational mitigation: one coordinated target at a time, measured completion
 before another, no independent command interleaving. Compatible joints and both
 arms may belong to the same reviewed target. The local rate ceiling was raised
@@ -255,8 +265,11 @@ Background conversation containing "Hold" or "Stop" interrupted recycling; Rudy
 explicitly identified several as not directed at ROB. Do not treat those past
 clarifications as permission to ignore a future direct Stop. The latest issue is
 external `say`/`sayit` feeding assistant updates back into Gemini/local ASR.
-The speech CLI is **unfinished**, with a source-based implementation plan in the
-handoff. Native `sayIt` mutes Gemini audio but ordinary local negative Stop still
+The speech CLI was unfinished at the original handoff. The continuation now
+implements [`speech.say` / `speech.status`](local-control.md#assistant-status-speech),
+with explicit assistant provenance and suppression of both microphone consumers
+through speech and its acoustic tail. Verify the running operation list before
+use. Native ordinary `sayIt` mutes Gemini audio but local negative Stop still
 listens, so merely wrapping it is insufficient. Do not inject announcements as
 user input, arm authorization or new Gemini requests. Keep microphone history
 and assistant-output provenance separate.

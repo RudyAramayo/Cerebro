@@ -126,6 +126,9 @@ NSString *ROBResolvedSpeechAcknowledgementPhrase(void)
 @property (nonatomic, assign) BOOL localPriorityStopConsumed;
 @property (nonatomic, assign) NSUInteger localPriorityStopRecognitionGeneration;
 @property (atomic, assign) BOOL recognitionContainsSpeechOutput;
+@property (atomic, readwrite) BOOL assistantStatusInputSuppressed;
+@property (nonatomic, assign) NSUInteger assistantStatusGeneration;
+@property (nonatomic, assign) BOOL assistantStatusResumeRecognition;
 
 - (void)beginRecognitionSession;
 - (void)startAudioCapture;
@@ -620,6 +623,10 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
     }
     if (self.pendingSpeechUtterances.count == 0 && self.isSpeaking) {
         self.isSpeaking = false;
+        if (self.assistantStatusInputSuppressed) {
+            [self finishAssistantStatusInputSuppression];
+            return;
+        }
         NSLog(@"Speech queue drained; microphone input resumed");
         [self.delegate didFinishProcessingSpeech];
     }
@@ -673,7 +680,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
         });
         return;
     }
-    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone) {
+    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone || self.assistantStatusInputSuppressed) {
         return;
     }
 
@@ -722,7 +729,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 {
     self.recognizerStartInProgress = NO;
     self.recognizerRestartScheduled = NO;
-    if (self.isShuttingDown) {
+    if (self.isShuttingDown || self.assistantStatusInputSuppressed) {
         return;
     }
 
@@ -804,7 +811,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 
 - (void)processLocalRecognitionTranscript:(NSString *)transcription isFinal:(BOOL)isFinal generation:(NSUInteger)generation
 {
-    if (self.isShuttingDown || generation != self.recognitionGeneration) { return; }
+    if (self.isShuttingDown || self.assistantStatusInputSuppressed || generation != self.recognitionGeneration) { return; }
     if (self.localPriorityStopConsumed && self.localPriorityStopRecognitionGeneration == generation) { return; }
     // Negative interruption bypasses speech output, wake words, finalization,
     // authorization and conversational debounce. Nothing positive uses it.
@@ -824,7 +831,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
         if (!self.isSpeaking) {
             [self.debounceSpeechInputTimer invalidate];
             self.debounceSpeechInputTimer = [NSTimer scheduledTimerWithTimeInterval:0.75 repeats:NO block:^(NSTimer *timer) {
-                if (self.isShuttingDown || self.isSpeaking || self.recognitionContainsSpeechOutput || generation != self.recognitionGeneration) { return; }
+                if (self.isShuttingDown || self.assistantStatusInputSuppressed || self.isSpeaking || self.recognitionContainsSpeechOutput || generation != self.recognitionGeneration) { return; }
                 if (!self.isSpeaking && generation == self.recognitionGeneration &&
                     [self.delegate respondsToSelector:@selector(shouldFinalizeLocalMicrophoneAuthorization:)] &&
                     [self.delegate shouldFinalizeLocalMicrophoneAuthorization:transcription]) {
@@ -841,7 +848,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 
 - (void)processCapturedMicrophoneBuffer:(AVAudioPCMBuffer *)buffer
 {
-    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone) { return; }
+    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone || self.assistantStatusInputSuppressed) { return; }
     // Keep on-device interruption listening during TTS. Cloud conversation
     // remains muted so ROB's speaker output is not streamed back as a turn.
     if (self.isSpeaking) { self.recognitionContainsSpeechOutput = YES; }
@@ -905,7 +912,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 
 - (void)scheduleRecognizerRestart
 {
-    if (self.isShuttingDown || self.recognizerRestartScheduled) {
+    if (self.isShuttingDown || self.assistantStatusInputSuppressed || self.recognizerRestartScheduled) {
         return;
     }
     self.recognizerRestartScheduled = YES;
@@ -989,7 +996,7 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 
 - (void)captureOutput:(AVCaptureOutput *)captureOutput didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection
 {
-    if (!self.isSpeaking)
+    if (!self.isSpeaking && !self.assistantStatusInputSuppressed)
         [self.speechRequest appendAudioSampleBuffer:sampleBuffer];
 }
 
@@ -1104,6 +1111,53 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 
         [self enqueueSpeechUtterance:utterance];
         NSLog(@"Have started to say: %@", stringToSpeak);
+    });
+}
+
+- (BOOL)sayAssistantStatus:(NSString *)text completion:(void (^)(BOOL finished))completion
+{
+    if (!NSThread.isMainThread || self.isShuttingDown || self.hologramRecordingOwnsMicrophone ||
+        text.length == 0 || text.length > 2000 || self.pendingSpeechUtterances.count >= 8) { return NO; }
+    // Do not interrupt an existing conversation or an authorization prompt.
+    if (!self.assistantStatusInputSuppressed && (self.isSpeaking || self.pendingSpeechUtterances.count != 0)) { return NO; }
+    if (!self.assistantStatusInputSuppressed) {
+        self.assistantStatusResumeRecognition = self.microphoneTapInstalled;
+    }
+    self.assistantStatusInputSuppressed = YES;
+    self.assistantStatusGeneration += 1;
+    [self.debounceSpeechInputTimer invalidate];
+    self.debounceSpeechInputTimer = nil;
+    self.currentTextInput = @"";
+    self.recognitionContainsSpeechOutput = YES;
+    // Invalidate callbacks already queued before the announcement, including
+    // the priority-Stop recognizer. UI/controller/hardware Stop stays live.
+    [self teardownSpeechRecognition];
+    self.recognizerStartInProgress = NO;
+    AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
+    utterance.voice = [self voiceForText:text];
+    if (completion) [self.utteranceCompletions setObject:[completion copy] forKey:utterance];
+    [self enqueueSpeechUtterance:utterance];
+    return YES;
+}
+
+- (void)finishAssistantStatusInputSuppression
+{
+    NSUInteger generation = self.assistantStatusGeneration;
+    // Retain suppression through the acoustic tail and cancelled utterances.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (self.isShuttingDown || !self.assistantStatusInputSuppressed ||
+            generation != self.assistantStatusGeneration || self.pendingSpeechUtterances.count != 0) { return; }
+        BOOL resume = self.assistantStatusResumeRecognition;
+        self.assistantStatusResumeRecognition = NO;
+        [self teardownSpeechRecognition];
+        self.recognitionContainsSpeechOutput = NO;
+        self.currentTextInput = @"";
+        self.assistantStatusInputSuppressed = NO;
+        // Avoid didFinishProcessingSpeech: that delegate opens a Gemini wake
+        // window. An assistant status must preserve the existing wake state.
+        if (resume && self.microphoneTapInstalled && !self.hologramRecordingOwnsMicrophone) {
+            [self startRecognizer];
+        }
     });
 }
 
@@ -1275,6 +1329,9 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
         return;
     }
     self.isShuttingDown = YES;
+    self.assistantStatusGeneration += 1;
+    self.assistantStatusInputSuppressed = NO;
+    self.assistantStatusResumeRecognition = NO;
     self.recognizerRestartScheduled = NO;
     [self.debounceSpeechInputTimer invalidate];
     self.debounceSpeechInputTimer = nil;

@@ -44,6 +44,8 @@ FOUNDATION_EXPORT BOOL ROBLocalSpeechContainsPriorityStop(NSString * _Nullable t
 }
 @property (nonatomic, weak) id<ROBSpeechDelegate> delegate;
 @property (atomic, assign) BOOL isSpeaking;
+/// Assistant announcements temporarily suppress both microphone consumers.
+@property (atomic, readonly) BOOL assistantStatusInputSuppressed;
 
 @property (readwrite, retain) NSString *emotion;
 @property (readwrite, retain) NSMutableArray *commands;
@@ -60,6 +62,8 @@ FOUNDATION_EXPORT BOOL ROBLocalSpeechContainsPriorityStop(NSString * _Nullable t
 - (void)sayArmAuthorizationPrompt:(NSString *)question;
 - (void) sayItIfNotQueued:(NSString *)stringToSpeak;
 - (void)sayIt:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;
+/// Main-thread, local speech only. Never routes text to Gemini or authorization.
+- (BOOL)sayAssistantStatus:(NSString *)text completion:(void (^ _Nullable)(BOOL finished))completion;
 - (void)sayPersonalityText:(NSString *)text provider:(NSString *)provider completion:(void (^ _Nullable)(BOOL finished))completion;
 /// Stage delivery keeps normal ROB speech responsive while adding a small
 /// punctuation-aware pause between sentences and before the next show cue.

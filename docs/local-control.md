@@ -22,6 +22,42 @@ Scripts/cerebroctl.py animation.list
 Scripts/cerebroctl.py mission.status
 ```
 
+### Assistant status speech
+
+Use Cerebro's native voice for assistant progress; do not use external `say` or
+route progress through microphone input or Gemini text generation:
+
+```sh
+Scripts/cerebroctl.py speech.say --params '{"text":"The offline checks passed.","source":"codex"}'
+Scripts/cerebroctl.py speech.status --params '{"utterance_id":"UUID returned by speech.say"}'
+```
+
+`speech.say` requires the current same-user app session and a new request ID.
+It returns immediately with a `queued` utterance ID; inspect `speech.status`
+for `finished` or `cancelled` and `microphone_suppressed`. Never replay a lost
+response. Text is limited to 2000 UTF-16 code units and eight queued utterances;
+an existing ordinary speech queue, recording ownership or shutdown rejects
+the request. Only the latest 64 utterance receipts are retained in memory.
+
+The native speech box suppresses both Gemini audio and the local recognizer
+before enqueueing, invalidates pending transcripts/debounce callbacks, and
+keeps suppression through the complete queue plus a 500 ms acoustic tail.
+Cancellation retains that tail; sleep cancels status speech. Normal speech
+retains its existing local Stop behavior. UI, controller and hardware Stop are
+unchanged. Finishing assistant speech restores only previously active local
+recognition and does not open a Gemini wake window or change saved microphone
+preferences. The transcript labels the text `Codex assistant status`; it is
+never user input, an arm grant or an AI request. `finished` is a synthesizer
+callback, not independent proof that a person heard the speaker.
+
+The operation list in `status` indicates whether the running build supports
+this route. A new source build must not be installed/restarted while another
+session owns the robot; coordinate explicit handoff first.
+For a verification-only Xcode build, pass `CEREBRO_INSTALL_AFTER_BUILD=NO`;
+the scheme's default aggregate target installs the signed app into Applications.
+That install preserves the existing process, but the updated code runs on the
+next launch. Installation and relaunch are separate coordination steps.
+
 `status` returns measured arm positions, currents, feedback ages, mode/status
 values, torso state, current motion/mission status, visible windows and camera
 throughput. `service_ms` measures handling after the main queue receives the

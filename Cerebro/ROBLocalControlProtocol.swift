@@ -9,8 +9,8 @@ struct ROBLocalControlRequest {
     let parameters: [String: Any]
     let session: String?
     let sentAt: Double
-    static let readOperations: Set<String> = ["status", "camera.frame", "camera.depth", "animation.list", "mission.status", "mission.plan"]
-    static let operations = readOperations.union(["camera.demand", "runtime.profile", "motion.move", "arm.mode", "gripper.command", "animation.play", "neck.pose", "torso.configure", "torso.reference", "torso.turn", "mission.start", "mission.confirm_empty", "stop"])
+    static let readOperations: Set<String> = ["status", "speech.status", "camera.frame", "camera.depth", "animation.list", "mission.status", "mission.plan"]
+    static let operations = readOperations.union(["speech.say", "camera.demand", "runtime.profile", "motion.move", "arm.mode", "gripper.command", "animation.play", "neck.pose", "torso.configure", "torso.reference", "torso.turn", "mission.start", "mission.confirm_empty", "stop"])
     var mutates: Bool { !Self.readOperations.contains(operation) }
 
     init(data: Data, now: Double = Date().timeIntervalSince1970 * 1000) throws {
@@ -29,6 +29,17 @@ struct ROBLocalControlRequest {
     }
     func only(_ keys: Set<String>) throws {
         guard Set(parameters.keys).isSubset(of: keys) else { throw ROBLocalControlError("Unknown parameter") }
+    }
+    func assistantSpeechText() throws -> String {
+        try only(["text", "source"])
+        guard parameters["source"] as? String == "codex",
+              let raw = parameters["text"] as? String,
+              raw.utf16.count <= 2000 else {
+            throw ROBLocalControlError("Speech requires source codex and at most 2000 characters")
+        }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw ROBLocalControlError("Speech text is empty") }
+        return text
     }
     func number(_ key: String, default fallback: Double? = nil, range: ClosedRange<Double>) throws -> Double {
         let candidate = parameters[key] as? NSNumber

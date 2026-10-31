@@ -1,0 +1,53 @@
+{
+  "assistant_speech_runtime_checks": 17,
+  "controlled_passive_relaunch": {
+    "amber_core_pids_unchanged": [
+      990,
+      991
+    ],
+    "arm_modes": {
+      "left": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "right": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "arm_positions_changed_in_final_comparison": false,
+    "mission_active": false,
+    "motion_running": false,
+    "neck_software_pose_after_relaunch": "unknown; previous targets not reissued",
+    "new_pid": 10187,
+    "passive_hardware_startup": true,
+    "previous_pid": 4121
+  },
+  "installed_app_sha256": {
+    "Cerebro": "b6f98c32b708a0dd1168a582ce6632d8ba0ef6f83d26432e0df0a5d0b90a427a",
+    "Cerebro.debug.dylib": "91c411c45335ce9c3013c84c0254f4b4dcdc96556d658e029988a4afb3efd5ff"
+  },
+  "local_control_protocol_socket_encoder_tests": "passed",
+  "native_build": "xcodebuild Debug succeeded with CEREBRO_INSTALL_AFTER_BUILD=NO",
+  "native_speech_smoke": {
+    "final_microphone_suppressed": false,
+    "initial_status": "queued",
+    "motor_output": false,
+    "new_microphone_user_turn_observed_in_ui_check": false,
+    "speaker_audibility_independently_verified": false,
+    "suppression_observed": true,
+    "terminal_status": "finished",
+    "transcript_label_verified": "Codex assistant status"
+  },
+  "normal_priority_stop_runtime_checks": 43
+}
