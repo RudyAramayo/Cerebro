@@ -212,11 +212,13 @@ with audio were already delivered to God at about 13:47 PDT: a three-stage
 grasp/lift/retract montage (planning gaps omitted) and the bucket release.
 Their actual capture cadence is about 18-19 fps, not the 24 fps request rate.
 
-The final 11-page PDF was rendered and visually reviewed. Its Messages delivery
-is **pending**: the UI became unavailable (`cgWindowNotFound`) before attachment
-sending. The PDF hash and exact delivery state are retained in
-[the delivery record](evidence/2026-10-31-test11/report-delivery.json). Do not claim
-the earlier videos establish PDF delivery.
+The final 11-page PDF was rendered and visually reviewed. On Rudy's retry request,
+the direct God conversation became accessible again. The handoff summary and
+571 KB PDF were sent; **Delivered** was verified for both, with the attachment
+timestamped 14:14 PDT. The earlier `cgWindowNotFound` blocker is resolved.
+The unchanged PDF hash and delivery evidence are retained in
+[the delivery record](evidence/2026-10-31-test11/report-delivery.json). No resend
+or robot motion is needed for this handoff.
 
 The latest supplied global agreement selects the verified **one-to-one God**
 Messages thread, superseding older God Squad routing. Check only new replies at
