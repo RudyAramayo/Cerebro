@@ -227,6 +227,8 @@ import UniformTypeIdentifiers
             addField("pourHold", "Fixed tilt hold (seconds)", 0.35, note: "0–2")
             addField("pourBaseAdvance", "Ghost tread approach (cm)", 25, note: "0–40; then torso faces table")
             addField("pourGraspOffset", "Grasp above can center (mm)", 20, note: "−25–25")
+            addField("pourPivotAbove", "Pivot above opening (mm)", 0, note: "0–100; opening must stay inside glass")
+            addField("pourTiltDegrees", "Can tilt (degrees)", 0, note: "0 = fill estimate; otherwise 1–170")
             addHelp("Inputs, model hashes, joint solutions, timing and collision results are saved for every run. Rehearsal is a recorded fixture, not a live-scene execution grant.")
         }
         if trial.id == "neck-qr-calibration" {
@@ -923,9 +925,15 @@ import UniformTypeIdentifiers
             let hold=try value("pourHold",within:0...2)
             let advance=try value("pourBaseAdvance",within:0...40)/100
             let offset=try value("pourGraspOffset",within:-25...25)/1000
+            let pivotAbove=try value("pourPivotAbove",within:0...100)/1000
+            let tilt=try value("pourTiltDegrees",within:0...170)
+            guard tilt==0 || tilt>=1 else {throw ROBGhostMotionError.blocked("Use 0 for the fill estimate or a tilt of 1–170 degrees.")}
             let source=resources.appendingPathComponent("fixtures/coke-pour-scene.json")
             guard var scene=try JSONSerialization.jsonObject(with:Data(contentsOf:source)) as? [String:Any],var can=scene["can"] as? [String:Any] else {throw ROBGhostMotionError.blocked("Saved pour scene is invalid.")}
             can["initial_fraction"]=fill;can["fraction_of_remaining_to_pour"]=amount;scene["can"]=can;scene["graspHeightOffset"]=offset
+            var rotation:[String:Any] = ["pivotAboveOpeningMeters":pivotAbove]
+            if tilt>0 {rotation["tiltDegrees"]=tilt}
+            scene["rotation"]=rotation
             let directory=ROBCanPourRehearsal.directory.appendingPathComponent(UUID().uuidString,isDirectory:true)
             try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
             let sceneURL=directory.appendingPathComponent("scene.json"),statusURL=directory.appendingPathComponent("baseline.json"),reportURL=directory.appendingPathComponent("report.json")
@@ -948,12 +956,12 @@ import UniformTypeIdentifiers
                     guard let self,self.pourTestProcess === process else {return}
                     self.pourTestProcess=nil
                     do {
-                        guard process.terminationStatus==0 else {throw ROBGhostMotionError.blocked("Planner failed or was stopped; inspect \(logURL.path)")}
                         let data=try Data(contentsOf:reportURL)
                         // Preserve the latest attempt, including a failed IK
                         // result, so an older passing replay cannot masquerade
                         // as the result of newly selected parameters.
                         try data.write(to:ROBCanPourRehearsal.latestReport,options:.atomic)
+                        guard process.terminationStatus==0 else {throw ROBGhostMotionError.blocked("Planner rejected this pivot or path; inspect \(reportURL.path)")}
                         let model=try ROBGhostRobotModel(directory:resources,physicalSide:"right")
                         let rehearsal=try ROBCanPourRehearsal(data:data,model:model,timed:false)
                         self.parameterMessage="Saved pour test finished.\n"+rehearsal.summary+"\nResults: "+directory.path

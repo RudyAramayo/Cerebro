@@ -7,6 +7,7 @@ struct ROBCanPourRehearsal {
     struct Frame {
         let time: Double, stage: String, positions: [String: Double]
         let canPose: simd_double4x4, worldFromRobot: simd_double4x4
+        let attached: Bool
         let detail: String
     }
     static var directory: URL {
@@ -15,6 +16,9 @@ struct ROBCanPourRehearsal {
     static var latestReport: URL { directory.appendingPathComponent("latest-report.json") }
     let baseline: [String: Double], frames: [Frame], timed: Bool
     let sceneTransform: simd_double4x4
+    let canInTool: simd_double4x4
+    let pivotAnchor: SIMD3<Double>, pivotAxis: SIMD3<Double>, pivotPointInObject: SIMD3<Double>
+    let rotationAuditPassed: Bool
     let cupCenter: SIMD3<Double>, cupRadius: Double, cupHeight: Double
     let canRadius: Double, canHeight: Double, canSpoutRadius: Double, tableBounds: [[Double]], tableZ: Double
     let tableOutline: [SIMD2<Double>]
@@ -26,11 +30,11 @@ struct ROBCanPourRehearsal {
         func fail(_ message: String) -> ROBGhostMotionError { .blocked("Pour rehearsal: " + message) }
         guard data.count <= 16_000_000,
               let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              root["schemaVersion"] as? Int == 1, root["hardwareOutputEnabled"] as? Bool == false,
+              root["schemaVersion"] as? Int == 2, root["hardwareOutputEnabled"] as? Bool == false,
               root["executable"] as? Bool == false,
               root["modelID"] as? String == model.modelID,
               root["modelReferenceID"] as? String == model.referenceID else {
-            throw fail("missing non-executable marker or mismatched robot model.")
+            throw fail("rerun the saved test: pivot-aware schema, non-executable marker and matching robot model are required.")
         }
         func positions(_ value: Any?) throws -> [String: Double] {
             guard let values = value as? [String: Double], values.values.allSatisfy(\.isFinite) else { throw fail("invalid joint pose.") }
@@ -59,12 +63,36 @@ struct ROBCanPourRehearsal {
             guard let n=value as? Double,n.isFinite,range.contains(n) else {throw fail("invalid geometry dimension.")};return n
         }
         let savedBaseline=try positions(root["baseline"])
+        guard model.frames(savedBaseline)["right_tool"] != nil else {throw fail("model lacks the carrying tool frame.")}
         baseline=savedBaseline
         guard let geometry=root["sceneGeometry"] as? [String:Any],let can=geometry["can"] as? [String:Any],
               let cup=geometry["cup"] as? [String:Any],let center=cup["rim_center"] as? [Double],center.count==3,center.allSatisfy(\.isFinite),
               let bounds=geometry["tableBoundsXY"] as? [[Double]],bounds.count==2,bounds.allSatisfy({$0.count==2 && $0.allSatisfy(\.isFinite)}),
               bounds[1][0]>bounds[0][0],bounds[1][1]>bounds[0][1] else {throw fail("missing can, cup or table geometry.")}
         sceneTransform=try matrix(geometry["modelFromScene"])
+        canInTool=try matrix(root["canInTool"])
+        func point(_ value:Any?) throws -> SIMD3<Double> {
+            guard let p=value as? [Double],p.count==3,p.allSatisfy({$0.isFinite && abs($0)<5}) else {throw fail("invalid pivot point or axis.")}
+            return SIMD3(p[0],p[1],p[2])
+        }
+        guard let pivot=root["rotationPivot"] as? [String:Any],
+              let audit=pivot["interpolationAudit"] as? [String:Any],audit["valid"] is Bool,
+              pivot["physicalCalibrationVerified"] as? Bool == false,
+              pivot["exactJointReturn"] as? Bool == true else {throw fail("missing fixed-pivot path audit.")}
+        let localPoint=try point(pivot["pointInObject"]),localAxis=try point(pivot["axisInObject"])
+        let anchor=try point(pivot["anchorInScene"]),axis=try point(pivot["axisInScene"])
+        let initial=try matrix(pivot["initialCanPoseInScene"])
+        guard abs(simd_length(localAxis)-1)<1e-6,abs(simd_length(axis)-1)<1e-6,
+              simd_length(initial*SIMD4(localPoint,1)-SIMD4(anchor,1))<1e-6,
+              simd_length(initial*SIMD4(localAxis,0)-SIMD4(axis,0))<1e-6 else {throw fail("inconsistent fixed pivot or axis.")}
+        _ = try number(pivot["tiltDegrees"],1...170)
+        pivotPointInObject=localPoint
+        let worldAnchor=sceneTransform*SIMD4(anchor,1),worldAxis=sceneTransform*SIMD4(axis,0)
+        pivotAnchor=SIMD3(worldAnchor.x,worldAnchor.y,worldAnchor.z)
+        pivotAxis=SIMD3(worldAxis.x,worldAxis.y,worldAxis.z)
+        let selectedAudit=timed ? (root["preparedTimedPour"] as? [String:Any])?["rotationAudit"] as? [String:Any] : audit
+        guard let selectedPassed=selectedAudit?["valid"] as? Bool else {throw fail("missing interpolated path review.")}
+        rotationAuditPassed=selectedPassed
         let tableUp=SIMD3(sceneTransform.columns.2.x,sceneTransform.columns.2.y,sceneTransform.columns.2.z)
         guard simd_length(tableUp-SIMD3<Double>(0,0,1))<1e-6,
               let outline=geometry["tableOutlineXY"] as? [[Double]],(3...64).contains(outline.count),
@@ -144,14 +172,24 @@ struct ROBCanPourRehearsal {
                 guard pose.allSatisfy({ name,value in name=="torso_yaw" || abs(value-savedBaseline[name,default:value])<1e-6 }) else {throw fail("arm moves during base preparation.")}
             }
             lastPhase=phaseIndex;previousAdvance=base.columns.3.x
-            built.append(Frame(time:time,stage:stage,positions:pose,canPose:try matrix(row["desiredCanPose"]),worldFromRobot:base,detail:checks))
+            guard let attached=row["attached"] as? Bool else {throw fail("missing payload attachment state.")}
+            built.append(Frame(time:time,stage:stage,positions:pose,canPose:try matrix(row["desiredCanPose"]),worldFromRobot:base,attached:attached,detail:checks))
         }
         guard (built.last?.time ?? 0)>0 else {throw fail("empty duration.")}
         frames=built;self.timed=timed
         let quick=root["preparedTimedPour"] as? [String:Any]
-        summary=String(format:"Saved test · drive %.0f cm, then torso %.1f° perpendicular\nActive tilt %.2f s + hold %.2f s; return begins %.2f s.\nDrive corridor, registration and full task remain unverified.",
+        summary=String(format:"Saved test · drive %.0f cm, then torso %.1f° perpendicular\nActive tilt %.2f s + hold %.2f s; return begins %.2f s.\nPivot path: %@. Registration and full task remain unverified.",
             advance*100,torsoYaw*180 / .pi,quick?["tiltSeconds"] as? Double ?? 0,
-            quick?["fixedHoldSeconds"] as? Double ?? 0,quick?["uprightRecallAtSeconds"] as? Double ?? 0)
+            quick?["fixedHoldSeconds"] as? Double ?? 0,quick?["uprightRecallAtSeconds"] as? Double ?? 0,
+            selectedPassed ? "model check passed":"BLOCKED; inspect audit")
+    }
+
+    /// Render the payload from the same interpolated joints as the robot.
+    /// Independent Cartesian interpolation conceals the spout's actual arc.
+    func payloadPose(positions:[String:Double],worldFromRobot:simd_double4x4,
+                     detachedPose:simd_double4x4,attached:Bool,model:ROBGhostRobotModel) -> simd_double4x4 {
+        if !attached {return detachedPose}
+        return worldFromRobot * model.frames(positions)["right_tool"]! * canInTool
     }
 }
 

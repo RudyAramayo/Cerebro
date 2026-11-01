@@ -1,19 +1,19 @@
 {
-  "recorded_at_utc": "2026-11-01T05:49:55.510043+00:00",
+  "recorded_at_utc": "2026-11-01T07:49:36.102698+00:00",
   "current_state": {
     "session": "9BB4F940-7C24-47E0-B1ED-B4309F54FD5A",
     "arms": {
       "left": {
         "q_radians": [
-          -0.4983733137530683,
-          1.9468602390605498,
+          -0.4940099906230825,
+          1.942905977474,
           0,
-          1.1951414760726795,
-          0,
-          0,
+          1.1877783682908285,
+          0.000136353847812057,
+          0.000954476934684399,
           0
         ],
-        "age_ms": 13.518188349756898,
+        "age_ms": 28742.888008664035,
         "modes": [
           2,
           2,
@@ -35,15 +35,15 @@
       },
       "right": {
         "q_radians": [
-          -0.3539745889201,
-          -0.9022534109723811,
-          1.241365430480967,
-          -0.9408415499031932,
-          0.5428246681397989,
-          0.4970097752749478,
-          0.8568475796509661
+          0.0868574010562803,
+          -0.7765351632896645,
+          1.5114824029966518,
+          -1.2655000615437009,
+          0.4196971435655114,
+          -0.37115517374441914,
+          0.9777934426602607
         ],
-        "age_ms": 13.004102664958001,
+        "age_ms": 21287.66182767384,
         "modes": [
           2,
           2,
@@ -65,33 +65,41 @@
       }
     },
     "neck": {
-      "detail": "Gesture authority released; holding the last commanded targets.",
       "known": true,
-      "lower": 6011,
       "pan": 5700,
-      "upper": 6200
+      "lower": 6011,
+      "upper": 6600
     },
     "torso": {
       "count": -2108,
-      "detail": "Last command failed: TIC feedback expired during control (547 ms old); stopped",
+      "detail": "Last command failed: TIC feedback expired during control (547 ms old); stopped\nWaiting for fresh left-arm feedback before torso rotation.",
       "front_count": 92,
-      "hardware_selected": true,
       "has_software_reference": false,
-      "heading_degrees": 22.002444716079566,
-      "pulse_ceiling": 2000
+      "heading_degrees": 22.002444716079566
     },
     "motion": {
-      "detail": "Sequence complete; robot holding. Servo/LACT tracks are command estimates.",
-      "id": "FB22E454-9EEF-4BB1-A43F-F3F99DF9E0DA",
+      "id": "04D15832-87E9-4987-ACF6-E32D2D6CDC9C",
       "running": false
     },
+    "feedback_stale": true,
+    "cached_mode_does_not_confirm_powered_hold": true,
+    "operator_ended_testing": true,
+    "requires_explicit_resume": true,
     "mission_active": false
   },
   "outcome": {
-    "grasped": false,
-    "poured": false,
-    "glass_pushed": false,
-    "payload": "both arms empty, jaws open in inspected frames"
+    "grasped": true,
+    "poured": true,
+    "accurate_autonomous_pour": false,
+    "glass_pushed_by_left": false,
+    "glass_displaced_during_pour_operator_report": true,
+    "operator_assisted_catch_and_glass_reposition": true,
+    "spill_on_table_operator_report": true,
+    "asymmetric_wiggle_operator_report": true,
+    "payload": "can visibly standing after release; right hand retracted 80 mm",
+    "volume_metered": false,
+    "remaining_can_emptiness_verified": false,
+    "current_request": "offline pivot planner improvements; arms shut down for sleep; no questions until morning"
   },
   "motions": [
     {
@@ -212,6 +220,333 @@
         0.8571202873465903
       ],
       "image_sha256": "b32cd3bf9a5ac6770920fa438b3c9f1db0bdd83a9b66c25da85e9def81a57308"
+    },
+    {
+      "stage": "observed-clearance-lift",
+      "operation_id": "0788CE63-6B7E-42D9-AC70-C294880A4B18",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.5819228515625,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        -0.4229696359130008,
+        -1.1520536601640696,
+        1.3478577856221834,
+        -1.0128363815479593,
+        0.6133196074586323,
+        0.5137812985558308,
+        1.026199058633541
+      ],
+      "image_sha256": "3f8806d9bff15c6ef3187f2d8ed0fe19eddf758991f9d910e399d5e0f09aad7c"
+    },
+    {
+      "stage": "observed-pregrasp-02",
+      "operation_id": "38F89C4E-3326-49CF-8365-E622FB4BAAE9",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.74204296875,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        -0.272707695624114,
+        -1.0338348741110162,
+        1.4701671871095985,
+        -1.213003830136059,
+        0.610047115111143,
+        0.1090830782496456,
+        0.9693395040959132
+      ],
+      "image_sha256": "0211871af34a6e78e50b7a949d42f9870f0ea6cd16b39d5ff464c387ac474f3e"
+    },
+    {
+      "stage": "observed-pregrasp-03",
+      "operation_id": "10BC9201-E04A-439E-B0F0-3D8501F9A4D3",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.835964111328125,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.0029997846518652537,
+        -0.8676195336281186,
+        1.5278448647340985,
+        -1.2968614465404742,
+        0.48487428281967465,
+        -0.2930244189481105,
+        1.002473489114243
+      ],
+      "image_sha256": "9a843cf567ba84672fc77d4738a43d7d481da1ff47d37e2e61f76a875fcac14d"
+    },
+    {
+      "stage": "observed-can-approach-02",
+      "operation_id": "AF15EF09-B104-4BC8-9522-9C106C884A8A",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.491596923828125,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.18789560228501453,
+        -0.787170763419005,
+        1.4780757102826978,
+        -1.1517809524684455,
+        0.4342870052814015,
+        -0.34143003492139073,
+        0.9842020735074274
+      ],
+      "image_sha256": "f9538460f0c866a8740c9908e5556b53a598ab0562d36cad6e817250875df569"
+    },
+    {
+      "stage": "fresh-forward-6cm",
+      "operation_id": "CDFC2A54-3E96-449B-A033-C75CC163870A",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.525717041015625,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.4645575594956782,
+        -0.7638542554431433,
+        1.4058081709423076,
+        -0.8543932103903491,
+        0.464148497952242,
+        -0.31634092692397225,
+        0.9647034732703033
+      ],
+      "image_sha256": "093056d5130758914fe75eb86e19e3f05cb5e1045bfe21b00f1497cb91c3ae8d",
+      "clearance_caveat": "Standard 15 mm nonpad foreground margin failed; explicit operator-requested bounded 60 mm visual trial retained positive estimated separation and native full self review. Not a routine clearance pass."
+    },
+    {
+      "stage": "calibration-retreat",
+      "operation_id": "A044CD43-7453-4C4B-97BA-DAC4B7A2BA94",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.624427001953125,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.19294069465406066,
+        -0.7855345172452604,
+        1.4779393564348857,
+        -1.1465995062515872,
+        0.4340142975857774,
+        -0.34470252726888007,
+        0.9795660426818175
+      ],
+      "image_sha256": "40dd3500c82e82bb4a312a70c8bf83592e405e687669a7ba3f1e641dbb8fa2ee"
+    },
+    {
+      "stage": "calibration-return",
+      "operation_id": "715067B4-F445-45DB-9AFE-DDC140507FDF",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 5.5995751953125,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.4653756825825505,
+        -0.763172486204083,
+        1.4040355709207508,
+        -0.8531660257600406,
+        0.46346672871318173,
+        -0.3164772807717843,
+        0.9670214886831082
+      ],
+      "image_sha256": "6d467bf07ba76909b05b37b14aab351485cad09543a9e3cfcf8e164f2c35ea05"
+    },
+    {
+      "stage": "retention-lift",
+      "operation_id": "EDE0A2B2-D153-4924-B4CC-859EA495F1E6",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 5.720602294921875,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.4791474212115683,
+        -0.8556203950206577,
+        1.3913546630742295,
+        -0.8594383027593953,
+        0.5478697605088451,
+        -0.31784081924990487,
+        0.9722029348999663
+      ],
+      "image_sha256": "a82f50ceee8115fdac1d338025731c59d86dfa96beb6ad2fb5d304aad777e8a5"
+    },
+    {
+      "stage": "held-can-clearance-lift",
+      "operation_id": "65ED09C9-5D60-46A2-A3E6-9118C0D8E13A",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 6.620275146484375,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.7858072249408845,
+        -1.117010721276371,
+        1.8609573149389538,
+        -0.42515129747799374,
+        1.3834461399011302,
+        -0.8231681792413881,
+        0.10144726277217041
+      ],
+      "image_sha256": "635dbdbaa25bf7abad102b500f7b2a0677e62a261f936af156cfa354379164da"
+    },
+    {
+      "stage": "observed-held-transfer",
+      "operation_id": "48957B8A-4586-4095-9EB1-9938FD9F30F8",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 6.754231201171875,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.9495681961631649,
+        -1.1881874298342647,
+        1.7994617295757163,
+        -1.0942396286917573,
+        0.935387395990711,
+        -1.2157309070923001,
+        0.9582948424231366
+      ],
+      "image_sha256": "f077c107b44482e9054d7aa5ffddbda089713f3f0bf8e8440c1adacdd4ff6670"
+    },
+    {
+      "stage": "observed-spout-alignment",
+      "operation_id": "16559EF9-1110-4AD5-B3C1-C1B875909A9C",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 6.304246826171875,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.7405377474672815,
+        -1.162552906445598,
+        1.9614501007764398,
+        -1.0930124440614488,
+        1.0330167510241437,
+        -1.1539626140334382,
+        0.7855345172452604
+      ],
+      "image_sha256": "8f3ac9c0237459e8cb8afb27c43d06eca2204fbf0860e8df3c2c404b0fe6a8f0"
+    },
+    {
+      "stage": "spout-back2",
+      "operation_id": "ED6B9FFD-A772-437F-9C3E-1A4F055932F4",
+      "requested_seconds": 2.0,
+      "monitored_elapsed_seconds": 3.51101123046875,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.8163504868507853,
+        -1.140872644643481,
+        1.8936822384138476,
+        -0.9971556890495729,
+        1.0031552583533032,
+        -1.1119656289073248,
+        0.7551276091831717
+      ],
+      "image_sha256": "6133c326cd2eb2cbc2ea6b33297737ab7cad935116974cb9346b74b0e2da74bc"
+    },
+    {
+      "stage": "complete-pour",
+      "operation_id": "0825E784-8A86-41F3-AC42-DCAA191E6100",
+      "requested_seconds": null,
+      "monitored_elapsed_seconds": 21.991563232421875,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.815805071459537,
+        -1.1395091061653604,
+        1.8957275461310283,
+        -0.9970193352017608,
+        1.0034279660489274,
+        -1.1066478288426547,
+        0.7552639630309838
+      ],
+      "image_sha256": "bf2f777baf9b44784378a7a5f3877217e85565016ca76b54a17b85433420da3b",
+      "physical_outcome": "failed; no liquid delivered per operator",
+      "reported_spout_miss_m": 0.0762,
+      "registration_verified": false
+    },
+    {
+      "stage": "upright-wrist-reconfiguration-01",
+      "operation_id": "C8DD6C04-27E6-43DE-B2E4-395B7513EB0E",
+      "requested_seconds": 2.0,
+      "monitored_elapsed_seconds": 3.965658935546875,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.7650814400734518,
+        -1.2789990924770946,
+        1.7866444678813829,
+        -0.9968829813539487,
+        1.0977848287348708,
+        -0.983247596572743,
+        0.8351673178488491
+      ],
+      "image_sha256": "f223e1e514b2b8048c9c27b0b558fd350791791a5102f807032c04e964c1e476"
+    },
+    {
+      "stage": "upright-extension-02",
+      "operation_id": "992F8C89-7EE7-4A46-AC99-1A6B86C78BB4",
+      "monitored_elapsed_seconds": 6.064049072265625,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.5999569303730508,
+        -1.3102241236260557,
+        1.7396023903862232,
+        -0.8342128409141647,
+        1.578841203815808,
+        -0.6392268385429232,
+        0.34702054268168503
+      ],
+      "events_sha256": "affa3facc156849b3f8e770a004b5a945322f56491d7cf62e5ca0d547ac072f3",
+      "requested_seconds": 3.0
+    },
+    {
+      "stage": "new-pour",
+      "operation_id": "56C06670-B6C5-4E38-86C4-D68C94BC9E83",
+      "monitored_elapsed_seconds": 50.186166015625,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.6007750534599231,
+        -1.3089969389957472,
+        1.7385115596037266,
+        -0.8347582563054129,
+        1.5797956807504923,
+        -0.6359543461954338,
+        0.34961126579011415
+      ],
+      "events_sha256": "e565607c2cc73139ff4d6b74979d32ddb7a50984049992f661ccdec54d2009c3",
+      "requested_seconds": 26.602195195199187
+    },
+    {
+      "stage": "return-can-above-table",
+      "operation_id": "9953C816-359F-439A-A803-4FA7DFF7873B",
+      "monitored_elapsed_seconds": 8.482046875,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.4788747135159442,
+        -0.8557567488684698,
+        1.3912183092264174,
+        -0.8571202873465903,
+        0.5473243451175968,
+        -0.3167499884674084,
+        0.9743845964649593
+      ],
+      "events_sha256": "251033e81d69be64d9800027495b50cd5bbda121da763d406d5963a3827dcd91",
+      "requested_seconds": 4.878857786751225
+    },
+    {
+      "stage": "return-can-support",
+      "operation_id": "8FD87FBF-F06B-4AEE-AC69-350C75CF3E2F",
+      "monitored_elapsed_seconds": 4.08477978515625,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.4655120364303626,
+        -0.7635815477475192,
+        1.4047173401598112,
+        -0.8503025949559875,
+        0.46305766716974556,
+        -0.31661363461959635,
+        0.9647034732703033
+      ],
+      "events_sha256": "17f8efa7a7ff1be2b229ef3937b3ebb00c194de238cd7688dfac14d6865f8af8",
+      "requested_seconds": 2.0
+    },
+    {
+      "stage": "right-retreat-after-pour",
+      "operation_id": "04D15832-87E9-4987-ACF6-E32D2D6CDC9C",
+      "monitored_elapsed_seconds": 5.446113037109375,
+      "native_outcome": "complete",
+      "final_right_raw_radians": [
+        0.08713010875190443,
+        -0.777489640224349,
+        1.5073917875622902,
+        -1.265636415391513,
+        0.42201515897831643,
+        -0.37292777376597586,
+        0.9779297965080728
+      ],
+      "events_sha256": "7681cb0d141467db541c658a766190c1845c3b6e74fa2a41be7b7cafbb192ba1",
+      "requested_seconds": 3.0
     }
   ],
   "drive_observations": [
@@ -463,14 +798,448 @@
     }
   },
   "validation": {
-    "pour_tests": 19,
+    "pour_tests": 25,
     "native_payload_rendering_fixture": "passed",
-    "source_correction_installed": false
+    "source_correction_installed": false,
+    "documentation_only_continuation": false,
+    "offline_pivot_code_and_tests": true,
+    "motor_commands_after_shutdown": false,
+    "native_pivot_replay_fixture": "passed",
+    "full_debug_build": "passed; installation disabled",
+    "physical_calibration_verified": false
   },
   "limitations": [
     "No measured full camera-to-arm registration",
     "No calibrated tread odometry",
     "Torso feedback timeout remains",
-    "No continuous fixed-time pour controller commissioned"
-  ]
+    "No continuous fixed-time pour controller commissioned",
+    "Failed full pour proves modeled spout trajectory does not match physical path",
+    "Rigid-root/pad fit remains unverified and was not installed",
+    "Assisted second delivery spilled and displaced glass; precise physical pivot and symmetric execution remain unverified",
+    "Cup was moved by operator; old rim location/height is stale and must be reacquired",
+    "Arm feedback is stale after operator shutdown; cached mode 2 is not powered-hold confirmation"
+  ],
+  "earlier_empty_checkpoint": {
+    "recorded_at_utc": "2026-11-01T05:49:55.510043+00:00",
+    "current_state": {
+      "session": "9BB4F940-7C24-47E0-B1ED-B4309F54FD5A",
+      "arms": {
+        "left": {
+          "q_radians": [
+            -0.4983733137530683,
+            1.9468602390605498,
+            0,
+            1.1951414760726795,
+            0,
+            0,
+            0
+          ],
+          "age_ms": 13.518188349756898,
+          "modes": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "statuses": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ]
+        },
+        "right": {
+          "q_radians": [
+            -0.3539745889201,
+            -0.9022534109723811,
+            1.241365430480967,
+            -0.9408415499031932,
+            0.5428246681397989,
+            0.4970097752749478,
+            0.8568475796509661
+          ],
+          "age_ms": 13.004102664958001,
+          "modes": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "statuses": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "neck": {
+        "detail": "Gesture authority released; holding the last commanded targets.",
+        "known": true,
+        "lower": 6011,
+        "pan": 5700,
+        "upper": 6200
+      },
+      "torso": {
+        "count": -2108,
+        "detail": "Last command failed: TIC feedback expired during control (547 ms old); stopped",
+        "front_count": 92,
+        "hardware_selected": true,
+        "has_software_reference": false,
+        "heading_degrees": 22.002444716079566,
+        "pulse_ceiling": 2000
+      },
+      "motion": {
+        "detail": "Sequence complete; robot holding. Servo/LACT tracks are command estimates.",
+        "id": "FB22E454-9EEF-4BB1-A43F-F3F99DF9E0DA",
+        "running": false
+      },
+      "mission_active": false
+    },
+    "outcome": {
+      "grasped": false,
+      "poured": false,
+      "glass_pushed": false,
+      "payload": "both arms empty, jaws open in inspected frames"
+    }
+  },
+  "failed_pour": {
+    "sequence_id": "7D1D9B4D-C1F9-4935-A40B-0DE999DE37D4",
+    "native_library_revision_invalidated": 3,
+    "all_clips_need_review": true,
+    "nominal_endpoint_degrees": 79.3029,
+    "nominal_seconds": 10.56700312308554,
+    "elapsed_seconds": 21.991563232421875,
+    "model_world_clear": true,
+    "maximum_predicted_flow_spout_xy_error_m": 0.003504392888201294,
+    "operator_reported_miss_m": 0.0762,
+    "liquid_delivery_verified": false,
+    "returned_upright": true,
+    "frames_obscure_opening": true,
+    "route_valid_for_replay": false
+  },
+  "grasp": {
+    "saved_pose_id": "D11EB719-41CC-4CDC-8796-2F361AC48F13",
+    "native_revision_created": 1,
+    "needs_review": true,
+    "operator_confirmed_retention": true,
+    "jaw_action": "RIGHT Hold 2 after empty retreat/calibration/reopen",
+    "calibration_clearance_failed": true,
+    "operator_reported_can_nudge_m": 0.015,
+    "calibration_with_payload_allowed": false
+  },
+  "wrist_reconfiguration": {
+    "operation_id": "C8DD6C04-27E6-43DE-B2E4-395B7513EB0E",
+    "j1_decrease_degrees": 2.86259,
+    "maximum_modeled_spout_travel_m": 0.0011617190573166894,
+    "maximum_modeled_orientation_change_degrees": 0.1764462930738429,
+    "observed_top_pixel_shift": [
+      1,
+      0
+    ],
+    "top_template_correlation": 0.9697999358177185,
+    "measurement_limit": "2D appearance only, not pouring-edge depth or full-range calibration"
+  },
+  "rigid_root_diagnostic": {
+    "hypothesis": "Rigid arm-root transform and fixed open pad points; not installed or registered",
+    "training_count": 6,
+    "rigid_rotation_vector": [
+      -0.020981689069682122,
+      0.0961837789488355,
+      -0.16134432505342797
+    ],
+    "rotation_degrees": 10.829287602805053,
+    "world_translation": [
+      -0.062096270759618065,
+      0.09002742007426233,
+      -0.0073833732945809485
+    ],
+    "tool_points": [
+      [
+        0.01615096953380431,
+        0.037980528417279995,
+        0.035201525393075084
+      ],
+      [
+        0.012332922739613311,
+        -0.06750123776384226,
+        0.025200210615863253
+      ]
+    ],
+    "condition_number": 118.06056151203414,
+    "rows": [
+      {
+        "observation": "wrist-geometry-observations.json",
+        "held_out": false,
+        "point_errors_m": [
+          0.00911342394957824,
+          0.012138951204216942
+        ],
+        "midpoint_error_m": 0.010586443420018826
+      },
+      {
+        "observation": "wrist-geometry-observations.json",
+        "held_out": false,
+        "point_errors_m": [
+          0.005726392300118443,
+          0.005504395023195692
+        ],
+        "midpoint_error_m": 0.0048510982759143555
+      },
+      {
+        "observation": "outside-lift-observations.json",
+        "held_out": false,
+        "point_errors_m": [
+          0.005799158268983426,
+          0.011092689265362516
+        ],
+        "midpoint_error_m": 0.006345640713564104
+      },
+      {
+        "observation": "wrist-pitch-observations.json",
+        "held_out": false,
+        "point_errors_m": [
+          0.008524658540894589,
+          0.01210061337713556
+        ],
+        "midpoint_error_m": 0.006368485174026025
+      },
+      {
+        "observation": "observed-orient-step-observations.json",
+        "held_out": false,
+        "point_errors_m": [
+          0.0024359267409588023,
+          0.0018770704084607936
+        ],
+        "midpoint_error_m": 0.001768454686881462
+      },
+      {
+        "observation": "observed-orient-step-02-observations.json",
+        "held_out": false,
+        "point_errors_m": [
+          0.009488687853167036,
+          0.009048005501822914
+        ],
+        "midpoint_error_m": 0.00924453900247758
+      },
+      {
+        "observation": "observed-orient-step-03-observations.json",
+        "held_out": true,
+        "point_errors_m": [
+          0.026147161502153012,
+          0.010729115234019851
+        ],
+        "midpoint_error_m": 0.01637362816373553
+      },
+      {
+        "observation": "observed-clearance-lift-observations.json",
+        "held_out": true,
+        "point_errors_m": [
+          0.02575624994200926,
+          0.009737604083753919
+        ],
+        "midpoint_error_m": 0.011512062230524766
+      },
+      {
+        "observation": "observed-pregrasp-02-observations.json",
+        "held_out": true,
+        "point_errors_m": [
+          0.009159146326471102,
+          0.00914495343242041
+        ],
+        "midpoint_error_m": 0.005484161061434743
+      },
+      {
+        "observation": "observed-pregrasp-03-observations.json",
+        "held_out": true,
+        "point_errors_m": [
+          0.013061835396409753,
+          0.007043617850779492
+        ],
+        "midpoint_error_m": 0.009101562430334114
+      }
+    ],
+    "registration_verified": false
+  },
+  "full_pour_feasibility": {
+    "executable": false,
+    "last_solved_angle_degrees": 95,
+    "first_unsolved": {
+      "angle": 100,
+      "solved": false,
+      "position_m": 0.006142627693160335,
+      "orientation_deg": 2.367462670216644,
+      "raw": [
+        2.0899999989999993,
+        -0.7151267692498637,
+        1.5707593687305634,
+        0.12293236164423882,
+        0.20484561375546975,
+        -1.5855786829981797,
+        -0.7987296017954276
+      ],
+      "j1_delta": 1.3253276204699835,
+      "can_bottom": 0.21769482973758497,
+      "opening_scene": [
+        -0.008707538453140115,
+        0.14113129091658902,
+        0.2255678308712394
+      ]
+    },
+    "endpoint_search_samples": 96,
+    "endpoint_solutions": 0,
+    "search_limit": "Four opening heights at fixed observed-left tilt azimuth; not proof all alternative grasps or orientations are impossible"
+  },
+  "earlier_held_checkpoint": {
+    "recorded_at_utc": "2026-11-01T07:14:11.534735+00:00",
+    "current_state": {
+      "session": "9BB4F940-7C24-47E0-B1ED-B4309F54FD5A",
+      "arms": {
+        "left": {
+          "q_radians": [
+            -0.4949644675577669,
+            1.9442695159521206,
+            0,
+            1.1925507529642505,
+            0,
+            0,
+            0
+          ],
+          "age_ms": 27.948324335410803,
+          "modes": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "statuses": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ]
+        },
+        "right": {
+          "q_radians": [
+            0.7646723785300157,
+            -1.2789990924770946,
+            1.7865081140335708,
+            -0.9968829813539487,
+            1.0977848287348708,
+            -0.9831112427249309,
+            0.8351673178488491
+          ],
+          "age_ms": 32.18170267792946,
+          "modes": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "statuses": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "neck": {
+        "detail": "Gesture authority released; holding the last commanded targets.",
+        "known": true,
+        "lower": 6011,
+        "pan": 5700,
+        "upper": 6600
+      },
+      "torso": {
+        "count": -2108,
+        "detail": "Last command failed: TIC feedback expired during control (547 ms old); stopped",
+        "front_count": 92,
+        "hardware_selected": true,
+        "has_software_reference": false,
+        "heading_degrees": 22.002444716079566,
+        "pulse_ceiling": 2000
+      },
+      "motion": {
+        "detail": "Sequence complete; robot holding. Servo/LACT tracks are command estimates.",
+        "id": "C8DD6C04-27E6-43DE-B2E4-395B7513EB0E",
+        "running": false
+      },
+      "mission_active": false
+    },
+    "outcome": {
+      "grasped": true,
+      "poured": false,
+      "glass_pushed": false,
+      "payload": "RIGHT visibly holds upright Coke can; LEFT empty active hold",
+      "pour_result_source": "operator reported zero liquid delivered and approximately 3 inches of pouring-edge displacement away from cup",
+      "current_request": "empty remaining Coke; keep pouring edge over glass, use straighter wrist and back J1 off; approximately 160-degree pour requested"
+    }
+  },
+  "can_set_down": {
+    "release_operation_id": "D93C0C82-1FCE-49D0-AE54-716E9F3FC7FF",
+    "jaw_action": "RIGHT Release 10",
+    "native_ack": "accepted_unverified",
+    "subsequent_images_verified_open_jaw_and_can_standing": true,
+    "release_image_sha256": "433333e11e3ee83e0ac6510041b92ee3c59947f2720c0cfb31e787247b906197",
+    "final_retracted_view_sha256": "33399d9d78f8724c34dc51caec4714b6f5a58b03e8cb7e6a091ff9735eab58e2",
+    "right_retreat_meters": 0.08,
+    "left_slide_deferred": true,
+    "post_pour_neck_motion_executed": false
+  },
+  "assisted_second_pour": {
+    "sequence_id": "6C284A33-DD1F-4F34-BF9C-3ED4A5AB04C1",
+    "operation_id": "56C06670-B6C5-4E38-86C4-D68C94BC9E83",
+    "nominal_maximum_tilt_degrees": 160,
+    "native_library_revision_marked_review": 7,
+    "all_clips_need_review": true,
+    "modeled_world_clear": true,
+    "maximum_modeled_flow_spout_xy_error_m": 0.011641736917087503,
+    "nominal_seconds": 26.602195195199187,
+    "monitored_elapsed_seconds": 50.186166015625,
+    "fixed_pivot_used": false,
+    "private_candidate_varied_rotation_azimuth_and_height": true,
+    "physical_symmetry_verified": false,
+    "delivered_volume_metered": false,
+    "stream_visible_image_sha256": "ac6622633432b2ea6991742b636ba8f72a8312ee47578bc42b77aa57365234aa",
+    "user_assistance_required": true,
+    "spill_and_cup_displacement_source": "operator report",
+    "contact_cause_established": false,
+    "route_valid_for_replay": false
+  },
+  "shutdown": {
+    "recorded_at_utc": "2026-11-01T07:49:36.102698+00:00",
+    "operator_ends_physical_testing": true,
+    "operator_plans_arm_shutdown": true,
+    "no_automatic_resume": true,
+    "reason": "sleep; offline code improvement only",
+    "can_released_on_table": true,
+    "left_slide_executed": false,
+    "last_motion_id": "04D15832-87E9-4987-ACF6-E32D2D6CDC9C",
+    "reported_pour": "liquid delivered with spill despite manual catch; uneven rotation; cup pushed/displaced too far back and manually moved farther from droid"
+  }
 }

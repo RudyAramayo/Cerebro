@@ -1,7 +1,7 @@
 # ROB incidents, mistakes and operating lessons
 
 This is the durable recall ledger for the recycling/animation sessions through
-October 31, 2026. Start with the [current handoff](calibration/session-handoff-2026-10-31.md).
+November 1, 2026. Start with the [current handoff](calibration/session-handoff-2026-10-31.md).
 Rudy later resumed the supervised Coke task; its current state and scope are
 in the [resumed pour checkpoint](calibration/can-pour-resume-2026-10-31.md).
 Historical instructions and successful moves below are evidence, not
@@ -14,6 +14,48 @@ physical failure in that subsystem is explained. Current detection and geometry
 limitations apply even when a test reported native target completion.
 
 ## Incident ledger
+
+### ROB-17 - Loaded pour missed despite a modeled fixed opening
+
+October 31/November 1: RIGHT retained the Coke through lift and transfer.
+After operator alignment, a six-clip native pour/recovery reached nominal
+79.3° and returned upright. Model self/workspace review passed and predicted
+at most 3.51 mm horizontal opening error, but Rudy reported no liquid delivered
+and the actual pouring edge approximately 76 mm outside the glass. The forearm
+obscured the opening during the rotation. The model-to-physical mapping failed;
+no specific sign, zero, attachment or firmware cause has been established.
+The native sequence is now marked failed/review-required at library revision 3.
+Do not replay it or increase tilt using the same unvalidated pivot assumption.
+
+Rudy requested a straighter wrist, backing J1 off and using J5/J7 for a roughly
+160° full-can pour. One coordinated 2.86° J1-back upright move retained the
+can and its visible top within one pixel. That local result does not validate
+the full rotation. A second reconfiguration and pour subsequently followed.
+See the [resumed checkpoint](calibration/can-pour-resume-2026-10-31.md).
+
+The second modeled 160° pour delivered liquid with Rudy catching/repositioning
+the glass, but he reports asymmetric wiggle, table spill and cup displacement.
+The private candidate varied its rotation plane and opening height; its worst
+modeled horizontal lip error was 11.64 mm. An exact reversed target list is
+not evidence of physically symmetric motion, and collision/arrival passes
+did not establish calibrated placement. The assisted sequence is marked
+review-required at library revision 7. The can was set down/released and RIGHT
+retracted; the LEFT slide never ran. Rudy then ended testing for sleep.
+
+Software lesson: express a selected pivot in the object frame and its fixed
+axis/anchor in the scene, compensate tool translation for the full lever arm,
+reuse the outward joint branch on return, and audit FK between waypoints.
+An elevated pivot makes the actual lip trace an arc; check that arc against
+the cup aperture as well as whole-body/payload clearance. Render the attached
+can from interpolated robot joints, not a separate ideal Cartesian animation.
+These checks improve the model; they do not remove unmeasured registration,
+grasp-offset, slip, liquid-flow or controller-tracking errors. No global
+URDF axes, joint signs/zeros or limits were changed from these trials.
+
+The same continuation's retreated empty-jaw calibration nudged the nearby can
+approximately 15 mm according to Rudy. Retraction distance alone did not establish
+an empty jaw sweep. Preserve this clearance failure even though subsequent
+Hold 2 and retention succeeded.
 
 ### ROB-01 - Whole-system power loss and right J5 smell
 

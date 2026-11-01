@@ -8,6 +8,17 @@ OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 "$python_bin" -B Scripts/plan-ca
   --scene Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-scene.json \
   --status Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-status.json \
   --base-advance .25 --output "$task_pour_native_dir/report.json" > "$task_pour_native_dir/summary.json"
+"$python_bin" -B - "$task_pour_native_dir/report.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+assert d['hardwareOutputEnabled'] is False and d['executable'] is False
+audit=d['rotationPivot']['interpolationAudit']
+assert audit['valid'] and audit['checkedSamples']>100 and audit['interpolationCoverageIncluded']
+assert d['preparedTimedPour']['rotationAudit']['valid']
+assert d['geometryAudit']['valid']
+print('Linear rotation review:',json.dumps(audit))
+print('Timed rotation review:',json.dumps(d['preparedTimedPour']['rotationAudit']))
+PY
 xcrun swiftc -O -whole-module-optimization -swift-version 5 -parse-as-library \
   -module-cache-path /private/tmp/cerebro-swift-module-cache \
   Cerebro/ROBArmRoutinePlan.swift Cerebro/ROBArmJointLimits.swift Cerebro/ROBArmControlProtocol.swift \

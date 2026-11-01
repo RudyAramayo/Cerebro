@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "Cerebro/Resources/ShadowPlanner"))
 from can_pour import (CanGeometry, CupGeometry, GhostPourRobot, PourPlanError, PourWorkspace,
                       transform, upright_can, geometry_path, geometry_audit,
                       cylinder_bottom, fixed_timed_chain, glass_push_plan,
-                      convex_table_outline)
+                      convex_table_outline, ObjectPivot, rotation_path_audit)
 from table_planes import fit_parallel_planes, floor_anchored_scene
 
 
@@ -58,6 +58,63 @@ class PourGeometryTests(unittest.TestCase):
         for radius in (float('nan'), float('inf'), -.1):
             with self.assertRaises(PourPlanError): CanGeometry(radius, .12, .025)
 
+    def test_arbitrary_object_pivot_and_axis_are_frame_invariant(self):
+        from scipy.spatial.transform import Rotation
+        initial=transform(Rotation.from_euler('xyz',[.4,-.2,.7]).as_matrix(),[.8,-.3,1.2])
+        pivot=ObjectPivot((.02,-.03,.12),(1,2,-1))
+        anchor=pivot.point(initial)
+        change=transform(Rotation.from_euler('zyx',[.9,.2,-.6]).as_matrix(),[-.4,.1,.8])
+        for angle in np.deg2rad([0,30,90,160,-45]):
+            pose=pivot.pose(initial,angle,anchor)
+            np.testing.assert_allclose(pivot.point(pose),anchor,atol=1e-12)
+            np.testing.assert_allclose(change@pose,pivot.pose(change@initial,angle,(change@np.r_[anchor,1])[:3]),atol=1e-12)
+            np.testing.assert_allclose(pose[:3,:3]@pivot.axis_in_object,initial[:3,:3]@pivot.axis_in_object,atol=1e-12)
+        for axis in ([0,0,0],[float('nan'),1,0]):
+            with self.assertRaises(PourPlanError):ObjectPivot((0,0,0),axis)
+        with self.assertRaises(PourPlanError):pivot.pose(initial,float('nan'),anchor)
+
+    def test_above_spout_pivot_keeps_anchor_but_checks_lip_arc_at_160_degrees(self):
+        pivot=ObjectPivot(tuple(self.can.spout+[0,0,.010]))
+        path=geometry_path(self.can,self.cup,self.source,self.tool,pivot=pivot,tilt_degrees=160)
+        self.assertTrue(geometry_audit(path,self.can,self.cup,pivot=pivot)['valid'])
+        frames=[s for s in path if s.rotation_radians is not None]
+        anchor=pivot.point(frames[0].world_can)
+        for s in frames:
+            np.testing.assert_allclose(pivot.point(s.world_can),anchor,atol=1e-12)
+            self.assertGreaterEqual(cylinder_bottom(s.world_can,self.can),self.cup.rim_center[2]+.025)
+            if s.reverse_of is not None:
+                np.testing.assert_array_equal(s.world_can,path[s.reverse_of].world_can)
+        self.assertAlmostEqual(max(s.rotation_radians for s in frames),math.radians(160))
+        lip=frames[len(frames)//4].world_can@np.r_[self.can.spout,1]
+        self.assertGreater(np.linalg.norm(lip[:2]-np.array(self.cup.rim_center)[:2]),.005)
+        # A point 30 mm above the lip sweeps outside this glass's 20 mm allowance.
+        with self.assertRaises(PourPlanError):
+            geometry_path(self.can,self.cup,self.source,self.tool,
+                          pivot=ObjectPivot(tuple(self.can.spout+[0,0,.03])),tilt_degrees=160)
+
+    def test_midpoint_drift_is_rejected_even_when_both_pivot_endpoints_are_exact(self):
+        from scipy.spatial.transform import Rotation
+        pivot=ObjectPivot(tuple(self.can.spout))
+        anchor=np.array(self.cup.rim_center)+[0,0,.18]
+        a=pivot.pose(self.source,0,anchor);b=pivot.pose(self.source,math.radians(160),anchor)
+        # Independent translation and orientation interpolation follows a
+        # chord, not the required compensated pivot path.
+        wrong=pivot.pose(self.source,math.radians(80),anchor)
+        wrong[:3,3]=(a[:3,3]+b[:3,3])/2
+        endpoints=rotation_path_audit([a,b],pivot,a,anchor,self.can,self.cup)
+        self.assertTrue(endpoints['valid'])
+        bad=rotation_path_audit([a,wrong,b],pivot,a,anchor,self.can,self.cup)
+        self.assertFalse(bad['valid']);self.assertGreater(bad['maximumPivotErrorBoundMeters'],.04)
+        # Fixed anchor alone also does not enforce a consistent rotation axis.
+        sideways=ObjectPivot(tuple(self.can.spout),(1,0,0)).pose(self.source,.2,anchor)
+        self.assertFalse(rotation_path_audit([a,sideways],pivot,a,anchor,self.can,self.cup)['valid'])
+
+    def test_sample_coverage_reserve_can_reject_a_near_margin_pivot(self):
+        pivot=ObjectPivot(tuple(self.can.spout));anchor=np.array(self.cup.rim_center)+[0,0,.18]
+        pose=pivot.pose(self.source,0,anchor);pose[0,3]+=.0048
+        self.assertTrue(rotation_path_audit([pose],pivot,self.source,anchor,self.can,self.cup)['valid'])
+        self.assertFalse(rotation_path_audit([pose],pivot,self.source,anchor,self.can,self.cup,padding=[.0004])['valid'])
+
     def test_fixed_chain_returns_exactly_and_bounds_all_derivatives(self):
         joints = np.zeros((28, 7)); joints[:, 5] = np.linspace(.1, 1.4, 28)
         chain = fixed_timed_chain(joints, hold_seconds=.35)
@@ -71,6 +128,11 @@ class PourGeometryTests(unittest.TestCase):
         for s in (chain['samples'][0], chain['samples'][-1]):
             np.testing.assert_allclose(s['velocity'], 0., atol=1e-9)
             np.testing.assert_allclose(s['acceleration'], 0., atol=1e-8)
+        outward=[s for s in chain['samples'] if s['stage']=='tilt']
+        inward=[s for s in chain['samples'] if s['stage']=='return']
+        for a,b in zip(outward,reversed(inward)):
+            np.testing.assert_allclose(a['rawRadians'],b['rawRadians'],atol=1e-12)
+            np.testing.assert_allclose(a['velocity'],-np.array(b['velocity']),atol=1e-12)
 
     def test_post_interpolation_bounds_are_enforced(self):
         joints = np.zeros((8, 7)); joints[:, 6] = [0, 1, 2.09, 2.09, -2.09, -2.09, -1, 0]
@@ -219,6 +281,42 @@ class GhostIntegrationTests(unittest.TestCase):
         report = self.robot.engine.clearance.check(q)
         self.assertFalse(report['clear'])
         self.assertLess(report['distance'], 0)
+
+    def test_historical_assisted_pour_is_not_a_fixed_pivot_route(self):
+        import json
+        fixture=json.loads((ROOT/'Cerebro/Resources/ShadowPlanner/fixtures/coke-pour-assisted-spill.json').read_text())
+        self.assertFalse(fixture['executable']);self.assertFalse(fixture['hardwareOutputEnabled'])
+        can=CanGeometry(**fixture['can']);cup=CupGeometry(**fixture['cup'])
+        baseline=self.robot.from_status(fixture['status'])
+        attachment=np.array(fixture['canInTool']);scene=np.array(fixture['modelFromScene'])
+        raw=np.array(fixture['rawJointPath']);q=baseline.copy()
+        q[self.robot.indices]=raw[0]-self.robot.priors['right']
+        initial=np.linalg.inv(scene)@self.robot.frame(q)@attachment
+        pivot=ObjectPivot(tuple(can.spout));anchor=pivot.point(initial)
+        # Even sparse FK samples already refute a fixed pivot. Native scenario
+        # fixtures separately exercise the full interval coverage reviewer.
+        poses=[]
+        for a,b in zip(raw,raw[1:]):
+            for u in (0.,.5,1.):
+                q[self.robot.indices]=a+(b-a)*u-self.robot.priors['right']
+                poses.append(np.linalg.inv(scene)@self.robot.frame(q)@attachment)
+        audit=rotation_path_audit(poses,pivot,initial,anchor,can,cup)
+        self.assertFalse(audit['valid'])
+        self.assertGreater(audit['maximumPivotErrorBoundMeters'],.05)
+        self.assertGreater(audit['maximumOffAxisBoundDegrees'],10)
+
+    def test_timed_equal_endpoints_are_not_implicitly_a_stationary_interval(self):
+        q=self.robot.from_status(self.status());can=CanGeometry(.033,.12,.025)
+        pivot=ObjectPivot(tuple(can.spout));initial=self.robot.frame(q);anchor=pivot.point(initial)
+        cup=CupGeometry(tuple(anchor),.035,.04,.12)
+        workspace=PourWorkspace(self.robot,can,cup,[[2,2],[3,3]],0,np.eye(4))
+        raw=q[self.robot.indices]+self.robot.priors['right']
+        arguments=dict(peak_speeds=[.3]*7,sample_times=[0.,1.],expected_angular_speed=0.)
+        audit=workspace.review_rotation([raw,raw],q,np.eye(4),pivot,initial,anchor,[0.,0.],**arguments)
+        self.assertFalse(audit['valid'])
+        held=workspace.review_rotation([raw,raw],q,np.eye(4),pivot,initial,anchor,[0.,0.],
+                                       stationary_intervals=[0],**arguments)
+        self.assertTrue(held['valid'])
 
     def test_workspace_includes_other_arm_and_payload_against_head(self):
         q = self.robot.from_status(self.status())

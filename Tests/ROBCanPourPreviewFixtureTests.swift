@@ -12,6 +12,26 @@ import simd
         precondition(timed.duration>4 && timed.duration<10)
         precondition(simd_distance(timed.frames.first!.canPose.columns.3,timed.frames.last!.canPose.columns.3)<1e-8)
         let original=try JSONSerialization.jsonObject(with:data) as! [String:Any]
+        precondition(simd_length(full.pivotAxis)>0.999)
+        precondition(full.rotationAuditPassed && timed.rotationAuditPassed)
+        let rows=original["steps"] as! [[String:Any]]
+        var reversedCount=0
+        for row in rows {
+            if let ik=row["ik"] as? [String:Any],let index=ik["retracesReportIndex"] as? Int {
+                precondition((row["positions"] as! [String:Double]) == (rows[index]["positions"] as! [String:Double]))
+                reversedCount += 1
+            }
+        }
+        precondition(reversedCount>20)
+        let held=full.frames.first {$0.attached}!
+        var editedJoints=held.positions;editedJoints["right_joint7"]! += 0.1
+        let actual=full.payloadPose(positions:editedJoints,worldFromRobot:held.worldFromRobot,
+            detachedPose:held.canPose,attached:true,model:model)
+        let expected=held.worldFromRobot * model.frames(editedJoints)["right_tool"]! * full.canInTool
+        for i in 0..<4 {precondition(simd_length(actual[i]-expected[i])<1e-12)}
+        let detached=full.payloadPose(positions:editedJoints,worldFromRobot:held.worldFromRobot,
+            detachedPose:held.canPose,attached:false,model:model)
+        for i in 0..<4 {precondition(simd_length(detached[i]-held.canPose[i])<1e-12)}
         func rejected(_ change:(inout [String:Any])->Void,timed:Bool=false) throws {
             var value=original;change(&value)
             let edited=try JSONSerialization.data(withJSONObject:value)
@@ -19,6 +39,20 @@ import simd
             catch is ROBGhostMotionError {}
         }
         try rejected {$0["executable"]=true}
+        try rejected {$0["schemaVersion"]=1}
+        try rejected {$0.removeValue(forKey:"rotationPivot")}
+        try rejected { root in
+            var pivot=root["rotationPivot"] as! [String:Any]
+            pivot["axisInObject"]=[0.0,0,0];root["rotationPivot"]=pivot
+        }
+        try rejected { root in
+            var pivot=root["rotationPivot"] as! [String:Any]
+            pivot["anchorInScene"]=[0.0,0,0];root["rotationPivot"]=pivot
+        }
+        try rejected { root in
+            var rows=root["steps"] as! [[String:Any]]
+            rows[0].removeValue(forKey:"attached");root["steps"]=rows
+        }
         try rejected {$0["hardwareOutputEnabled"]=true}
         try rejected {$0["modelID"]="wrong model"}
         try rejected {$0.removeValue(forKey:"tableAlignment")}
@@ -76,6 +110,6 @@ import simd
         for frame in full.frames where frame.stage.hasPrefix("Drive") || frame.stage.hasPrefix("Turn torso") {
             precondition(simd_length(frame.canPose.columns.3-full.frames.first!.canPose.columns.3)<1e-8)
         }
-        print("Native pour preview: measured height, fixed world, staged drive/torso and sixteen invalid-input cases passed")
+        print("Native pour preview: fixed pivot, exact joint reversal, FK-attached payload, measured table, staged body and invalid-input cases passed")
     }
 }

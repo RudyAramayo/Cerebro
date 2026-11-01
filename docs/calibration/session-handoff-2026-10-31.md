@@ -1,14 +1,39 @@
 # ROB session handoff - October 31, 2026
 
-## Latest physical state: resumed pour preparation
+## Latest physical state: stopped for sleep after assisted pour, November 1
 
-Rudy explicitly resumed the Coke task after the Halloween pause. Both arms
-are now active empty holds; the base has approached and the torso has turned.
-The Coke is still on the table. The original grasp route is withheld because
-the observed gripper disagrees with its nominal model. Read the
+The second modeled 160° pour delivered Coke with Rudy catching/moving the
+glass. He reports asymmetric wiggle, spill on the table and the cup pushed too
+far back. The can was returned, released standing and RIGHT retracted 80 mm.
+No LEFT slide or post-pour head motion was sent. Rudy ended physical testing
+and is cutting arm power; work is offline only on pivot planning and tests.
+No motor commands, activation, calibration, installation/restart or automatic
+replay. The final read-only status had stale arm feedback (21–29 seconds), so
+cached mode 2 is not live holding confirmation. Resume requires Rudy's explicit
+instruction and new feedback/scene checks. Do not ask questions tonight.
+
+The assisted pour and return are review-required at native library revision 7;
+the first failed sequence remains review-required. Read the
+[resumed checkpoint](can-pour-resume-2026-10-31.md) and
+[offline pivot changes](object-pivot-pour-2026-11-01.md). The immediate filming
+cue is now saved in home and repository steering. No software from the offline
+work was installed or the runtime restarted.
+
+## Earlier intermediate state: Coke held after first failed pour
+
+Rudy explicitly resumed the Coke task after the Halloween pause. RIGHT now
+holds the can upright; LEFT remains raised and empty. Rudy confirmed grasp
+and retention, but the nominal 79.3° pour failed: no liquid came out and the
+pouring edge moved approximately 3 inches outside the glass. The six-clip
+sequence recovered upright and is now marked failed/review-required. A small
+coordinated J1-back adjustment subsequently kept the visible can top within
+one pixel. No second pour or glass push occurred. Rudy now requests all the
+remaining Coke and approximately 160° tilt, with J5/J7 contributing while
+the actual pouring edge stays above the glass. Read the
 [resumed pour checkpoint](can-pour-resume-2026-10-31.md) before continuation,
 and obtain fresh feedback instead of replaying any recorded target. No app
-restart or torque-changing cache refresh is appropriate while the arms hold.
+restart, torque-changing cache refresh, loaded jaw calibration or unsupported
+release is appropriate. Neck is 5700/6011/6600; torso remains at count -2108.
 The following pause and Test 11 sections are historical snapshots.
 
 ## Earlier physical state: Halloween pause

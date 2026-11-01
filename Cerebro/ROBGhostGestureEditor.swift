@@ -429,6 +429,15 @@ import simd
             spout.position=SCNVector3(preview.canSpoutRadius,preview.canHeight/2,0)
             pourCan.addChildNode(spout)
             canMotionOverlay.addChildNode(pourCan)
+            let pivotNode=SCNNode(geometry:SCNSphere(radius:0.005))
+            let pivotMaterial=SCNMaterial();pivotMaterial.diffuse.contents=NSColor.systemCyan;pivotMaterial.lightingModel = .constant
+            pivotNode.geometry?.materials=[pivotMaterial];pivotNode.name="Selected fixed rotation point"
+            pivotNode.simdPosition=SIMD3<Float>(preview.pivotAnchor);canMotionOverlay.addChildNode(pivotNode)
+            let axisEnds=[preview.pivotAnchor-preview.pivotAxis*0.08,preview.pivotAnchor+preview.pivotAxis*0.08]
+            let axisGeometry=SCNGeometry(sources:[SCNGeometrySource(vertices:axisEnds.map {SCNVector3($0.x,$0.y,$0.z)})],
+                elements:[SCNGeometryElement(indices:[UInt32(0),UInt32(1)],primitiveType:.line)])
+            axisGeometry.materials=[pivotMaterial];let axisNode=SCNNode(geometry:axisGeometry)
+            axisNode.name="Fixed object rotation axis";canMotionOverlay.addChildNode(axisNode)
             let cupMaterial=SCNMaterial();cupMaterial.diffuse.contents=NSColor.systemGreen;cupMaterial.transparency=0.3
             let cup=SCNNode(geometry:SCNCylinder(radius:CGFloat(preview.cupRadius),height:CGFloat(preview.cupHeight)))
             cup.geometry?.materials=[cupMaterial];cup.name="Pour test glass"
@@ -453,10 +462,16 @@ import simd
             tableMaterial.isDoubleSided=true
             table.geometry?.materials=[tableMaterial];table.name="Horizontal observed table patch · unseen extent unknown"
             table.simdTransform=floatMatrix(preview.sceneTransform);canMotionOverlay.addChildNode(table)
-            let points=preview.frames.map { SCNVector3($0.canPose.columns.3.x,$0.canPose.columns.3.y,$0.canPose.columns.3.z) }
+            let points=preview.frames.map { frame -> SCNVector3 in
+                let pose=preview.payloadPose(positions:frame.positions,worldFromRobot:frame.worldFromRobot,
+                    detachedPose:frame.canPose,attached:frame.attached,model:model)
+                let lip=pose*SIMD4<Double>(preview.canSpoutRadius,0,preview.canHeight/2,1)
+                return SCNVector3(lip.x,lip.y,lip.z)
+            }
             let path=SCNGeometry(sources:[SCNGeometrySource(vertices:points)],elements:[SCNGeometryElement(indices:(0..<(points.count-1)).flatMap{[UInt32($0),UInt32($0+1)]},primitiveType:.line)])
             let pathMaterial=SCNMaterial();pathMaterial.diffuse.contents=NSColor.systemYellow;pathMaterial.lightingModel = .constant
-            path.materials=[pathMaterial];canMotionOverlay.addChildNode(SCNNode(geometry:path))
+            path.materials=[pathMaterial];let lipPath=SCNNode(geometry:path)
+            lipPath.name="Actual opening path from joint FK";canMotionOverlay.addChildNode(lipPath)
             let basePoints=preview.frames.map { SCNVector3($0.worldFromRobot.columns.3.x,$0.worldFromRobot.columns.3.y,0.008) }
             let basePath=SCNGeometry(sources:[SCNGeometrySource(vertices:basePoints)],elements:[SCNGeometryElement(indices:(0..<(basePoints.count-1)).flatMap{[UInt32($0),UInt32($0+1)]},primitiveType:.line)])
             let baseMaterial=SCNMaterial();baseMaterial.diffuse.contents=NSColor.cyan;baseMaterial.lightingModel = .constant
@@ -477,6 +492,7 @@ import simd
         simd_float4x4(columns:(SIMD4<Float>(value.columns.0),SIMD4<Float>(value.columns.1),SIMD4<Float>(value.columns.2),SIMD4<Float>(value.columns.3)))
     }
     @nonobjc private func renderPourTime(_ time:Double,preview:ROBCanPourRehearsal) {
+        guard let model else {return}
         let index=preview.frames.lastIndex(where:{$0.time<=time}) ?? 0
         let a=preview.frames[index],b=preview.frames[min(index+1,preview.frames.count-1)]
         let u=b.time>a.time ? max(0,min(1,(time-a.time)/(b.time-a.time))):0
@@ -490,6 +506,8 @@ import simd
         updateGhost(positions,updateFields:false)
         let rotation=simd_slerp(simd_quatd(a.canPose),simd_quatd(b.canPose),u)
         var pose=simd_double4x4(rotation);pose.columns.3=a.canPose.columns.3+(b.canPose.columns.3-a.canPose.columns.3)*u
+        pose=preview.payloadPose(positions:positions,worldFromRobot:robotPose,detachedPose:pose,
+            attached:a.attached,model:model)
         pourCan.simdTransform=floatMatrix(pose*simd_double4x4(simd_quatd(angle:.pi/2,axis:[1,0,0])))
         clock.stringValue=preview.timed ? String(format:"%.2f s",time):"Pose \(index+1)/\(preview.frames.count)"
         status.stringValue="\(a.stage) · GHOST TEST ONLY\n\(a.detail)\n"+preview.summary

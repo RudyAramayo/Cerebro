@@ -159,6 +159,38 @@ class PourWaypoint:
     world_tool: np.ndarray
     attached: bool
     checkpoint: str | None = None
+    rotation_radians: float | None = None
+    reverse_of: int | None = None
+
+
+@dataclass(frozen=True)
+class ObjectPivot:
+    """A selected object-local point and axis, fixed in space during rotation.
+
+    The point may lie outside the object (e.g. above a can opening). The tool
+    translation must compensate for its offset; rotating the wrist alone does
+    not implement this constraint. The axis is expressed in the INITIAL object
+    frame, not recomputed from a moving camera or an IK solution.
+    """
+    point_in_object: tuple
+    axis_in_object: tuple = (0., 1., 0.)
+
+    def __post_init__(self):
+        point, axis = vector(self.point_in_object), vector(self.axis_in_object)
+        axis_length = math.hypot(*axis)
+        if not math.isfinite(axis_length) or axis_length < 1e-9:
+            raise PourPlanError("Rotation axis must be nonzero")
+        object.__setattr__(self, 'point_in_object', tuple(point))
+        object.__setattr__(self, 'axis_in_object', tuple(axis / axis_length))
+
+    def pose(self, initial_pose, angle, anchor):
+        source = rigid(initial_pose)
+        if not np.isfinite(angle): raise PourPlanError("Rotation angle must be finite")
+        rotation = source[:3, :3] @ Rotation.from_rotvec(vector(self.axis_in_object)*angle).as_matrix()
+        return transform(rotation, vector(anchor) - rotation @ vector(self.point_in_object))
+
+    def point(self, pose):
+        return (rigid(pose) @ np.r_[self.point_in_object, 1])[:3]
 
 
 def upright_can(center, spout_direction):
@@ -171,11 +203,8 @@ def upright_can(center, spout_direction):
 
 
 def tilt_about_spout(world_can_upright, can, tilt, world_spout):
-    source = rigid(world_can_upright)
-    positive(tilt, 0, math.pi / 2, "tilt")
-    # +Y rotation tilts can +Z toward its +X opening direction. There is no yaw.
-    rotation = source[:3, :3] @ Rotation.from_rotvec([0, tilt, 0]).as_matrix()
-    return transform(rotation, vector(world_spout) - rotation @ can.spout)
+    positive(tilt, 0, math.pi, "tilt")
+    return ObjectPivot(tuple(can.spout)).pose(world_can_upright, tilt, world_spout)
 
 
 def cylinder_bottom(world_can, can):
@@ -186,7 +215,8 @@ def cylinder_bottom(world_can, can):
 
 
 def geometry_path(can, cup, world_can, world_tool_at_grasp, *, rim_clearance=.025,
-                  landing_margin=.015, maximum_tilt_step_degrees=3):
+                  landing_margin=.015, maximum_tilt_step_degrees=3,
+                  pivot=None, tilt_degrees=None):
     """Rigid can/tool continuation, including grasp verification and return.
 
     This does not invent an entry from hanging. The caller must solve and
@@ -211,9 +241,13 @@ def geometry_path(can, cup, world_can, world_tool_at_grasp, *, rim_clearance=.02
     tool_in_can = np.linalg.inv(source) @ grasp
     path = []
 
-    def append(stage, pose, attached=True, checkpoint=None):
+    pivot = pivot or ObjectPivot(tuple(can.spout))
+    end_tilt = (can.tilt_for_fraction(can.final_fraction) if tilt_degrees is None else
+                math.radians(positive(tilt_degrees, 1, 170, 'explicit tilt degrees')))
+
+    def append(stage, pose, attached=True, checkpoint=None, angle=None, reverse_of=None):
         pose = rigid(pose)
-        path.append(PourWaypoint(stage, pose, pose @ tool_in_can, attached, checkpoint))
+        path.append(PourWaypoint(stage, pose, pose @ tool_in_can, attached, checkpoint, angle, reverse_of))
 
     append("Grasp at source", source, False, "Visually confirm both pads surround the can before closing")
     append("Verify jaw closure", source, True, "Jaw ACK is not retention; no force escalation or calibration with the can")
@@ -228,28 +262,36 @@ def geometry_path(can, cup, world_can, world_tool_at_grasp, *, rim_clearance=.02
     over = transfer.copy()
     over[:2, 3] = rim[:2] - (over[:3, :3] @ can.spout)[:2]
     append("Position opening over cup", over, True, "Verify opening lies inside the cup and view remains clear")
-    end_tilt = can.tilt_for_fraction(can.final_fraction)
     count = max(5, math.ceil(math.degrees(end_tilt) / maximum_tilt_step_degrees))
-    # Hold the opening at one point while rotating the can/tool rigidly around
-    # it. The upright cylinder is the highest required opening position over
-    # this <=90-degree interval: H*cos(theta)+(r-s)*sin(theta) can have an
-    # interior maximum, so compute that support maximum analytically.
-    peak_angle = min(end_tilt, math.atan2(can.radius - can.spout_radius, can.height))
-    opening_height = rim_clearance + can.height * math.cos(peak_angle) + (can.radius - can.spout_radius) * math.sin(peak_angle)
-    over[2, 3] = rim[2] + opening_height - can.height / 2
+    # Cover the entire cylinder envelope, including >90 degrees. A support
+    # function is Lipschitz with this object radius, so the half-step reserve
+    # bounds unsampled extrema; a handful of endpoint checks is insufficient.
+    angles = np.linspace(0, end_tilt, math.ceil(math.degrees(end_tilt)/.25)+1)
+    radius = np.linalg.norm(pivot.point_in_object) + can.height/2 + can.radius
+    reserve = radius * (angles[1]-angles[0])/2
+    anchor = rim + source[:3, :3] @ (vector(pivot.point_in_object)-can.spout)
+    anchor[2] = rim[2] + rim_clearance + reserve - min(
+        cylinder_bottom(pivot.pose(source, a, [0,0,0]), can) for a in angles)
+    lip_reserve = np.linalg.norm(can.spout-vector(pivot.point_in_object)) * (angles[1]-angles[0])/2
+    for angle in angles:
+        pose = pivot.pose(source, angle, anchor)
+        lip = pose @ np.r_[can.spout, 1]
+        if np.linalg.norm(lip[:2]-rim[:2]) + lip_reserve > cup.inner_radius-landing_margin:
+            raise PourPlanError("Selected pivot moves the actual opening outside the cup landing margin")
+    over = pivot.pose(source, 0, anchor)
     path[-1].world_can = over
     path[-1].world_tool = over @ tool_in_can
-    spout = rim + [0, 0, opening_height]
+    path[-1].rotation_radians = 0.
     for angle in np.linspace(0, end_tilt, count + 1)[1:]:
-        pose = tilt_about_spout(source, can, angle, spout)
+        pose = pivot.pose(source, angle, anchor)
         append("Tilt toward cup %.2f degrees" % math.degrees(angle), pose, True,
-               "Fixed-time estimate; interrupt for rim contact, foam limit, slip, lost view or spill")
+               "Fixed-time estimate; interrupt for rim contact, foam limit, slip, lost view or spill", angle=angle)
     # Recovery is a whole can/tool path, not an isolated J7 amendment or a
     # replacement cmd4 fired during an unfinished trajectory.
-    pour_frames = list(path[5:])
-    for step in reversed(pour_frames[:-1]):
-        append("Controlled upright recovery", step.world_can)
-    append("Upright above cup", over, True, "Verify stream has ceased and the can remains retained")
+    pour_frames = list(enumerate(path[5:], start=5))
+    for original, step in reversed(pour_frames[:-1]):
+        append("Controlled upright recovery", step.world_can, angle=step.rotation_radians, reverse_of=original)
+    append("Upright above cup", over, True, "Verify stream has ceased and the can remains retained", angle=0., reverse_of=4)
     append("Return above source", transfer)
     append("Return to source support", source, True, "Confirm base contact/support before release")
     append("Release supported can", source, False, "Verify jaws open and the can remains standing")
@@ -419,6 +461,7 @@ def fixed_timed_chain(joints, *, hold_seconds=.35, velocity_limit=.30,
             parameter = 1 - clock if reverse else clock
             sign = -1 if reverse else 1
             records.append(dict(timeSeconds=start + fraction * duration, stage=stage,
+                                pathParameter=parameter,
                                 rawRadians=curve(parameter).tolist(),
                                 velocity=(sign * curve(parameter, 1) * clock_v / duration).tolist(),
                                 acceleration=((curve(parameter, 2) * clock_v**2 +
@@ -439,25 +482,90 @@ def fixed_timed_chain(joints, *, hold_seconds=.35, velocity_limit=.30,
                 samples=records)
 
 
-def geometry_audit(path, can, cup, *, rim_clearance=.025):
+def rotation_path_audit(poses, pivot, initial, anchor, can, cup, *,
+                        padding=None, angular_padding=None, expected_angles=None, target_angular_padding=None,
+                        pivot_tolerance=.005, landing_margin=.015):
+    """Audit FK along an interpolated path, not just the desired IK targets.
+
+    Padding is a conservative nearest-sample travel bound supplied by the
+    joint path reviewer. Zero padding checks only the supplied poses. This is
+    model-relative geometry; it cannot measure slip or camera/arm calibration.
+    """
+    positive(pivot_tolerance, .0001, .010, 'pivot drift tolerance')
+    positive(landing_margin, .010, .060, 'landing margin')
+    if landing_margin >= cup.inner_radius: raise PourPlanError('Cup opening is smaller than landing allowance')
+    source, anchor = rigid(initial), vector(anchor)
+    axis = vector(pivot.axis_in_object)
+    rim = vector(cup.rim_center)
+    poses = list(poses)
+    if not poses: raise PourPlanError('Rotation audit requires poses')
+    count = len(poses)
+    def bounds(values):
+        a = np.zeros(count) if values is None else np.asarray(values, float)
+        if a.shape != (count,) or not np.isfinite(a).all() or np.any(a < 0):
+            raise PourPlanError('Invalid interpolation coverage bounds')
+        return a
+    padding, angular_padding = bounds(padding), bounds(angular_padding)
+    target_angular_padding = bounds(target_angular_padding)
+    if expected_angles is not None:
+        expected_angles = vector(expected_angles, count)
+    errors, worst_pivot, worst_lip, worst_axis, worst_angle = [], 0., 0., 0., 0.
+    for i, (pose, radius, angle_radius) in enumerate(zip(poses, padding, angular_padding)):
+        pose = rigid(pose)
+        drift = float(np.linalg.norm(pivot.point(pose)-anchor)) + radius
+        lip = pose @ np.r_[can.spout, 1]
+        landing = float(np.linalg.norm(lip[:2]-rim[:2])) + radius
+        rotation = Rotation.from_matrix(source[:3,:3].T @ pose[:3,:3])
+        quaternion = rotation.as_quat()
+        perpendicular = quaternion[:3]-axis*float(quaternion[:3]@axis)
+        # Geodesic distance to the fixed-axis subgroup is 1-Lipschitz in
+        # orientation. Projected rotation-vector components are not, especially
+        # near inversion, and cannot justify an unsampled angular bound.
+        off_axis = 2*math.asin(float(np.clip(np.linalg.norm(perpendicular),0,1))) + angle_radius
+        angle_error = (0. if expected_angles is None else
+            float((Rotation.from_rotvec(axis*expected_angles[i]).inv()*rotation).magnitude())
+            + angle_radius + target_angular_padding[i])
+        worst_pivot, worst_lip = max(worst_pivot, drift), max(worst_lip, landing)
+        worst_axis, worst_angle = max(worst_axis, off_axis), max(worst_angle, angle_error)
+        failed = []
+        if drift > pivot_tolerance: failed.append('selected pivot drift')
+        if landing > cup.inner_radius-landing_margin: failed.append('opening outside protected aperture')
+        if off_axis > math.radians(2): failed.append('rotation leaves fixed axis')
+        if angle_error > math.radians(2): failed.append('rotation progress differs from planned angle')
+        if failed and len(errors) < 12: errors.append(dict(sample=i, reasons=failed))
+    return dict(valid=not errors, checkedSamples=count, errors=errors,
+        maximumPivotErrorBoundMeters=worst_pivot, pivotToleranceMeters=pivot_tolerance,
+        maximumOpeningRadiusBoundMeters=worst_lip, landingRadiusMeters=cup.inner_radius-landing_margin,
+        maximumOffAxisBoundDegrees=math.degrees(worst_axis), maximumAngleErrorBoundDegrees=math.degrees(worst_angle),
+        interpolationCoverageIncluded=bool(np.any(padding)), hardwareOutputEnabled=False,
+        physicalCalibrationVerified=False)
+
+
+def geometry_audit(path, can, cup, *, rim_clearance=.025, pivot=None, landing_margin=.015):
     """Independent geometry invariants, never proof of physical calibration."""
     rim = vector(cup.rim_center)
     source = path[0].world_can
     opening = source[:3, 0]
     tool_in_can = np.linalg.inv(source) @ path[0].world_tool
+    pivot = pivot or ObjectPivot(tuple(can.spout))
+    anchor = pivot.point(next(s.world_can for s in path if s.rotation_radians == 0))
     errors = []
     for index, step in enumerate(path):
         if not np.allclose(step.world_can @ tool_in_can, step.world_tool, atol=1e-8):
             errors.append([index, "Can moved relative to gripping tool"])
-        if step.stage.startswith("Tilt toward") or step.stage == "Controlled upright recovery":
+        if step.rotation_radians is not None:
             p = step.world_can @ np.r_[can.spout, 1]
-            if np.linalg.norm(p[:2] - rim[:2]) > 1e-8:
-                errors.append([index, "Opening leaves the cup center"])
+            if np.linalg.norm(pivot.point(step.world_can)-anchor) > 1e-8:
+                errors.append([index, "Selected rotation point leaves its fixed anchor"])
+            if np.linalg.norm(p[:2] - rim[:2]) > cup.inner_radius-landing_margin+1e-8:
+                errors.append([index, "Actual opening leaves protected cup aperture"])
             if cylinder_bottom(step.world_can, can) < rim[2] + rim_clearance - 1e-8:
                 errors.append([index, "Can enters protected cup-rim plane"])
             horizontal_axis = step.world_can[:3, 2].copy(); horizontal_axis[2] = 0
             if np.linalg.norm(horizontal_axis) > 1e-6 and horizontal_axis @ opening < 0:
                 errors.append([index, "Can tilts away from original opening direction"])
+        if step.reverse_of is not None and not np.allclose(step.world_can, path[step.reverse_of].world_can, atol=1e-10):
+            errors.append([index, "Return differs from outward object path"])
     return dict(valid=not errors, errors=errors, hardwareOutputEnabled=False,
                 worldAndRobotClearanceIncluded=False)
 
@@ -601,6 +709,53 @@ class PourWorkspace:
                                 supported=supported and cylinder_bottom(scene_can, self.can) >= self.table_z - .001)
             if not result['clear']: return dict(result, fraction=u)
         return result
+
+    def review_rotation(self, raw_path, baseline, can_in_tool, pivot, initial, anchor, angles,
+                        *, peak_speeds=None, sample_times=None, expected_angular_speed=None,
+                        stationary_intervals=()):
+        """Cover linear joint segments or the speed-bounded compiled curve."""
+        raw = np.asarray(raw_path, float)
+        if raw.ndim != 2 or raw.shape[1] != 7 or len(raw)<2 or not np.isfinite(raw).all():
+            raise PourPlanError('Invalid joint rotation path')
+        if np.max(abs(raw)) > self.robot.limit+1e-9:
+            raise PourPlanError('Rotation review exceeds raw joint limits')
+        angles = vector(angles, len(raw))
+        indices = self.robot.indices
+        levers = self.robot.engine.clearance.levers[self.robot.side+'_tool']
+        extent = max(np.linalg.norm((can_in_tool @ np.r_[p,1])[:3])
+                     for p in (pivot.point_in_object, self.can.spout))
+        radii = np.array([levers.get(i,0)+extent for i in indices])
+        poses, pads, angular_pads, target_pads, targets = [], [], [], [], []
+        inverse = np.linalg.inv(self.model_from_scene)
+        def add(value, pad, angle_pad, target_pad, angle):
+            q = baseline.copy();q[indices] = value-self.robot.priors[self.robot.side]
+            poses.append(inverse @ self.robot.frame(q) @ can_in_tool)
+            pads.append(pad);angular_pads.append(angle_pad);target_pads.append(target_pad);targets.append(angle)
+        if peak_speeds is not None:
+            speeds = vector(peak_speeds,7);times=vector(sample_times,len(raw))
+            if np.any(speeds<0) or np.any(np.diff(times)<0): raise PourPlanError('Invalid timed coverage')
+            if expected_angular_speed is None or not np.isfinite(expected_angular_speed) or expected_angular_speed<0:
+                raise PourPlanError('Timed rotation review needs the planned angle-speed bound')
+            holds=set(stationary_intervals)
+            if any(not isinstance(j,int) or not 0<=j<len(raw)-1 or
+                   not np.array_equal(raw[j],raw[j+1]) or angles[j]!=angles[j+1] for j in holds):
+                raise PourPlanError('A declared stationary interval changes pose or angle')
+            for i, value in enumerate(raw):
+                # Only the compiler's explicit hold is exempt. Equal endpoints
+                # alone do not prove a nonlinear curve was stationary between.
+                gaps = [times[j+1]-times[j] for j in (i-1,i) if 0<=j<len(raw)-1 and j not in holds]
+                half_dt=max(gaps,default=0)/2
+                add(value,float(speeds@radii)*half_dt,float(sum(speeds))*half_dt,
+                    expected_angular_speed*half_dt,angles[i])
+        else:
+            for a,b,aa,ab in zip(raw,raw[1:],angles,angles[1:]):
+                delta=abs(b-a);travel=float(delta@radii)
+                count=max(1,math.ceil(travel/.001))
+                if count>5000: raise PourPlanError('Rotation sweep budget exceeded')
+                for u in np.linspace(0,1,count+1):
+                    add(a+(b-a)*u,travel/(2*count),float(sum(delta))/(2*count),abs(ab-aa)/(2*count),aa+(ab-aa)*u)
+        return rotation_path_audit(poses,pivot,initial,anchor,self.can,self.cup,
+            padding=pads,angular_padding=angular_pads,expected_angles=targets,target_angular_padding=target_pads)
 
     def review_timed_curve(self, chain, baseline, can_in_tool):
         """Review the actual compiled curve, including interpolation overshoot.

@@ -10,10 +10,10 @@ import numpy as np
 
 DIRECTORY = Path(__file__).resolve().parent
 sys.path.insert(0, str(DIRECTORY))
-from can_pour import (CanGeometry, CupGeometry, GhostPourRobot, PourWorkspace,
+from can_pour import (CanGeometry, CupGeometry, GhostPourRobot, PourWorkspace, ObjectPivot,
                       PourPlanError, PourWaypoint, transform, rigid, vector,
                       upright_can, geometry_path, geometry_audit,
-                      fixed_timed_chain, glass_push_plan, convex_table_outline)
+                      fixed_timed_chain, glass_push_plan, convex_table_outline, positive)
 from table_planes import floor_anchored_scene
 
 
@@ -99,7 +99,18 @@ def plan(scene, status, advance=0., hold=.35):
         raise PourPlanError('Grasp center must remain in the middle half of the can')
     grasp_center[2] += grasp_offset
     grasp = transform(np.column_stack([up, np.cross(approach, up), approach]), grasp_center)
-    payload_path = geometry_path(can, cup, source, grasp)
+    rotation = scene.get('rotation', {})
+    if not isinstance(rotation, dict): raise PourPlanError('Rotation settings must be an object')
+    above = positive(float(rotation.get('pivotAboveOpeningMeters', 0.)), 0, .10, 'pivot above opening')
+    if 'pointInObject' in rotation and 'pivotAboveOpeningMeters' in rotation:
+        raise PourPlanError('Choose either an object point or an opening offset, not both')
+    pivot = ObjectPivot(tuple(rotation.get('pointInObject', can.spout+[0,0,above])),
+                        tuple(rotation.get('axisInObject', [0,1,0])))
+    explicit_tilt = rotation.get('tiltDegrees')
+    payload_path = geometry_path(can, cup, source, grasp, pivot=pivot, tilt_degrees=explicit_tilt)
+    rotation_start = next(s.world_can for s in payload_path if s.rotation_radians == 0)
+    pivot_anchor = pivot.point(rotation_start)
+    final_angle = max(s.rotation_radians or 0. for s in payload_path)
     pregrasp = grasp.copy(); pregrasp[:3, 3] -= approach * .08
     steps = [PourWaypoint('Approach open gripper 8 cm before can', source, pregrasp, False,
                           'Entry from current posture requires swept full-robot clearance')]
@@ -132,7 +143,8 @@ def plan(scene, status, advance=0., hold=.35):
             checkpoint='Geometric preview only; drive corridor, stopping distance and torso reference unverified'))
         previous=q
     previous_pour = None
-    raw_pour, pour_solved = [], True
+    raw_pour, raw_rotation, rotation_angles, solved_steps = [], [], [], []
+    pour_solved = True
     # Seed the pregrasp from a solved grasp rather than forcing a local IK
     # branch directly out of hanging. The connector is still reviewed from q0.
     raised=next(step.world_tool for step in steps if step.stage=='Raise only to computed cup clearance')
@@ -146,13 +158,24 @@ def plan(scene, status, advance=0., hold=.35):
             # wandering, which otherwise turns a smooth tilt into a jerky fit.
             continuation[robot.indices] += (seed - previous_pour)[robot.indices]
         old_seed = seed.copy()
-        q, ik = robot.solve(target, continuation)
+        if step.reverse_of is not None:
+            # Re-solving the same Cartesian target can choose a different
+            # redundant-joint branch. Recall the EXACT outward joint path.
+            q, ik, original_index = solved_steps[step.reverse_of+1]
+            q, ik = q.copy(), dict(ik, retracesReportIndex=original_index)
+        else:
+            q, ik = robot.solve(target, continuation)
+        solved_steps.append((q.copy(), dict(ik), len(reports)))
         report = dict(index=len(reports), stage=step.stage, phase='arm', attached=step.attached,
                       positions={name:float(q[j.position_start()]) for name,j in robot.engine.joints.items()},
                       checkpoint=step.checkpoint, ik=ik,
                       worldFromRobot=world_from_robot.tolist(),
                       desiredCanPose=(world_from_scene @ step.world_can).tolist(),
                       targetToolPose=target.tolist(), ghostFrames=robot.ghost_frames(q))
+        if step.rotation_radians is not None:
+            report['rotationRadians'] = step.rotation_radians
+            raw_rotation.append(ik['rawRadians']);rotation_angles.append(step.rotation_radians)
+            pour_solved = pour_solved and ik['solved']
         if ik['solved']:
             report['selfClearance'] = robot.review(seed, q)
             # Release is a stationary state change; payload remains at support.
@@ -170,13 +193,19 @@ def plan(scene, status, advance=0., hold=.35):
         reports.append(report)
     timed = None
     quick = None
+    rotation_audit = dict(valid=False, reason='Every rotation IK target must solve first')
     if pour_solved:
+        rotation_audit = workspace.review_rotation(raw_rotation, q0, can_in_tool, pivot,
+                                                   rotation_start, pivot_anchor, rotation_angles)
         try: timed = fixed_timed_chain(raw_pour, hold_seconds=hold)
         except PourPlanError as error: timed = dict(executable=False, error=str(error))
         # A prepared tilt below the ideal flow threshold shortens the active
         # pour/cutoff portion. It is not guaranteed dry with uncertain fill/lip.
-        onset = can.tilt_for_fraction(can.initial_fraction)
-        final = can.tilt_for_fraction(can.final_fraction)
+        # Explicit tilt is geometric, including >90 degrees. Do not pretend
+        # the static volume approximation can meter that motion or define a
+        # dry prepared pose for it.
+        onset = can.tilt_for_fraction(can.initial_fraction) if explicit_tilt is None else 0.
+        final = final_angle
         first = max(0, int((onset - np.deg2rad(10)) / final * (len(raw_pour)-1)))
         if len(raw_pour) - first >= 6:
             try:
@@ -188,6 +217,15 @@ def plan(scene, status, advance=0., hold=.35):
     for chain in (timed, quick):
         if chain and 'samples' in chain:
             chain['sweptReview'] = workspace.review_timed_curve(chain, q0, can_in_tool)
+            start_angle = np.deg2rad(chain.get('preparedTiltDegrees', 0.))
+            chain['rotationAudit'] = workspace.review_rotation(
+                [s['rawRadians'] for s in chain['samples']], q0, can_in_tool, pivot, rotation_start, pivot_anchor,
+                [start_angle+(final_angle-start_angle)*s['pathParameter'] for s in chain['samples']],
+                peak_speeds=chain['peakVelocityByJoint'], sample_times=[s['timeSeconds'] for s in chain['samples']],
+                expected_angular_speed=(final_angle-start_angle)*1.875/chain['tiltSeconds'],
+                stationary_intervals=[i for i,(a,b) in enumerate(zip(chain['samples'],chain['samples'][1:]))
+                                      if a['stage']=='tilt' and b['stage']=='return'])
+            chain['movingPathChecksPassed'] = bool(chain['sweptReview']['clear'] and chain['rotationAudit']['valid'])
     native_timed = []
     if quick and 'samples' in quick:
         for sample in quick['samples']:
@@ -204,10 +242,20 @@ def plan(scene, status, advance=0., hold=.35):
     failed = [r['stage'] for r in reports if not r['ik']['solved']]
     blocked = [r['stage'] for r in reports if r['ik']['solved'] and
                (not r['selfClearance']['clear'] or not r['worldClearance']['clear'])]
-    return dict(schemaVersion=1, hardwareOutputEnabled=False, executable=False,
+    liquid = (can.liquid_report() if explicit_tilt is None else
+              dict(metered=False, timedPour=False, explicitTiltDegrees=float(explicit_tilt),
+                   initialFractionOfCapacity=can.initial_fraction,
+                   note='Explicit geometry only; delivered volume and flow onset are not predicted beyond the static model.'))
+    return dict(schemaVersion=2, hardwareOutputEnabled=False, executable=False,
                 physicalArm='right', nominalBaseAdvanceMeters=advance,
                 baseline={name:float(initial[j.position_start()]) for name,j in robot.engine.joints.items()},
                 bodyPreparation=body_plan,
+                canInTool=can_in_tool.tolist(),
+                rotationPivot=dict(pointInObject=list(pivot.point_in_object), axisInObject=list(pivot.axis_in_object),
+                    anchorInScene=pivot_anchor.tolist(), axisInScene=(source[:3,:3]@vector(pivot.axis_in_object)).tolist(),
+                    initialCanPoseInScene=rotation_start.tolist(), tiltDegrees=float(np.rad2deg(final_angle)),
+                    angleSource='explicit geometry only' if explicit_tilt is not None else 'static liquid estimate',
+                    exactJointReturn=True, interpolationAudit=rotation_audit, physicalCalibrationVerified=False),
                 nativeTimedPreview=native_timed,
                 baseRouteChecked=False, sceneEvidence=scene.get('evidence', {}),
                 tableAlignment=table_alignment,
@@ -217,7 +265,7 @@ def plan(scene, status, advance=0., hold=.35):
                 modelID=robot.engine.reference['modelID'], modelReferenceID=robot.engine.reference['referenceID'],
                 modelSource='pinned ghost scan; simulation only; supplied saved status gives both arms and head targets',
                 baselineSelf=baseline_self, baselineWorld=baseline_world,
-                geometryAudit=geometry_audit(payload_path, can, cup), liquid=can.liquid_report(),
+                geometryAudit=geometry_audit(payload_path, can, cup, pivot=pivot), liquid=liquid,
                 failedIKStages=failed, blockedClearanceStages=blocked, fixedTimedPour=timed, preparedTimedPour=quick,
                 leftGlassPush=push, steps=reports,
                 blockers=['Camera-to-arm registration and body/torso posture remain unverified',
@@ -238,7 +286,7 @@ def main():
     try:
         report = plan(load(args.scene), load(args.status), args.base_advance, args.hold_seconds)
     except (PourPlanError, ValueError, KeyError) as error:
-        report = dict(schemaVersion=1, executable=False, hardwareOutputEnabled=False, error=str(error))
+        report = dict(schemaVersion=2, executable=False, hardwareOutputEnabled=False, error=str(error))
     report['inputHashes'] = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in (args.scene, args.status)}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, allow_nan=False, default=json_default) + '\n')
