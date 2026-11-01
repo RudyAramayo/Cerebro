@@ -1,0 +1,169 @@
+{
+  "date_local": "2026-10-31",
+  "outcome": "Physical preparation stopped after operator reported RIGHT J5 bent backwards; recovered to hanging and paused for Halloween",
+  "pour_completed": false,
+  "base_or_torso_travel_sent": false,
+  "right_retry_after_recovery_sent": false,
+  "right_j5_target_radians": 1.195716,
+  "left_j5_target_radians": -1.213675,
+  "operator_recovered_right": true,
+  "left_release_accepted": true,
+  "left_jaw_open_visually_verified": true,
+  "left_lowered_and_deactivated": true,
+  "final_arms": {
+    "left": {
+      "q_radians": [
+        -0.001090830782496456,
+        0.00681769239060285,
+        0,
+        -0.000136353847812057,
+        0,
+        0.000409061543436171,
+        0
+      ],
+      "modes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statuses": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "age_ms": 19.976831963592737
+    },
+    "right": {
+      "q_radians": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "modes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statuses": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "age_ms": 19.44211499009818
+    }
+  },
+  "final_torso_count": 92,
+  "torso_reference_set": false,
+  "motion_running": false,
+  "mission_active": false,
+  "movements": [
+    {
+      "stage": "Gesture \u00b7 Lift outward, wrists held",
+      "nominal_seconds": 4.0,
+      "observed_window_seconds": 5.106000732421875,
+      "targets": {
+        "arm.left.j1": -0.5,
+        "arm.left.j2": 0.62,
+        "arm.left.j4": 0.15,
+        "arm.right.j1": 0.5,
+        "arm.right.j2": -0.62,
+        "arm.right.j4": -0.15
+      },
+      "measured_complete": true
+    },
+    {
+      "stage": "Gesture \u00b7 Lift above treads, wrists held",
+      "nominal_seconds": 6.0,
+      "observed_window_seconds": 6.94089111328125,
+      "targets": {
+        "arm.left.j1": -0.5,
+        "arm.left.j2": 1.95,
+        "arm.left.j4": 1.2,
+        "arm.right.j1": 0.5,
+        "arm.right.j2": -1.95,
+        "arm.right.j4": -1.2
+      },
+      "measured_complete": true
+    },
+    {
+      "stage": "Gesture \u00b7 Orient raised grippers",
+      "nominal_seconds": 7.0,
+      "observed_window_seconds": 8.134680908203125,
+      "targets": {
+        "arm.left.j1": -0.5,
+        "arm.left.j2": 1.95,
+        "arm.left.j4": 1.2,
+        "arm.left.j5": -1.213675,
+        "arm.left.j6": -1.47459,
+        "arm.left.j7": 0.064455,
+        "arm.right.j1": 0.5,
+        "arm.right.j2": -1.95,
+        "arm.right.j4": -1.2,
+        "arm.right.j5": 1.195716,
+        "arm.right.j6": 1.488664,
+        "arm.right.j7": -0.099177
+      },
+      "measured_complete": true
+    },
+    {
+      "stage": "Restore left hanging wrist orientation while raised",
+      "nominal_seconds": 7.0,
+      "observed_window_seconds": 8.008516845703125,
+      "targets": {
+        "arm.left.j3": 0,
+        "arm.left.j5": 0.014589861715890098,
+        "arm.left.j6": -0.005045092369046109,
+        "arm.left.j7": 0
+      },
+      "measured_complete": true
+    },
+    {
+      "stage": "Lower left outward with wrist held",
+      "nominal_seconds": 6.0,
+      "observed_window_seconds": 6.896318115234375,
+      "targets": {
+        "arm.left.j1": -0.5,
+        "arm.left.j2": 0.62,
+        "arm.left.j4": 0.15
+      },
+      "measured_complete": true
+    },
+    {
+      "stage": "Return left to hanging",
+      "nominal_seconds": 4.0,
+      "observed_window_seconds": 4.827926025390625,
+      "targets": {
+        "arm.left.j1": 0,
+        "arm.left.j2": 0,
+        "arm.left.j3": 0,
+        "arm.left.j4": 0,
+        "arm.left.j5": 0,
+        "arm.left.j6": 0,
+        "arm.left.j7": 0
+      },
+      "measured_complete": true
+    }
+  ],
+  "lesson": "Native arrival and model-only collision checks did not establish correct physical RIGHT J5 posture. Do not replay the failed wrist pose or infer a global joint-sign change. Fresh startup hanging is the user-provided default, not a new encoder calibration.",
+  "pause_requested_by_user": true
+}
