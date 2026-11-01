@@ -42,6 +42,12 @@ with tempfile.TemporaryDirectory(prefix="rob-surface-render-", dir="/private/tmp
                     "-framework", "AppKit", "-framework", "SceneKit", "-framework", "CoreVideo", "-framework", "CoreImage", "-framework", "Vision",
                     "-o", str(photo)], check=True)
     subprocess.run([str(photo), str(render_path.with_name(render_path.stem + "-qr.png"))], check=True)
+    stitch = temporary / "stitch"
+    subprocess.run(["xcrun", "clang", "-fobjc-arc", "-O2", "-Wall", "-Wextra", "-Werror", "-I", str(root / "Cerebro"),
+                    str(root / "Tests/ROBAccumulatedSurfaceStitchFixture.m"),
+                    "-framework", "AppKit", "-framework", "SceneKit", "-framework", "CoreVideo", "-framework", "CoreImage", "-framework", "Vision",
+                    "-o", str(stitch)], check=True)
+    subprocess.run([str(stitch), str(render_path.with_name(render_path.stem + "-multiview.png"))], check=True)
 image = render_path.read_bytes()
 assert image[:8] == b"\x89PNG\r\n\x1a\n", "The production renderer must produce a PNG artifact"
 assert struct.unpack(">II", image[16:24]) == (1100, 800), "Unexpected production render dimensions"

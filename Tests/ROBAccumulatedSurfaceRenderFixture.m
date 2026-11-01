@@ -43,8 +43,14 @@
 @end
 @interface FixtureGhostGestureEditor : NSObject
 @property(copy) NSString *depthProjectionIdentity;
+@property(copy) NSArray *headCandidates,*bellyCandidates;
+- (void)clearSurfaceGhostCandidates:(BOOL)belly;
+- (void)publishSurfaceGhostCandidates:(NSArray *)values capturedUptime:(double)time belly:(BOOL)belly;
 @end
-@implementation FixtureGhostGestureEditor @end
+@implementation FixtureGhostGestureEditor
+- (void)clearSurfaceGhostCandidates:(BOOL)belly {if (belly) self.bellyCandidates=nil;else self.headCandidates=nil;}
+- (void)publishSurfaceGhostCandidates:(NSArray *)values capturedUptime:(double)time belly:(BOOL)belly { (void)time;if (belly) self.bellyCandidates=values;else self.headCandidates=values; }
+@end
 @interface ROBFixedHeadBodyMotionIdentity : NSObject
 + (NSString *)currentIdentity;
 + (void)setFixtureIdentity:(NSString *)identity;
@@ -90,14 +96,16 @@ static SCNNode *rebuildHead(Harness *h, NSData *samples, ROBDepthCloudFrame *fra
     frame.sequence++;offer(h,samples,frame,view);
     frame.sequence++;offer(h,samples,frame,view);
     SCNNode *map=h.headSurfaceNode.childNodes.firstObject;
-    assert(map.childNodes.count>=4 && h.headUsesSurfaces);
+    assert(map.childNodes.count>=4 && h.headUsesSurfaces && h.ghostGestureEditor.headCandidates);
     return map;
 }
 static void assertEmptyHistory(Harness *h) {
+    assert(!h.ghostGestureEditor.headCandidates && !h.ghostGestureEditor.bellyCandidates);
     assert(!h.headSurfaceNode.childNodes.count && !h.bellySurfaceNode.childNodes.count);
     assert(!h.headSurfaceAccumulator && !h.bellySurfaceAccumulator && !h.headUsesSurfaces && !h.bellyUsesSurfaces);
 }
 static void assertEmptyHeadHistory(Harness *h) {
+    assert(!h.ghostGestureEditor.headCandidates);
     assert(!h.headSurfaceNode.childNodes.count && !h.headSurfaceAccumulator && !h.headUsesSurfaces);
 }
 static ROBDepthCloudFrame *copyFrame(ROBDepthCloudFrame *frame) {

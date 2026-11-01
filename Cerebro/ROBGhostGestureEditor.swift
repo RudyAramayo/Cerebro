@@ -49,6 +49,11 @@ import simd
     private var collisionMapRenderKey: String?
     private let canInfo = NSTextField(wrappingLabelWithString: "Can target: not measured")
     private let canArm = NSPopUpButton()
+    private let surfaceTargetInfo = NSTextField(wrappingLabelWithString:"Stationary surface targets: waiting for accumulation")
+    @nonobjc private var surfaceTargets:[Bool:[ROBSurfaceGhostTarget]]=[:]
+    @nonobjc private var surfacePreviewSteps:[ROBCanGrabPreview.Step]=[]
+    private var surfacePreviewKey:String?
+    @nonobjc private var surfacePreviewPoint:SIMD3<Double>?
     private var liveBaseline = false
     private var tabletopEditing = false
     private var ownsPendingRequest = false
@@ -546,6 +551,7 @@ import simd
         currentPlot.heightAnchor.constraint(equalToConstant: 75).isActive = true
         let stack = NSStackView(views: [title, help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, angleText, xyzLabels, targets, nudgeRow,
             row([canArm, button("Scan front table + ghost grab", #selector(findAndPreviewCan))]), canInfo,
+            button("Preview stationary surface target", #selector(previewStationarySurfaceCan)), surfaceTargetInfo,
             collisionControls, inspectCollision, collisionInfo,
             button("Teach can → bucket task", #selector(newTabletopTask)), posesRow, poseCount, preview, timeline, identity, executeButton,
             row([stop, button("Review stopped return", #selector(recover))]),
@@ -561,13 +567,108 @@ import simd
             scroll.bottomAnchor.constraint(equalTo: panelView.bottomAnchor), document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
             stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 14), stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -14),
             stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -16)])
-        for value in [help, referenceInfo, headInfo, canInfo, collisionInfo, continueButton, presets, name, joints, angle, timeline, identity, executeButton, currentPlot, currentHelp, status] {
+        for value in [help, referenceInfo, headInfo, canInfo, surfaceTargetInfo, collisionInfo, continueButton, presets, name, joints, angle, timeline, identity, executeButton, currentPlot, currentHelp, status] {
             value.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         status.isSelectable = true; identity.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         status.font = .systemFont(ofSize: 11)
         canInfo.identifier = NSUserInterfaceItemIdentifier("ghost-can-target")
         canInfo.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+    }
+
+    /// Called only after the cloud worker's stream/body/projection checks.
+    /// The explicit camera pose is still provisional; legacy floor-only maps
+    /// cannot supply a model-space target through this route.
+    func publishSurfaceGhostCandidates(_ values: [NSDictionary], capturedUptime: Double, belly: Bool) {
+        guard depthCloudUsesExplicitCameraPose(belly) else {clearSurfaceGhostCandidates(belly);return}
+        surfaceTargets[belly]=values.prefix(4).compactMap {
+            ROBSurfaceGhostTarget(value:$0,capturedUptime:capturedUptime,sceneFromModel:roomBaseToSceneTransform(),
+                scale:Double(ROBScanVisualModel.presentationScale),projectionIdentity:depthProjectionIdentity,
+                bodyIdentity:ROBFixedHeadBodyMotionIdentity.currentIdentity)
+        }
+        refreshSurfaceTargetInfo()
+    }
+    func clearSurfaceGhostCandidates(_ belly: Bool) {
+        surfaceTargets.removeValue(forKey:belly)
+        refreshSurfaceTargetInfo()
+    }
+    @nonobjc private func currentSurfaceTargets()->[(String,ROBSurfaceGhostTarget)] {
+        let now=ProcessInfo.processInfo.systemUptime
+        return surfaceTargets.flatMap { camera,values in values.filter {
+            $0.isCurrent(now:now,projectionIdentity:depthProjectionIdentity,bodyIdentity:ROBFixedHeadBodyMotionIdentity.currentIdentity)
+        }.map {("\(camera ? "belly":"head")-\($0.trackID)",$0)} }
+    }
+    private func refreshSurfaceTargetInfo() {
+        let current=currentSurfaceTargets()
+        surfaceTargetInfo.stringValue="Stationary surface targets: \(current.count) · preview only"
+        if let key=surfacePreviewKey,let point=surfacePreviewPoint,
+           !current.contains(where:{$0.0==key && simd_distance($0.1.point,point)<=0.008}) {
+            invalidateReview();resetGhostToCurrentPose()
+            status.stringValue="The surface target lost fresh stationary evidence. Observe it again before recalculating the ghost path."
+        }
+    }
+    @objc private func previewStationarySurfaceCan() {
+        guard !ROBLeftArmTrial.shared.isRunning,!ROBArmRoutineCoordinator.shared.isRunning,
+              !ROBControllerArmApproval.shared.isPending,let directory=model?.directory else {return}
+        let side=canArm.indexOfSelectedItem==1 ? "right":"left"
+        do {
+            let selected=try ROBGhostRobotModel(directory:directory,physicalSide:side)
+            invalidateReview();model=selected;resetGhostToCurrentPose();clearCanVisuals();displayedCan=nil
+            let baseline=freshBaseline().map {selected.positions(vendorLeft:$0.q)} ?? selected.reference
+            let ik=try ROBCanHorizontalIK(model:selected,baseline:baseline,side:side)
+            let origin=ik.tip(baseline)
+            guard let candidate=currentSurfaceTargets().min(by:{simd_distance($0.1.point,origin)<simd_distance($1.1.point,origin)}) else {
+                status.stringValue="Accumulate a stationary can with an explicit camera pose for at least one second. Partial views and moving targets do not qualify."
+                return
+            }
+            let target=candidate.1.point
+            let approach=ik.closest(target+SIMD3(0,0,0.10),baseline)
+            let reach=ik.closest(target,approach)
+            let error=simd_distance(ik.tip(reach),target)
+            surfacePreviewSteps=[.init(pose:baseline,seconds:0.5,stage:"Current model pose")]
+            var previous=baseline
+            for (pose,stage) in [(approach,"Above stationary surface target"),(reach,"Closest model reach to surface target")] {
+                let angle=ik.chain.map {abs(pose[$0.name,default:0]-previous[$0.name,default:0])}.max() ?? 0
+                surfacePreviewSteps.append(.init(pose:pose,seconds:max(0.8,angle/0.6),stage:stage));previous=pose
+            }
+            surfacePreviewKey=candidate.0;surfacePreviewPoint=target;poses=[];tabletopEditing=false;liveBaseline=false
+            name.stringValue="Stationary surface target · ghost only";presets.selectItem(at:2)
+            let material=SCNMaterial();material.diffuse.contents=NSColor.systemCyan;material.lightingModel = .constant
+            let marker=SCNNode(geometry:SCNSphere(radius:0.015));marker.geometry?.materials=[material]
+            marker.simdPosition=SIMD3<Float>(target);marker.name="Provisional stationary surface target";canOverlay.addChildNode(marker)
+            var points:[SCNVector3]=[];previous=baseline
+            for step in surfacePreviewSteps {
+                for sample in 0...12 {
+                    var pose=previous;let f=Double(sample)/12
+                    for (joint,q) in step.pose {pose[joint]=previous[joint,default:0]+(q-previous[joint,default:0])*f}
+                    let p=ik.tip(pose);points.append(SCNVector3(p.x,p.y,p.z))
+                }
+                previous=step.pose
+            }
+            let indices=(0..<(points.count-1)).flatMap{[UInt32($0),UInt32($0+1)]}
+            let path=SCNGeometry(sources:[SCNGeometrySource(vertices:points)],elements:[SCNGeometryElement(indices:indices,primitiveType:.line)])
+            path.materials=[material];let pathNode=SCNNode(geometry:path)
+            pathNode.name="Stationary surface ghost trajectory";pathNode.isHidden=collisionPathVisible.state != .on
+            canMotionOverlay.addChildNode(pathNode)
+            timeline.minValue=0;timeline.maxValue=surfacePreviewSteps.reduce(0){$0+$1.seconds};timeline.doubleValue=0
+            identity.stringValue="Stationary surface \(candidate.0) · visual IK only\nArm reach only; base/torso preparation and clearance unverified"
+            poseCount.stringValue=String(format:"3 ghost stages · endpoint error %.1f mm · wrist tilt %.1f°",error*1000,ik.tiltDegrees(reach))
+            executeButton.isEnabled=false;renderTime(0);play()
+        } catch {status.stringValue=error.localizedDescription}
+    }
+    private func renderSurfaceTime(_ time:Double) {
+        guard let first=surfacePreviewSteps.first else {return}
+        var previous=first.pose,elapsed=0.0
+        for step in surfacePreviewSteps {
+            if time<=elapsed+step.seconds {
+                let f=max(0,min(1,(time-elapsed)/step.seconds));var pose=previous
+                for (joint,q) in step.pose {pose[joint]=previous[joint,default:0]+(q-previous[joint,default:0])*f}
+                updateGhost(pose,updateFields:false)
+                status.stringValue=step.stage+" · ghost only · clearance unverified";return
+            }
+            previous=step.pose;elapsed+=step.seconds
+        }
+        updateGhost(previous,updateFields:false)
     }
 
     @objc private func findAndPreviewCan() {
@@ -707,6 +808,7 @@ import simd
         collisionMapOverlay.isHidden = collisionMapVisible.state != .on
         collisionPathOverlay.isHidden = collisionPathVisible.state != .on
         canMotionOverlay.childNode(withName: "Can grab ghost trajectory", recursively: false)?.isHidden = collisionPathVisible.state != .on
+        canMotionOverlay.childNode(withName: "Stationary surface ghost trajectory", recursively: false)?.isHidden = collisionPathVisible.state != .on
         refreshCollisionScene(force: true)
     }
 
@@ -1029,6 +1131,7 @@ import simd
         executeButton.isEnabled=false
     }
     private func invalidateReview() {
+        surfacePreviewSteps=[];surfacePreviewKey=nil;surfacePreviewPoint=nil
         pourPreview=nil
         playButton.title="Play ×4"
         canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil; collisionPreview = nil
@@ -1129,6 +1232,7 @@ import simd
             : "Five positions taught. Review approach, grip, lift, bucket release and retreat; Save gesture makes this the saved tabletop task."
     }
     @objc private func saveGesture() {
+        guard surfacePreviewSteps.isEmpty else {status.stringValue="Surface target previews cannot be saved as executable gestures.";return}
         guard !name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard let model else { return }
         let value = ROBGhostGesture(name: String(name.stringValue.prefix(100)), poses: poses.isEmpty ? [ghost] : poses,
@@ -1147,6 +1251,7 @@ import simd
         reloadPresets(); presets.selectItem(at: saved.count + 2); review()
     }
     @objc private func review() {
+        if !surfacePreviewSteps.isEmpty {renderSurfaceTime(timeline.doubleValue);return}
         if let pourPreview {renderPourTime(timeline.doubleValue,preview:pourPreview);return}
         guard !ROBLeftArmTrial.shared.isRunning, let model else { return }
         invalidateReview()
@@ -1180,6 +1285,7 @@ import simd
         renderTime(0)
     }
     @objc private func executeReviewed() {
+        guard surfacePreviewSteps.isEmpty else {status.stringValue="Surface target previews never authorize motor output.";return}
         guard pourPreview == nil else {status.stringValue="Saved pour tests never authorize motor output.";return}
         if let preview=canPreview,preview.side=="right",preview.reachesCan {
             guard !ROBLeftArmTrial.shared.isRunning else{return}
@@ -1216,7 +1322,7 @@ import simd
         status.stringValue = "Stop + hold requested. A stopped custom path needs a newly reviewed return."
     }
     @objc private func play() {
-        guard pourPreview != nil || canPreview != nil || collisionPreview != nil || proposal != nil || !record.isEmpty else { return }
+        guard !surfacePreviewSteps.isEmpty || pourPreview != nil || canPreview != nil || collisionPreview != nil || proposal != nil || !record.isEmpty else { return }
         if timeline.doubleValue >= timeline.maxValue - 0.001 { timeline.doubleValue = 0 }
         playing = true; animationStarted = ProcessInfo.processInfo.systemUptime - timeline.doubleValue / playbackRate
     }
@@ -1224,6 +1330,7 @@ import simd
     private func renderTime(_ time: Double) {
         guard let model else { return }
         clock.stringValue = String(format: "%.1f s", time)
+        if !surfacePreviewSteps.isEmpty {renderSurfaceTime(time);return}
         if let pourPreview {renderPourTime(time,preview:pourPreview);return}
         if let collisionPreview { renderCollisionTime(time, proposal: collisionPreview); return }
         if let canPreview { renderCanTime(time, preview: canPreview); return }
@@ -1380,7 +1487,7 @@ import simd
             SIMD4<Float>(presentation.columns.2),SIMD4<Float>(presentation.columns.3)))
         if robotPresentationRoot.simdTransform != meshOffset {robotPresentationRoot.simdTransform=meshOffset}
         if pourPreview == nil, now - lastCanInfoUpdate >= 1 {
-            lastCanInfoUpdate = now; refreshCanInfo(); refreshCollisionScene(force: false)
+            lastCanInfoUpdate = now; refreshCanInfo(); refreshSurfaceTargetInfo(); refreshCollisionScene(force: false)
         }
         if pourPreview == nil, !replayingRecording, now - lastOriginalUpdate > 0.2 {
             lastOriginalUpdate = now

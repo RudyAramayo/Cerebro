@@ -2,6 +2,7 @@
 #define ROBAccumulatedSurfaceMap_h
 
 #include "ROBDepthFloorRectification.h"
+#include "ROBSurfaceStationarity.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -52,6 +53,7 @@ typedef struct {
     double observedAgeSeconds;
     uint32_t trackID;
     size_t support;
+    ROBSurfaceStationaryEvidence stationary;
 } ROBSurfaceCylinder;
 typedef struct {
     bool valid;
@@ -66,6 +68,7 @@ typedef struct {
     ROBSurfaceCylinder cylinder;
     double lastSeen;
     unsigned contradictions;
+    ROBSurfaceStationarity stationarity;
 } ROBSurfaceCylinderTrack;
 typedef struct {
     ROBSurfaceVoxel *slots;
@@ -78,6 +81,7 @@ typedef struct {
     uint32_t nextTrackID;
     uint32_t touched[ROBSurfaceMaximumInput];
     size_t count, tombstones;
+    size_t lastCylinderInputCount;
     uint64_t frame;
     double lastCapture;
     bool full;
@@ -482,9 +486,11 @@ static inline void ROBSurfaceUpdateCylinders(ROBSurfaceMap *m, ROBSurfaceMesh *m
     uint8_t *visited=calloc(2*ROBSurfaceMaximumInput,1);
     if (!fine || !visited) {free(fine);free(visited);return;}
     for (int frame=0;frame<2;frame++) if (m->lastCapture-m->recentTimes[frame]<=2) {
-        memcpy(fine+count,m->recentSamples+frame*ROBSurfaceMaximumInput,m->recentCounts[frame]*sizeof(*fine));
-        count+=m->recentCounts[frame];
+        const ROBSurfaceSample *raw=m->recentSamples+frame*ROBSurfaceMaximumInput;
+        for (size_t j=0;j<m->recentCounts[frame];j++) if (ROBSurfacePointValid(raw[j].point) && ROBSurfaceCanAppearance(raw[j].rgba))
+            fine[count++]=raw[j];
     }
+    m->lastCylinderInputCount=count;
     unsigned attempts=0;bool updated[4]={0};
     for (size_t plane=0;plane<mesh->planeCount && attempts<16;plane++) {
         ROBSurfacePlane *p=&mesh->planes[plane];if (p->normal.y<.7) continue;
@@ -528,7 +534,25 @@ static inline void ROBSurfaceUpdateCylinders(ROBSurfaceMap *m, ROBSurfaceMesh *m
             if (t->cylinder.valid && m->lastCapture-t->lastSeen<=3) {
                 c.center=ROBSurfaceAdd(ROBDepthFloorScale(t->cylinder.center,.8),ROBDepthFloorScale(c.center,.2));
                 c.trackID=t->cylinder.trackID;
-            } else c.trackID=++m->nextTrackID;
+            } else {c.trackID=++m->nextTrackID;t->stationarity=(ROBSurfaceStationarity){0};}
+            // The merged two-frame fit and partial-side support are useful for
+            // display continuity, but are not independent position evidence.
+            size_t measuredCount=0,measuredSeen=0;uint32_t measuredRandom=0x841db2u;
+            for (size_t j=0;j<currentCount;j++) if (ROBSurfacePointValid(current[j].point) && ROBSurfaceCanAppearance(current[j].rgba)) {
+                ROBSurfacePoint world=current[j].point;
+                double h=ROBDepthFloorDot(p->normal,world)+p->offset;
+                double x=ROBDepthFloorDot(p->u,world),z=ROBDepthFloorDot(p->v,world);
+                if (h<.016 || h>.145 || hypot(x-su,z-sv)>.09) continue;
+                ROBSurfaceSample sample={{x,h,z},current[j].rgba};measuredSeen++;
+                if (measuredCount<1024) local[measuredCount++]=sample;
+                else {size_t slot=ROBSurfaceRandom(&measuredRandom)%measuredSeen;if (slot<1024) local[slot]=sample;}
+            }
+            ROBSurfaceCylinder measured=ROBSurfaceFitCylinder(local,measuredCount,0,.033,.115);
+            if (measured.valid) {
+                ROBSurfacePoint center=ROBSurfaceAdd(ROBDepthFloorScale(p->normal,measured.center.y-p->offset),
+                    ROBSurfaceAdd(ROBDepthFloorScale(p->u,measured.center.x),ROBDepthFloorScale(p->v,measured.center.z)));
+                ROBSurfaceStationarityObserve(&t->stationarity,center,m->lastCapture);
+            }
             t->cylinder=c;t->lastSeen=m->lastCapture;t->contradictions=0;updated[match]=true;
         }
     }
@@ -537,7 +561,10 @@ static inline void ROBSurfaceUpdateCylinders(ROBSurfaceMap *m, ROBSurfaceMesh *m
         if (!updated[i] && ROBSurfaceCylinderEvidence(t->cylinder,current,currentCount)>=6) t->lastSeen=m->lastCapture;
         double age=m->lastCapture-t->lastSeen;
         if (age>3 || t->contradictions>=2) {t->cylinder.valid=false;continue;}
-        t->cylinder.observedAgeSeconds=age;mesh->cylinders[mesh->cylinderCount++]=t->cylinder;
+        t->cylinder.observedAgeSeconds=age;
+        t->cylinder.stationary=ROBSurfaceStationarityEvaluate(&t->stationarity,m->lastCapture);
+        if (t->contradictions || t->cylinder.stationary.lastMeasuredAt!=m->lastCapture) t->cylinder.stationary.ready=false;
+        mesh->cylinders[mesh->cylinderCount++]=t->cylinder;
     }
     free(fine);free(visited);
 }

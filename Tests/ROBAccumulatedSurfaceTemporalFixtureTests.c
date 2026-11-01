@@ -19,7 +19,40 @@ static size_t scene(ROBSurfaceSample *samples,int frame,int canMode) {
     }
     return n;
 }
+static void checkMeasuredStationarity(void) {
+    ROBSurfaceSample samples[6000];size_t candidates=0,all=0;
+    for (int moving=0;moving<3;moving++) {
+        ROBSurfaceMap *map=ROBSurfaceMapCreate();
+        for (int frame=1;frame<=22;frame++) {
+            int mode=frame>18 ? 2:1;size_t n=scene(samples,frame,mode);
+            if (moving==2) {
+                size_t original=n;
+                for(size_t i=0;i<original;i++) if(ROBSurfaceCanAppearance(samples[i].rgba))
+                    for(int copy=0;copy<7;copy++) samples[n++]=samples[i];
+                assert(n<6000);
+            }
+            if (moving==1) for(size_t i=0;i<n;i++) if(ROBSurfaceCanAppearance(samples[i].rgba)) samples[i].point.x+=frame*.2*.012;
+            assert(ROBSurfaceMapIntegrate(map,samples,n,frame*.2,NULL,true));
+            ROBSurfaceMesh *mesh=ROBSurfaceMapBuildMesh(map);assert(mesh);
+            if(frame>=2) {
+                assert(mesh->cylinderCount==1);
+                ROBSurfaceStationaryEvidence e=mesh->cylinders[0].stationary;
+                if (moving!=1 && frame>=8 && frame<=18) assert(e.ready && e.observations>=5);
+                if (moving==1 || mode==2) assert(!e.ready);
+                // Rebuilding one captured frame cannot add confirmation votes.
+                ROBSurfaceMesh *again=ROBSurfaceMapBuildMesh(map);
+                assert(again->cylinders[0].stationary.observations==e.observations);ROBSurfaceMeshDestroy(again);
+                if(frame==18 && moving==0) {candidates=map->lastCylinderInputCount;all=map->recentCounts[0]+map->recentCounts[1];}
+            }
+            ROBSurfaceMeshDestroy(mesh);
+        }
+        ROBSurfaceMapDestroy(map);
+    }
+    assert(candidates<all/5);
+    printf("Measured can stationarity passed: stable and dense sampling accepted, 12mm/s motion and partial-only fits rejected, duplicate builds ignored; candidate search %zu/%zu raw points.\n",candidates,all);
+}
 int main(void) {
+    checkMeasuredStationarity();
     ROBSurfaceMap *map=ROBSurfaceMapCreate();assert(map);ROBSurfaceSample samples[6000];
     uint32_t planeID=0,canID=0;ROBSurfacePoint normal={0},u={0},v={0};double offset=0,maxDrift=0;
     size_t trackedFrames=0;

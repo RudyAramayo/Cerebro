@@ -12,8 +12,25 @@ static bool decodes(CGImageRef image) {
     return false;
 }
 static uint64_t hashImage(CGImageRef image) {
-    CFDataRef data=CGDataProviderCopyData(CGImageGetDataProvider(image));const uint8_t *bytes=CFDataGetBytePtr(data);
-    uint64_t hash=1469598103934665603ull;for (CFIndex i=0;i<CFDataGetLength(data);i++) {hash^=bytes[i];hash*=1099511628211ull;}CFRelease(data);return hash;
+    // The locked QR must not change. Unphotographed border fallback is allowed
+    // to refresh as measured voxel colours improve.
+    VNDetectBarcodesRequest *request=[VNDetectBarcodesRequest new];request.symbologies=@[VNBarcodeSymbologyQR];
+    VNImageRequestHandler *handler=[[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
+    assert([handler performRequests:@[request] error:NULL]);
+    VNBarcodeObservation *code=request.results.firstObject;assert(code);
+    static CGRect region={0};
+    if (CGRectIsEmpty(region)) {
+        CGRect b=code.boundingBox;
+        region=CGRectIntegral(CGRectMake(b.origin.x*CGImageGetWidth(image),(1-CGRectGetMaxY(b))*CGImageGetHeight(image),
+            b.size.width*CGImageGetWidth(image),b.size.height*CGImageGetHeight(image)));
+    }
+    NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithCGImage:image];
+    uint64_t hash=1469598103934665603ull;
+    for (NSInteger y=CGRectGetMinY(region);y<CGRectGetMaxY(region);y++) for (NSInteger x=CGRectGetMinX(region);x<CGRectGetMaxX(region);x++) {
+        NSUInteger pixel[4]={0};[bitmap getPixel:pixel atX:x y:y];
+        for(int c=0;c<4;c++) {hash^=pixel[c];hash*=1099511628211ull;}
+    }
+    return hash;
 }
 static CGPoint qrCenter(CGImageRef image) {
     VNDetectBarcodesRequest *request=[VNDetectBarcodesRequest new];request.symbologies=@[VNBarcodeSymbologyQR];
@@ -143,5 +160,5 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     CVPixelBufferRelease(rgb);
     checkMissingPhotoCoverage();
     checkObliqueCoverage();
-    printf("Photographic surface passed: %zu consecutive QR decodes, source/render alignment, same plane identity, bit-identical keyframe despite exposure changes, measured colour without RGB, depth-hole fallback/refill and noisy oblique-plane coverage; no camera/actuator IO.\n",decoded);
+    printf("Photographic surface passed: %zu consecutive QR decodes, source/render alignment, same plane identity, bit-identical QR keyframe despite exposure changes, measured colour without RGB, depth-hole fallback/refill and noisy oblique-plane coverage; no camera/actuator IO.\n",decoded);
 } }

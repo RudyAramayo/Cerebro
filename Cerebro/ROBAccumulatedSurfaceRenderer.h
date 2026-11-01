@@ -9,6 +9,7 @@
 @property uint32_t surfaceTrackID;
 @property uint32_t cylinderTrackID;
 @property double observationAge;
+@property(nonatomic, copy) NSArray<NSDictionary *> *stationaryCanCandidates;
 @end
 
 /* All vertices remain in physical submap metres. The caller applies exactly
@@ -90,7 +91,8 @@ static inline SCNGeometry *ROBSurfaceResidualGeometry(const ROBSurfaceMesh *mesh
     SCNMaterial *material=[SCNMaterial material];material.lightingModelName=SCNLightingModelConstant;geometry.firstMaterial=material;return geometry;
 }
 static inline SCNNode *ROBSurfaceMeshNode(const ROBSurfaceMesh *mesh) {
-    SCNNode *root=[SCNNode node];root.name=@"Accumulated observed surfaces · provisional display submap";
+    ROBSurfaceTrackedNode *root=[ROBSurfaceTrackedNode new];root.name=@"Accumulated observed surfaces · provisional display submap";
+    NSMutableArray *targets=[NSMutableArray array];
     for (size_t i=0;i<mesh->planeCount;i++) {
         SCNGeometry *geometry=ROBSurfacePlaneGeometry(&mesh->planes[i]);if (!geometry) continue;
         ROBSurfaceTrackedNode *node=[ROBSurfaceTrackedNode new];node.geometry=geometry;
@@ -110,8 +112,16 @@ static inline SCNNode *ROBSurfaceMeshNode(const ROBSurfaceMesh *mesh) {
         if (length>1e-8) node.rotation=SCNVector4Make(c.axis.z/length,0,-c.axis.x/length,acos(fmin(1,fmax(-1,c.axis.y))));
         node.name=c.observedAgeSeconds>0 ? @"Tracked inferred can · brief observation gap" : @"Inferred can-sized cylinder · unseen surface is a prior";
         node.cylinderTrackID=c.trackID;node.observationAge=c.observedAgeSeconds;
+        if (c.stationary.ready) {
+            node.name=@"Stationary inferred can · ghost target only";
+            ROBSurfaceStationaryEvidence e=c.stationary;
+            [targets addObject:@{@"track_id":@(c.trackID),@"center":@[@(e.center.x),@(e.center.y),@(e.center.z)],
+                @"observations":@(e.observations),@"span_seconds":@(e.spanSeconds),
+                @"max_deviation_m":@(e.maxDeviationMeters),@"speed_m_s":@(e.speedMetersPerSecond)}];
+        }
         [root addChildNode:node];
     }
+    root.stationaryCanCandidates=targets;
     return root;
 }
 

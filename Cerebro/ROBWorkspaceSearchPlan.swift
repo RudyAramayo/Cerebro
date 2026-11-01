@@ -565,6 +565,43 @@ struct ROBWorkspaceCanSections: Codable {
     }
 }
 
+/// A stationary display-surface target for visual IK only. It never becomes a
+/// located-object observation, collision return or executable proposal.
+struct ROBSurfaceGhostTarget {
+    let point: SIMD3<Double>
+    let trackID: UInt32
+    let capturedUptime: Double
+    let projectionIdentity: String
+    let bodyIdentity: String
+
+    init?(value: NSDictionary, capturedUptime: Double, sceneFromModel: [NSNumber], scale: Double,
+          projectionIdentity: String, bodyIdentity: String) {
+        guard let center=value["center"] as? [Double],center.count==3,center.allSatisfy(\.isFinite),
+              let id=value["track_id"] as? UInt32,id>0,
+              let count=value["observations"] as? Int,(5...12).contains(count),
+              let span=value["span_seconds"] as? Double,(1...3).contains(span),
+              let deviation=value["max_deviation_m"] as? Double,(0...0.004).contains(deviation),
+              let speed=value["speed_m_s"] as? Double,(0...0.003).contains(speed),
+              capturedUptime.isFinite,capturedUptime>=0,scale.isFinite,(0.1...10).contains(scale),
+              sceneFromModel.count==12,sceneFromModel.allSatisfy({$0.doubleValue.isFinite}),
+              !projectionIdentity.isEmpty,!bodyIdentity.isEmpty else {return nil}
+        var transform=matrix_identity_double4x4
+        for row in 0..<3 {for column in 0..<4 {transform[column][row]=sceneFromModel[row*4+column].doubleValue}}
+        let rotation=simd_double3x3(columns:(SIMD3(transform.columns.0.x,transform.columns.0.y,transform.columns.0.z)/scale,
+            SIMD3(transform.columns.1.x,transform.columns.1.y,transform.columns.1.z)/scale,
+            SIMD3(transform.columns.2.x,transform.columns.2.y,transform.columns.2.z)/scale))
+        guard abs(simd_determinant(rotation)-1)<0.001 else {return nil}
+        for a in 0..<3 {for b in 0..<3 {guard abs(simd_dot(rotation[a],rotation[b])-(a==b ? 1:0))<0.001 else {return nil}}}
+        let p=simd_inverse(transform)*SIMD4(center[0]*scale,center[1]*scale,center[2]*scale,1)
+        guard [p.x,p.y,p.z].allSatisfy(\.isFinite) else {return nil}
+        point=SIMD3(p.x,p.y,p.z);trackID=id;self.capturedUptime=capturedUptime
+        self.projectionIdentity=projectionIdentity;self.bodyIdentity=bodyIdentity
+    }
+    func isCurrent(now:Double,projectionIdentity:String,bodyIdentity:String)->Bool {
+        now.isFinite && (0...0.75).contains(now-capturedUptime) && self.projectionIdentity==projectionIdentity && self.bodyIdentity==bodyIdentity
+    }
+}
+
 struct ROBWorkspaceLocatedObject: Codable {
     let target: ROBWorkspaceTarget
     let position: [Double]
@@ -1066,7 +1103,7 @@ enum ROBWorkspaceBucketOpeningPrior {
 
 /// Shared numerical horizontal-jaw IK only. It neither checks the world nor
 /// grants motion; zero tool offset preserves the original grasp preview math.
-fileprivate struct ROBCanHorizontalIK {
+struct ROBCanHorizontalIK {
     let chain:[ROBGhostRobotModel.Joint]
     let allowed:[String:ClosedRange<Double>]
     let tip:([String:Double])->SIMD3<Double>

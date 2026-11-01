@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-31",
+  "kind": "offline_surface_stitching_stationarity_and_ghost_preview",
+  "initial_source_base": "8a5723cf7f9228865c2374c9d48e0aeec42ca5df",
+  "pause_handoff_source_commit": "3a81e61a4be6dff852a93f834a6d56b3549bb782",
+  "metrics": {
+    "voxel_stitch_metrics": {
+      "post_warmup_views": 7,
+      "stable_plane_id": 1,
+      "max_qr_world_error_mm": 1.8509
+    },
+    "stitch_metrics": {
+      "views": 8,
+      "qr_decodes": 8,
+      "qr_world_drift_mm": 0.0,
+      "initial_photo_texels": 223000,
+      "final_photo_texels": 364488,
+      "atlas_texels": 384000,
+      "refill_texel_visits": 36864,
+      "occluder_rejected": true,
+      "missing_rgb_growth_and_recolor": true
+    }
+  },
+  "coarsening": {
+    "texel_m": 0.004,
+    "qr_decoded": true,
+    "qr_world_drift_mm": 2.0527,
+    "atlas_size": [
+      1201,
+      240
+    ]
+  },
+  "performance_work_counts": {
+    "atlas_full_scan_texels": 384000,
+    "tile_refill_visits": 36864,
+    "refill_visit_reduction_fraction": 0.904,
+    "raw_can_search_points": 5526,
+    "filtered_can_search_points": 576,
+    "filtered_point_reduction_fraction": 0.8957654723127035,
+    "claim": "Operation counts in the synthetic fixture; not wall-clock or end-to-end speedup"
+  },
+  "negative_control": {
+    "renderer_commit": "8a5723c",
+    "result": "assertion_failed_as_expected",
+    "assertion": "atlas->originU+atlas->width*atlas->texelMeters>=.8",
+    "case": "plane extent grows while RGB is missing"
+  },
+  "stationarity": {
+    "max_observations": 12,
+    "min_observations": 5,
+    "min_span_seconds": 1,
+    "max_window_seconds": 3,
+    "max_gap_seconds": 0.6,
+    "max_deviation_m": 0.004,
+    "max_fitted_speed_m_s": 0.003,
+    "requires_current_frame_full_fit": true,
+    "display_smoothing_used_as_evidence": false,
+    "partial_side_evidence_counts_as_fit": false,
+    "optimized_and_asan_ubsan_passed": true,
+    "cases": [
+      "depth_noise",
+      "dense_sampling_reservoir",
+      "6_mm_per_second_drift",
+      "12_mm_per_second_integrated_can_motion",
+      "oscillation",
+      "relocation_and_reacquisition",
+      "partial_only_support",
+      "occlusion",
+      "expiry",
+      "duplicate_builds",
+      "out_of_order_samples",
+      "high_rate_burst",
+      "invalid_numbers"
+    ]
+  },
+  "ghost_preview": {
+    "requires_explicit_camera_pose": true,
+    "max_capture_age_seconds": 0.75,
+    "invalidates_on": [
+      "stream_reset",
+      "body_identity_change",
+      "projection_change",
+      "lost_current_fit",
+      "target_displacement_over_8_mm",
+      "expiry"
+    ],
+    "coordinate_round_trip_test": "passed",
+    "actual_editor_model_ik_animation_test": "passed",
+    "review_execution_save_guards": "passed",
+    "arm_reach_only": true,
+    "base_torso_route_planned": false,
+    "collision_authority": false,
+    "motor_authority": false
+  },
+  "tests": [
+    {
+      "command": "bash Scripts/test-accumulated-surface-map.sh",
+      "status": "passed"
+    },
+    {
+      "command": "python3 Scripts/test-accumulated-surface-render.py <private-output.png>",
+      "status": "passed"
+    },
+    {
+      "command": "bash Scripts/test-ghost-motion.sh",
+      "status": "passed"
+    },
+    {
+      "command": "bash Scripts/test-ghost-editor-render.sh <private-output.png>",
+      "status": "passed"
+    }
+  ],
+  "recorded_camera_replay": {
+    "frames": 6,
+    "post_warmup_frames": 5,
+    "native_qr": [
+      "ROB:FLOOR:R01"
+    ],
+    "atlas_qr": [],
+    "rendered_qr": [],
+    "world_texture_comparisons": 0,
+    "limitation": "Known depth/plane coverage gap still prevents reconstruction of the floor QR. Repeated stationary snapshot, not moving-camera registration evidence."
+  },
+  "deployment": {
+    "app_build": "passed",
+    "install_after_build": "NO",
+    "installed": false,
+    "restarted": false,
+    "reason": "Coordinated physical-testing pause; no install/restart handoff requested",
+    "codesign_verification": "passed",
+    "built_debug_dylib_sha256": "966936bf66be18163c85f652dbbc5d52be11a5b3f1493fd250b64d1ac6411fe8",
+    "build_command": "xcodebuild -project Cerebro.xcodeproj -scheme Cerebro -configuration Debug -derivedDataPath <separate-cache> CEREBRO_INSTALL_AFTER_BUILD=NO COMPILER_INDEX_STORE_ENABLE=NO build",
+    "unchanged_running_session": "9BB4F940-7C24-47E0-B1ED-B4309F54FD5A",
+    "read_only_final_arm_modes": {
+      "left": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "right": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "source_sha256": {
+    "Cerebro/ROBSurfaceStationarity.h": "9429faf9393a1a2a075a8c9e5e12f46cb5caa666f69287afec898aab68799185",
+    "Cerebro/ROBAccumulatedSurfaceMap.h": "d33232edfbbae3575dc903b1e65c889cda6b18ac1fa866c9982f1def13b4ba0a",
+    "Cerebro/ROBAccumulatedSurfaceRenderer.h": "ef2d628e748733ca7292d804d75a96b3bc59f1ad9f2a5679c460c666a3433a7d",
+    "Cerebro/ROBAccumulatedSurfaceRenderer.m": "3753ef3fac05afcd3a93a35c4a4c81ce38043be42542c7aaa1bc2d95a5eb466f",
+    "Cerebro/ROBGhostGestureEditor.swift": "1ce1b26f16749cc46ee08d2af25be845189cba3cdab51c91aba23b02bdedfcd5",
+    "Cerebro/ROBSCNViewController.m": "6f51f4d4bfeec65fa1003a7aea15fe1dd139f42390bc3e3859a8ae54c6005bb9",
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "a9d93560a4ccc8455cf78fb156a2db82ba5f87ca40b541ad2e4416d523f8a708",
+    "Tests/ROBAccumulatedSurfaceStitchFixture.m": "9628127530bd6983495f530b0fc3d87b27a88d71243801fbdd9288a9c9062339",
+    "Tests/ROBSurfaceStationarityFixtureTests.c": "fab00d139604ddd81a59155e1ce4030ed550d6e68c98ec0c2930626eab7beecd",
+    "Tests/ROBAccumulatedSurfaceTemporalFixtureTests.c": "235dfb1cb71717785bc6729e04f6112f4c442eb070f984be606b9e295cda704e",
+    "Tests/ROBGhostEditorRenderFixture.swift": "11a94e6fb7ad4151f287cecc2ac9e8fc82a7f543fda6bde3492b0d6f866e270e",
+    "Tests/ROBGhostMotionPlanFixtureTests.swift": "876f77613571d9326e9b75d294a4314222ecae7c095e73e3bf313792d43cb1e9"
+  },
+  "private_artifact_sha256": {
+    "render.png": "3ebbb31c582ce5b2d94441455a3e879d1443415018ead29810bdebd8371137eb",
+    "render-qr.png": "04afd9f8d52a33bb0887d1ee06766b0a6b1a8cecc1f9e44de4c34090d4a4a5a2",
+    "render-multiview.png": "23a8ff599875f786dab4a714d825fcb00663e1ac79563667cd6bf7d812a8d251",
+    "ghost.png": "2a7242f1fa28584b410852709382a337e57befbe2ee2eba515c5f8201108f884",
+    "baseline-failure.txt": "6753e6ff79169813557fe4b07f9a75536da68f1b5a6b02e2cc3e31687e06971b"
+  }
+}

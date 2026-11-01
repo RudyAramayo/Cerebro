@@ -39,6 +39,10 @@ can-sized geometry; the colored voxels are the actual measured returns.
   foreground objects out of a table's texture. Filled photographic texels stay
   fixed; later views fill only missing regions. Plane/profile reset or expiry
   discards the keyframe. This is texture history, not a live video surface.
+  Atlas extent and measured-colour fallback now refresh even when RGB is
+  unavailable or another plane owns the photographic acquisition slot. Filled
+  16×16 tiles are skipped during refill; holes remain eligible for later RGB.
+  First-view exposure differences can still leave seams between locked regions.
   Until a usable photograph is available, a plane keeps its measured voxel
   colours. Partly filled photographs use those coarse colours only in missing
   regions; they are never locked into the photographic history, so later valid
@@ -49,7 +53,7 @@ can-sized geometry; the colored voxels are the actual measured returns.
 - Extraction stops at 2,048 rectangles. Up to 4,000 residual points preserve
   irregular details. The HUD reports when a detail limit is reached. It also
   reports capture age; retained history never gets described as current data.
-- There is one pending surface job across the two cameras, at most four updates
+- There is at most one pending surface job per camera, at most four updates
   per second per camera, on the existing serial cloud worker. Raw cloud delivery
   drops to four display updates per second once surfaces replace it, and avoids
   constructing the hidden point geometry. Camera capture and actuator watchdogs
@@ -112,7 +116,8 @@ than assuming a perfect world-up camera calibration. The fitter needs at least
 20 side samples, 55% inliers within the candidate, at least
 1.5 radians of angular support, support in three height bands, observed height
 of at least 60% of the prior, and at most 4.5 mm radial RMS. There are at most
-16 candidate fits per extraction. Shape/coverage tests still reject flat patches
+16 candidate regions per extraction, each with a separate current-frame fit for
+stationarity. Shape/coverage tests still reject flat patches
 and short arcs. Color and geometry do not identify a brand. Other appearances,
 sizes, independently tilted cans and ambiguous observations remain points.
 
@@ -127,6 +132,36 @@ display submap. A retained model never adds occupied/free-space evidence.
 The full cylinder is an explicit inferred overlay, with no fabricated texture
 on its back. It does not add voxels or erase the observed front half. Its shape,
 dimensions and centre must not be used as measured grasp/collision evidence.
+
+## Stationary targets for ghost arm reach
+
+**Preview stationary surface target** in the ghost editor uses an inferred can
+only after independent full fits from the current raw frame agree over time.
+The display's two-frame fit, smoothed centre and partial-side continuation do
+not count as stationary measurements. The bounded window holds at most twelve
+samples, requires at least five over one second, at most 4 mm deviation from
+the mean, and at most 3 mm/s fitted drift. A gap longer than 0.6 s starts a new
+window. A partial-only or occluded current frame immediately loses preview
+eligibility even while its cyan display model remains visible. These are
+configurable-in-code tolerances for this can prior, not a claim of zero motion.
+
+Candidate search prefilters red side points once before the repeated local
+fits. The stationary target uses the unsmoothed fitted positions. It carries
+its track, capture time, projection and body identity to the ghost editor;
+head and belly candidates remain separate. An explicit camera pose is required,
+and converting from Y-up display metres to robot-model coordinates undoes the
+presentation scale exactly once. Targets older than 0.75 s, or from a changed
+body/projection/stream, cannot start a preview. Reset, lost evidence or more
+than 8 mm target displacement clears an active surface preview.
+
+This button calculates a three-stage **visual arm reach** using the shared
+horizontal-wrist IK: current pose, above the target, closest reach. It reports
+endpoint error and wrist tilt. It performs no camera search, base/torso
+preparation, grasp, arm command or collision admission. Review, Execute and
+Save cannot promote this surface rehearsal into an executable gesture. The
+separate prepared-base pour rehearsal and measured depth collision map retain
+their own contracts. Registration and the physical right-arm pose mapping still
+need their independent commissioning; apparent stability cannot establish them.
 
 ## Verification
 
@@ -151,10 +186,45 @@ The temporal C fixture adds 79 consecutive visible frames with partial fits and
 depth noise: no can identity/dropout transitions, fixed plane UV axes, brief
 occlusion/reacquisition, bounded disappearance and two-frame see-through removal.
 The photographic fixture generates a real QR and requires 11 consecutive decodes
-and a bit-identical keyframe despite exposure changes in later input frames.
+and a bit-identical photographic QR region despite exposure changes in later input frames.
+Unphotographed fallback is deliberately allowed to refresh with measured colours.
 It also compares an off-centre QR's rendered position with its source image,
 checks observed colours when RGB is unavailable, and checks depth-hole fallback,
 later photographic refill and noisy oblique-plane coverage.
+
+The additional stitching fixture raycasts eight translated/rotated camera
+views of a fixed, off-centre QR, with depth noise, exposure changes and a
+foreground occluder. It tests the production atlas separately, then the full
+voxel/plane/texture pipeline. All seven post-warm-up pipeline views retained
+the same plane ID and decoded the QR, with **1.851 mm maximum world-position
+error**. The isolated atlas had eight decodes and zero measured world drift;
+coverage grew from 223,000 to 364,488 photographic texels. A large extent change
+forced 4 mm texels and retained decoding with 2.053 mm drift. Missing-RGB extent
+growth and fallback recolouring pass; the pre-change `8a5723c` renderer fails
+the extent-growth assertion.
+
+On the final fixture view, refill visited 36,864 of 384,000 texels, a **90.4%
+reduction in texel visits** versus scanning the whole atlas. Candidate fitting
+examined 576 of 5,526 raw points after appearance filtering, **89.6% fewer
+candidate-search points**. These are deterministic work counts, not claims of
+end-to-end speedup. The stationarity fixtures cover noise, slow drift,
+oscillation, relocation, partial-only support, gaps, stale data, repeated builds,
+high-rate bursts and invalid values, in optimized and ASan/UBSan runs.
+
+The ghost fixtures test model/display coordinate conversion, time and context
+rejection, actual model IK through the editor button, reset, and prevention of
+review/execution/save promotion. Run them with:
+
+```sh
+bash Scripts/test-ghost-motion.sh
+bash Scripts/test-ghost-editor-render.sh /private/tmp/rob-stationary-ghost.png
+```
+
+These new changes are validated offline. Installation/restart is deferred in
+coordination with the paused robot-testing session. The deployment paragraph
+below describes the earlier texture fix, not this stationary-target change.
+Sanitized measurements are in
+[the stitching/stationarity validation](calibration/evidence/2026-10-31-stationary-surfaces/validation.json).
 
 The October 31 texture correction removed a duplicate vertical flip when
 SceneKit samples a `CGImage`. The previous centred-code/decode tests missed it:

@@ -36,6 +36,35 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
         setbuf(stdout, nil)
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
+        do {
+        // World-to-model conversion must undo the presentation scale exactly
+        // once, including a nontrivial gauge rotation and translation.
+        let scale=1.35,angle=0.37
+        let rows:[NSNumber]=[cos(angle)*scale,-sin(angle)*scale,0,0.3,
+            sin(angle)*scale,cos(angle)*scale,0,-0.2,0,0,scale,0.4].map(NSNumber.init(value:))
+        let world=SIMD3<Double>(0.45,-0.12,0.82)
+        let display=SIMD3(cos(angle)*world.x-sin(angle)*world.y+0.3/scale,
+            sin(angle)*world.x+cos(angle)*world.y-0.2/scale,world.z+0.4/scale)
+        let evidence:NSDictionary=["track_id":7,"center":[display.x,display.y,display.z],"observations":6,
+            "span_seconds":1.2,"max_deviation_m":0.002,"speed_m_s":0.001]
+        func surfaceTarget(_ value:NSDictionary=evidence,_ transform:[NSNumber]=rows)->ROBSurfaceGhostTarget? {
+            .init(value:value,capturedUptime:100,sceneFromModel:transform,scale:scale,projectionIdentity:"pose",bodyIdentity:"body")
+        }
+        let stationary=surfaceTarget()!
+        precondition(simd_distance(stationary.point,world)<1e-12)
+        precondition(stationary.isCurrent(now:100.5,projectionIdentity:"pose",bodyIdentity:"body"))
+        for (now,projection,body) in [(100.751,"pose","body"),(99.0,"pose","body"),(100.2,"other","body"),(100.2,"pose","other")] {
+            precondition(!stationary.isCurrent(now:now,projectionIdentity:projection,bodyIdentity:body))
+        }
+        for (key,value) in [("observations",4 as Any),("observations",13),("span_seconds",0.5),("max_deviation_m",0.005),
+                            ("speed_m_s",0.004),("center",[Double.nan,0,0]),("track_id",0)] {
+            let invalid=evidence.mutableCopy() as! NSMutableDictionary;invalid[key]=value;precondition(surfaceTarget(invalid)==nil)
+        }
+        var wrongScale=rows;wrongScale[0]=NSNumber(value:rows[0].doubleValue*2);precondition(surfaceTarget(evidence,wrongScale)==nil)
+        var reflection=rows;for index in [0,4,8] {reflection[index]=NSNumber(value:-rows[index].doubleValue)}
+        precondition(surfaceTarget(evidence,reflection)==nil)
+        print("Surface ghost targets: scale/rigid-gauge round trip, finite stability evidence, fresh time, body/projection identity and invalid-transform rejection passed")
+        }
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
         if CommandLine.arguments.last == "torso-ready-preparation" {
             let leftGoal = try ROBCanRecyclingReadyPose.target(physicalSide: "left")
