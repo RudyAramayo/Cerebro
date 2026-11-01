@@ -294,6 +294,20 @@ class GhostPourRobot:
                   "upper_neck": -(neck["upper"] - 6906) * math.pi / 6000}
         for name, value in angles.items():
             q[self.engine.joints[name].position_start()] = value
+        torso = state.get('torso')
+        if torso is not None:
+            # Live count propagation is an estimate, not a calibrated zero.
+            # Nevertheless, replacing a reported turn with the scan's zero
+            # silently rotates both arms and the camera into the wrong frame.
+            heading = torso.get('heading_degrees')
+            if not isinstance(heading, (int, float)) or isinstance(heading, bool) or not math.isfinite(heading):
+                raise PourPlanError('Current torso heading is unavailable or nonfinite')
+            joint = self.engine.joints['torso_yaw']
+            index = joint.position_start()
+            yaw = math.radians(heading)
+            if not self.engine.plant.GetPositionLowerLimits()[index] <= yaw <= self.engine.plant.GetPositionUpperLimits()[index]:
+                raise PourPlanError('Current torso heading exceeds the ghost model range')
+            q[index] = yaw
         if not np.isfinite(q).all():
             raise PourPlanError("Nonfinite full-robot pose")
         return q

@@ -2,8 +2,10 @@
 
 This is the durable recall ledger for the recycling/animation sessions through
 October 31, 2026. Start with the [current handoff](calibration/session-handoff-2026-10-31.md).
-**No further arm motion is currently authorized.** Historical instructions and
-successful moves below are evidence, not permission to replay them.
+Rudy later resumed the supervised Coke task; its current state and scope are
+in the [resumed pour checkpoint](calibration/can-pour-resume-2026-10-31.md).
+Historical instructions and successful moves below are evidence, not
+permission to replay them or take runtime ownership from the active task.
 
 Dates come from repository steering and saved tests where available. Earlier
 events without timestamped records are explicitly operator reports. "Fixed"
@@ -94,6 +96,15 @@ to 0.30 rad/s in `20aeab5`; this is not a firmware reversal fix. Faster movement
 does not justify removing arrival/current/feedback checks.
 
 ### ROB-06 - Mirror, roll direction and pose geometry assumptions
+
+In the later resumed pour task, Rudy clarified that J5 may move and that
+matching physical postures does not require equal numerical values. Keep
+the per-arm kinematics and current observed geometry; do not freeze J5,
+copy arbitrary values between sides, or treat a visual reflection as a zero
+calibration. The resumed right-hand observation also found roughly 9 cm
+between the visible jaw midpoint and the nominal tool origin. A fixed local
+tool-offset fit failed an independent nearby orientation by about 2 cm;
+it was not promoted to calibration. See the resumed checkpoint.
 
 October 31 evening pour preparation: the compact paired entry passed numerical
 self/table checks and all three native endpoints, but Rudy reported RIGHT J5

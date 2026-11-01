@@ -1,6 +1,17 @@
 # ROB session handoff - October 31, 2026
 
-## Latest physical state: Halloween pause
+## Latest physical state: resumed pour preparation
+
+Rudy explicitly resumed the Coke task after the Halloween pause. Both arms
+are now active empty holds; the base has approached and the torso has turned.
+The Coke is still on the table. The original grasp route is withheld because
+the observed gripper disagrees with its nominal model. Read the
+[resumed pour checkpoint](can-pour-resume-2026-10-31.md) before continuation,
+and obtain fresh feedback instead of replaying any recorded target. No app
+restart or torque-changing cache refresh is appropriate while the arms hold.
+The following pause and Test 11 sections are historical snapshots.
+
+## Earlier physical state: Halloween pause
 
 The later pour task attempted three paired preparation targets. Rudy reported
 RIGHT J5 bent backwards after the raised wrist-orientation target; native
@@ -34,9 +45,9 @@ All 90 poses solve, but self-collision and unmeasured drive/registration
 constraints still block physical continuation. No tread, torso or arm movement
 was executed. The updated test report contains reproduction and rejection tests.
 
-## Start here
+## Historical Test 11 handoff instruction
 
-**Rudy's latest instruction is: "do not run anymore arm motions as of now."**
+**At the Test 11 handoff, Rudy instructed: "do not run anymore arm motions as of now."**
 He requested a context switch and repository records of the mistakes, crashes,
 errors and unusual arm/hand movements. This handoff is not authority to resume
 recycling. Do not run an animation, return-to-hanging routine, mode transition,

@@ -1,0 +1,476 @@
+{
+  "recorded_at_utc": "2026-11-01T05:49:55.510043+00:00",
+  "current_state": {
+    "session": "9BB4F940-7C24-47E0-B1ED-B4309F54FD5A",
+    "arms": {
+      "left": {
+        "q_radians": [
+          -0.4983733137530683,
+          1.9468602390605498,
+          0,
+          1.1951414760726795,
+          0,
+          0,
+          0
+        ],
+        "age_ms": 13.518188349756898,
+        "modes": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "statuses": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ]
+      },
+      "right": {
+        "q_radians": [
+          -0.3539745889201,
+          -0.9022534109723811,
+          1.241365430480967,
+          -0.9408415499031932,
+          0.5428246681397989,
+          0.4970097752749478,
+          0.8568475796509661
+        ],
+        "age_ms": 13.004102664958001,
+        "modes": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "statuses": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ]
+      }
+    },
+    "neck": {
+      "detail": "Gesture authority released; holding the last commanded targets.",
+      "known": true,
+      "lower": 6011,
+      "pan": 5700,
+      "upper": 6200
+    },
+    "torso": {
+      "count": -2108,
+      "detail": "Last command failed: TIC feedback expired during control (547 ms old); stopped",
+      "front_count": 92,
+      "hardware_selected": true,
+      "has_software_reference": false,
+      "heading_degrees": 22.002444716079566,
+      "pulse_ceiling": 2000
+    },
+    "motion": {
+      "detail": "Sequence complete; robot holding. Servo/LACT tracks are command estimates.",
+      "id": "FB22E454-9EEF-4BB1-A43F-F3F99DF9E0DA",
+      "running": false
+    },
+    "mission_active": false
+  },
+  "outcome": {
+    "grasped": false,
+    "poured": false,
+    "glass_pushed": false,
+    "payload": "both arms empty, jaws open in inspected frames"
+  },
+  "motions": [
+    {
+      "stage": "reach-ready-bridge-00",
+      "operation_id": "401F8A48-8DE8-495E-907A-06FC76E6D61B",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.9495751953125,
+      "outcome": "complete",
+      "final_right_raw_radians": [
+        0.2188479257383515,
+        -1.6347462814187512,
+        0.8759371183446542,
+        -1.2304571226560024,
+        0.08031241636130157,
+        -0.18080520219878757,
+        0.7166758241001716
+      ],
+      "image_sha256": "dc1d68fa1a4cea9345df429f8a78969906b69acc68ed02ddd3799c5cb4242239"
+    },
+    {
+      "stage": "wrist-observation",
+      "operation_id": "6C519B43-6F30-4803-9B16-BD969CEF1794",
+      "requested_seconds": 3.0,
+      "monitored_elapsed_seconds": 3.675445068359375,
+      "outcome": "complete",
+      "final_right_raw_radians": [
+        0.21857521804272736,
+        -1.6332463890928186,
+        0.8768915952793386,
+        -1.2301844149603782,
+        0.08003970866567746,
+        -0.18066884835097552,
+        0.9719302272043423
+      ],
+      "image_sha256": "70e0a5867a7114dedd1b7cb79c6888d45107c77c5a477e7eb7bd8c8b14c58332"
+    },
+    {
+      "stage": "outside-lift",
+      "operation_id": "3709FAF7-F6E2-4604-A726-DD842F79DCA7",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.976955810546875,
+      "outcome": "complete",
+      "final_right_raw_radians": [
+        0.21693897186898267,
+        -1.9348611004530887,
+        0.8898452108214839,
+        -1.1205559213194844,
+        0.17453292519943295,
+        0.11944597068336194,
+        1.1037843980386013
+      ],
+      "image_sha256": "1847f60b8927a84a7fa74b244bda2c71cef9061690dfc4e618cd3df49453e195"
+    },
+    {
+      "stage": "wrist-pitch",
+      "operation_id": "74FDA7BC-76A4-4E1B-B382-049B34386DC4",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.337996826171875,
+      "outcome": "complete",
+      "final_right_raw_radians": [
+        0.21680261802117062,
+        -1.9349974543009008,
+        0.8897088569736719,
+        -1.1202832136238603,
+        0.17426021750380885,
+        0.26425375705976645,
+        1.1037843980386013
+      ],
+      "image_sha256": "6a962798c53e655526195f48c9ffabf6f313ecd9dbdadd9eeeb11b4eafa2b164"
+    },
+    {
+      "stage": "observed-orient-step",
+      "operation_id": "7F38D59F-B8A4-4041-B053-05F11ED9B8D1",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.67185400390625,
+      "outcome": "complete",
+      "final_right_raw_radians": [
+        -0.07690357016600015,
+        -1.7740999138826736,
+        1.1295552752750802,
+        -1.088376413235839,
+        0.3291581886183056,
+        0.30897781914212114,
+        0.9689304425524771
+      ],
+      "image_sha256": "5adb3978a2f9aefa64815d9f87d8b61cdac37b59444c0081ca0eeea79d14c6c6"
+    },
+    {
+      "stage": "observed-orient-step-02",
+      "operation_id": "7DAC7D3D-7FE4-4EF3-9D36-4A6130ED0CF7",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.823947021484375,
+      "outcome": "complete",
+      "final_right_raw_radians": [
+        -0.30993229607680556,
+        -1.363811185816194,
+        1.296316031149226,
+        -1.0938305671483213,
+        0.4311508667817242,
+        0.3088414652943091,
+        0.861210902780952
+      ],
+      "image_sha256": "3816d195d32ce3d320f09038ef65955fd699a9ec76e9382f90767fe975603c83"
+    },
+    {
+      "stage": "observed-orient-step-03",
+      "operation_id": "FB22E454-9EEF-4BB1-A43F-F3F99DF9E0DA",
+      "requested_seconds": 4.0,
+      "monitored_elapsed_seconds": 4.946794189453125,
+      "outcome": "complete",
+      "final_right_raw_radians": [
+        -0.35424729661572407,
+        -0.9025261186680053,
+        1.2417744920244032,
+        -0.9408415499031932,
+        0.5430973758354231,
+        0.4971461291227598,
+        0.8571202873465903
+      ],
+      "image_sha256": "b32cd3bf9a5ac6770920fa438b3c9f1db0bdd83a9b66c25da85e9def81a57308"
+    }
+  ],
+  "drive_observations": [
+    {
+      "match_count": 76,
+      "inlier_count": 66,
+      "reprojection_rms_pixels": 0.3697531028124971,
+      "camera_displacement_in_before_optical_m": [
+        -0.0009991695907189094,
+        -0.07288862664790902,
+        0.024985928266724293
+      ],
+      "camera_translation_norm_m": 0.07705872335978049,
+      "camera_rotation_vector_degrees": [
+        1.1082191010423816,
+        0.018235595101635037,
+        -0.0209656739148109
+      ],
+      "model_or_base_registration_verified": false,
+      "method": "SIFT floor correspondences with observed RGB-D and PnP RANSAC; camera displacement estimate, not wheel odometry",
+      "drive_step": 2,
+      "coverage_caveat": "Observer expired before successful drive"
+    },
+    {
+      "match_count": 78,
+      "inlier_count": 69,
+      "reprojection_rms_pixels": 0.621524450115252,
+      "camera_displacement_in_before_optical_m": [
+        -0.0159269383280838,
+        -0.05203085419030013,
+        0.024707508672511546
+      ],
+      "camera_translation_norm_m": 0.05976067383389424,
+      "camera_rotation_vector_degrees": [
+        -0.08152182386510115,
+        -1.2291020966259085,
+        -3.5929510581267254
+      ],
+      "model_or_base_registration_verified": false,
+      "method": "SIFT floor correspondences with observed RGB-D and PnP RANSAC; camera displacement estimate, not wheel odometry",
+      "drive_step": 3,
+      "coverage_caveat": "Local observer covered the action"
+    },
+    {
+      "match_count": 94,
+      "inlier_count": 85,
+      "reprojection_rms_pixels": 0.47761346889933437,
+      "camera_displacement_in_before_optical_m": [
+        0.013455436100216744,
+        -0.042621900617254245,
+        0.019197088102800547
+      ],
+      "camera_translation_norm_m": 0.048643636423491204,
+      "camera_rotation_vector_degrees": [
+        0.11112928267969245,
+        -0.01138974427291566,
+        0.34131106542842266
+      ],
+      "model_or_base_registration_verified": false,
+      "method": "SIFT floor correspondences with observed RGB-D and PnP RANSAC; camera displacement estimate, not wheel odometry",
+      "drive_step": 4,
+      "coverage_caveat": "Local observer covered the action"
+    }
+  ],
+  "gripper_observation": {
+    "partial_pad_depth": [
+      {
+        "pad": "upper_visible_pad",
+        "box": [
+          598,
+          216,
+          614,
+          227
+        ],
+        "valid": 176,
+        "median_depth_m": 0.556,
+        "spread_percentile10_90": [
+          0.54,
+          0.568
+        ],
+        "optical_point": [
+          0.32569055491807275,
+          0.019073556142955427,
+          0.556
+        ]
+      },
+      {
+        "pad": "lower_visible_pad",
+        "box": [
+          585,
+          331,
+          609,
+          345
+        ],
+        "valid": 117,
+        "median_depth_m": 0.537,
+        "spread_percentile10_90": [
+          0.534,
+          0.542
+        ],
+        "optical_point": [
+          0.30467389401580486,
+          0.14640280711655615,
+          0.537
+        ]
+      }
+    ],
+    "lift_translation": {
+      "observed_translation_world_m": [
+        0.0009235366276586568,
+        0.0037658169019194037,
+        0.08135269976401506
+      ],
+      "model_translation_world_m": [
+        0.0004489424246201801,
+        -0.0010493419307427976,
+        0.07943135622869668
+      ],
+      "error_m": 0.005206011450432304,
+      "actual_jaw_midpoint_world_m": [
+        0.49235087514264525,
+        -0.08543010061822517,
+        0.8371331120370533
+      ],
+      "tool_origin_world_m": [
+        0.4811562524471727,
+        -0.13062397902017267,
+        0.9189500489675224
+      ],
+      "local_world_translation_correction": [
+        0.011194622695472556,
+        0.045193878401947496,
+        -0.0818169369304691
+      ],
+      "jaw_gap_direction_world": [
+        -0.702147591002519,
+        0.22200068717221796,
+        -0.6765385837810153
+      ],
+      "nominal_tool_rotation": [
+        [
+          -0.041659980911472445,
+          0.49912900830860657,
+          0.8655256663180602
+        ],
+        [
+          0.9799634756507398,
+          -0.1484605336642223,
+          0.13278198799029836
+        ],
+        [
+          0.19477174430850372,
+          0.8537152353150321,
+          -0.4829433347816506
+        ]
+      ],
+      "pad_heights_world": [
+        0.8734718888092193,
+        0.8007943352648874
+      ]
+    },
+    "four_pose_fit": {
+      "model": "constant world translation plus fixed two pad points in nominal tool frame",
+      "rank": 9,
+      "singular_values": [
+        3.462846477225708,
+        3.459337507317204,
+        3.458081536834781,
+        2.0000000000000004,
+        2.0,
+        1.9999999999999991,
+        0.20413741597852583,
+        0.18161500617626614,
+        0.09324309714662829
+      ],
+      "condition_number": 37.13783200251544,
+      "world_translation_m": [
+        0.02963531213661907,
+        0.05760506849033598,
+        -0.104381093892872
+      ],
+      "tool_local_pad_points_m": [
+        [
+          -0.0128516180526443,
+          0.06345356713428864,
+          -0.022828698740715213
+        ],
+        [
+          -0.00643297300316804,
+          -0.04102580964194344,
+          -0.04058493958450262
+        ]
+      ],
+      "tool_local_grasp_midpoint_m": [
+        -0.00964229552790617,
+        0.0112138787461726,
+        -0.03170681916260892
+      ],
+      "point_errors_m": [
+        0.007394122599687732,
+        0.013526486400012663,
+        0.00437363481457196,
+        0.004875044745414201,
+        0.007839499079044661,
+        0.00593815215113601,
+        0.005807433361028192,
+        0.01314227265489471
+      ],
+      "rms_m": 0.008541798959153208,
+      "registration_verified": false,
+      "note": "Fit on four nearby poses only; no independent held-out observation. RGB-D visible pad centroids are approximate.",
+      "five_mm_noise_amplification_bound_m": 0.05362327242452394
+    },
+    "independent_orientation": {
+      "independent_pose": true,
+      "fit_point_errors_m": [
+        0.019352568365037282,
+        0.020894132579068896
+      ],
+      "fit_midpoint_error_m": 0.019680562488696308,
+      "actual_midpoint_world": [
+        0.47150860396949945,
+        -0.07007912254766545,
+        0.8096114871575528
+      ],
+      "actual_gap_direction_world": [
+        0.6793421478890864,
+        -0.34697016211265996,
+        0.6466111294317142
+      ],
+      "commanded_midpoint_residual_m": [
+        -0.005166644867710901,
+        -0.003449989921119667,
+        -0.003934820695886465
+      ],
+      "actual_pad_points_world": [
+        [
+          0.5072450001965925,
+          -0.0883312849238193,
+          0.843626087308628
+        ],
+        [
+          0.4357722077424064,
+          -0.05182696017151161,
+          0.7755968870064776
+        ]
+      ],
+      "registration_verified": false
+    }
+  },
+  "validation": {
+    "pour_tests": 19,
+    "native_payload_rendering_fixture": "passed",
+    "source_correction_installed": false
+  },
+  "limitations": [
+    "No measured full camera-to-arm registration",
+    "No calibrated tread odometry",
+    "Torso feedback timeout remains",
+    "No continuous fixed-time pour controller commissioned"
+  ]
+}

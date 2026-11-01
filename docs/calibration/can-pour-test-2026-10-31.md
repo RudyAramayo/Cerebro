@@ -1,5 +1,11 @@
 # Coke can timed-pour test
 
+**Latest physical continuation:** Rudy resumed after the Halloween pause.
+The base/torso have moved and both arms are active empty holds. The grasp,
+pour and glass push are unfinished. See the [resumed physical checkpoint and
+gripper observations](can-pour-resume-2026-10-31.md); the older pause and saved
+fixture below are not the current live state.
+
 **Testing Sandbox → Coke can · timed pour** reproduces the saved scene in
 Cerebro's native ghost planner. The current sequence explicitly previews a
 25 cm tread approach, a 16.6° torso turn perpendicular to the observed table
@@ -163,7 +169,7 @@ clock and analytical derivative bounds enforce 0.30 rad/s, 0.60 rad/s² and
 2 rad/s³; the reverse retraces the same curve. Final interpolated raw targets
 remain within ±2.09 rad. No overlapping vendor cmd4 dispatch was added.
 
-## Physical blockers and corrected history
+## Saved-fixture blockers before the later physical resume
 
 All current poses solve kinematically, but the route is **not collision clear**.
 The model reports a baseline left-tool/track overlap of about 77 mm, blocked
@@ -187,7 +193,7 @@ results are superseded. The current paired-plane source and native rejection
 tests prevent those scenes from being silently replayed as current evidence.
 
 No arm mode, jaw command, arm trajectory, base travel or torso turn was sent
-by this task. Earlier neck-only search and read-only torso counter selection
+during the initial saved-fixture work described in this section. Earlier neck-only search and read-only torso counter selection
 located the can, ice-filled glass and occupied keyboard seat on ROB's left.
 Counter 92 matched historical forward count, but software alignment was unset.
 Latest inspected frames show the can and glass still on the table.

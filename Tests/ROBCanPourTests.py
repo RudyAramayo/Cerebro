@@ -158,6 +158,32 @@ class GhostIntegrationTests(unittest.TestCase):
         status = self.status(); status['neck']['known'] = False
         with self.assertRaises(PourPlanError): self.robot.from_status(status)
 
+    def test_current_torso_turn_is_preserved_in_camera_and_both_arm_frames(self):
+        from scipy.spatial.transform import Rotation
+        status = self.status()
+        before = self.robot.from_status(status)
+        status['torso'] = dict(heading_degrees=22.002444716079566,
+                               has_software_reference=False)
+        after = self.robot.from_status({'result': status})
+        yaw = math.radians(status['torso']['heading_degrees'])
+        index = self.robot.engine.joints['torso_yaw'].position_start()
+        self.assertAlmostEqual(after[index], yaw)
+        expected = before.copy(); expected[index] = yaw
+        for name in ('oak_optical_frame', 'left_tool', 'right_tool'):
+            np.testing.assert_allclose(self.robot.frame(after, name),
+                                       self.robot.frame(expected, name), atol=1e-12)
+            turn = self.robot.frame(after, name)[:3,:3] @ self.robot.frame(before, name)[:3,:3].T
+            np.testing.assert_allclose(turn, Rotation.from_euler('z', yaw).as_matrix(), atol=1e-10)
+        for side in ('left', 'right'):
+            np.testing.assert_array_equal(after[self.robot.engine.arm_indices[side]],
+                                          before[self.robot.engine.arm_indices[side]])
+
+    def test_invalid_live_torso_heading_cannot_fall_back_to_scan_zero(self):
+        for heading in (None, float('nan'), float('inf'), True, '22', 180.):
+            status = self.status(); status['torso'] = dict(heading_degrees=heading)
+            with self.subTest(heading=heading), self.assertRaises(PourPlanError):
+                self.robot.from_status(status)
+
     def test_drive_then_perpendicular_torso_keeps_world_and_arms_fixed(self):
         from can_pour_scenario import prepare_base_and_torso
         from scipy.spatial.transform import Rotation
