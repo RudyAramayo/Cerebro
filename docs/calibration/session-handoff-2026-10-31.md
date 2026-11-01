@@ -1,5 +1,17 @@
 # ROB session handoff - October 31, 2026
 
+## Latest physical state: Halloween pause
+
+The later pour task attempted three paired preparation targets. Rudy reported
+RIGHT J5 bent backwards after the raised wrist-orientation target; native
+arrival and model review had passed. Stop was sent, Rudy recovered RIGHT,
+and LEFT was released, visually checked open, lowered to hanging and
+deactivated. Both arms now have fresh near-zero feedback and mode/status 0.
+No tread/torso travel or pour occurred. Rudy explicitly paused physical tests
+for Halloween; do not automatically replay or resume them. Read the
+[physical preparation, J5 failure and recovery](can-pour-test-2026-10-31.md#later-physical-preparation-and-halloween-pause)
+before any later authorized continuation. Older snapshots below are historical.
+
 ## Later pour-test task
 
 After the incident handoff below, Rudy requested a right-arm Coke pour, a

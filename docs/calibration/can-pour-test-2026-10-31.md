@@ -14,6 +14,52 @@ corrected the initially tilted and overly tall table, and required the drive
 and torso turn to appear before the reach. These corrections invalidate the
 previous geometry and its timing results.
 
+## Later physical preparation and Halloween pause
+
+Rudy subsequently authorized physical preparation, approach and pouring,
+confirmed both arms hanging, and instructed using hanging as the startup
+assumption. Fresh inactive near-zero feedback corroborated that start. The
+neck gateway established commanded targets 6000 / 6011 / 6200 in two native
+safety stages; these are command estimates, not measured shaft positions.
+Both arms entered position holds once from hanging. The native hanging scan
+had returned no observations because its views were outside the unknown-neck
+envelope; it did not establish the arm posture.
+
+Three coordinated targets completed with native arrival/settling: outward
+lift with wrists retained, lift above the treads with wrists retained, then
+raised wrist orientation. The full paired model review reported no new/deeper
+intersections, and an estimated table/cup review passed with 100 mm added
+robot/environment padding. Neither result established physical calibration.
+
+After orientation, Rudy reported RIGHT J5 bent backwards. The dispatched J5
+targets were **LEFT -1.213675 rad, RIGHT +1.195716 rad**. Fresh RIGHT feedback
+reached approximately +1.195 rad; the log does not show an uncommanded J5
+reversal or identical left/right J5 values. The chosen physical pose was wrong.
+The cause remains unresolved: do not promote a sign, encoder-zero or hardware
+diagnosis, or automatically repeat this pose because the numerical review passed.
+
+Native Stop was requested immediately. Rudy restored RIGHT to hanging; fresh
+inactive zero feedback followed. He requested LEFT release and then a pause
+for Halloween. LEFT Release 10 was accepted and the camera visibly showed its
+open jaws. LEFT returned through the reverse staged entry, reached near-zero
+hanging, and was deactivated. The reverse path's modeled overlaps near hanging
+were the existing hanging-pose proxies, reviewed against the operator-confirmed
+hanging endpoint; they were not relabeled as measured collision-free geometry.
+RIGHT remained inactive during the return. The requested right-arm retry was
+not sent before the subsequent pause.
+
+Final feedback: both arms mode/status 0, approximately 20 ms old; no animation
+or mission running; torso count 92 with its software reference still unset.
+No tread or torso travel, grasp, pour, or glass slide was performed. **Physical
+testing is paused until Rudy resumes it.** The startup hanging assumption must
+not replace fresh feedback, contradict an active hold, or reset encoder zero.
+
+[Sanitized targets, timings and final state](evidence/2026-10-31-can-pour/physical-preparation-and-pause.json)
+are committed. Private images, command/feedback logs and review scripts are in
+`~/Library/Application Support/Cerebro/CanPourTests/physical-2026-10-31-j5-pause/`.
+No model, joint mapping, controller limit or application binary was changed
+during this physical attempt or recovery.
+
 ## Repeat in Cerebro
 
 1. Open **Testing Sandbox**, select **Coke can · timed pour**.

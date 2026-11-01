@@ -95,6 +95,17 @@ does not justify removing arrival/current/feedback checks.
 
 ### ROB-06 - Mirror, roll direction and pose geometry assumptions
 
+October 31 evening pour preparation: the compact paired entry passed numerical
+self/table checks and all three native endpoints, but Rudy reported RIGHT J5
+bent backwards after raised wrist orientation. Logged J5 targets were LEFT
+-1.213675 and RIGHT +1.195716 radians; RIGHT feedback reached about +1.195.
+This establishes an incorrect physical pose, not identical left/right targets,
+an uncommanded reversal, or a proven global sign/zero fault. Stop was sent;
+Rudy recovered RIGHT. LEFT Release 10 visibly opened the jaw, then the empty
+left arm returned to hanging and was deactivated. Both arms ended inactive.
+Rudy paused tests for Halloween. Do not automatically replay this wrist pose;
+see the [pour recovery record](calibration/can-pour-test-2026-10-31.md#later-physical-preparation-and-halloween-pause).
+
 LEFT J5 and several wrist adjustments moved in the wrong apparent direction.
 Rudy specified the existing Mirror L10 -> R11 and reverse logic. An intervening
 J5-only sign assumption was not established calibration. Anatomical clockwise
