@@ -15,12 +15,24 @@ static CVPixelBufferRef loadRGB(NSString *path,int width,int height) {
     }
     CVPixelBufferUnlockBaseAddress(buffer,0);return buffer;
 }
-static NSArray<VNBarcodeObservation *> *barcodes(CGImageRef image) {
+static NSArray<VNBarcodeObservation *> *nativeBarcodes(CGImageRef image) {
     if (!image) return @[];
     VNDetectBarcodesRequest *request=[VNDetectBarcodesRequest new];request.symbologies=@[VNBarcodeSymbologyQR];
     VNImageRequestHandler *handler=[[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
     NSError *error=nil;if (![handler performRequests:@[request] error:&error]) return @[];
     return request.results ?: @[];
+}
+static NSArray<VNBarcodeObservation *> *barcodes(CGImageRef image) {
+    NSArray *native=nativeBarcodes(image);if (native.count || !image) return native;
+    // QR features only a few source pixels wide can miss Vision's detector at
+    // native display scale. Enlarge actual rendered pixels without inventing
+    // detail. Report native-scale results separately; the old broken rendering
+    // must also fail this identical two-scale test.
+    size_t w=CGImageGetWidth(image)*2,h=CGImageGetHeight(image)*2;
+    CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();CGContextRef context=CGBitmapContextCreate(NULL,w,h,8,w*4,space,(CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(space);assert(context);CGContextSetInterpolationQuality(context,kCGInterpolationNone);
+    CGContextDrawImage(context,CGRectMake(0,0,w,h),image);CGImageRef enlarged=CGBitmapContextCreateImage(context);
+    NSArray *result=nativeBarcodes(enlarged);CGImageRelease(enlarged);CGContextRelease(context);return result;
 }
 static NSArray *payloads(CGImageRef image) {
     NSMutableArray *found=[NSMutableArray array];
@@ -29,6 +41,13 @@ static NSArray *payloads(CGImageRef image) {
 static uint32_t rgbAt(NSBitmapImageRep *bitmap,int x,int y) {
     NSColor *c=[[bitmap colorAtX:x y:y] colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
     return ((uint32_t)lround(c.redComponent*255)<<24)|((uint32_t)lround(c.greenComponent*255)<<16)|((uint32_t)lround(c.blueComponent*255)<<8)|255u;
+}
+static ROBSurfacePoint pointAt(SCNGeometrySource *source,NSUInteger index) {
+    const float *v=(const float *)((const uint8_t *)source.data.bytes+source.dataOffset+index*source.dataStride);
+    return (ROBSurfacePoint){v[0],v[1],v[2]};
+}
+static CGPoint uvAt(SCNGeometrySource *source,NSUInteger index) {
+    const float *v=(const float *)((const uint8_t *)source.data.bytes+source.dataOffset+index*source.dataStride);return CGPointMake(v[0],v[1]);
 }
 int main(int argc,const char *argv[]) { @autoreleasepool {
     [NSApplication sharedApplication];
@@ -68,10 +87,38 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
         sequence++;
         SCNNode *node=[accumulator accumulate:samples view:view capturedAt:1+sequence*.5 sequence:sequence rgbPixelBuffer:rgb summary:&summary];
         double elapsed=(NSProcessInfo.processInfo.systemUptime-time)*1000;
-        NSMutableArray *decoded=[NSMutableArray array],*planeIDs=[NSMutableArray array],*canIDs=[NSMutableArray array],*planeDetails=[NSMutableArray array],*canDetails=[NSMutableArray array];
+        NSMutableArray *decoded=[NSMutableArray array],*planeIDs=[NSMutableArray array],*canIDs=[NSMutableArray array],*planeDetails=[NSMutableArray array],*canDetails=[NSMutableArray array],*detailIDs=[NSMutableArray array];
+        NSUInteger detailPixels=0;
         NSUInteger checked=0,changed=0;
         for (SCNNode *child in node.childNodes) if ([child isKindOfClass:ROBSurfaceTrackedNode.class]) {
             ROBSurfaceTrackedNode *tracked=(ROBSurfaceTrackedNode *)child;
+            if (tracked.depthDetailTrackID) {
+                [detailIDs addObject:@(tracked.depthDetailTrackID)];
+                CGImageRef image=(__bridge CGImageRef)child.geometry.firstMaterial.diffuse.contents;
+                NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithCGImage:image];[decoded addObjectsFromArray:payloads(image)];
+                SCNGeometrySource *vertices=[child.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticVertex].firstObject;
+                SCNGeometryElement *element=child.geometry.geometryElements.firstObject;const uint32_t *indices=element.data.bytes;
+                NSMutableIndexSet *valid=[NSMutableIndexSet indexSet];for (NSInteger i=0;i<element.primitiveCount*3;i+=6) [valid addIndex:indices[i]/4];
+                detailPixels+=valid.count;NSNumber *key=@(UINT32_MAX-tracked.depthDetailTrackID);
+                NSArray *previous=probes[key];NSMutableArray *newProbes=[NSMutableArray array];
+                // Compare every retained, represented pixel, including its
+                // world position. Decoding a full source image alone is not a
+                // test that those pixels survived into geometry.
+                for (NSUInteger i=valid.firstIndex;i!=NSNotFound;i=[valid indexGreaterThanIndex:i]) {
+                    int x=(int)(i%bitmap.pixelsWide),y=(int)(i/bitmap.pixelsWide);ROBSurfacePoint world={0};
+                    for (int j=0;j<4;j++) world=ROBSurfaceAdd(world,ROBDepthFloorScale(pointAt(vertices,i*4+j),.25));
+                    uint32_t rgba=rgbAt(bitmap,x,y);
+                    [newProbes addObject:@{@"pixel":@(i),@"world":[NSValue valueWithBytes:&world objCType:@encode(ROBSurfacePoint)],@"rgba":@(rgba)}];
+                }
+                for (NSDictionary *probe in previous) {
+                    NSUInteger i=[probe[@"pixel"] unsignedIntegerValue];if (![valid containsIndex:i]) continue;
+                    ROBSurfacePoint before,world={0};[probe[@"world"] getValue:&before];for (int j=0;j<4;j++) world=ROBSurfaceAdd(world,ROBDepthFloorScale(pointAt(vertices,i*4+j),.25));
+                    ROBSurfacePoint delta=ROBDepthFloorSubtract(world,before);checked++;
+                    if (ROBDepthFloorDot(delta,delta)>1e-12 || rgbAt(bitmap,(int)(i%bitmap.pixelsWide),(int)(i/bitmap.pixelsWide))!=[probe[@"rgba"] unsignedIntValue]) changed++;
+                }
+                if (!previous) probes[key]=newProbes;
+                [[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[output stringByAppendingPathComponent:[NSString stringWithFormat:@"frame-%llu-detail-%u.png",(unsigned long long)sequence,tracked.depthDetailTrackID]] atomically:YES];
+            }
             if (tracked.cylinderTrackID) {
                 [canIDs addObject:@(tracked.cylinderTrackID)];SCNVector3 p=tracked.position;const double *m=view.cameraToMap;
                 double dx=p.x-m[3],dy=p.y-m[7],dz=p.z-m[11],z=m[2]*dx+m[6]*dy+m[10]*dz;
@@ -79,22 +126,25 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
             }
             if (tracked.surfaceTrackID) {
                 [planeIDs addObject:@(tracked.surfaceTrackID)];CGImageRef image=(__bridge CGImageRef)child.geometry.firstMaterial.diffuse.contents;
+                SCNGeometryElement *element=child.geometry.geometryElements.firstObject;if (!element.primitiveCount) continue;
+                const uint32_t *indices=element.data.bytes;
                 SCNGeometrySource *vertices=[child.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticVertex].firstObject;
-                const float *values=vertices.data.bytes;
-                ROBSurfacePoint a={values[0],values[1],values[2]},b={values[3],values[4],values[5]},c={values[9],values[10],values[11]};
+                ROBSurfacePoint a=pointAt(vertices,indices[0]),b=pointAt(vertices,indices[1]),c=pointAt(vertices,indices[2]);
                 ROBSurfacePoint normal=ROBDepthFloorCross(ROBDepthFloorSubtract(b,a),ROBDepthFloorSubtract(c,a));
                 normal=ROBDepthFloorScale(normal,1/sqrt(ROBDepthFloorDot(normal,normal)));
                 [planeDetails addObject:@{@"id":@(tracked.surfaceTrackID),@"normal":@[@(normal.x),@(normal.y),@(normal.z)],@"offset":@(-ROBDepthFloorDot(normal,a))}];
                 [decoded addObjectsFromArray:payloads(image)];
                 NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithCGImage:image];
                 SCNGeometrySource *texture=[child.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticTexcoord].firstObject;
-                const float *uv=texture.data.bytes;
+                CGPoint ta=uvAt(texture,indices[0]),tb=uvAt(texture,indices[1]),tc=uvAt(texture,indices[2]);
                 ROBSurfacePoint edgeU=ROBDepthFloorSubtract(b,a),edgeV=ROBDepthFloorSubtract(c,a);
+                double uu=ROBDepthFloorDot(edgeU,edgeU),uv=ROBDepthFloorDot(edgeU,edgeV),vv=ROBDepthFloorDot(edgeV,edgeV),det=uu*vv-uv*uv;
+                double textureDet=(tb.x-ta.x)*(tc.y-ta.y)-(tb.y-ta.y)*(tc.x-ta.x);if (fabs(det)<1e-16 || fabs(textureDet)<1e-16) continue;
                 NSNumber *key=@(tracked.surfaceTrackID);NSArray *previous=probes[key];
                 if (previous) for (NSDictionary *probe in previous) {
                     ROBSurfacePoint world;[probe[@"world"] getValue:&world];ROBSurfacePoint delta=ROBDepthFloorSubtract(world,a);
-                    double u=uv[0]+ROBDepthFloorDot(delta,edgeU)/ROBDepthFloorDot(edgeU,edgeU)*(uv[2]-uv[0]);
-                    double v=uv[1]+ROBDepthFloorDot(delta,edgeV)/ROBDepthFloorDot(edgeV,edgeV)*(uv[7]-uv[1]);
+                    double du=ROBDepthFloorDot(delta,edgeU),dv=ROBDepthFloorDot(delta,edgeV),alpha=(du*vv-dv*uv)/det,beta=(dv*uu-du*uv)/det;
+                    double u=ta.x+alpha*(tb.x-ta.x)+beta*(tc.x-ta.x),v=ta.y+alpha*(tb.y-ta.y)+beta*(tc.y-ta.y);
                     int x=(int)floor(u*bitmap.pixelsWide),y=(int)floor(v*bitmap.pixelsHigh);
                     if (x>=0 && x<bitmap.pixelsWide && y>=0 && y<bitmap.pixelsHigh) {checked++;if (rgbAt(bitmap,x,y)!=[probe[@"rgba"] unsignedIntValue]) changed++;}
                 }
@@ -106,7 +156,8 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
                         if (px<0 || px>=bitmap.pixelsWide || py<0 || py>=bitmap.pixelsHigh) continue;
                         uint32_t rgba=rgbAt(bitmap,px,py);if (rgba==0x70808CFF) continue;
                         double u=(px+.5)/bitmap.pixelsWide,v=(py+.5)/bitmap.pixelsHigh;
-                        ROBSurfacePoint world=ROBSurfaceAdd(a,ROBSurfaceAdd(ROBDepthFloorScale(edgeU,(u-uv[0])/(uv[2]-uv[0])),ROBDepthFloorScale(edgeV,(v-uv[1])/(uv[7]-uv[1]))));
+                        double alpha=((u-ta.x)*(tc.y-ta.y)-(v-ta.y)*(tc.x-ta.x))/textureDet,beta=((v-ta.y)*(tb.x-ta.x)-(u-ta.x)*(tb.y-ta.y))/textureDet;
+                        ROBSurfacePoint world=ROBSurfaceAdd(a,ROBSurfaceAdd(ROBDepthFloorScale(edgeU,alpha),ROBDepthFloorScale(edgeV,beta)));
                         [newProbes addObject:@{@"world":[NSValue valueWithBytes:&world objCType:@encode(ROBSurfacePoint)],@"rgba":@(rgba)}];
                     }
                     if (newProbes.count) probes[key]=newProbes;
@@ -116,7 +167,7 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
             }
         }
         NSBitmapImageRep *source=(NSBitmapImageRep *)[NSBitmapImageRep imageRepWithContentsOfFile:[directory stringByAppendingPathComponent:imagePath]];
-        NSArray *renderedQR=@[];
+        NSArray *renderedQR=@[],*renderedNativeResolutionQR=@[];double maxCornerError=0;
         if (node.childNodes.count) {
             SCNScene *scene=[SCNScene scene];scene.background.contents=NSColor.darkGrayColor;[scene.rootNode addChildNode:node];
             SCNNode *camera=[SCNNode node];camera.camera=[SCNCamera camera];
@@ -137,10 +188,16 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
             NSString *path=[output stringByAppendingPathComponent:[NSString stringWithFormat:@"frame-%llu-rendered.png",(unsigned long long)sequence]];
             [[rendered representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
             renderedQR=payloads(rendered.CGImage);
+            NSMutableArray *nativeScale=[NSMutableArray array];for (VNBarcodeObservation *code in nativeBarcodes(rendered.CGImage)) if (code.payloadStringValue) [nativeScale addObject:code.payloadStringValue];renderedNativeResolutionQR=nativeScale;
+            for (VNBarcodeObservation *before in barcodes(source.CGImage)) for (VNBarcodeObservation *after in barcodes(rendered.CGImage)) if ([before.payloadStringValue isEqual:after.payloadStringValue]) {
+                CGPoint a[4]={before.topLeft,before.topRight,before.bottomRight,before.bottomLeft},b[4]={after.topLeft,after.topRight,after.bottomRight,after.bottomLeft};
+                for (int j=0;j<4;j++) maxCornerError=fmax(maxCornerError,hypot((a[j].x-b[j].x)*width,(a[j].y-b[j].y)*height));
+            }
         }
         NSDictionary *record=@{@"frame":@(sequence),@"summary":summary ?: @"",@"milliseconds":@(elapsed),@"planeIDs":planeIDs,@"canIDs":canIDs,
             @"reconstructedQR":decoded,@"nativeQR":payloads(source.CGImage),@"planes":planeDetails,@"cans":canDetails,
-            @"textureProbesCompared":@(checked),@"textureProbesChanged":@(changed),@"renderedQR":renderedQR};
+            @"textureProbesCompared":@(checked),@"textureProbesChanged":@(changed),@"renderedQR":renderedQR,
+            @"renderedNativeResolutionQR":renderedNativeResolutionQR,@"maxRenderQRCornerErrorPixels":@(maxCornerError),@"detailIDs":detailIDs,@"detailPixels":@(detailPixels)};
         [results addObject:record];printf("%s\n",[[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:record options:NSJSONWritingSortedKeys error:NULL] encoding:NSUTF8StringEncoding] UTF8String]);
         CVPixelBufferRelease(rgb);
     } }

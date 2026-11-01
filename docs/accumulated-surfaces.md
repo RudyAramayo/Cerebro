@@ -50,6 +50,27 @@ can-sized geometry; the colored voxels are the actual measured returns.
   Photo visibility uses perpendicular distance to the fitted plane, in the same
   units as its RMS, rather than an optical-Z threshold that rejects oblique
   surfaces. Foreground/invalid-depth rejection remains in place.
+- Nonplanar detail can use up to four retained 128×128 native-depth patches
+  per camera. Candidate patches require at least 90% repeated depth support,
+  within 20 mm optical depth in the previous accepted view no more than two
+  seconds earlier, and at least 12% of those samples outside the planes' 15 mm
+  fit tolerance. Contrast and missing plane support prioritize the fixed budget;
+  QR detection or payload text does not influence selection. One patch is
+  acquired per update. Captures above 1,048,576 pixels retain the plane path
+  without allocating this detail history.
+  Each valid pixel owns an independent, camera-oriented footprint at its
+  measured depth and samples only its own photographic pixel centre. No
+  triangles connect different returns, so holes and foreground depth jumps
+  cannot stretch or delete neighbouring QR features. The footprint positions
+  and photograph stay fixed. Coarse plane triangles and residual points are
+  clipped within the patch's ray bundle and observed depth slab, preserving
+  their outside geometry and UVs; there is no depth bias or draw-through overlay.
+  The four-patch limit bounds added detail to 65,536 measured pixels and
+  131,072 triangles. Patches retain missing-depth holes rather than infilling
+  them, and are not a fused, watertight surface. Large viewpoint changes can
+  reveal the individual footprints. They supply no collision or free-space
+  evidence. Existing context resets, two-view see-through removal and 90-second
+  expiry apply; published geometry/images are immutable across worker updates.
 - Extraction stops at 2,048 rectangles. Up to 4,000 residual points preserve
   irregular details. The HUD reports when a detail limit is reached. It also
   reports capture age; retained history never gets described as current data.
@@ -220,8 +241,8 @@ bash Scripts/test-ghost-motion.sh
 bash Scripts/test-ghost-editor-render.sh /private/tmp/rob-stationary-ghost.png
 ```
 
-These new changes are validated offline. Installation/restart is deferred in
-coordination with the paused robot-testing session. The deployment paragraph
+These new changes are validated offline. Installation/restart is deferred to
+the coordinated robot-testing session's runtime owner. The deployment paragraph
 below describes the earlier texture fix, not this stationary-target change.
 Sanitized measurements are in
 [the stitching/stationarity validation](calibration/evidence/2026-10-31-stationary-surfaces/validation.json).
@@ -235,8 +256,9 @@ before the fix and zero afterward. Its mean absolute RGB-channel difference
 from the input fell from 69.453 to 29.024 on an 8-bit scale. This includes
 unmodeled gaps and inferred geometry; it is not a calibration measurement.
 This replay repeats one stationary RGB-D snapshot to isolate rendering, rather
-than testing moving-camera registration. The floor QR in that difficult capture still lacks a complete readable texture
-because of depth/plane coverage. Do not equate the texture-orientation fix with
+than testing moving-camera registration. That orientation correction alone did
+not recover the difficult floor QR's depth/plane coverage. The later depth-detail
+change below addresses that separate failure. Neither change establishes
 complete reconstruction, QR detection of every target or robot registration.
 Sanitized results and private-artifact hashes are in the
 [October 31 renderer validation](calibration/evidence/2026-10-31-surface-texture/renderer-validation.json).
@@ -253,6 +275,40 @@ this verification used no actuator commands. See the
 [deployment record](calibration/evidence/2026-10-31-surface-texture/deployment-validation.json)
 for exact hashes and runtime identity.
 
+### Floor QR coverage recovery (2026-10-31)
+
+In the saved 640×400 table capture, 1,668 of the floor QR polygon's 1,681 pixels
+have valid depth (99.23%). Only 61.81% of those measured returns fit within
+15 mm of any of the six frozen planes. Increasing the flat-plane visibility
+tolerance would paint foreground or nonplanar measurements onto incorrect
+geometry. The depth-detail layer instead keeps their measured positions and
+the original RGB samples, including all 1,668 supported QR pixels; the thirteen
+missing depth pixels remain missing. Pixel-centre texture coordinates prevent
+a footprint from sampling an invalid neighbour at its edges.
+
+The replay repeats this **one stored capture six times**, with synthetic
+advancing sequence/timestamps to isolate reconstruction. It is not six
+independent live observations or evidence of moving-camera registration.
+Frames 3–6 decode `ROB:FLOOR:R01` in the actual 640×400 SceneKit render,
+with at most **1.241 pixels** source/render QR-corner displacement. Frame 1
+warms the voxel history; frame 2 has incomplete scene extraction and still
+misses full-scene QR detection. These failures remain in the report. The
+`ca06db1` renderer fails all reconstructed frames under the same native and
+2× nearest-pixel decoding checks. Photograph decoding and world-position/color
+comparisons inspect the pixels actually represented in the patch geometry,
+not an unattached copy of the camera image.
+
+The existing eight-view atlas/stitch tests retain their previous results.
+The new optimized and ASan/UBSan detail fixture checks 16,382 valid samples,
+pixel-centre UV ownership, holes, depth discontinuities, repeated-view support,
+nonoverlap, input limits, frozen world geometry and color, coarse clipping area
+and UV preservation, foreground/missing-depth retention, interrupted and
+consecutive see-through observations, immutable published images, and expiry.
+Numeric results and private-artifact hashes are recorded in
+[the floor-QR validation](calibration/evidence/2026-10-31-floor-qr/validation.json).
+No raw camera image is committed. The app build is verified without installation;
+the resumed pour session retains exclusive runtime/audio ownership.
+
 To replay local saved calibration evidence through the actual accumulator and
 SceneKit renderer (without opening a camera or robot service):
 
@@ -262,8 +318,14 @@ python3 -B Scripts/replay-accumulated-surfaces.py capture-input.json output-dire
 
 `--expected-can-count` is for a known stationary can scene; omit it for other
 captures. `--require-qr` checks native QR payloads against both the photographic
-atlas and the rendered 3D view after warm-up, and compares world-anchored texture
-pixels. Reports and per-frame PNGs are written to the requested output directory.
+atlas/detail geometry and the rendered 3D view after warm-up, and compares
+world-anchored texture pixels. Detection tries native size, then 2× nearest
+pixels if native detection finds nothing; native-scale results are reported
+separately. `--require-native-render-qr` additionally requires decoding the
+unscaled render. `--max-qr-corner-error-pixels 2` checks alignment.
+`--warmup-frames` defaults to one; the difficult floor replay explicitly uses
+two and leaves every warm-up result visible in the report. Reports and
+per-frame PNGs are written to the requested output directory.
 
 On 2026-10-24, local head capture `4575D65E-1A32-4407-BA5D-5EC4F708E1CF`
 preserved `ROB:TABLE:001` and four fixed can IDs in all four post-warm-up frames.

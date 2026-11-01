@@ -6,6 +6,7 @@ Exercises explicit camera-pose admission independently of a floor-fit result.
 """
 from pathlib import Path
 import re
+import os
 import struct
 import subprocess
 import sys
@@ -48,6 +49,13 @@ with tempfile.TemporaryDirectory(prefix="rob-surface-render-", dir="/private/tmp
                     "-framework", "AppKit", "-framework", "SceneKit", "-framework", "CoreVideo", "-framework", "CoreImage", "-framework", "Vision",
                     "-o", str(stitch)], check=True)
     subprocess.run([str(stitch), str(render_path.with_name(render_path.stem + "-multiview.png"))], check=True)
+    for sanitized in (False, True):
+        detail = temporary / ("detail-sanitized" if sanitized else "detail")
+        flags = ["-O1", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if sanitized else ["-O2"]
+        subprocess.run(["xcrun", "clang", "-fobjc-arc", *flags, "-Wall", "-Wextra", "-Werror", "-I", str(root / "Cerebro"),
+                        str(root / "Tests/ROBSurfaceDepthDetailFixture.m"), "-framework", "AppKit", "-framework", "SceneKit",
+                        "-framework", "CoreVideo", "-o", str(detail)], check=True)
+        subprocess.run([str(detail)], check=True, env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
 image = render_path.read_bytes()
 assert image[:8] == b"\x89PNG\r\n\x1a\n", "The production renderer must produce a PNG artifact"
 assert struct.unpack(">II", image[16:24]) == (1100, 800), "Unexpected production render dimensions"

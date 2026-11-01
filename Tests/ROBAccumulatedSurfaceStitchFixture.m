@@ -88,18 +88,21 @@ int main(int argc,const char **argv) { @autoreleasepool {
             VNBarcodeObservation *found=nil;for(VNBarcodeObservation *value in request.results)
                 if([value.payloadStringValue isEqual:@"ROB:MULTIVIEW:FIXED"]) found=value;
             assert(found);pipelineDecodes++;
-            // Recover a world point from the ACTUAL rendered quad vertices/UVs,
+            // Recover a world point from the ACTUAL rendered triangle/UVs,
             // independently of the atlas's private plane-frame bookkeeping.
             SCNGeometrySource *vertices=[surface.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticVertex].firstObject;
             SCNGeometrySource *uv=[surface.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticTexcoord].firstObject;
-            const float *a=(const float *)((const uint8_t *)vertices.data.bytes+vertices.dataOffset);
-            const float *b=(const float *)((const uint8_t *)vertices.data.bytes+vertices.dataOffset+vertices.dataStride);
-            const float *d=(const float *)((const uint8_t *)vertices.data.bytes+vertices.dataOffset+vertices.dataStride*3);
-            const float *ta=(const float *)((const uint8_t *)uv.data.bytes+uv.dataOffset);
-            const float *tb=(const float *)((const uint8_t *)uv.data.bytes+uv.dataOffset+uv.dataStride);
-            const float *td=(const float *)((const uint8_t *)uv.data.bytes+uv.dataOffset+uv.dataStride*3);
-            double fu=(CGRectGetMidX(found.boundingBox)-ta[0])/(tb[0]-ta[0]);
-            double fv=(1-CGRectGetMidY(found.boundingBox)-ta[1])/(td[1]-ta[1]);
+            const uint32_t *indices=surface.geometry.geometryElements.firstObject.data.bytes;
+            const float *a=(const float *)((const uint8_t *)vertices.data.bytes+vertices.dataOffset+vertices.dataStride*indices[0]);
+            const float *b=(const float *)((const uint8_t *)vertices.data.bytes+vertices.dataOffset+vertices.dataStride*indices[1]);
+            const float *d=(const float *)((const uint8_t *)vertices.data.bytes+vertices.dataOffset+vertices.dataStride*indices[2]);
+            const float *ta=(const float *)((const uint8_t *)uv.data.bytes+uv.dataOffset+uv.dataStride*indices[0]);
+            const float *tb=(const float *)((const uint8_t *)uv.data.bytes+uv.dataOffset+uv.dataStride*indices[1]);
+            const float *td=(const float *)((const uint8_t *)uv.data.bytes+uv.dataOffset+uv.dataStride*indices[2]);
+            double du=CGRectGetMidX(found.boundingBox)-ta[0],dv=1-CGRectGetMidY(found.boundingBox)-ta[1];
+            double determinant=(tb[0]-ta[0])*(td[1]-ta[1])-(tb[1]-ta[1])*(td[0]-ta[0]);assert(fabs(determinant)>1e-12);
+            double fu=(du*(td[1]-ta[1])-dv*(td[0]-ta[0]))/determinant;
+            double fv=(dv*(tb[0]-ta[0])-du*(tb[1]-ta[1]))/determinant;
             double world[3];for(int k=0;k<3;k++) world[k]=a[k]+(b[k]-a[k])*fu+(d[k]-a[k])*fv;
             double expectedU=qrU+pattern.pixelsWide*qrPixel/2,expectedV=qrV+pattern.pixelsHigh*qrPixel/2;
             double error=hypot(hypot(world[0]-expectedU,world[1]-expectedV),world[2]+1);

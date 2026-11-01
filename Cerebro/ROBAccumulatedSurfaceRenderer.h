@@ -8,6 +8,7 @@
 @interface ROBSurfaceTrackedNode : SCNNode
 @property uint32_t surfaceTrackID;
 @property uint32_t cylinderTrackID;
+@property uint32_t depthDetailTrackID;
 @property double observationAge;
 @property(nonatomic, copy) NSArray<NSDictionary *> *stationaryCanCandidates;
 @end

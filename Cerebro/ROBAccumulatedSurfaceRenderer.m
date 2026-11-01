@@ -1,6 +1,7 @@
 #import "ROBAccumulatedSurfaceRenderer.h"
 
 @implementation ROBSurfaceTrackedNode @end
+#include "ROBSurfaceDepthDetail.h"
 
 /* Orthorectified RGB keyframes in a persistent metric plane frame. A texel is
  * filled only by depth-verified RGB at that location, then retained unchanged.
@@ -138,11 +139,16 @@
     uint64_t _lastSequence;
     NSMutableDictionary<NSNumber *,ROBSurfacePhotoAtlas *> *_photos;
     NSUInteger _photoCursor;
+    NSMutableArray<ROBSurfaceDepthDetail *> *_details;
+    NSData *_previousDepth;
+    ROBSurfaceDepthView _previousView;
+    double _previousTime;
+    uint32_t _nextDetailID;
 }
 
 - (instancetype)init
 {
-    if ((self=[super init])) { _map=ROBSurfaceMapCreate();_photos=[NSMutableDictionary dictionary]; }
+    if ((self=[super init])) { _map=ROBSurfaceMapCreate();_photos=[NSMutableDictionary dictionary];_details=[NSMutableArray array]; }
     return self;
 }
 
@@ -187,9 +193,31 @@
             child.geometry=ROBSurfacePlaneGeometryWithPhoto(plane,photo,atlas->originU,atlas->originV,atlas->width*atlas->texelMeters,atlas->height*atlas->texelMeters);
         }
     }
-    if (summary) *summary=[NSString stringWithFormat:@"%llu frames · %zu stable voxels → %zu planes / %zu triangles + %zu points · %zu inferred cans · %lu photo planes%@",
+    for (ROBSurfaceDepthDetail *patch in _details.copy) {
+        [patch refresh:view time:capturedAt];if (!patch->observedPixels) [_details removeObject:patch];
+    }
+    if (_details.count<ROBSurfaceDetailMaximumPatches && capturedAt-_previousTime<=2) {
+        ROBSurfaceDepthDetail *patch=ROBSurfaceDetailCreate(view,_previousView,rgb,mesh,_details,_nextDetailID+1,capturedAt);
+        if (patch) {[_details addObject:patch];_nextDetailID++;}
+    }
+    // The full-resolution capture is retained for independent depth support,
+    // not RGB repainting. Context resets already replace this accumulator.
+    _previousDepth=ROBSurfaceDetailCaptureEligible(view) ? [NSData dataWithBytes:view.depthLittleEndian length:(size_t)view.width*view.height*2] : nil;
+    _previousView=view;_previousView.depthLittleEndian=_previousDepth.bytes;_previousTime=capturedAt;
+    NSUInteger detailPixels=0;
+    if (_details.count) {
+        for (SCNNode *child in node.childNodes) {
+            if ([child isKindOfClass:ROBSurfaceTrackedNode.class] && ((ROBSurfaceTrackedNode *)child).cylinderTrackID) continue;
+            ROBSurfaceDetailCutCoarseNode(child,_details);
+        }
+        for (ROBSurfaceDepthDetail *patch in _details) {
+            ROBSurfaceTrackedNode *detail=[ROBSurfaceTrackedNode new];detail.depthDetailTrackID=patch->trackID;detail.geometry=patch->geometry;
+            detail.name=@"Observed depth detail · retained capture pixels";[node addChildNode:detail];detailPixels+=patch->observedPixels;
+        }
+    }
+    if (summary) *summary=[NSString stringWithFormat:@"%llu frames · %zu stable voxels → %zu planes / %zu triangles + %zu points · %zu inferred cans · %lu photo planes · %lu detail pixels%@",
         (unsigned long long)_map->frame,mesh->stableVoxelCount,mesh->planeCount,mesh->quadCount*2,mesh->residualCount,mesh->cylinderCount,
-        (unsigned long)photoCount,
+        (unsigned long)photoCount,(unsigned long)detailPixels,
         mesh->truncated ? @" · detail limit reached" : @""];
     ROBSurfaceMeshDestroy(mesh);
     return node;
