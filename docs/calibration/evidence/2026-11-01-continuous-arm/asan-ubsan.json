@@ -1,0 +1,149 @@
+{
+  "hardware_io": false,
+  "installed": false,
+  "ruckig_version": "0.9.2",
+  "ruckig_commit": "7de6b1035e1cad509251b31b3287d10fbcda6baf",
+  "sanitizer": "address,undefined",
+  "source_sha256": {
+    "Tools/ContinuousArm/ContinuousArmController.hpp": "8a0e1ac411769cec03c53f1c65b252358a98e5fc7d6caf2faf0a5eadf751e7b8",
+    "Tools/ContinuousArm/ContinuousArmController.cpp": "f1e0eac811ea4e073ce39c76fa4a493c09f7b2a8e5ed47f8aa01b4893ae9cfb2",
+    "Tests/ROBContinuousArmControllerTests.cpp": "a87d4672530cbc2f4b080ad64a846dcd58d9f7e387035807338e636a9aa410fd"
+  },
+  "tests": [
+    {
+      "test": "explicit_limits_guard_stationary_start_no_takeover",
+      "passed": true
+    },
+    {
+      "metrics": "seven_joint_stream",
+      "samples": 14000,
+      "targets": 4200,
+      "moving_retargets": 3898,
+      "max_velocity_rad_s": 0.3,
+      "max_acceleration_rad_s2": 0.6,
+      "max_discrete_jerk_rad_s3": 2,
+      "max_step_rad": 0.0015
+    },
+    {
+      "test": "seven_joint_noisy_66hz_stream_200hz_owner_and_final_convergence",
+      "passed": true
+    },
+    {
+      "test": "thousand_command_burst_one_latest_target",
+      "passed": true
+    },
+    {
+      "test": "replay_reordering_foreign_generation_nan_bounds_and_time_rejected",
+      "passed": true
+    },
+    {
+      "test": "release_jerk_limited_stop_latched_reclutch_no_replay",
+      "passed": true
+    },
+    {
+      "test": "lost_tracking_stream_stops_and_does_not_auto_resume",
+      "passed": true
+    },
+    {
+      "test": "stale_feedback_tracking_error_mode_lease_stall_duplicate_tick_infinity_fault",
+      "passed": true
+    },
+    {
+      "test": "uncertain_transport_result_latches_no_retry",
+      "passed": true
+    },
+    {
+      "test": "changed_scene_rechecks_current_path_and_brakes",
+      "passed": true
+    },
+    {
+      "test": "blocked_stopping_envelope_faults_before_output",
+      "passed": true
+    },
+    {
+      "test": "analytical_braking_extrema_reject_near_limit_overshoot",
+      "passed": true
+    },
+    {
+      "test": "joint_limit_endpoint_and_reversal_without_wrapping",
+      "passed": true
+    },
+    {
+      "test": "3ms_7ms_jitter_integrates_time_without_burst_or_derivative_reseed",
+      "passed": true
+    },
+    {
+      "test": "concurrent_100000_packet_mailbox_latest_wins",
+      "passed": true
+    },
+    {
+      "test": "second_trajectory_worker_cannot_publish",
+      "passed": true
+    },
+    {
+      "test": "stop_and_publication_share_one_generation_barrier",
+      "passed": true
+    },
+    {
+      "test": "250_random_trajectories_526750_joint_samples_inside_analytic_envelopes",
+      "passed": true
+    },
+    {
+      "test": "constant_acceleration_zero_velocity_root_is_checked",
+      "passed": true
+    },
+    {
+      "test": "20_60_90_120hz_pose_streams_share_200hz_owner",
+      "passed": true
+    },
+    {
+      "result": "pass",
+      "groups": 19,
+      "hardware_io": false,
+      "ruckig": "0.9.2"
+    }
+  ],
+  "legacy_comparison": [
+    {
+      "case": "consistent_command_state",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0.2,
+      "seed_acceleration_rad_s2": 0,
+      "minimum_rad": 0.34,
+      "maximum_rad": 1.05,
+      "duration_s": 2
+    },
+    {
+      "case": "hypothetical_missed_sample",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0,
+      "seed_acceleration_rad_s2": -40,
+      "minimum_rad": -5.26259621712,
+      "maximum_rad": 1.05,
+      "duration_s": 2.05691587591
+    },
+    {
+      "case": "stationary_handoff",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0,
+      "seed_acceleration_rad_s2": 0,
+      "minimum_rad": 0.34,
+      "maximum_rad": 1.05,
+      "duration_s": 2
+    },
+    {
+      "case": "persistent_latest_target_prototype",
+      "target_updates_hz": 20,
+      "planner_hz": 200,
+      "changes_while_moving": 155,
+      "max_velocity_rad_s": 0.3,
+      "max_acceleration_rad_s2": 0.6,
+      "max_jerk_rad_s3": 2,
+      "max_step_rad": 0.0015,
+      "final_rad": 0.7
+    }
+  ]
+}
