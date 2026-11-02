@@ -299,6 +299,13 @@ import CoreFoundation
                 "front_count":torso.countReference,"detail":torso.status,"pulse_ceiling":torso.maximumPulseRate],
             "neck":["known":serial?.isNeckCommandStateKnown ?? false,"pan":serial?.commandedNeckPanTarget ?? 0,
                 "lower":serial?.commandedLowerNeckTiltTarget ?? 0,"upper":serial?.commandedUpperNeckTiltTarget ?? 0,
+                "automatic_startup_enabled":ROBServoControlStore.automaticStartupEnabled,
+                "startup_in_progress":serial?.isSafeNeckStartupInProgress ?? false,
+                "saved_startup_phases":(0..<3).compactMap { index -> [String:Any]? in
+                    guard let phase = ROBServoControlStore.shared.startupPhase(at:index) else { return nil }
+                    return ["phase":phase.phaseIndex,"pan":phase.panTarget,"lower":phase.lowerTarget,
+                            "upper":phase.upperTarget,"hold_seconds":phase.holdSeconds]
+                },
                 "detail":serial?.neckCommandSafetyStatus ?? "Unavailable"],
             "navigation":["pose_fresh":room.poseIsFresh(at:ProcessInfo.processInfo.systemUptime),
                 "map_fresh":room.mapIsFresh(at:ProcessInfo.processInfo.systemUptime),

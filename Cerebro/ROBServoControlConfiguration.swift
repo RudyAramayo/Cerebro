@@ -147,6 +147,18 @@ public enum ROBServoControlConfigurationError: LocalizedError {
 @objcMembers public final class ROBServoControlStore: NSObject {
     public static let shared = ROBServoControlStore()
 
+    /// Neck clearance is independent of passive arm/accessory profiling. Only
+    /// this explicit neck preference may suppress the saved startup sequence.
+    public static var automaticStartupEnabled: Bool {
+        get {
+            guard let value = UserDefaults.standard.object(forKey: "ROBNeckAutomaticStartupEnabled") else {
+                return true
+            }
+            return value as? Bool ?? false
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "ROBNeckAutomaticStartupEnabled") }
+    }
+
     private static let defaultsKey = "ROBServoControlConfigurationV1"
     private static let schemaVersion = 4
     private static let uprightLowerTarget = 6011

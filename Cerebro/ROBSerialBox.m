@@ -1321,14 +1321,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             if (!connectionIsStillCurrent) return;
             // Hardware readiness owns hardware startup. Do not make servo
             // activation depend on any window controller receiving the event.
-            BOOL passiveStartup = [[NSUserDefaults standardUserDefaults]
-                boolForKey:@"ROBPassiveHardwareStartup"];
-            ROBNeckCommandDisposition startupDisposition = passiveStartup
-                ? ROBNeckCommandDispositionRejected : [self startSafeNeckStartup];
+            ROBNeckCommandDisposition startupDisposition = [self startAutomaticNeckStartup];
             [[ROBBubbleRuntime shared] maestroReconnected];
-            if (passiveStartup) {
-                NSLog(@"Passive hardware startup: neck targets unchanged");
-            } else if (startupDisposition == ROBNeckCommandDispositionRejected) {
+            if (startupDisposition == ROBNeckCommandDispositionRejected) {
                 NSLog(@"Maestro connected, but automatic safe neck startup was rejected: %@",
                       self.neckCommandSafetyStatus);
             }
@@ -1727,6 +1722,17 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             [weakSelf advanceSafeNeckStartupForGeneration:generation];
         }
     );
+}
+
+- (ROBNeckCommandDisposition)startAutomaticNeckStartup
+{
+    if (![ROBServoControlStore automaticStartupEnabled]) {
+        self.torsoNeckAuthorityRequiresOperatorAction = YES;
+        self.neckCommandSafetyStatus =
+            @"Automatic neck startup disabled in Settings; saved startup values retained. No neck targets sent.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    return [self startSafeNeckStartup];
 }
 
 - (ROBNeckCommandDisposition)startSafeNeckStartup

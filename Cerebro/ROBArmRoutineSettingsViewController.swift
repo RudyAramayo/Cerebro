@@ -1,10 +1,15 @@
 import AppKit
 
+private final class ROBArmSettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 /// Persistent robot behavior belongs here. Changing trials and their parameters
 /// live in the Testing Sandbox rather than growing the preferences window.
 @objcMembers final class ROBArmRoutineSettingsViewController: NSViewController {
     private let startup = NSButton(checkboxWithTitle: "Offer the arm startup route", target: nil, action: nil)
-    private let passiveStartup = NSButton(checkboxWithTitle: "Passive hardware startup (connect without automatic positioning)", target: nil, action: nil)
+    private let passiveStartup = NSButton(checkboxWithTitle: "Passive arm and accessory startup", target: nil, action: nil)
+    private let neckStartup = NSButton(checkboxWithTitle: "Run saved neck startup sequence after connecting", target: nil, action: nil)
     private let gripperStartup = NSButton(checkboxWithTitle: "Calibrate empty grippers after connecting", target: nil, action: nil)
     private let sessionOnWake = NSButton(checkboxWithTitle: "Offer one arm session at launch / wake", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
@@ -17,6 +22,11 @@ import AppKit
         title.font = .boldSystemFont(ofSize: 20)
         passiveStartup.state = UserDefaults.standard.bool(forKey: "ROBPassiveHardwareStartup") ? .on : .off
         passiveStartup.target = self; passiveStartup.action = #selector(changePassiveStartup)
+        neckStartup.state = ROBServoControlStore.automaticStartupEnabled ? .on : .off
+        neckStartup.target = self; neckStartup.action = #selector(changeNeckStartup)
+        let neckHelp = NSTextField(wrappingLabelWithString:
+            "The neck uses your saved three-phase sequence at launch and reconnect, independently of passive arm and accessory startup. Turn this off before servicing the neck. Changing this setting does not move or stop servos.")
+        neckHelp.textColor = .secondaryLabelColor
         startup.state = UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) ? .on : .off
         startup.target = self; startup.action = #selector(changeStartup)
         gripperStartup.state = ROBGripperStartupCalibration.enabled ? .on : .off
@@ -51,17 +61,30 @@ import AppKit
         let stop = NSButton(title: "Stop + hold", target: self, action: #selector(stop))
         stop.bezelColor = .systemRed
         state.isSelectable = true
-        let stack = NSStackView(views: [title, passiveStartup, gripperStartup, gripperHelp, sessionOnWake, startup,
+        let stack = NSStackView(views: [title, neckStartup, neckHelp, passiveStartup, gripperStartup, gripperHelp, sessionOnWake, startup,
                                        inspectionRow, treadRow, treadHelp, behaviorHelp, sandbox, sandboxHelp, state, stop])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
-        stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        let content = ROBArmSettingsDocumentView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = content
+        view.addSubview(scroll)
+        stack.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -24)
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            content.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 28),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -24)
         ])
-        for label in [gripperHelp, treadHelp, behaviorHelp, sandboxHelp, state] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for label in [neckHelp, gripperHelp, treadHelp, behaviorHelp, sandboxHelp, state] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: ROBTreadMotionRamp.settingsChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBArmRoutineDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBControllerArmApprovalDidChange"), object: nil)
@@ -70,6 +93,7 @@ import AppKit
     }
     @objc private func changeStartup() { UserDefaults.standard.set(startup.state == .on, forKey: ROBArmRoutinePlan.startupDefaultsKey) }
     @objc private func changePassiveStartup() { UserDefaults.standard.set(passiveStartup.state == .on, forKey: "ROBPassiveHardwareStartup") }
+    @objc private func changeNeckStartup() { ROBServoControlStore.automaticStartupEnabled = neckStartup.state == .on }
     @objc private func changeTreadAcceleration() { ROBTreadMotionRamp.selectedMode = treadAcceleration.indexOfSelectedItem }
     @objc private func changeGripperStartup() { ROBGripperStartupCalibration.enabled = gripperStartup.state == .on }
     @objc private func changeSessionOnWake() { UserDefaults.standard.set(sessionOnWake.state == .on, forKey: ROBArmRoutinePlan.sessionOnWakeKey) }

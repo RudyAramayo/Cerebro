@@ -1190,11 +1190,12 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         NSInteger requestedUpperTilt = self.headUpperNeckTilt.integerValue;
         self.pendingNeckOperatorCommandAfterStartup = NO;
         self.pendingLowerTiltOperatorCommandAfterStartup = NO;
-        // Restore the original operator-calibrated resting defaults. The
-        // serial gateway first uses 6011 only as a temporary clearance lift.
-        self.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;
-        self.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;
-        self.headUpperNeckTilt.integerValue = ROBNeckSafetyDefaultUpperTarget;
+        // Mirror the operator's saved final phase, including custom values.
+        // The serial gateway alone owns the preceding clearance sequence.
+        ROBServoSequencePhase *rest = [[ROBServoControlStore shared] startupPhaseAtIndex:2];
+        self.headPan.integerValue = rest.panTarget;
+        self.headTilt.integerValue = rest.lowerTarget;
+        self.headUpperNeckTilt.integerValue = rest.upperTarget;
         ROBNeckCommandDisposition disposition = [serialBox startSafeNeckStartup];
         if (disposition == ROBNeckCommandDispositionRejected) NSBeep();
         if (neckSliderAction) {

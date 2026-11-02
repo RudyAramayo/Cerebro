@@ -13,6 +13,8 @@ from ROBNeckSafetyStaticTests import objective_c_method
 ROOT=Path(__file__).resolve().parents[1]
 torso=(ROOT/'Cerebro/ROBTorsoControlsViewController.m').read_text()
 serial=(ROOT/'Cerebro/ROBSerialBox.m').read_text()
+main_source=(ROOT/'Cerebro/ROBMainViewController.mm').read_text()
+connection_method=objective_c_method(main_source,'maestroDidConnect:')
 selectors=['synchronizeUneditedNeckSlidersForControl:','applyServoCommand:','renderServoCommands','renderServoCommandsOperatorInitiated:']
 methods=[objective_c_method(torso,s)for s in selectors]
 getter=objective_c_method(serial,'upperNeckOperatorDemandTarget')
@@ -51,6 +53,21 @@ typedef NS_ENUM(NSInteger,ROBNeckCommandDisposition){ROBNeckCommandDispositionRe
 @end
 @interface NSButton:NSControl @end
 @implementation NSButton @end
+@interface ROBServoSequencePhase:NSObject
+@property NSInteger panTarget,lowerTarget,upperTarget;
+@end
+@implementation ROBServoSequencePhase @end
+@interface ROBServoControlStore:NSObject
++ (instancetype)shared;
+- (ROBServoSequencePhase*)startupPhaseAtIndex:(NSInteger)index;
+@end
+@implementation ROBServoControlStore
++ (instancetype)shared{return [self new];}
+- (ROBServoSequencePhase*)startupPhaseAtIndex:(NSInteger)index{
+ assert(index==2);ROBServoSequencePhase*p=[ROBServoSequencePhase new];
+ p.panTarget=5812;p.lowerTarget=7020;p.upperTarget=7610;return p;
+}
+@end
 @interface ROBBubbleRuntime:NSObject
 + (instancetype)shared;
 - (void)releaseMount;
@@ -85,10 +102,14 @@ __GETTER__
 - (void)cancelSafeNeckStartup{self.cancels++;self.safeNeckStartupInProgress=NO;}
 __RENDER_RECORDER__
 @end
+@class Harness;
+@compatibility_alias ROBTorsoControlsViewController Harness;
 @interface ROBMainViewController:NSObject
 @property(strong)ROBSerialBox*serialBox;
+@property BOOL runtimeIsShuttingDown;
+@property(strong)Harness*torsoControlsViewController;
+- (void)maestroDidConnect:(NSNotification*)notification;
 @end
-@implementation ROBMainViewController @end
 @interface Harness:NSObject
 @property(strong)ROBMainViewController*robMainViewController;
 @property BOOL pendingNeckOperatorCommandAfterStartup,pendingLowerTiltOperatorCommandAfterStartup;
@@ -96,10 +117,15 @@ __RENDER_RECORDER__
 __PROPS__
 __DECLS__
 - (void)refreshNeckCommandReadouts;
+- (void)refreshAmberPositionControls;
 @end
 @implementation Harness
 __METHODS__
 - (void)refreshNeckCommandReadouts{self.refreshCount++;}
+- (void)refreshAmberPositionControls{}
+@end
+@implementation ROBMainViewController
+__CONNECTION_METHOD__
 @end
 static Harness* active(void){
  Harness*h=[Harness new];h.robMainViewController=[ROBMainViewController new];ROBSerialBox*b=[ROBSerialBox new];h.robMainViewController.serialBox=b;
@@ -146,6 +172,19 @@ int main(void){@autoreleasepool{
  h=active();b=h.robMainViewController.serialBox;b.commandedLowerNeckTiltTarget=0;b.commandedUpperNeckTiltTarget=0;h.headTilt_enabled.state=NSControlStateValueOn;
  [h applyServoCommand:h.headTilt_enabled];assert(b.startups==1 && b.commandCount==0 && b.safeNeckStartupInProgress);
  assert(h.headPan_enabled.state==1 && h.headTilt_enabled.state==1 && h.headUpperNeckTilt_enabled.state==1);
+ assert(h.headPan.integerValue==5812 && h.headTilt.integerValue==7020 && h.headUpperNeckTilt.integerValue==7610);
+ // A suppressed or failed startup must not paint three enabled checkboxes.
+ // Merely receiving a connection event only changes display, never output.
+ for(int starting=0;starting<2;starting++){
+  h=active();b=h.robMainViewController.serialBox;h.robMainViewController.torsoControlsViewController=h;
+  b.neckPanCommandKnown=starting;b.lowerNeckTiltCommandKnown=starting;b.upperNeckTiltCommandKnown=starting;
+  b.commandedNeckPanTarget=0;b.commandedLowerNeckTiltTarget=6011;b.commandedUpperNeckTiltTarget=6906;
+  b.safeNeckStartupInProgress=starting;
+  [h.robMainViewController maestroDidConnect:[NSNotification notificationWithName:@"fixture" object:b]];
+  assert(h.headPan_enabled.state==starting && h.headTilt_enabled.state==starting && h.headUpperNeckTilt_enabled.state==starting);
+  assert(h.headPan.integerValue==5812 && h.headTilt.integerValue==(starting?6011:7020) && h.headUpperNeckTilt.integerValue==(starting?6906:7610));
+  assert(b.commandCount==0 && b.startups==0);
+ }
  // A missing current demand is never replaced by an old slider value.
  h=active();b=h.robMainViewController.serialBox;b.lastDesiredUpperNeckTargetIsKnown=NO;h.headPan.integerValue=6450;int priorBeeps=beeps;[h applyServoCommand:h.headPan];assert(b.commandCount==0 && beeps==priorBeeps+1 && b.upperNeckOperatorDemandTarget==nil);
  // Session invalidation/OFF must not expose stale upper metadata.
@@ -162,6 +201,7 @@ int main(void){@autoreleasepool{
 }}
 '''
 replacements={'RENDER_DECL':renderSignature,'RENDER_RECORDER':renderSignature+'\n'+recordingBody,'GETTER':getter,'PROPS':props,'DECLS':'\n'.join(m[:m.index('{')].strip()+';'for m in methods),'METHODS':'\n'.join(methods)}
+replacements['CONNECTION_METHOD']=connection_method
 for key,value in replacements.items():harness=harness.replace('__'+key+'__',value)
 with tempfile.TemporaryDirectory(prefix='rob-manual-neck-',dir='/private/tmp')as folder:
  path=Path(folder);source=path/'Fixture.m';binary=path/'Fixture';source.write_text(harness)

@@ -290,17 +290,32 @@ opening on the next launch. Hidden Amber diagnostics skip redraw work. Arm
 consoles retain a 4096-character live tail and bounded backing buffers; full
 controller logs remain on Amber. Camera/task consumers run independently.
 
-Passive hardware startup is also in **Settings → Arms and motion**. It skips
-automatic neck/mount positioning, jaw setup and arm startup offers at launch or
-reconnect. Relay OFF outputs remain active. Explicit local controls and explicit
-stationary empty-jaw setup still work normally. Changing the preference does not
-move anything or stop an already-running task; use Stop for that. It can be set
-before launch with:
+**Settings → Arms and motion → Passive arm and accessory startup** skips
+automatic accessory mount positioning, jaw setup and arm startup offers at
+launch or reconnect. It does not disable the saved neck startup sequence.
+Relay OFF outputs remain active. Explicit local controls and explicit stationary
+empty-jaw setup still work normally. Changing a startup preference does not move
+anything or stop an already-running task; use Stop for that. Arm/accessory
+profiling preferences can be set before launch with:
 
 ```sh
 defaults write com.orbitusrobotics.Cerebro ROBPassiveHardwareStartup -bool YES
 defaults write com.orbitusrobotics.Cerebro ROBLowOverheadDiagnostics -bool YES
 ```
+
+**Run saved neck startup sequence after connecting** is a separate, default-on
+setting (`ROBNeckAutomaticStartupEnabled`). It uses the exact saved three phases
+from Servo Control, including custom targets and holds, after Maestro's motion
+limits have been applied. Passive arm/accessory profiling cannot change this
+setting. For stationary neck maintenance, explicitly turn it off before a
+launch/reconnect and retain the physical power shutdown. Re-enable only after
+the mechanism is ready. Neither preference proves that a servo has power or
+has reached its target. Explicit manual startup retains its existing controls.
+
+`status.result.neck` exposes `automatic_startup_enabled`, `startup_in_progress`
+and `saved_startup_phases` without moving hardware. Disabled/rejected startup
+does not paint unknown axes as enabled. The November 2 incident and uninstalled
+repair are recorded in [the neck startup investigation](neck-startup-2026-11-02.md).
 
 The sampler has a hard duration limit of 12 hours (10 by default), renews camera
 demand and records status, process CPU/RSS, uptime, stream ages/FPS and errors.

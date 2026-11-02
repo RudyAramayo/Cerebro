@@ -353,17 +353,19 @@ def main() -> None:
                 "postNotificationName:ROBMaestroDidConnectNotification"
             )
         and "connectedSerialBox != self.serialBox" in maestro_ready_handler
-        and "ROBNeckSafetyDefaultForwardPanTarget" in maestro_ready_handler
-        and "ROBNeckSafetyDefaultLowerTarget" in maestro_ready_handler
-        and "ROBNeckSafetyDefaultUpperTarget" in maestro_ready_handler
+        and "startupPhaseAtIndex:2" in maestro_ready_handler
+        and "rest.panTarget" in maestro_ready_handler
+        and "rest.lowerTarget" in maestro_ready_handler
+        and "rest.upperTarget" in maestro_ready_handler
         and "connectedSerialBox.commandedNeckPanTarget"
             in maestro_ready_handler
         and "connectedSerialBox.commandedLowerNeckTiltTarget"
             in maestro_ready_handler
         and "connectedSerialBox.commandedUpperNeckTiltTarget"
             in maestro_ready_handler
-        and "[self startSafeNeckStartup]" in maestro_reconnect
-        and reconnect_compact.find("[self startSafeNeckStartup]")
+        and "[self startAutomaticNeckStartup]" in maestro_reconnect
+        and "ROBPassiveHardwareStartup" not in maestro_reconnect
+        and reconnect_compact.find("[self startAutomaticNeckStartup]")
             < reconnect_compact.find(
                 "postNotificationName:ROBMaestroDidConnectNotification"
             )

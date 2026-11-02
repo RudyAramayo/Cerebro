@@ -3315,37 +3315,43 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
 
-    // Startup has already issued its first hardware command before this event.
-    // Mirror that accepted command rather than painting the eventual resting
-    // defaults over phase 1 (notably L 6011 versus final L 7014). An OFF pan
-    // target cannot be represented by the enabled slider, so retain its
-    // reviewed forward fallback until startup energizes pan in phase 2.
+    // Startup is attempted before this event, but may be disabled or rejected.
+    // Show only accepted commands as enabled. Slider drafts use the saved final
+    // phase; neither a skipped startup nor opening a window grants motion.
     ROBTorsoControlsViewController *controls = self.torsoControlsViewController;
     if (controls != nil) {
-        controls.headPan_enabled.state = NSControlStateValueOn;
-        controls.headTilt_enabled.state = NSControlStateValueOn;
-        controls.headUpperNeckTilt_enabled.state = NSControlStateValueOn;
+        ROBServoSequencePhase *rest = [[ROBServoControlStore shared] startupPhaseAtIndex:2];
+        BOOL starting = connectedSerialBox.isSafeNeckStartupInProgress;
+        controls.headPan_enabled.state = (starting || (connectedSerialBox.neckPanCommandKnown
+            && connectedSerialBox.commandedNeckPanTarget != ROBNeckSafetyTargetOff))
+            ? NSControlStateValueOn : NSControlStateValueOff;
+        controls.headTilt_enabled.state = (starting || (connectedSerialBox.lowerNeckTiltCommandKnown
+            && connectedSerialBox.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff))
+            ? NSControlStateValueOn : NSControlStateValueOff;
+        controls.headUpperNeckTilt_enabled.state = (starting || (connectedSerialBox.upperNeckTiltCommandKnown
+            && connectedSerialBox.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff))
+            ? NSControlStateValueOn : NSControlStateValueOff;
         controls.headPan.integerValue = connectedSerialBox.neckPanCommandKnown
                 && connectedSerialBox.commandedNeckPanTarget
                     != ROBNeckSafetyTargetOff
             ? connectedSerialBox.commandedNeckPanTarget
-            : ROBNeckSafetyDefaultForwardPanTarget;
+            : rest.panTarget;
         controls.headTilt.integerValue =
             connectedSerialBox.lowerNeckTiltCommandKnown
                 && connectedSerialBox.commandedLowerNeckTiltTarget
                     != ROBNeckSafetyTargetOff
             ? connectedSerialBox.commandedLowerNeckTiltTarget
-            : ROBNeckSafetyDefaultLowerTarget;
+            : rest.lowerTarget;
         controls.headUpperNeckTilt.integerValue =
             connectedSerialBox.upperNeckTiltCommandKnown
                 && connectedSerialBox.commandedUpperNeckTiltTarget
                     != ROBNeckSafetyTargetOff
             ? connectedSerialBox.commandedUpperNeckTiltTarget
-            : ROBNeckSafetyDefaultUpperTarget;
+            : rest.upperTarget;
     }
 
-    // ROBSerialBox already started the hardware-owned sequence before posting
-    // this event. This observer only mirrors its accepted phase-1 pose.
+    // ROBSerialBox owns startup and reports any disabled/rejected state.
+    // This observer only mirrors its accepted commands and saved drafts.
 }
 
 - (void)shutdownCerebroRuntime

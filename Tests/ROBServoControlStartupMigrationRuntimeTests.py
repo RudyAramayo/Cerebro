@@ -16,6 +16,9 @@ private final class FixtureDefaults {
     static let standard = FixtureDefaults()
     var bytes: Data?
     var writes = 0
+    var preferences: [String:Any] = [:]
+    func object(forKey key:String) -> Any? { preferences[key] }
+    func set(_ value:Bool, forKey key:String) { preferences[key] = value }
     func data(forKey key: String) -> Data? {
         precondition(key == "ROBServoControlConfigurationV1")
         return bytes
@@ -65,6 +68,19 @@ extension ROBServoControlStore {
         return (store,try object(FixtureDefaults.standard.bytes!),FixtureDefaults.standard.writes)
     }
     static func main() throws {
+        let preferences = FixtureDefaults.standard
+        require(ROBServoControlStore.automaticStartupEnabled,"Normal neck startup must default on")
+        preferences.set(true,forKey:"ROBPassiveHardwareStartup")
+        require(ROBServoControlStore.automaticStartupEnabled,"Overnight profiling disabled neck startup")
+        ROBServoControlStore.automaticStartupEnabled = false
+        require(!ROBServoControlStore.automaticStartupEnabled,"Explicit neck service shutdown was ignored")
+        preferences.set(false,forKey:"ROBPassiveHardwareStartup")
+        require(!ROBServoControlStore.automaticStartupEnabled,"Changing passive mode re-enabled neck startup")
+        preferences.preferences["ROBNeckAutomaticStartupEnabled"] = "invalid"
+        require(!ROBServoControlStore.automaticStartupEnabled,"Invalid neck preference must fail closed")
+        ROBServoControlStore.automaticStartupEnabled = true
+        preferences.set(true,forKey:"ROBPassiveHardwareStartup")
+        require(ROBServoControlStore.automaticStartupEnabled,"Explicit startup enable did not survive passive mode")
         let (defaults,base,defaultWrites)=try load(nil)
         let phases=defaults.sequencePhasesSnapshot()
         require(defaultWrites == 1 && base["version"] as? Int == 4,"Factory defaults were not persisted as schema4")
@@ -141,6 +157,27 @@ extension ROBServoControlStore {
         require(startup(oldAfter)[0]["upperTarget"] as? Int == 6906,"Existing version1 mounting migration stopped")
         require(equal(startup(oldAfter)[2],startup(version1)[2]),"Automatic migration matched only after unrelated tuple mutation")
 
+        // The incident's saved schema-4 startup is operator configuration,
+        // including zero holds and its lean-forward final phase. Never migrate
+        // it to the newer factory upright pose or overwrite it with a toggle.
+        var incident = replacingStartup(base) { p in
+            p[0]["holdSeconds"]=0;p[1]["holdSeconds"]=0
+            p[2]["phaseName"]="Lean forward";p[2]["cameraPositionName"]="lean_forward"
+            p[2]["lowerTarget"]=7014;p[2]["upperTarget"]=7698;p[2]["holdSeconds"]=0
+        }
+        incident["version"] = 4
+        let (saved,savedAfter,savedWrites)=try load(incident)
+        require(savedWrites == 0 && equal(savedAfter,incident),"Incident startup was overwritten")
+        let savedBytes = preferences.bytes
+        ROBServoControlStore.automaticStartupEnabled = false
+        ROBServoControlStore.automaticStartupEnabled = true
+        require(preferences.bytes == savedBytes,"Startup preference changed saved servo targets")
+        let (_,relaunched,relaunchWrites)=try load(savedAfter)
+        require(relaunchWrites == 0 && equal(relaunched,incident),"Saved startup changed on relaunch")
+        require(saved.sequencePhasesSnapshot().map(\.panTarget) == [0,5799,5799],"Saved pan phases changed")
+        require(saved.sequencePhasesSnapshot().map(\.lowerTarget) == [6011,6011,7014],"Saved lower phases changed")
+        require(saved.sequencePhasesSnapshot().map(\.upperTarget) == [6906,6906,7698],"Saved upper phases changed")
+
         defaults.restoreDefaults()
         require(defaults.startupPhase(at:2)!.lowerTarget == 6011 && defaults.startupPhase(at:2)!.upperTarget == 6906,"Restore defaults reinstated deep automatic lean")
         require(defaults.cameraPosition(named:"lean_forward")!.lowerTarget == 7014,"Restore defaults erased named lean preset")
@@ -152,7 +189,7 @@ extension ROBServoControlStore {
 
 def main() -> None:
     source = SOURCE.read_text()
-    assert source.count("UserDefaults.standard") == 2
+    assert source.count("UserDefaults.standard") == 4
     # Preserve the real production load/validate/persist code while ensuring
     # this executable cannot read or write any actual preference domain.
     source = source.replace("UserDefaults.standard", "FixtureDefaults.standard")
