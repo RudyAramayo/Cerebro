@@ -2,9 +2,11 @@
 
 Rudy reported that automatic neck startup no longer ran and the upper camera
 servo mount snapped during his recovery attempt. He first shut down upper tilt,
-then pan and both tilts. No motor command, power change, calibration, live
-preference edit, app installation or restart was performed for this repair.
-Keep the neck shut down until the mount is repaired and Rudy explicitly resumes.
+then pan and both tilts. During the initial offline repair, no motor command,
+power change, calibration, live preference edit, installation or restart occurred.
+Rudy subsequently authorized installation and launch with servo power off;
+that deployment is recorded below. Keep neck power off until the mount is
+repaired and Rudy explicitly resumes physical testing.
 
 ## Confirmed software cause
 
@@ -74,8 +76,9 @@ refresh before it could compile against current source.
 Build command uses a fresh derived-data directory and
 `CEREBRO_INSTALL_AFTER_BUILD=NO`. The output is staged outside the installed
 application. Physical startup remains untested because the mount is damaged.
-Do not install/restart, turn power back on, or treat these software checks as
-proof of physical clearance until Rudy resumes with the repaired mechanism.
+The initial deployment hold required Rudy's explicit continuation; the later
+installation authorization is recorded below. These checks do not establish
+physical clearance, and neck power must remain off pending mount repair.
 
 Passing checks on November 2:
 
@@ -94,10 +97,41 @@ Passing checks on November 2:
   was changed.
 
 Staged application: `~/dev/output/cerebro-neck-startup-20261102/Cerebro.app`.
-It has not been installed or launched.
+This was the initial staged artifact; the authorized deployment below followed.
 
 The live saved servo catalog hash observed during the repair was
 `199860f7011e55009e14c774d13bf04740f592481d9dcdba55bf6ef078b6cc38` (SHA-256).
 The installed Debug dylib was
 `c690b91840604ade399336764f36f211031d9605af99739144319ffb7242a16c`.
 These identify the retained live configuration/app, not the new staged build.
+
+## Authorized installation and launch — 12:50 PDT
+
+Rudy explicitly instructed: "install and launch, the servos are off anyway until
+I fix it." This superseded the initial installation hold, without authorizing
+powered physical testing. The signed `f083fdf` app was installed atomically in
+`/Applications/Cerebro.app`, the old process quit cleanly, and the new app
+launched as PID 5771. A copy of the previous app remains outside Git at
+`~/dev/output/cerebro-neck-startup-20261102/Cerebro-before-install.app`.
+
+Installed Debug dylib SHA-256:
+`89bb27558d4f1634b679651262af3972ba80e634f7c400cf533a2c9b71c376bc`.
+Strict deep signature verification passed. The saved servo catalog retained
+the exact hash above. `ROBPassiveHardwareStartup` remained true, and the new
+independent automatic neck startup reported enabled.
+
+Read-only local status captured the running app's phases in order:
+
+1. Pan OFF, lower 6011, upper 6906.
+2. Pan 5799, lower 6011, upper 6906.
+3. Pan 5799, lower 7014, upper 7698.
+4. Startup complete by command timing; final targets remained unchanged for
+   at least five seconds afterward. Animation stayed idle and mission inactive.
+
+The app automatically emitted the saved neck startup commands on this authorized
+launch. No explicit arm, jaw, torso, tread, power or additional neck command
+was requested. Servo power remained off according to Rudy; Maestro does not
+measure power or shaft position. This verifies deployment and the command
+sequence only. Physical startup and clearance after mount repair remain untested.
+The private launch observations and deployment manifest are retained alongside
+the staged app outside Git.

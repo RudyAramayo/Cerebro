@@ -314,8 +314,8 @@ has reached its target. Explicit manual startup retains its existing controls.
 
 `status.result.neck` exposes `automatic_startup_enabled`, `startup_in_progress`
 and `saved_startup_phases` without moving hardware. Disabled/rejected startup
-does not paint unknown axes as enabled. The November 2 incident and uninstalled
-repair are recorded in [the neck startup investigation](neck-startup-2026-11-02.md).
+does not paint unknown axes as enabled. The November 2 incident, repair and
+deployment are recorded in [the neck startup investigation](neck-startup-2026-11-02.md).
 
 The sampler has a hard duration limit of 12 hours (10 by default), renews camera
 demand and records status, process CPU/RSS, uptime, stream ages/FPS and errors.
