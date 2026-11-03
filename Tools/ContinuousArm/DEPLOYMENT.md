@@ -22,8 +22,12 @@ symbol versions against Amber's installed runtimes before an authorized run.
 `rob-amber-controller --self-check` opens no devices. No arguments prints help.
 Only an explicit `--observe --arm right|left --duration 10` opens the selected
 canonical CAN receive socket. It cannot start a motion session and cannot send
-frames. It records kernel timestamp/queue errors, accepted receive counts and
-final status. Its `commanded_*` arrays describe the motion owner, never measured
+frames. Its final record includes per-joint raw ID/data, source epoch,
+conservative kernel receipt timestamp and report-time age, plus raw native
+position/velocity/current counts and tag/status bytes. Missing joints are null.
+It does not infer motor sample age, calibrated pose, physical velocity/current
+units or authority. It also records timestamp/queue errors and receive counts.
+Its `commanded_*` arrays describe the motion owner, never measured
 pose; passive mode has no motion owner or inferred stationary authority.
 
 Prepare a separate staging directory, retain the manifest and verify every

@@ -54,7 +54,7 @@ def main():
         if portable[field][-1]['passed'] != count or portable[field][-1]['failed']:
             raise SystemExit('Validation missing: ' + field)
     if (native['tests'][-1]['passed'] != 8 or native['tests'][-1]['failed'] or
-            native['runtime_tests'][-1]['passed'] != 9 or native['runtime_tests'][-1]['failed']):
+            native['runtime_tests'][-1]['passed'] != 10 or native['runtime_tests'][-1]['failed']):
         raise SystemExit('Native transport and executable validation required')
     binary = args.build_dir.resolve() / 'rob-amber-controller'
     raw = binary.read_bytes()
@@ -94,7 +94,7 @@ def main():
                 'needed_libraries': needed, 'required_symbol_versions': versions, 'interpreter': interpreter[0],
                 'observed_amber': {'os': 'Ubuntu 22.04.3', 'architecture': 'x86_64', 'glibc': '2.35'},
                 'physical_transmit_available': False, 'installed': False, 'service_enabled': False,
-                'portable_groups': 53, 'transport_groups': 8, 'runtime_groups': 9,
+                'portable_groups': 53, 'transport_groups': 8, 'runtime_groups': 10,
                 'release_scope': 'Passive commissioning and isolated virtual-CAN control only',
                 'files_sha256': {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
                                  for p in sorted(output.rglob('*')) if p.is_file()}}

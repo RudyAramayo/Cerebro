@@ -61,6 +61,29 @@ def receive(client):
     return json.loads(client.recv(8192))
 
 
+def observe_without_start(binary, interface):
+    arm = VirtualArm(interface)
+    arm.positions[0] = b'\x12\x34'
+    try:
+        with tempfile.TemporaryDirectory(prefix='rob-arm-passive-') as directory:
+            result = subprocess.run([str(binary), '--virtual-fixture', '--interface', interface,
+                                     '--runtime-dir', str(Path(directory) / 'session'), '--duration', '.4'],
+                                    text=True, capture_output=True, timeout=4)
+            assert result.returncode == 0, result.stderr
+            final = json.loads(result.stdout.splitlines()[-1])
+            assert final['status']['mode'] == 'observing' and final['status']['shutdown_complete']
+            assert final['status']['backend_accepted_frames'] == 0 and arm.frames == 0
+            observations = final['raw_joint_observations']
+            assert len(observations) == 7 and all(x is not None for x in observations)
+            assert observations[0]['position_native_counts'] == 0x1234
+            assert observations[0]['data'][1:3] == [0x12, 0x34]
+            assert all(0 <= x['age_at_report_ns'] < 200000000 for x in observations)
+            assert final['status']['commanded_position'] == [0] * 7, 'raw receipt is not a commanded/calibrated pose'
+            return {'test': 'raw_observation_before_any_grant_has_zero_transmission', 'passed': True}
+    finally:
+        arm.close()
+
+
 def scenario(binary, interface, action):
     scenario_started = time.monotonic()
     arm = VirtualArm(interface)
@@ -70,7 +93,7 @@ def scenario(binary, interface, action):
         with tempfile.TemporaryDirectory(prefix='rob-arm-fixture-') as directory:
             runtime = Path(directory) / 'session'
             process = subprocess.Popen([str(binary), '--virtual-fixture', '--interface', interface,
-                                        '--runtime-dir', str(runtime), '--duration', '2.5'],
+                                        '--runtime-dir', str(runtime), '--duration', '4'],
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if not select.select([process.stdout], [], [], 4)[0]:
                 raise AssertionError('runtime startup did not complete')
@@ -106,6 +129,7 @@ def scenario(binary, interface, action):
                 assert last['accepted'], last
                 time.sleep(.01)
             assert arm.frames > 100 and abs(last['commanded_velocity'][0]) > .01, (arm.frames, arm.error, last)
+            assert last['mode'] == 'following', 'action must exercise its own stop trigger, not earlier expiry'
             if action == 'disconnect':
                 client.close()
                 client = None
@@ -159,6 +183,9 @@ def scenario(binary, interface, action):
             else:
                 assert process.returncode == 0 and status['mode'] == 'held' and status['shutdown_complete'], (status, error)
                 assert all(abs(x) < 1e-9 for x in status['commanded_velocity']), status
+                expected_reason = ('Stop' if action in ('stop', 'replay') else
+                                   'Shutdown' if action == 'signal' else 'ClientDisconnected')
+                assert status['reason_name'] == expected_reason, (action, status)
             assert not runtime.exists(), 'private socket and directory removed after exit'
             return {'test': action, 'passed': True, 'status': status, 'virtual_frames': arm.frames}
     finally:
@@ -191,9 +218,10 @@ def main():
     info = json.loads(subprocess.check_output([str(binary), '--self-check'], text=True))
     assert info['hardware_io'] is False and info['physical_transmit_available'] is False
     print(json.dumps({'test': 'no_io_self_check_and_no_physical_transmit_capability', 'passed': True}), flush=True)
+    print(json.dumps(observe_without_start(binary, args.interface)), flush=True)
     for action in ['disconnect', 'stop', 'replay', 'nonce', 'oversized', 'duplicate', 'signal', 'feedback_loss']:
         print(json.dumps(scenario(binary, args.interface, action)), flush=True)
-    print(json.dumps({'passed': 9, 'failed': 0, 'robot_io': False, 'virtual_CAN_io': True}))
+    print(json.dumps({'passed': 10, 'failed': 0, 'robot_io': False, 'virtual_CAN_io': True}))
 
 
 if __name__ == '__main__':

@@ -47,6 +47,24 @@ struct Options {
   std::string interface, directory;
   double duration{10};
 };
+const char *reasonName(w::SessionReason reason) {
+  switch (reason) {
+#define REASON_CASE(x)                                                         \
+  case w::SessionReason::x:                                                    \
+    return #x;
+    REASON_CASE(None)
+    REASON_CASE(Stop) REASON_CASE(ClientDisconnected) REASON_CASE(ClientExpired)
+        REASON_CASE(TargetExpired) REASON_CASE(GrantEnding)
+            REASON_CASE(GrantExpired) REASON_CASE(Shutdown)
+                REASON_CASE(ShutdownTimeout) REASON_CASE(Clock)
+                    REASON_CASE(Feedback) REASON_CASE(Output)
+                        REASON_CASE(Transport) REASON_CASE(SourceChanged)
+                            REASON_CASE(WrongThread) REASON_CASE(UnsafeStop)
+                                REASON_CASE(PathRejected)
+#undef REASON_CASE
+  }
+  return "unknown";
+}
 void help() {
   std::cout << "rob-amber-controller --self-check\n"
                "rob-amber-controller --observe --arm right|left [--duration "
@@ -199,6 +217,7 @@ Json snapshot(const w::ArmSession &session,
   const auto t = transport.status();
   return {{"mode", modeName(s.mode)},
           {"reason", static_cast<int>(s.reason)},
+          {"reason_name", reasonName(s.reason)},
           {"generation", s.generation},
           {"owner_reason", a::name(s.owner.reason)},
           {"boundary_fault", static_cast<int>(s.boundary.fault)},
@@ -329,6 +348,7 @@ int run(const Options &o) {
                end = begin + o.duration;
   double next_tick = begin;
   std::uint64_t peer = 0, connection_generation = 0;
+  std::array<std::optional<w::KernelFeedback>, 7> latest_feedback;
   std::string token;
   auto drop = [&] {
     if (server && server->client >= 0) {
@@ -352,9 +372,11 @@ int run(const Options &o) {
       session.transportFault();
       break;
     }
-    for (const auto &f : feedback)
+    for (const auto &f : feedback) {
+      latest_feedback.at(f.frame.identifier - 0x91) = f;
       session.observe(f.epoch, f.frame,
                       static_cast<double>(f.received_at) * 1e-9);
+    }
     const double now = w::SocketCanTransport::monotonicSeconds();
     if (stop_requested || now >= end)
       session.shutdown();
@@ -429,10 +451,37 @@ int run(const Options &o) {
     poll(nullptr, 0, 1);
   }
   const auto final = snapshot(session, transport);
+  const auto observed_at = w::SocketCanTransport::monotonicNanoseconds();
+  Json observations = Json::array();
+  for (const auto &item : latest_feedback) {
+    if (!item) {
+      observations.push_back(nullptr);
+      continue;
+    }
+    const auto decoded = w::decodeJointDiagnostic(item->frame, 1);
+    Json record = {{"identifier", item->frame.identifier},
+                   {"data", item->frame.data},
+                   {"source_epoch", item->epoch},
+                   {"conservative_kernel_receive_ns", item->received_at},
+                   {"age_at_report_ns", observed_at - item->received_at}};
+    if (decoded) {
+      record["reply_tag"] = decoded->reply_tag;
+      record["status_raw"] = decoded->status;
+      record["position_native_counts"] = decoded->position_native_counts;
+      record["velocity_native_counts"] = decoded->velocity_native_counts;
+      record["current_native_counts"] = decoded->current_native_counts;
+    }
+    observations.push_back(record);
+  }
   std::cout << Json({{"event", "final"},
                      {"status", final},
                      {"received_frames", transport.status().received},
-                     {"virtual_fixture", o.fixture}})
+                     {"virtual_fixture", o.fixture},
+                     {"raw_joint_observations", observations},
+                     {"observation_scope",
+                      "Kernel receipt age and raw native counts; no motor "
+                      "sample age, calibrated pose, velocity/current units or "
+                      "authority inferred"}})
                    .dump()
             << std::endl;
   return session.status().mode == w::SessionMode::Fault ? 3 : 0;
