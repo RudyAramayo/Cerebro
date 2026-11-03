@@ -8,6 +8,7 @@ on:
       - Tests/ROBContinuousArmControllerTests.cpp
       - Tests/ROBAmberWireCodecTests.cpp
       - Tests/ROBArmDriverBoundaryTests.cpp
+      - Tests/ROBReceiveClockTests.cpp
       - Tests/ROBAmberLinuxTransportTests.cpp
       - Scripts/test-continuous-arm.py
       - Scripts/test-amber-linux-isolation.py
@@ -45,9 +46,21 @@ jobs:
           if os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
               raise SystemExit('This virtual CAN check requires a disposable GitHub-hosted runner')
           result = subprocess.run(['sudo', 'modprobe', 'vcan'], text=True, capture_output=True, timeout=30)
+          package_result = None
+          if result.returncode:
+              # The hosted Azure kernel omits optional modules in its image.
+              # Install only the exact signed Ubuntu package on this disposable
+              # runner; never change the robot or the developer workstation.
+              release = subprocess.check_output(['uname', '-r'], text=True).strip()
+              package = 'linux-modules-extra-' + release
+              update = subprocess.run(['sudo', 'apt-get', 'update', '-qq'], text=True, capture_output=True, timeout=180)
+              install = subprocess.run(['sudo', 'apt-get', 'install', '-y', package], text=True, capture_output=True, timeout=180)
+              package_result = {'name': package, 'update_returncode': update.returncode,
+                                'install_returncode': install.returncode, 'detail': install.stderr[-2000:]}
+              result = subprocess.run(['sudo', 'modprobe', 'vcan'], text=True, capture_output=True, timeout=30)
           report = {'hosted_runner': True, 'vcan_module_available': result.returncode == 0,
                     'returncode': result.returncode, 'detail': result.stderr.strip(),
-                    'robot_io': False, 'interfaces_created': False}
+                    'optional_module_package': package_result, 'robot_io': False, 'interfaces_created': False}
           path = Path(os.environ['RUNNER_TEMP']) / 'results/vcan-support.json'
           path.write_text(json.dumps(report, indent=2) + '\n')
           print(json.dumps(report))

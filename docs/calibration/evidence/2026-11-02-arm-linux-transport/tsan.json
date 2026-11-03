@@ -1,0 +1,289 @@
+{
+  "hardware_io": false,
+  "installed": false,
+  "ruckig_version": "0.9.2",
+  "ruckig_commit": "7de6b1035e1cad509251b31b3287d10fbcda6baf",
+  "sanitizer": "thread",
+  "source_sha256": {
+    "Tools/ContinuousArm/ContinuousArmController.hpp": "8a0e1ac411769cec03c53f1c65b252358a98e5fc7d6caf2faf0a5eadf751e7b8",
+    "Tools/ContinuousArm/ContinuousArmController.cpp": "f1e0eac811ea4e073ce39c76fa4a493c09f7b2a8e5ed47f8aa01b4893ae9cfb2",
+    "Tests/ROBContinuousArmControllerTests.cpp": "a87d4672530cbc2f4b080ad64a846dcd58d9f7e387035807338e636a9aa410fd",
+    "Tools/ContinuousArm/AmberWireCodec.hpp": "08e422501b0ae2cf980271990267500c45b47ae4f12804f09cf335d0c5b5f216",
+    "Tools/ContinuousArm/AmberWireCodec.cpp": "0c4a6de4c3d013eeb9621db92c2cacd85044e072f0132c9ca8cf61ba0cfebd54",
+    "Tools/ContinuousArm/ArmDriverBoundary.hpp": "979bfd9a7dea7dac3ea7721a08157eec56c7a959c403e1f14f36883a9f89f61b",
+    "Tools/ContinuousArm/ArmDriverBoundary.cpp": "b0d37a34e16bbaed4c8105362608161d3895bdf5da5793a5a9d8b6d1b47b88a5",
+    "Tools/ContinuousArm/ReceiveClock.hpp": "ac0807a4b6b8a7e6e05314c2021b2c697287571d3dc93f9ca5f05dbf64ac6a9c",
+    "Tools/ContinuousArm/ReceiveClock.cpp": "8036b9d47100bae76886eaf5825db9dff99225cdb9007ac9d8921370a323323a",
+    "Tools/ContinuousArm/CMakeLists.txt": "91da5932fbdb7b4b0cd6787d8415eeee8eb624dec3401263d91645c0b9f566c6",
+    "Tests/ROBAmberWireCodecTests.cpp": "531803b3fb7ae90f6bdfe51954ebcd5655f8c33105f8f0f163aa073c5904631d",
+    "Tests/ROBArmDriverBoundaryTests.cpp": "97859759924ae8daed3fa1bba47da0110bead8466a1254ed3d25fe6544c00125",
+    "Tests/ROBReceiveClockTests.cpp": "05f3f998ad8d57368e3e85be32a126aaf3aba286dcad042afc278d4342b17bae",
+    "Scripts/test-continuous-arm.py": "af7ed75b3a8a6a5ec86a44bf6b1e78e959364d0dc99de930eb6971885de12374"
+  },
+  "tests": [
+    {
+      "test": "explicit_limits_guard_stationary_start_no_takeover",
+      "passed": true
+    },
+    {
+      "metrics": "seven_joint_stream",
+      "samples": 14000,
+      "targets": 4200,
+      "moving_retargets": 3898,
+      "max_velocity_rad_s": 0.3,
+      "max_acceleration_rad_s2": 0.6,
+      "max_discrete_jerk_rad_s3": 2,
+      "max_step_rad": 0.0015
+    },
+    {
+      "test": "seven_joint_noisy_66hz_stream_200hz_owner_and_final_convergence",
+      "passed": true
+    },
+    {
+      "test": "thousand_command_burst_one_latest_target",
+      "passed": true
+    },
+    {
+      "test": "replay_reordering_foreign_generation_nan_bounds_and_time_rejected",
+      "passed": true
+    },
+    {
+      "test": "release_jerk_limited_stop_latched_reclutch_no_replay",
+      "passed": true
+    },
+    {
+      "test": "lost_tracking_stream_stops_and_does_not_auto_resume",
+      "passed": true
+    },
+    {
+      "test": "stale_feedback_tracking_error_mode_lease_stall_duplicate_tick_infinity_fault",
+      "passed": true
+    },
+    {
+      "test": "uncertain_transport_result_latches_no_retry",
+      "passed": true
+    },
+    {
+      "test": "changed_scene_rechecks_current_path_and_brakes",
+      "passed": true
+    },
+    {
+      "test": "blocked_stopping_envelope_faults_before_output",
+      "passed": true
+    },
+    {
+      "test": "analytical_braking_extrema_reject_near_limit_overshoot",
+      "passed": true
+    },
+    {
+      "test": "joint_limit_endpoint_and_reversal_without_wrapping",
+      "passed": true
+    },
+    {
+      "test": "3ms_7ms_jitter_integrates_time_without_burst_or_derivative_reseed",
+      "passed": true
+    },
+    {
+      "test": "concurrent_100000_packet_mailbox_latest_wins",
+      "passed": true
+    },
+    {
+      "test": "second_trajectory_worker_cannot_publish",
+      "passed": true
+    },
+    {
+      "test": "stop_and_publication_share_one_generation_barrier",
+      "passed": true
+    },
+    {
+      "test": "250_random_trajectories_526750_joint_samples_inside_analytic_envelopes",
+      "passed": true
+    },
+    {
+      "test": "constant_acceleration_zero_velocity_root_is_checked",
+      "passed": true
+    },
+    {
+      "test": "20_60_90_120hz_pose_streams_share_200hz_owner",
+      "passed": true
+    },
+    {
+      "result": "pass",
+      "groups": 19,
+      "hardware_io": false,
+      "ruckig": "0.9.2"
+    }
+  ],
+  "legacy_comparison": [
+    {
+      "case": "consistent_command_state",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0.2,
+      "seed_acceleration_rad_s2": 0,
+      "minimum_rad": 0.34,
+      "maximum_rad": 1.05,
+      "duration_s": 2
+    },
+    {
+      "case": "hypothetical_missed_sample",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0,
+      "seed_acceleration_rad_s2": -40,
+      "minimum_rad": -5.26259621712,
+      "maximum_rad": 1.05,
+      "duration_s": 2.05691587591
+    },
+    {
+      "case": "stationary_handoff",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0,
+      "seed_acceleration_rad_s2": 0,
+      "minimum_rad": 0.34,
+      "maximum_rad": 1.05,
+      "duration_s": 2
+    },
+    {
+      "case": "persistent_latest_target_prototype",
+      "target_updates_hz": 20,
+      "planner_hz": 200,
+      "changes_while_moving": 155,
+      "max_velocity_rad_s": 0.3,
+      "max_acceleration_rad_s2": 0.6,
+      "max_jerk_rad_s3": 2,
+      "max_step_rad": 0.0015,
+      "final_rad": 0.7
+    }
+  ],
+  "wire_codec_tests": [
+    {
+      "test": "physical_arm_routes_and_fourteen_exact_golden_position_frames",
+      "passed": true
+    },
+    {
+      "test": "legacy_0_32768_32769_65535_signed_boundaries_all_three_fields",
+      "passed": true
+    },
+    {
+      "test": "reject_wrong_id_dlc_can_flags_and_direction_preserve_raw_diagnostics",
+      "passed": true
+    },
+    {
+      "test": "finite_profile_range_sign_and_atomic_seven_joint_rejection",
+      "passed": true
+    },
+    {
+      "test": "420014_quantized_joint_roundtrips_both_signs_and_tight_bound_rejection",
+      "passed": true
+    },
+    {
+      "test": "917476_full_signed_domain_roundtrips_reject_negative32767_sign_flip",
+      "passed": true
+    },
+    {
+      "metrics": "owner_to_recorded_CAN",
+      "samples": 6000,
+      "frames": 42000,
+      "moving_retargets": 1358,
+      "maximum_quantization_error_rad": 0.000136344,
+      "maximum_wire_step_rad": 0.00163625,
+      "hardware_io": false
+    },
+    {
+      "test": "200hz_owner_to_recorded_frames_with_20hz_ideal_quantized_feedback",
+      "passed": true
+    },
+    {
+      "test": "invalid_driver_boundary_emits_zero_frames_and_owner_latches_fault",
+      "passed": true
+    },
+    {
+      "passed": 8,
+      "failed": 0,
+      "hardware_io": false
+    }
+  ],
+  "driver_boundary_tests": [
+    {
+      "test": "fresh_all_joint_stationary_observations_explicit_grant_and_single_claim",
+      "passed": true
+    },
+    {
+      "test": "stationary_range_and_sample_gap_admission",
+      "passed": true
+    },
+    {
+      "test": "foreign_source_future_stale_duplicate_and_invalidated_feedback_replay",
+      "passed": true
+    },
+    {
+      "test": "one_stale_joint_fresh_other_joints_mode_change_unknown_tag_latch",
+      "passed": true
+    },
+    {
+      "test": "source_restart_flushes_samples_and_requires_new_generation_and_history",
+      "passed": true
+    },
+    {
+      "test": "receive_recovery_cannot_mask_mode_tag_range_outage_or_expired_lease",
+      "passed": true
+    },
+    {
+      "test": "35_partial_rejected_uncertain_exception_late_and_clock_faults_no_retry",
+      "passed": true
+    },
+    {
+      "test": "sample_time_replay_nan_bounds_and_bounded_nonreviving_writer_leases",
+      "passed": true
+    },
+    {
+      "test": "brake_latch_explicit_revoke_and_publication_thread_ownership",
+      "passed": true
+    },
+    {
+      "test": "concurrent_receive_and_revoke_serialize_with_seven_frame_publication",
+      "passed": true
+    },
+    {
+      "metrics": "owner_fake_driver_stop",
+      "ticks": 1161,
+      "frames": 8127,
+      "targets": 100,
+      "hardware_io": false
+    },
+    {
+      "test": "owner_to_fake_driver_20hz_feedback_lease_renewal_and_controlled_stop",
+      "passed": true
+    },
+    {
+      "passed": 11,
+      "failed": 0,
+      "hardware_io": false
+    }
+  ],
+  "receive_clock_tests": [
+    {
+      "test": "kernel_receive_age_epoch_future_stale_and_conservative_bracket",
+      "passed": true
+    },
+    {
+      "test": "clock_step_reversal_uncertainty_overflow_and_new_epoch_recovery",
+      "passed": true
+    },
+    {
+      "test": "allowed_positive_negative_clock_drift_preserves_age_and_epoch_lower_bound",
+      "passed": true
+    },
+    {
+      "test": "modern_realtime_epoch_preserves_one_nanosecond_age_boundary",
+      "passed": true
+    },
+    {
+      "passed": 4,
+      "failed": 0,
+      "hardware_io": false
+    }
+  ]
+}

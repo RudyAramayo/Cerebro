@@ -1,0 +1,8 @@
+{
+  "hosted_runner": true,
+  "vcan_module_available": false,
+  "returncode": 1,
+  "detail": "modprobe: FATAL: Module vcan not found in directory /lib/modules/6.8.0-1070-azure",
+  "robot_io": false,
+  "interfaces_created": false
+}

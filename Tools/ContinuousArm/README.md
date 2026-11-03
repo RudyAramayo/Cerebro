@@ -220,3 +220,38 @@ The full suite has 38 groups (19 owner + 8 codec + 11 boundary), plus the legacy
 fixture. Source-bound results are recorded separately under
 `docs/calibration/evidence/2026-11-02-arm-driver-boundary/`; the earlier codec
 reports remain historical snapshots.
+
+## Kernel receive-clock conversion
+
+`ReceiveClock` keeps Linux kernel realtime receive timestamps and monotonic
+clock correlations as signed 64-bit integer nanoseconds. A monotonic/realtime/
+monotonic bracket bounds correlation uncertainty. It requires a strictly new
+source epoch after clock failure, rejects backwards monotonic time, and admits
+only brackets wholly inside the initial offset interval plus the configured
+variation allowance. Packet age uses the earliest possible offset in that
+entire interval. Using only the current offset can make queued packets appear
+younger after a small backwards wall-clock step, even when that step is inside
+the allowed tolerance.
+
+The policy assumes the offset stays inside that expanded interval throughout
+the epoch. Measurements cannot prove that an unobserved excursion between
+correlation samples did not happen. The conservative allowance can delay new
+source admission and reject otherwise usable borderline packets. Old-epoch,
+future and stale packets are rejected without relabelling dequeue time as
+receipt time. Four regression groups include permitted positive/negative clock
+steps, overflow, restart, and an exact one-nanosecond age boundary at a modern
+realtime epoch; floating-point absolute realtime cannot preserve that boundary.
+
+This measures **kernel receipt age**, not actuator sample age. The serial CAN
+adapter, USB/TTY queues and firmware may add delay before the kernel sees a
+frame. The upstream Linux 5.15 slcan driver does not provide hardware receive
+timestamps or decode bus-error frames. An error-frame filter alone therefore
+cannot prove bus-off detection on the installed transport. Those capabilities,
+queue behavior and independent watchdog still need supported bench evidence.
+See the primary [Linux timestamping documentation](https://docs.kernel.org/networking/timestamping.html)
+and [5.15 slcan source](https://github.com/torvalds/linux/blob/v5.15/drivers/net/can/slcan.c).
+
+The Ubuntu 22.04 CI job uses a disposable GitHub-hosted runner with a read-only
+repository token. It builds the same pinned source without robot access and
+reports virtual-CAN module availability separately from test success. An absent
+vcan module is not a passing transport integration test.

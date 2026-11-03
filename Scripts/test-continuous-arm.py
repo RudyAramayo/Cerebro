@@ -45,6 +45,7 @@ def main():
     legacy = [json.loads(line) for line in run([str(build / "legacy_handoff_reproduction")]).splitlines() if line.strip()]
     codec = [json.loads(line) for line in run([str(build / "amber_wire_codec_tests")]).splitlines() if line.strip()]
     boundary = [json.loads(line) for line in run([str(build / "arm_driver_boundary_tests")]).splitlines() if line.strip()]
+    receive_clock = [json.loads(line) for line in run([str(build / "receive_clock_tests")]).splitlines() if line.strip()]
     source_files = ["Tools/ContinuousArm/ContinuousArmController.hpp",
                     "Tools/ContinuousArm/ContinuousArmController.cpp",
                     "Tests/ROBContinuousArmControllerTests.cpp",
@@ -52,14 +53,18 @@ def main():
                     "Tools/ContinuousArm/AmberWireCodec.cpp",
                     "Tools/ContinuousArm/ArmDriverBoundary.hpp",
                     "Tools/ContinuousArm/ArmDriverBoundary.cpp",
+                    "Tools/ContinuousArm/ReceiveClock.hpp",
+                    "Tools/ContinuousArm/ReceiveClock.cpp",
                     "Tools/ContinuousArm/CMakeLists.txt",
                     "Tests/ROBAmberWireCodecTests.cpp",
                     "Tests/ROBArmDriverBoundaryTests.cpp",
+                    "Tests/ROBReceiveClockTests.cpp",
                     "Scripts/test-continuous-arm.py"]
     report = {"hardware_io": False, "installed": False, "ruckig_version": "0.9.2",
               "ruckig_commit": revision, "sanitizer": args.sanitizer,
               "source_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in source_files},
-              "tests": records, "legacy_comparison": legacy, "wire_codec_tests": codec, "driver_boundary_tests": boundary}
+              "tests": records, "legacy_comparison": legacy, "wire_codec_tests": codec, "driver_boundary_tests": boundary,
+              "receive_clock_tests": receive_clock}
     if args.summary:
         args.summary.parent.mkdir(parents=True, exist_ok=True)
         args.summary.write_text(json.dumps(report, indent=2) + "\n")
@@ -69,6 +74,7 @@ def main():
     print(json.dumps(next(x for x in codec if "metrics" in x)))
     print(json.dumps({"sanitizer": args.sanitizer, "driver_boundary": boundary[-1]}))
     print(json.dumps(next(x for x in boundary if "metrics" in x)))
+    print(json.dumps({"sanitizer": args.sanitizer, "receive_clock": receive_clock[-1]}))
 
 
 if __name__ == "__main__":
