@@ -160,3 +160,38 @@ measure power or shaft position. This verifies deployment and the command
 sequence only. Physical startup and clearance after mount repair remain untested.
 The private launch observations and deployment manifest are retained alongside
 the staged app outside Git.
+
+## Laser startup installation and launch — 21:25 local time
+
+The signed `fcf656c` build was installed atomically and launched under Rudy's
+existing authorization and follow-up laser-positioning request. The previously
+installed neck repair is retained at
+`~/dev/output/cerebro-laser-startup-20261102/Cerebro-before-install.app`.
+Strict signature verification passed for the built, backup and installed apps.
+Installed Debug dylib SHA-256:
+`64ac33c0cbd2fc4fbda84101e212d97510c1b677efce52be592f7e9cc1977984`.
+
+The new process was PID 15843, session
+`56D9E2BE-B102-4E37-B327-6562860B2F03`. From 21:25:11 through 21:25:26,
+139 read-only status samples captured laser startup with tilt 8000 accepted
+while pan remained unknown, followed by pan 4000 accepted and startup complete.
+Both relay outputs remained OFF and `relay_off_established` was true. The neck
+again traversed all three saved phases and finished at 5799 / 7014 / 7698;
+completion remained stable for at least five seconds.
+
+`ROBPassiveHardwareStartup` remains true, and both independent automatic
+startup settings are enabled. Installed Settings → Arms shows all three
+checkboxes checked, with readable help text in the scrolling panel. The exact
+neck catalog and laser calibration hashes above remain unchanged. No calibration
+confirmation, live preference reset or power command occurred. This verifies
+accepted startup commands, not physical motion; the damaged neck remains
+powered off per Rudy pending repair.
+
+`Scripts/test-bubbles.sh` passed the new actual-runtime fixtures, protocol,
+relay duty-cycle and console tests. All neck/configuration/manual/static checks
+listed above, `ROBGripperStartupCalibrationRuntimeTests.py`, and the local
+control suite also passed. The full Debug build passed with automatic install
+disabled before the explicit installation. Source was committed and pushed to
+`origin/codex/neck-startup-preservation` before launch. The complete local
+observation trace and validation manifest are in the laser staging directory
+outside Git.
