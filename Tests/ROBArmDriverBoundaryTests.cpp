@@ -25,7 +25,8 @@ struct Rig {
     double time{};
     bool clockThrows{};
     wire::ArmDriverBoundary boundary{wire::PhysicalArm::Right,signs(),bounds(),policy(),[this]{
-        if(clockThrows)throw std::runtime_error("injected clock failure");return time;
+        if(clockThrows)throw std::runtime_error("injected clock failure");
+        return time;
     }};
     std::uint64_t epoch{1},generation{1},owner{101};
     std::vector<wire::Frame> frames;
