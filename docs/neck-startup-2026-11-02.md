@@ -55,6 +55,31 @@ that day, the actor that enabled it, or a definitive mechanical/electrical cause
 - Read-only local status exposes the automatic-startup setting, progress flag
   and saved phases, so a future disabled startup can be diagnosed directly.
 
+## Laser mount follow-up
+
+Rudy subsequently requested automatic laser servo positioning as well. The same
+`41c59e9` passive-startup preference also suppressed the tuck-and-turn sequence
+in `ROBBubbleRuntime.maestroReconnected()`. The saved mount calibration remains
+tilt channel 6 at 8000, then pan channel 7 at 4000 after 0.75 seconds; both relay
+OFF targets remain 4000. Geometry is still unconfirmed. Saved calibration bytes
+have SHA-256 `891dfdbfabf3c289f1a4123cde12d36fd2aaa022af92a00581d343b3dda32f3f`.
+
+Laser mount startup now has a separate default-on
+`ROBLaserMountAutomaticStartupEnabled` preference and an Arms and motion
+checkbox. The passive setting continues to suppress arm offers and automatic
+gripper calibration. The mount uses saved targets without rewriting calibration,
+records accepted commands in read-only local status, and cancels the pending
+pan after Stop, pulse release, manual control or a subsequent reconnect. Relay
+OFF and tilt must succeed before pan is dispatched; connection/write failures
+report failed startup. Automatic positioning grants no later motor or remote
+mount authorization and does not enable laser emission.
+
+The actual runtime fixtures cover default-on startup with passive arms,
+non-factory stored targets, exact relay/tilt/pan ordering, persisted opt-out and
+re-enable, malformed settings, cancellation, reconnect invalidation and failed
+relay/tilt/pan writes. All tests use isolated preferences and inert serial
+substitutes. Deployment observations are recorded below after installation.
+
 ## Offline verification and deployment
 
 Production-code byte-recorder fixtures exercise the automatic startup gate,

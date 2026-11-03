@@ -24,8 +24,19 @@ still takes approximately 0.5 seconds to respond.
 The operator also verified **8000 ON / 4000 OFF for both relays**. Existing calibrations using those
 exact values receive a one-time wiring confirmation; different saved values are not confirmed.
 The runtime never restores authorization or live output mode from disk. On Maestro connection,
-it applies the confirmed relay OFF values and the
-existing startup tuck: Tilt 8000, then Pan 4000 after 0.75 seconds.
+it applies the confirmed relay OFF values and the saved startup tuck: Tilt first,
+then Pan after 0.75 seconds (the installed values are 8000 / 4000). The separate
+default-on **Settings → Arms and motion → Run saved laser mount startup after
+connecting** setting (`ROBLaserMountAutomaticStartupEnabled`) controls this
+sequence. Passive arm/gripper startup cannot suppress it. An explicit disabled
+setting still sends relay OFF, without positioning the mount. Preference changes
+apply on the next launch/reconnect and do not move or stop an existing sequence.
+
+Stop, release, manual positioning and another reconnect cancel the pending pan.
+Failed relay OFF or tilt writes prevent the pan stage. Startup does not authorize
+later motor or remote mount commands, enable a laser, or confirm calibration.
+`status.result.laser_mount` reports the setting, saved targets, command-state
+progress and accepted targets; these are not measured shaft positions.
 
 ## Operation
 

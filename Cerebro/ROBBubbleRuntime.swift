@@ -29,6 +29,7 @@ import CoreImage
     private var outputSequence: UInt64 = 0
     private var stowGeneration = 0
     private var stowingUntil = 0.0
+    private var automaticStartupState = "idle"
     private var localPreviewActive = false
     private var laserCaptureActive = false
     private var lastDetail = "Cerebro controls are ready. Remote controllers must enable Tilt/Pan or authorize bubbles."
@@ -41,6 +42,28 @@ import CoreImage
     private let context: CIContext
     private let uptime: () -> Double
     private let defaults: UserDefaults
+    /// Mount clearance is independent of passive arm/gripper startup.
+    /// Only an explicit mount maintenance setting suppresses this sequence.
+    var automaticMountStartupEnabled: Bool {
+        get {
+            guard let value = defaults.object(forKey: "ROBLaserMountAutomaticStartupEnabled") else { return true }
+            return (value as? Bool) ?? false
+        }
+        set { defaults.set(newValue, forKey: "ROBLaserMountAutomaticStartupEnabled") }
+    }
+
+    @nonobjc func mountStartupStatus() -> [String: Any] {
+        ["automatic_startup_enabled": automaticMountStartupEnabled,
+         "startup_in_progress": automaticStartupState == "tilt",
+         "startup_state": automaticStartupState,
+         "saved_pan": calibration.stowPan, "saved_tilt": calibration.stowTilt,
+         "pan_channel": calibration.panChannel, "tilt_channel": calibration.tiltChannel,
+         "commanded_pan": lastOutputs[calibration.panChannel] as Any? ?? NSNull(),
+         "commanded_tilt": lastOutputs[calibration.tiltChannel] as Any? ?? NSNull(),
+         "relay_off_established": relayOffEstablished,
+         "spin": safety.spin, "blower": safety.blower,
+         "detail": lastDetail]
+    }
     private struct Viewer { var controller: UUID; var sequence: UInt64; var seen: Double }
     private var viewers: [UUID: Viewer] = [:]
     private struct Frame {
@@ -220,12 +243,12 @@ import CoreImage
         dispatchPrecondition(condition: .onQueue(.main))
         safety.stop(at: uptime())
         owner = nil; ownerController = nil; mountAuthorized = false; localMotorControl = false
-        aimUsesCalibration = false; stowGeneration += 1
+        aimUsesCalibration = false; cancelPendingStow()
         stowingUntil = 0
         lastDetail = reason; applyOutputs()
     }
     func stow() {
-        stop(reason: "Startup tuck: Tilt 8000, then Pan 4000")
+        stop(reason: "Startup tuck: Tilt \(calibration.stowTilt), then Pan \(calibration.stowPan)")
         stowingUntil = uptime() + 1.5
         tilt = calibration.stowTilt
         write(channel: calibration.tiltChannel, value: tilt)
@@ -259,7 +282,7 @@ import CoreImage
     }
     private func applyAim(pan: Int, tilt: Int, calibrated: Bool) {
         guard (4000 ... 8000).contains(pan), (4000 ... 8000).contains(tilt) else { return }
-        stowGeneration += 1
+        cancelPendingStow()
         self.pan = pan; self.tilt = tilt; aimUsesCalibration = calibrated && liveMountOutputs
         write(channel: calibration.panChannel, value: pan)
         write(channel: calibration.tiltChannel, value: tilt)
@@ -537,16 +560,52 @@ import CoreImage
         let blowerOff = serialBox?.applyBubbleTarget(calibration.blowerOff, channel: calibration.blowerChannel) == true
         let spinOff = serialBox?.applyBubbleTarget(calibration.spinOff, channel: calibration.spinChannel) == true
         relayOffEstablished = blowerOff && spinOff
-        if !defaults.bool(forKey: "ROBPassiveHardwareStartup") {
-            _ = serialBox?.applyBubbleTarget(calibration.stowTilt, channel: calibration.tiltChannel)
+        if blowerOff { lastOutputs[calibration.blowerChannel] = calibration.blowerOff }
+        if spinOff { lastOutputs[calibration.spinChannel] = calibration.spinOff }
+        if automaticMountStartupEnabled {
+            automaticStartupState = "tilt"
+            guard relayOffEstablished,
+                  commandStartupMountTarget(calibration.stowTilt, channel: calibration.tiltChannel) else {
+                failAutomaticStartup()
+                safety.forceCooldown(at: uptime())
+                return
+            }
+            tilt = calibration.stowTilt
+            lastDetail = "Laser mount startup: Tilt \(tilt) commanded; waiting before Pan \(calibration.stowPan)"
             let generation = stowGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
                 guard let self, self.stowGeneration == generation else { return }
-                _ = self.serialBox?.applyBubbleTarget(self.calibration.stowPan, channel: self.calibration.panChannel)
+                guard self.commandStartupMountTarget(self.calibration.stowPan, channel: self.calibration.panChannel) else {
+                    self.failAutomaticStartup(); return
+                }
+                self.pan = self.calibration.stowPan
+                self.automaticStartupState = "complete"
+                self.lastDetail = "Saved laser mount startup targets sent: Tilt \(self.tilt), then Pan \(self.pan); physical position unmeasured"
             }
+        } else {
+            automaticStartupState = "disabled"
+            lastDetail = "Automatic laser mount startup disabled in Arms and motion settings"
         }
         // Start the restart cooldown when OFF is actually sent, not when the
         // operator later enables motors. Tilt/Pan remains available throughout.
         safety.forceCooldown(at: uptime())
+    }
+
+    private func cancelPendingStow() {
+        stowGeneration += 1
+        if automaticStartupState == "tilt" { automaticStartupState = "cancelled" }
+    }
+
+    private func commandStartupMountTarget(_ target: Int, channel: Int) -> Bool {
+        guard serialBox?.bubbleHardwareReady == true,
+              serialBox?.applyBubbleTarget(target, channel: channel) == true else { return false }
+        lastOutputs[channel] = target
+        return true
+    }
+
+    private func failAutomaticStartup() {
+        automaticStartupState = "failed"
+        stowingUntil = 0
+        lastDetail = "Laser mount startup stopped: Maestro did not accept the required OFF or positioning commands"
     }
 }

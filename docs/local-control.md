@@ -290,12 +290,12 @@ opening on the next launch. Hidden Amber diagnostics skip redraw work. Arm
 consoles retain a 4096-character live tail and bounded backing buffers; full
 controller logs remain on Amber. Camera/task consumers run independently.
 
-**Settings → Arms and motion → Passive arm and accessory startup** skips
-automatic accessory mount positioning, jaw setup and arm startup offers at
-launch or reconnect. It does not disable the saved neck startup sequence.
+**Settings → Arms and motion → Passive arm and gripper startup** skips
+automatic jaw setup and arm startup offers at launch or reconnect. Saved neck
+and laser mount startup sequences have independent default-on settings.
 Relay OFF outputs remain active. Explicit local controls and explicit stationary
 empty-jaw setup still work normally. Changing a startup preference does not move
-anything or stop an already-running task; use Stop for that. Arm/accessory
+anything or stop an already-running task; use Stop for that. Arm/gripper
 profiling preferences can be set before launch with:
 
 ```sh
@@ -306,7 +306,7 @@ defaults write com.orbitusrobotics.Cerebro ROBLowOverheadDiagnostics -bool YES
 **Run saved neck startup sequence after connecting** is a separate, default-on
 setting (`ROBNeckAutomaticStartupEnabled`). It uses the exact saved three phases
 from Servo Control, including custom targets and holds, after Maestro's motion
-limits have been applied. Passive arm/accessory profiling cannot change this
+limits have been applied. Passive arm/gripper profiling cannot change this
 setting. For stationary neck maintenance, explicitly turn it off before a
 launch/reconnect and retain the physical power shutdown. Re-enable only after
 the mechanism is ready. Neither preference proves that a servo has power or
@@ -316,6 +316,17 @@ has reached its target. Explicit manual startup retains its existing controls.
 and `saved_startup_phases` without moving hardware. Disabled/rejected startup
 does not paint unknown axes as enabled. The November 2 incident, repair and
 deployment are recorded in [the neck startup investigation](neck-startup-2026-11-02.md).
+
+**Run saved laser mount startup after connecting** independently enables the
+saved tilt-then-pan sequence (`ROBLaserMountAutomaticStartupEnabled`, default
+on). It uses `ROBBubbleCalibration.v1` targets, currently tilt 8000 followed by
+pan 4000 after 0.75 seconds, while sending both bubble relays OFF. Explicit
+maintenance disable suppresses positioning only. Failed relay OFF/tilt writes,
+Stop, pulse release and a manual override prevent delayed pan commands.
+`status.result.laser_mount` exposes `automatic_startup_enabled`, `startup_state`,
+`startup_in_progress`, `saved_pan`, `saved_tilt`, `commanded_pan`,
+`commanded_tilt`, channel numbers and relay state. `complete` means both commands
+were sent; it does not establish power, physical arrival or clearance.
 
 The sampler has a hard duration limit of 12 hours (10 by default), renews camera
 demand and records status, process CPU/RSS, uptime, stream ages/FPS and errors.

@@ -307,6 +307,7 @@ import CoreFoundation
                             "upper":phase.upperTarget,"hold_seconds":phase.holdSeconds]
                 },
                 "detail":serial?.neckCommandSafetyStatus ?? "Unavailable"],
+            "laser_mount":ROBBubbleRuntime.shared.mountStartupStatus(),
             "navigation":["pose_fresh":room.poseIsFresh(at:ProcessInfo.processInfo.systemUptime),
                 "map_fresh":room.mapIsFresh(at:ProcessInfo.processInfo.systemUptime),
                 "x_m":finite(Double(scan?.x ?? .nan)),"y_m":finite(Double(scan?.y ?? .nan)),

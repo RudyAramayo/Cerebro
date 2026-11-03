@@ -8,8 +8,9 @@ private final class ROBArmSettingsDocumentView: NSView {
 /// live in the Testing Sandbox rather than growing the preferences window.
 @objcMembers final class ROBArmRoutineSettingsViewController: NSViewController {
     private let startup = NSButton(checkboxWithTitle: "Offer the arm startup route", target: nil, action: nil)
-    private let passiveStartup = NSButton(checkboxWithTitle: "Passive arm and accessory startup", target: nil, action: nil)
+    private let passiveStartup = NSButton(checkboxWithTitle: "Passive arm and gripper startup", target: nil, action: nil)
     private let neckStartup = NSButton(checkboxWithTitle: "Run saved neck startup sequence after connecting", target: nil, action: nil)
+    private let laserStartup = NSButton(checkboxWithTitle: "Run saved laser mount startup after connecting", target: nil, action: nil)
     private let gripperStartup = NSButton(checkboxWithTitle: "Calibrate empty grippers after connecting", target: nil, action: nil)
     private let sessionOnWake = NSButton(checkboxWithTitle: "Offer one arm session at launch / wake", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
@@ -25,8 +26,13 @@ private final class ROBArmSettingsDocumentView: NSView {
         neckStartup.state = ROBServoControlStore.automaticStartupEnabled ? .on : .off
         neckStartup.target = self; neckStartup.action = #selector(changeNeckStartup)
         let neckHelp = NSTextField(wrappingLabelWithString:
-            "The neck uses your saved three-phase sequence at launch and reconnect, independently of passive arm and accessory startup. Turn this off before servicing the neck. Changing this setting does not move or stop servos.")
+            "The neck uses your saved three-phase sequence at launch and reconnect, independently of passive arm and gripper startup. Turn this off before servicing the neck. Changing this setting does not move or stop servos.")
         neckHelp.textColor = .secondaryLabelColor
+        laserStartup.state = ROBBubbleRuntime.shared.automaticMountStartupEnabled ? .on : .off
+        laserStartup.target = self; laserStartup.action = #selector(changeLaserStartup)
+        let laserHelp = NSTextField(wrappingLabelWithString:
+            "The laser mount uses your saved tuck-and-turn positions at launch and reconnect: tilt first, then pan. This is independent of passive arm and gripper startup. Turn this off before servicing the mount. Changing this setting does not move or stop servos.")
+        laserHelp.textColor = .secondaryLabelColor
         startup.state = UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) ? .on : .off
         startup.target = self; startup.action = #selector(changeStartup)
         gripperStartup.state = ROBGripperStartupCalibration.enabled ? .on : .off
@@ -61,7 +67,7 @@ private final class ROBArmSettingsDocumentView: NSView {
         let stop = NSButton(title: "Stop + hold", target: self, action: #selector(stop))
         stop.bezelColor = .systemRed
         state.isSelectable = true
-        let stack = NSStackView(views: [title, neckStartup, neckHelp, passiveStartup, gripperStartup, gripperHelp, sessionOnWake, startup,
+        let stack = NSStackView(views: [title, neckStartup, neckHelp, laserStartup, laserHelp, passiveStartup, gripperStartup, gripperHelp, sessionOnWake, startup,
                                        inspectionRow, treadRow, treadHelp, behaviorHelp, sandbox, sandboxHelp, state, stop])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
         let scroll = NSScrollView()
@@ -84,7 +90,7 @@ private final class ROBArmSettingsDocumentView: NSView {
             stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 28),
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -24)
         ])
-        for label in [neckHelp, gripperHelp, treadHelp, behaviorHelp, sandboxHelp, state] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for label in [neckHelp, laserHelp, gripperHelp, treadHelp, behaviorHelp, sandboxHelp, state] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: ROBTreadMotionRamp.settingsChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBArmRoutineDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBControllerArmApprovalDidChange"), object: nil)
@@ -94,6 +100,7 @@ private final class ROBArmSettingsDocumentView: NSView {
     @objc private func changeStartup() { UserDefaults.standard.set(startup.state == .on, forKey: ROBArmRoutinePlan.startupDefaultsKey) }
     @objc private func changePassiveStartup() { UserDefaults.standard.set(passiveStartup.state == .on, forKey: "ROBPassiveHardwareStartup") }
     @objc private func changeNeckStartup() { ROBServoControlStore.automaticStartupEnabled = neckStartup.state == .on }
+    @objc private func changeLaserStartup() { ROBBubbleRuntime.shared.automaticMountStartupEnabled = laserStartup.state == .on }
     @objc private func changeTreadAcceleration() { ROBTreadMotionRamp.selectedMode = treadAcceleration.indexOfSelectedItem }
     @objc private func changeGripperStartup() { ROBGripperStartupCalibration.enabled = gripperStartup.state == .on }
     @objc private func changeSessionOnWake() { UserDefaults.standard.set(sessionOnWake.state == .on, forKey: ROBArmRoutinePlan.sessionOnWakeKey) }
