@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=Path)
     parser.add_argument('--summary', required=True, type=Path)
+    parser.add_argument('--runtime-binary', type=Path)
     args = parser.parse_args()
     if os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted' or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Requires a disposable GitHub-hosted runner; not a robot or workstation')
@@ -58,14 +59,22 @@ def main():
                 raise RuntimeError('Host namespace can still bind the moved virtual interface')
         output = run(['sudo', 'ip', 'netns', 'exec', namespace, 'env', 'ROB_ISOLATED_VCAN_TEST=1', str(args.binary.resolve()), interface])
         records = [json.loads(line) for line in output.splitlines() if line.strip()]
+        runtime_records = None
+        if args.runtime_binary:
+            runtime_output = run(['sudo', 'ip', 'netns', 'exec', namespace, 'env', 'ROB_ISOLATED_VCAN_TEST=1',
+                                  'python3', str(Path(__file__).with_name('test-amber-runtime.py')),
+                                  '--binary', str(args.runtime_binary.resolve()), '--interface', interface])
+            runtime_records = [json.loads(line) for line in runtime_output.splitlines() if line.strip()]
         report = {'robot_io': False, 'virtual_CAN_io': True, 'old_socket_send_errno': old_send_error,
-                  'new_host_bind_errno': new_bind_error, 'tests': records,
+                  'new_host_bind_errno': new_bind_error, 'tests': records, 'runtime_tests': runtime_records,
                   'git_commit': os.environ.get('GITHUB_SHA'),
                   'scope': 'Disposable hosted runner and virtual CAN only; physical slcan transfer remains uncommissioned'}
         root = Path(__file__).resolve().parents[1]
         sources = ['Tools/ContinuousArm/SocketCanTransport.hpp', 'Tools/ContinuousArm/SocketCanTransport.cpp',
                    'Tools/ContinuousArm/ReceiveClock.hpp', 'Tools/ContinuousArm/ReceiveClock.cpp',
-                   'Tests/ROBAmberLinuxTransportTests.cpp', 'Scripts/test-amber-linux-isolation.py']
+                   'Tests/ROBAmberLinuxTransportTests.cpp', 'Scripts/test-amber-linux-isolation.py',
+                   'Tools/ContinuousArm/AmberControllerMain.cpp', 'Scripts/test-amber-runtime.py',
+                   'Tools/ContinuousArm/ArmSession.hpp', 'Tools/ContinuousArm/ArmSession.cpp']
         report['source_sha256'] = {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in sources}
         args.summary.parent.mkdir(parents=True, exist_ok=True)
         args.summary.write_text(json.dumps(report, indent=2) + '\n')

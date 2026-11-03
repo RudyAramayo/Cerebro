@@ -13,6 +13,7 @@ on:
       - Tests/ROBAmberLinuxTransportTests.cpp
       - Scripts/test-continuous-arm.py
       - Scripts/test-amber-linux-isolation.py
+      - Scripts/test-amber-runtime.py
       - .github/workflows/continuous-arm-linux.yml
   workflow_dispatch:
 
@@ -70,6 +71,7 @@ jobs:
         run: >-
           python3 Scripts/test-amber-linux-isolation.py
           --binary "$RUNNER_TEMP/arm-build/amber_linux_transport_tests"
+          --runtime-binary "$RUNNER_TEMP/arm-build/rob-amber-controller"
           --summary "$RUNNER_TEMP/results/virtual-can-isolation.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
