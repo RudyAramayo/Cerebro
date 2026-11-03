@@ -18,8 +18,10 @@ import time
 class VirtualArm:
     def __init__(self, interface):
         self.bus = socket.socket(socket.AF_CAN, socket.SOCK_RAW | socket.SOCK_NONBLOCK, socket.CAN_RAW)
+        # Include EFF/RTR discrimination but NOT CAN_ERR_FLAG. Including the
+        # error bit routes a filter to the kernel's error-frame receive list.
         self.bus.setsockopt(socket.SOL_CAN_RAW, socket.CAN_RAW_FILTER,
-                            b''.join(struct.pack('=II', j, 0xFFFFFFFF) for j in range(0x11, 0x18)))
+                            b''.join(struct.pack('=II', j, 0xC00007FF) for j in range(0x11, 0x18)))
         self.bus.bind((interface,))
         self.positions = [b'\0\0'] * 7
         self.frames = 0
@@ -102,7 +104,7 @@ def scenario(binary, interface, action):
                 last = command('target', sequence=sequence, position=[.45 * math.sin(.5 + tick * .01)] * 7)
                 assert last['accepted'], last
                 time.sleep(.01)
-            assert arm.frames > 100 and abs(last['commanded_velocity'][0]) > .01, last
+            assert arm.frames > 100 and abs(last['commanded_velocity'][0]) > .01, (arm.frames, arm.error, last)
             if action == 'disconnect':
                 client.close()
                 client = None
