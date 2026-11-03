@@ -1,0 +1,23 @@
+{
+  "captured_utc": "2026-11-03T05:55:01.259927+00:00",
+  "method": "Read /sys/class/net metadata and process command lines. No CAN sockets or commands.",
+  "hardware_commands_sent": false,
+  "interfaces": {
+    "can10": {
+      "type": "280",
+      "mtu": "16",
+      "tx_queue_len": "1000",
+      "operstate": "unknown"
+    },
+    "can11": {
+      "type": "280",
+      "mtu": "16",
+      "tx_queue_len": "1000",
+      "operstate": "unknown"
+    }
+  },
+  "slcand_processes": [
+    "765 /usr/bin/slcand -o -c -s8 /dev/ttyACM1 can10",
+    "783 /usr/bin/slcand -o -c -s8 /dev/ttyACM0 can11"
+  ]
+}

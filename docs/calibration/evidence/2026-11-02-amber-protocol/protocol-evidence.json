@@ -1,0 +1,89 @@
+{
+  "audit_timestamp_utc": "2026-11-03T05:36:51.140560+00:00",
+  "hardware_commands_sent": false,
+  "vendor_binary_executed": false,
+  "source_root": "Amber-HomeFolder at commit 16796c4",
+  "files": {
+    "amber/L-10/amber_core_L": {
+      "sha256": "554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100",
+      "size": 1921528
+    },
+    "amber/R-11/amber_core_R": {
+      "sha256": "554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100",
+      "size": 1921528
+    },
+    "amber/L-10/launch.json": {
+      "sha256": "baea5d73603f3e44eb603fde26c8d06268e2949b1adc4fb880f65a73a901f572",
+      "size": 1216
+    },
+    "amber/R-11/launch.json": {
+      "sha256": "5de7ef5c9e8f2315b5fc88d6b4db4dac54065cb2d0b1569484636435f649410d",
+      "size": 1217
+    },
+    "amber/rob_gateway/rob_amber_gateway.py": {
+      "sha256": "6903063cbcaf9e74fe84b506b1566c09b5d5650a6a2bd81b060ebea1f14997d2",
+      "size": 71477
+    },
+    "amber/sin_wave/lcmTypes/posCmd_t.py": {
+      "sha256": "f46ccc077356c4f724a3b363438d415dfb92ac35722a83e62776114e93d86cb9",
+      "size": 1857
+    },
+    "amber/sin_wave/lcmTypes/armStatus_t.py": {
+      "sha256": "d539e795316a3ed8c15444aed588cb523a5159dfb4df75845f547a0577bcd78c",
+      "size": 2537
+    },
+    "system/etc/rc.local": {
+      "sha256": "2369a9576604b945df2c8bb4913967430ea0d3790eca196102ecdbdc5ebe37b9",
+      "size": 1157
+    }
+  },
+  "observed_binary_contract": {
+    "position_sender": {
+      "symbol": "positionCanSender::sendPosition()",
+      "start": "0x394d8",
+      "end_exclusive": "0x396a3",
+      "can_id": "0x11 + zero_based_joint",
+      "dlc": 3,
+      "opcode": "0x40",
+      "scale_counts_per_degree": 128,
+      "signed_encoding": "truncate toward zero; add 65535 for negative; high byte then low byte",
+      "config_sign": "robotConfig::RotationDirection",
+      "lease_or_feedback_test_in_sender": false
+    },
+    "sender_loop": {
+      "symbol": "positionCanSender::spin()",
+      "start": "0x396a3",
+      "end_exclusive": "0x396e0",
+      "tick": "RealTimer::globalIter",
+      "staleness_check_observed": false
+    },
+    "feedback_decoder": {
+      "symbol": "canRecv::convertfromCan",
+      "start": "0x38d99",
+      "position_scale_divisor": 128,
+      "velocity_scale": "raw integer, physical units not established",
+      "current_scale_divisor": 256,
+      "signed_decode": "raw > 32768: raw - 65535; otherwise raw",
+      "status": "payload byte 7",
+      "firmware_physical_interpretation_validated": false
+    },
+    "mode": {
+      "symbol": "lcmCanSender::ModeHandler::handleMessage",
+      "start": "0x3a5b0",
+      "can_id": "0x10 + joint_id",
+      "dlc": 2,
+      "payload": [
+        "0x20",
+        "mode"
+      ]
+    }
+  },
+  "limitations": [
+    "Static audit of hash-matched original host binaries; not a motor test.",
+    "Packet transmission and physical actuation are not implied.",
+    "Firmware command-timeout and stop behavior remain unverified.",
+    "Raw velocity and current physical units require independent validation.",
+    "Reviewed gateway lease-expiry hold sends UDP command 4; it is not an independent drive-side watchdog."
+  ],
+  "interpretation_note": "Static instructions and selected embedded constants, not recovered vendor source. No vendor binary executed and no hardware command transmitted."
+}

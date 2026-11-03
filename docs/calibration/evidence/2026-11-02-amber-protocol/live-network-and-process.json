@@ -1,0 +1,114 @@
+{
+  "inspection": "read_only",
+  "captured_at_unix": 1793684445.0685866,
+  "can_interfaces": {
+    "can10": [
+      {
+        "ifindex": 4,
+        "ifname": "can10",
+        "flags": [
+          "NOARP",
+          "UP",
+          "LOWER_UP"
+        ],
+        "mtu": 16,
+        "qdisc": "pfifo_fast",
+        "operstate": "UNKNOWN",
+        "linkmode": "DEFAULT",
+        "group": "default",
+        "txqlen": 1000,
+        "link_type": "can",
+        "promiscuity": 0,
+        "min_mtu": 0,
+        "max_mtu": 0,
+        "num_tx_queues": 1,
+        "num_rx_queues": 1,
+        "gso_max_size": 65536,
+        "gso_max_segs": 65535,
+        "stats64": {
+          "rx": {
+            "bytes": 0,
+            "packets": 0,
+            "errors": 0,
+            "dropped": 0,
+            "over_errors": 0,
+            "multicast": 0
+          },
+          "tx": {
+            "bytes": 132526656,
+            "packets": 44175551,
+            "errors": 0,
+            "dropped": 0,
+            "carrier_errors": 0,
+            "collisions": 0
+          }
+        }
+      }
+    ],
+    "can11": [
+      {
+        "ifindex": 5,
+        "ifname": "can11",
+        "flags": [
+          "NOARP",
+          "UP",
+          "LOWER_UP"
+        ],
+        "mtu": 16,
+        "qdisc": "pfifo_fast",
+        "operstate": "UNKNOWN",
+        "linkmode": "DEFAULT",
+        "group": "default",
+        "txqlen": 1000,
+        "link_type": "can",
+        "promiscuity": 0,
+        "min_mtu": 0,
+        "max_mtu": 0,
+        "num_tx_queues": 1,
+        "num_rx_queues": 1,
+        "gso_max_size": 65536,
+        "gso_max_segs": 65535,
+        "stats64": {
+          "rx": {
+            "bytes": 0,
+            "packets": 0,
+            "errors": 0,
+            "dropped": 0,
+            "over_errors": 0,
+            "multicast": 0
+          },
+          "tx": {
+            "bytes": 132260583,
+            "packets": 44086861,
+            "errors": 0,
+            "dropped": 0,
+            "carrier_errors": 0,
+            "collisions": 0
+          }
+        }
+      }
+    ]
+  },
+  "cores": {
+    "974": {
+      "Name": "amber_core_L",
+      "State": "S (sleeping)",
+      "Threads": "19",
+      "Cpus_allowed_list": "0-3",
+      "voluntary_ctxt_switches": "375",
+      "nonvoluntary_ctxt_switches": "11",
+      "schedstat": "54353132 224275 386"
+    },
+    "975": {
+      "Name": "amber_core_R",
+      "State": "S (sleeping)",
+      "Threads": "19",
+      "Cpus_allowed_list": "0-3",
+      "voluntary_ctxt_switches": "362",
+      "nonvoluntary_ctxt_switches": "19",
+      "schedstat": "54231340 248684 381"
+    }
+  },
+  "uptime": "34555.20",
+  "limitation": "Interface counters are kernel transport counters, not actuator acknowledgement or live pose evidence."
+}

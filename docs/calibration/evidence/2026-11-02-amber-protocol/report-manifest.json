@@ -1,0 +1,20 @@
+{
+  "artifact": "amber-controller-replacement-analysis.pdf",
+  "private_relative_path": "ROB Test Reports/2026-11-02/output/pdf/amber-controller-replacement-analysis.pdf",
+  "sha256": "8334ad292c46e6597ff69753e2bba817d73352d52a1889e596b09d4962b650f6",
+  "bytes": 114165,
+  "pages": 14,
+  "source_implementation_commit": "9e054156e0fe29cc5cfde8e785eb3a1f6e0489e2",
+  "library_evidence_commit": "bfed885",
+  "generator_sha256": "c4b96dcc6cd82a39bdf4e2241258b7518c214c9696806b5ded59dce20eb11520",
+  "validation": {
+    "all_pages_rendered_and_visually_inspected": true,
+    "layout_text_bounds_checked": true,
+    "all_42_mapped_library_filenames_verified_in_extracted_text": true,
+    "all_page_numbers_verified": true,
+    "clickable_source_links": 9,
+    "test_reports_source_hashes_verified": true
+  },
+  "hardware_io": false,
+  "limitation": "Offline owner/codec and architecture report. Exclusive transport daemon and firmware/physical commissioning remain outstanding."
+}

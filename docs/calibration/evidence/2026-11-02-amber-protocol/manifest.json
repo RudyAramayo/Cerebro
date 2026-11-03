@@ -1,0 +1,11 @@
+{
+  "backup-manifest.json": "e547596219379aeca3d5b37e61d7425869a2a4a36588d158bbc10ea88592b7c4",
+  "can-position-sender.asm": "a1fa1e5ac4fd2021552679d275a1312e8f8ef2cedd9c112b36588589cf042681",
+  "can-receive.asm": "0a7efc7ea45e541405176c1ea769ac8e9c13e04afd09ea68ad80cb35ac09fe81",
+  "lcm-control-sender.asm": "2aa8fe49428aa1732e6ecaf0efd2e664697c7af4fbeb91c43d9851dd6a29e01e",
+  "live-network-and-process.json": "9f02f8d16777f26389596aa17aaab6c83ff30294ec2466fab24e7d62e726016e",
+  "mode-gripper-handlers.asm": "0d3879bb64440c66e3d45dd7557dcd12b6a4742615bbe90baf1febf364da24a9",
+  "protocol-evidence.json": "e96cbefa102973b7c062b24f3128ccf97f2a448e0a3eaf3145783ed32e431828",
+  "report-manifest.json": "9189cfb88a916febdb043d51084816b3c3147e5b105f50eede9028cfba213f2c",
+  "serial-can-transport.json": "144a8b2d79a7bacd411b7dca1dd77a6ad5f54c5743812eb21d08162a72ee4cd7"
+}
