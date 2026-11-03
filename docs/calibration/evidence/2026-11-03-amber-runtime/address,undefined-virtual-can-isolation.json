@@ -1,0 +1,469 @@
+{
+  "robot_io": false,
+  "virtual_CAN_io": true,
+  "old_socket_send_errno": 6,
+  "new_host_bind_errno": 19,
+  "tests": [
+    {
+      "test": "physical_route_mismatch_rejected_without_socket",
+      "passed": true
+    },
+    {
+      "test": "virtual_CAN_real_receive_timestamps_and_seven_position_frames",
+      "passed": true
+    },
+    {
+      "test": "passive_default_opens_receiver_without_transmitting",
+      "passed": true
+    },
+    {
+      "test": "kernel_queue_age_latches_and_reopen_requires_explicit_new_epoch",
+      "passed": true
+    },
+    {
+      "test": "deadline_and_wrong_arm_reject_before_send",
+      "passed": true
+    },
+    {
+      "test": "malformed_feedback_and_bounded_receive_backlog_latch",
+      "passed": true
+    },
+    {
+      "test": "virtual_bus_error_frame_latches_without_claiming_slcan_error_support",
+      "passed": true
+    },
+    {
+      "test": "current_socket_drop_counter_blocks_TX_before_old_ancillary_is_dequeued",
+      "passed": true
+    },
+    {
+      "passed": 8,
+      "failed": 0,
+      "robot_io": false,
+      "virtual_CAN_io": true
+    }
+  ],
+  "runtime_tests": [
+    {
+      "test": "no_io_self_check_and_no_physical_transmit_capability",
+      "passed": true
+    },
+    {
+      "test": "raw_observation_before_any_grant_has_zero_transmission",
+      "passed": true
+    },
+    {
+      "test": "disconnect",
+      "passed": true,
+      "status": {
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16
+        ],
+        "commanded_position": [
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24
+        ],
+        "commanded_velocity": [
+          8.326672684688674e-17,
+          8.326672684688674e-17,
+          8.326672684688674e-17,
+          8.326672684688674e-17,
+          8.326672684688674e-17,
+          8.326672684688674e-17,
+          8.326672684688674e-17
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 2,
+        "reason_name": "ClientDisconnected",
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "stop",
+      "passed": true,
+      "status": {
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002
+        ],
+        "commanded_velocity": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 1,
+        "reason_name": "Stop",
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "replay",
+      "passed": true,
+      "status": {
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24
+        ],
+        "commanded_velocity": [
+          1.3877787807814457e-17,
+          1.3877787807814457e-17,
+          1.3877787807814457e-17,
+          1.3877787807814457e-17,
+          1.3877787807814457e-17,
+          1.3877787807814457e-17,
+          1.3877787807814457e-17
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 1,
+        "reason_name": "Stop",
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "nonce",
+      "passed": true,
+      "status": {
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002,
+          0.24000000000000002
+        ],
+        "commanded_velocity": [
+          2.7755575615628914e-17,
+          2.7755575615628914e-17,
+          2.7755575615628914e-17,
+          2.7755575615628914e-17,
+          2.7755575615628914e-17,
+          2.7755575615628914e-17,
+          2.7755575615628914e-17
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 2,
+        "reason_name": "ClientDisconnected",
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "oversized",
+      "passed": true,
+      "status": {
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          -1.1102230246251565e-16,
+          -1.1102230246251565e-16,
+          -1.1102230246251565e-16,
+          -1.1102230246251565e-16,
+          -1.1102230246251565e-16,
+          -1.1102230246251565e-16,
+          -1.1102230246251565e-16
+        ],
+        "commanded_position": [
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24
+        ],
+        "commanded_velocity": [
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 2,
+        "reason_name": "ClientDisconnected",
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "duplicate",
+      "passed": true,
+      "status": {
+        "backend_accepted_frames": 2058,
+        "backend_attempted_frames": 2058,
+        "boundary_accepted_frames": 2058,
+        "boundary_attempted_frames": 2058,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16
+        ],
+        "commanded_position": [
+          0.23999999999999996,
+          0.23999999999999996,
+          0.23999999999999996,
+          0.23999999999999996,
+          0.23999999999999996,
+          0.23999999999999996,
+          0.23999999999999996
+        ],
+        "commanded_velocity": [
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 294,
+        "reason": 2,
+        "reason_name": "ClientDisconnected",
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2058
+    },
+    {
+      "test": "signal",
+      "passed": true,
+      "status": {
+        "backend_accepted_frames": 2058,
+        "backend_attempted_frames": 2058,
+        "boundary_accepted_frames": 2058,
+        "boundary_attempted_frames": 2058,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16,
+          1.1102230246251565e-16
+        ],
+        "commanded_position": [
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24,
+          0.24
+        ],
+        "commanded_velocity": [
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17,
+          9.71445146547012e-17
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 294,
+        "reason": 7,
+        "reason_name": "Shutdown",
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2058
+    },
+    {
+      "test": "feedback_loss",
+      "passed": true,
+      "status": {
+        "backend_accepted_frames": 861,
+        "backend_attempted_frames": 861,
+        "boundary_accepted_frames": 861,
+        "boundary_attempted_frames": 861,
+        "boundary_fault": 5,
+        "commanded_acceleration": [
+          0.21549022600001966,
+          0.21549022600001966,
+          0.21549022600001966,
+          0.21549022600001966,
+          0.21549022600001966,
+          0.21549022600001966,
+          0.21549022600001966
+        ],
+        "commanded_position": [
+          0.0880934041089867,
+          0.0880934041089867,
+          0.0880934041089867,
+          0.0880934041089867,
+          0.0880934041089867,
+          0.0880934041089867,
+          0.0880934041089867
+        ],
+        "commanded_velocity": [
+          0.2883909906246151,
+          0.2883909906246151,
+          0.2883909906246151,
+          0.2883909906246151,
+          0.2883909906246151,
+          0.2883909906246151,
+          0.2883909906246151
+        ],
+        "generation": 1,
+        "mode": "fault",
+        "owner_reason": "Feedback",
+        "physical_transmit_available": false,
+        "published_batches": 123,
+        "reason": 10,
+        "reason_name": "Feedback",
+        "shutdown_complete": false,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 861
+    },
+    {
+      "passed": 10,
+      "failed": 0,
+      "robot_io": false,
+      "virtual_CAN_io": true
+    }
+  ],
+  "git_commit": "039b722ad869d2fb04d57c4fb1c1f92e58a77897",
+  "scope": "Disposable hosted runner and virtual CAN only; physical slcan transfer remains uncommissioned",
+  "source_sha256": {
+    "Tools/ContinuousArm/SocketCanTransport.hpp": "a80933e8499fbb97a08df12360cac0386f90cbc1fc9f0d7b6ecd31ddb3f8ee8a",
+    "Tools/ContinuousArm/SocketCanTransport.cpp": "fd7bd20ae54bee5e8840dc299ca81b13baee8aa316db79f397e167be7447d460",
+    "Tools/ContinuousArm/ReceiveClock.hpp": "ac0807a4b6b8a7e6e05314c2021b2c697287571d3dc93f9ca5f05dbf64ac6a9c",
+    "Tools/ContinuousArm/ReceiveClock.cpp": "8036b9d47100bae76886eaf5825db9dff99225cdb9007ac9d8921370a323323a",
+    "Tests/ROBAmberLinuxTransportTests.cpp": "e1d90756d8a06a65016b2744a4f6d059ef5e4650386db714eb05b5486d155dee",
+    "Scripts/test-amber-linux-isolation.py": "c067fac19f0a7b5d641976a9953d95e7559530a2bf130c789146d1f48f9f7a83",
+    "Tools/ContinuousArm/AmberControllerMain.cpp": "c40822b892ffa853bcbbb607ed5e56ea2d6cd6e061366451192abd4224c6cc2d",
+    "Scripts/test-amber-runtime.py": "c999e8600db451d52a5a40a0fdbe9ff2c5e0dc529fbba1860735f5a07f6069dc",
+    "Tools/ContinuousArm/ArmSession.hpp": "e828e290e2fc46a82c26002fafa8a91af39b5c014eb23e72910c69ed70d0a9f3",
+    "Tools/ContinuousArm/ArmSession.cpp": "2711e3e19e35ee54370c493825c6735f4934e50ba1bce0a5983e74ff393f6842"
+  },
+  "runtime_binary_sha256": "f7c4b67a6f8e4cd8c26b7860e36b0053a7d92079d238c93c842815017193d520"
+}

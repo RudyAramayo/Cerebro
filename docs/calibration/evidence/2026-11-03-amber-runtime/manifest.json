@@ -1,0 +1,50 @@
+{
+  "archive_sha256": "d74696ec4e4be361d74e0aed41ecf98c3ddf1d7499b67c9fb82a8dcbb59d06fa",
+  "binary_sha256": "364e6e1707d541d5d1e55ea6dbc5ce089151323050fd3408db18129150017fc5",
+  "manifest_files_verified": 7,
+  "executable_mode": "0o755",
+  "interpreter": "/lib64/ld-linux-x86-64.so.2",
+  "source_commit": "039b722ad869d2fb04d57c4fb1c1f92e58a77897",
+  "ci_run": "https://github.com/RudyAramayo/Cerebro/actions/runs/41600422377",
+  "result": "success",
+  "portable_groups": 53,
+  "native_transport_groups": 8,
+  "process_groups": 10,
+  "total_distinct_groups": 71,
+  "robot_io": false,
+  "installed": false,
+  "service_enabled": false,
+  "physical_transmit_available": false,
+  "scope": "Passive commissioning and isolated virtual-CAN control; physical continuous control remains uncommissioned",
+  "prior_failed_runs": [
+    {
+      "run": 41598551620,
+      "cause": "Virtual actuator normal-frame receive mask incorrectly included CAN_ERR_FLAG; child diagnostic initially hidden"
+    },
+    {
+      "run": 41599079929,
+      "cause": "Exposed receive-filter failure; runtime had accepted commands but simulator did not receive normal frames"
+    },
+    {
+      "run": 41599384495,
+      "cause": "Short fixture grant began automatic braking before explicit Stop; missing rejection details"
+    },
+    {
+      "run": 41599968356,
+      "cause": "Diagnostic confirmed GrantEnding before Stop/replay; increased fixture horizon and asserted exact action reasons"
+    }
+  ],
+  "files_sha256": {
+    "address,undefined-continuous-arm.json": "016464371d68a91a9608be5a6e7a5a64cc2af9c7688a804998cdf9ce0800fcd0",
+    "address,undefined-vcan-support.json": "313af8ebbf243c467db3a45461edf7a25c596ef4bfaa828fb402a84002195750",
+    "address,undefined-virtual-can-isolation.json": "b95021bc004a97b74264190ebe56db25a39f1c8efb8690345fd95dab82d339be",
+    "amber-elf-compatibility.json": "4324524074ad89fd6e33cf728c8272dae1596647cde1fd2622df9be3e7f2566e",
+    "independent-verification.json": "a0e0e4d65a73e4c32849f1efe7b3bfadd6213b9a1840dc33d69db4f4119a172e",
+    "none-continuous-arm.json": "f0086de2302abd9eb05bccf495d28ca0c4b86927a6d3cac1d7e4a90a8896480f",
+    "none-vcan-support.json": "313af8ebbf243c467db3a45461edf7a25c596ef4bfaa828fb402a84002195750",
+    "none-virtual-can-isolation.json": "9bba420b020f83e62a416ce5a39ee188cb21b002e9f15981d5096b490668804c",
+    "package-manifest.json": "2606ca932fb8588b8b502617e6738303665c99bb2ad2b8a182c7b5e6518ead57",
+    "report-manifest.json": "71b81ef8dbcbd87481e6b0b8eb7483ed0c2833adf0a1f13925c7622a2a8ffd5b"
+  },
+  "abi_review": "Exact candidate and verified Amber backup parsed offline; no missing required libraries, symbol versions or strong imports; not robot execution"
+}

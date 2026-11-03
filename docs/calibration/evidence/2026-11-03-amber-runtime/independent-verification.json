@@ -1,0 +1,45 @@
+{
+  "commit": "039b722ad869d2fb04d57c4fb1c1f92e58a77897",
+  "run": 41600422377,
+  "binary_sha256": "364e6e1707d541d5d1e55ea6dbc5ce089151323050fd3408db18129150017fc5",
+  "archive_sha256": "d74696ec4e4be361d74e0aed41ecf98c3ddf1d7499b67c9fb82a8dcbb59d06fa",
+  "files_verified": 7,
+  "tests": [
+    {
+      "variant": "none",
+      "groups": 71,
+      "source_hash_entries_checked": 33,
+      "reasons": {
+        "disconnect": "ClientDisconnected",
+        "stop": "Stop",
+        "replay": "Stop",
+        "nonce": "ClientDisconnected",
+        "oversized": "ClientDisconnected",
+        "duplicate": "ClientDisconnected",
+        "signal": "Shutdown",
+        "feedback_loss": "Feedback"
+      },
+      "old_socket_errno": 6,
+      "new_socket_errno": 19
+    },
+    {
+      "variant": "address,undefined",
+      "groups": 71,
+      "source_hash_entries_checked": 33,
+      "reasons": {
+        "disconnect": "ClientDisconnected",
+        "stop": "Stop",
+        "replay": "Stop",
+        "nonce": "ClientDisconnected",
+        "oversized": "ClientDisconnected",
+        "duplicate": "ClientDisconnected",
+        "signal": "Shutdown",
+        "feedback_loss": "Feedback"
+      },
+      "old_socket_errno": 6,
+      "new_socket_errno": 19
+    }
+  ],
+  "binary_mode_preserved": "0755",
+  "binary_size": 510584
+}

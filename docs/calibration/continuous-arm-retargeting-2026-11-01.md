@@ -296,9 +296,66 @@ prove physical stationarity, and transport acceptance is not motor receipt.
 No sockets, backend, service, mode changes, install or restart were added. The
 remaining exclusive backend, commissioned feedback/mode/current interpretation,
 physical limits, collision calibration, watchdog and supervised tests are still
-required before live continuous control. The 14-page report delivered earlier
-that evening documents the preceding 27-group owner/codec phase; these later
+required before live continuous control. The 14-page report Rudy manually sent
+to The God Squad at 22:20 documents the preceding 27-group owner/codec phase; these later
 boundary results are recorded here rather than attributed to that PDF.
+
+## Linux commissioning release, 2026-11-03
+
+The subsequent source-controlled implementation now includes the integer-nanosecond
+receive clock, bounded native SocketCAN backend, trusted session lifecycle and a
+Linux executable. Source `039b722ad869d2fb04d57c4fb1c1f92e58a77897` passes all
+71 distinct groups in both Linux Release and ASan/UBSan:
+53 portable, eight native transport and ten executable/IPC groups. Local
+Release/ASan/UBSan/TSan cover the 53 portable groups. The final
+[CI run](https://github.com/RudyAramayo/Cerebro/actions/runs/41600422377),
+[source-bound reports](evidence/2026-11-03-amber-runtime/) and
+[package/deployment contract](../../Tools/ContinuousArm/DEPLOYMENT.md) are the
+current evidence; the preceding sections preserve the earlier milestones.
+
+Session clients carry exact generation tokens and original creation times.
+Disconnect, Stop and client expiry remove client control while a bounded
+internal writer lease can finish an admissible brake. Every candidate's stopping
+reserve must fit the grant, including a check after the external world guard
+returns. A final planning-age check prevents late calculations from producing
+new output. External faults revoke both owner and boundary with no output;
+new history and a new explicit grant are required for rearm. A timeout is Fault,
+not a claim of physical hold. Native frame acceptance remains distinct from
+motor acknowledgement, with no retry after uncertain or partial publication.
+
+The executable has no physical transmit mode. Physical observation records
+per-joint raw frame/native counts and conservative kernel receipt age without
+manufacturing calibration, mode validity or stationary authority. Its active
+test mode requires kernel-verified virtual CAN, an explicit isolated fixture,
+a private UID-checked local socket and a new connection nonce. Packet size,
+batching, sequence, generation, original age and schema are bounded; duplicate
+keys are malformed. It never exposes mode, gripper or calibration commands.
+
+End-to-end tests verify the exact intended stop reason, rather than merely
+observing that output ended. Initial CI failures exposed a simulator filter
+that accidentally subscribed to error frames and a test grant that entered
+automatic braking before explicit Stop. The filter and test horizon were
+corrected, the controller guards were preserved, and final tests require
+ClientDisconnected, Stop, Shutdown or Feedback for the respective scenario.
+
+The archive's exact tested executable SHA-256 is
+`364e6e1707d541d5d1e55ea6dbc5ce089151323050fd3408db18129150017fc5`;
+the archive SHA-256 is
+`d74696ec4e4be361d74e0aed41ecf98c3ddf1d7499b67c9fb82a8dcbb59d06fa`.
+The package contains its licenses, source/test manifests and an inactive passive
+service example. Staging runs only on the disposable hosted runner and performs
+no robot install, restart or connection. The observed Amber ABI is Ubuntu
+22.04.3 / x86_64 / glibc 2.35. Exact dynamic dependencies and required symbol
+versions are recorded, separate from physical CAN/kernel commissioning.
+
+Physical continuous control remains uncommissioned. Preserve the command-4
+measured-completion guard. Before enabling a future physical backend, complete
+the full robot/world/other-arm collision guard, native signs/zeros and real
+joint limits, verified real slcan exclusion/drain, serial/sample-age bounds,
+independent motor watchdog and coordinated supported/no-load tests. The world
+model includes tread approach and torso alignment to the table; a static
+arm-on-table model and placeholder URDF limits cannot supply these constraints.
+There is no automatic morning activation or old-target replay.
 
 ## Primary implementation references
 

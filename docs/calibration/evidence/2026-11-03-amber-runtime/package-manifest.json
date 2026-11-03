@@ -1,0 +1,55 @@
+{
+  "source_commit": "039b722ad869d2fb04d57c4fb1c1f92e58a77897",
+  "ruckig_commit": "7de6b1035e1cad509251b31b3287d10fbcda6baf",
+  "binary_abi": "ELF64 x86_64",
+  "needed_libraries": [
+    "libstdc++.so.6",
+    "libm.so.6",
+    "libgcc_s.so.1",
+    "libc.so.6"
+  ],
+  "required_symbol_versions": [
+    "CXXABI_1.3",
+    "CXXABI_1.3.9",
+    "GCC_3.0",
+    "GLIBCXX_3.4",
+    "GLIBCXX_3.4.11",
+    "GLIBCXX_3.4.14",
+    "GLIBCXX_3.4.20",
+    "GLIBCXX_3.4.21",
+    "GLIBCXX_3.4.26",
+    "GLIBCXX_3.4.29",
+    "GLIBCXX_3.4.9",
+    "GLIBC_2.10",
+    "GLIBC_2.14",
+    "GLIBC_2.17",
+    "GLIBC_2.2.5",
+    "GLIBC_2.25",
+    "GLIBC_2.3.4",
+    "GLIBC_2.32",
+    "GLIBC_2.34",
+    "GLIBC_2.4"
+  ],
+  "interpreter": "/lib64/ld-linux-x86-64.so.2",
+  "observed_amber": {
+    "os": "Ubuntu 22.04.3",
+    "architecture": "x86_64",
+    "glibc": "2.35"
+  },
+  "physical_transmit_available": false,
+  "installed": false,
+  "service_enabled": false,
+  "portable_groups": 53,
+  "transport_groups": 8,
+  "runtime_groups": 10,
+  "release_scope": "Passive commissioning and isolated virtual-CAN control only",
+  "files_sha256": {
+    "DEPLOYMENT.md": "ef4c81b11686e41e6e98a75ae6b18fdc92c09affd18bb8a247c2c0112229caff",
+    "bin/rob-amber-controller": "364e6e1707d541d5d1e55ea6dbc5ce089151323050fd3408db18129150017fc5",
+    "licenses/Ruckig-LICENSE": "94ad283da40528d820de7bbd7df73871521c346205e208c801d233cb6b813a2f",
+    "licenses/nlohmann-json-LICENSE": "86b998c792894ccb911a1cb7994f7a9652894e7a094c0b5e45be2f553f45cf14",
+    "rob-amber-observe@.service.example": "b79a0beaff2d4f3aa980f3010befc304cde601490aa971f719070fe777437a19",
+    "validation/linux.json": "9bba420b020f83e62a416ce5a39ee188cb21b002e9f15981d5096b490668804c",
+    "validation/portable.json": "f0086de2302abd9eb05bccf495d28ca0c4b86927a6d3cac1d7e4a90a8896480f"
+  }
+}

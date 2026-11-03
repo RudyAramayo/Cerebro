@@ -1,0 +1,14 @@
+{
+  "hosted_runner": true,
+  "vcan_module_available": true,
+  "returncode": 0,
+  "detail": "",
+  "optional_module_package": {
+    "name": "linux-modules-extra-6.8.0-1070-azure",
+    "update_returncode": 0,
+    "install_returncode": 0,
+    "detail": ""
+  },
+  "robot_io": false,
+  "interfaces_created": false
+}

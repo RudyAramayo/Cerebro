@@ -1,0 +1,18 @@
+{
+  "filename": "amber-continuous-controller-commissioning-report.pdf",
+  "sha256": "455d8e20d5a8ae3faa02751ab3595ea0a158bc29d33c639141e7317cb581b2bd",
+  "bytes": 13969,
+  "pages": 4,
+  "all_final_pages_rendered_and_visually_reviewed": true,
+  "source_commit": "039b722ad869d2fb04d57c4fb1c1f92e58a77897",
+  "ci_run": "https://github.com/RudyAramayo/Cerebro/actions/runs/41600422377",
+  "physical_transmit_available": false,
+  "installed": false,
+  "opened_in_preview": false,
+  "sent_as_messages_attachment_by_agent": false,
+  "delivery_blockers": [
+    "Computer Use was not approved to use Preview.",
+    "Computer Use was not approved to use Finder."
+  ],
+  "original_114KB_report_delivery": "Rudy manually sent the earlier report to The God Squad at 22:20; no duplicate sent"
+}
