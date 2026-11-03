@@ -1,0 +1,198 @@
+{
+  "hardware_io": false,
+  "installed": false,
+  "ruckig_version": "0.9.2",
+  "ruckig_commit": "7de6b1035e1cad509251b31b3287d10fbcda6baf",
+  "sanitizer": "none",
+  "source_sha256": {
+    "Tools/ContinuousArm/ContinuousArmController.hpp": "8a0e1ac411769cec03c53f1c65b252358a98e5fc7d6caf2faf0a5eadf751e7b8",
+    "Tools/ContinuousArm/ContinuousArmController.cpp": "f1e0eac811ea4e073ce39c76fa4a493c09f7b2a8e5ed47f8aa01b4893ae9cfb2",
+    "Tests/ROBContinuousArmControllerTests.cpp": "a87d4672530cbc2f4b080ad64a846dcd58d9f7e387035807338e636a9aa410fd",
+    "Tools/ContinuousArm/AmberWireCodec.hpp": "e4bc8b5621891afb7fe6b47ef93098d12ae504e11bbe1dffee1454538a7010a7",
+    "Tools/ContinuousArm/AmberWireCodec.cpp": "7e6bbef38c1e4554063e3823477ec863d227f4a679a3e4952e68905df00d3ae0",
+    "Tools/ContinuousArm/CMakeLists.txt": "e4736656b38dbd3b42525ecdd1b0ba520e11f014199e74605be0a0326ea4df8a",
+    "Tests/ROBAmberWireCodecTests.cpp": "12f17b5153b6dcd2bfdd0f2d9acd677ec8dce75f08cb9b4b70b2d88a323cf2b5",
+    "Scripts/test-continuous-arm.py": "9cdd5489b7c9404ab3c72212ad251ffb5d1aebcc59d7836645fc6341473503b0"
+  },
+  "tests": [
+    {
+      "test": "explicit_limits_guard_stationary_start_no_takeover",
+      "passed": true
+    },
+    {
+      "metrics": "seven_joint_stream",
+      "samples": 14000,
+      "targets": 4200,
+      "moving_retargets": 3898,
+      "max_velocity_rad_s": 0.3,
+      "max_acceleration_rad_s2": 0.6,
+      "max_discrete_jerk_rad_s3": 2,
+      "max_step_rad": 0.0015
+    },
+    {
+      "test": "seven_joint_noisy_66hz_stream_200hz_owner_and_final_convergence",
+      "passed": true
+    },
+    {
+      "test": "thousand_command_burst_one_latest_target",
+      "passed": true
+    },
+    {
+      "test": "replay_reordering_foreign_generation_nan_bounds_and_time_rejected",
+      "passed": true
+    },
+    {
+      "test": "release_jerk_limited_stop_latched_reclutch_no_replay",
+      "passed": true
+    },
+    {
+      "test": "lost_tracking_stream_stops_and_does_not_auto_resume",
+      "passed": true
+    },
+    {
+      "test": "stale_feedback_tracking_error_mode_lease_stall_duplicate_tick_infinity_fault",
+      "passed": true
+    },
+    {
+      "test": "uncertain_transport_result_latches_no_retry",
+      "passed": true
+    },
+    {
+      "test": "changed_scene_rechecks_current_path_and_brakes",
+      "passed": true
+    },
+    {
+      "test": "blocked_stopping_envelope_faults_before_output",
+      "passed": true
+    },
+    {
+      "test": "analytical_braking_extrema_reject_near_limit_overshoot",
+      "passed": true
+    },
+    {
+      "test": "joint_limit_endpoint_and_reversal_without_wrapping",
+      "passed": true
+    },
+    {
+      "test": "3ms_7ms_jitter_integrates_time_without_burst_or_derivative_reseed",
+      "passed": true
+    },
+    {
+      "test": "concurrent_100000_packet_mailbox_latest_wins",
+      "passed": true
+    },
+    {
+      "test": "second_trajectory_worker_cannot_publish",
+      "passed": true
+    },
+    {
+      "test": "stop_and_publication_share_one_generation_barrier",
+      "passed": true
+    },
+    {
+      "test": "250_random_trajectories_526750_joint_samples_inside_analytic_envelopes",
+      "passed": true
+    },
+    {
+      "test": "constant_acceleration_zero_velocity_root_is_checked",
+      "passed": true
+    },
+    {
+      "test": "20_60_90_120hz_pose_streams_share_200hz_owner",
+      "passed": true
+    },
+    {
+      "result": "pass",
+      "groups": 19,
+      "hardware_io": false,
+      "ruckig": "0.9.2"
+    }
+  ],
+  "legacy_comparison": [
+    {
+      "case": "consistent_command_state",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0.2,
+      "seed_acceleration_rad_s2": 0,
+      "minimum_rad": 0.34,
+      "maximum_rad": 1.05,
+      "duration_s": 2
+    },
+    {
+      "case": "hypothetical_missed_sample",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0,
+      "seed_acceleration_rad_s2": -40,
+      "minimum_rad": -5.26259621712,
+      "maximum_rad": 1.05,
+      "duration_s": 2.05691587591
+    },
+    {
+      "case": "stationary_handoff",
+      "start_rad": 0.34,
+      "target_rad": 1.05,
+      "seed_velocity_rad_s": 0,
+      "seed_acceleration_rad_s2": 0,
+      "minimum_rad": 0.34,
+      "maximum_rad": 1.05,
+      "duration_s": 2
+    },
+    {
+      "case": "persistent_latest_target_prototype",
+      "target_updates_hz": 20,
+      "planner_hz": 200,
+      "changes_while_moving": 155,
+      "max_velocity_rad_s": 0.3,
+      "max_acceleration_rad_s2": 0.6,
+      "max_jerk_rad_s3": 2,
+      "max_step_rad": 0.0015,
+      "final_rad": 0.7
+    }
+  ],
+  "wire_codec_tests": [
+    {
+      "test": "physical_arm_routes_and_fourteen_exact_golden_position_frames",
+      "passed": true
+    },
+    {
+      "test": "legacy_0_32768_32769_65535_signed_boundaries_all_three_fields",
+      "passed": true
+    },
+    {
+      "test": "reject_wrong_id_dlc_can_flags_and_direction_preserve_raw_diagnostics",
+      "passed": true
+    },
+    {
+      "test": "finite_profile_range_sign_and_atomic_seven_joint_rejection",
+      "passed": true
+    },
+    {
+      "test": "420014_quantized_joint_roundtrips_both_signs_and_tight_bound_rejection",
+      "passed": true
+    },
+    {
+      "metrics": "owner_to_recorded_CAN",
+      "samples": 6000,
+      "frames": 42000,
+      "moving_retargets": 1358,
+      "maximum_quantization_error_rad": 0.000136344,
+      "maximum_wire_step_rad": 0.00163625,
+      "hardware_io": false
+    },
+    {
+      "test": "200hz_owner_to_recorded_frames_with_20hz_ideal_quantized_feedback",
+      "passed": true
+    },
+    {
+      "test": "invalid_driver_boundary_emits_zero_frames_and_owner_latches_fault",
+      "passed": true
+    },
+    {
+      "passed": 7,
+      "failed": 0,
+      "hardware_io": false
+    }
+  ]
+}

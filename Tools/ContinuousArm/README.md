@@ -98,3 +98,49 @@ guards. The source corresponding to the live core binary was not found; older
 object files are not a safe rebuild substitute. No continuous-stream capability
 should be advertised to ROBControllerVision until that integration, measured
 limits, collision calibration and watchdog commissioning pass.
+
+## Inert Amber wire compatibility component (2026-11-02)
+
+`AmberWireCodec` is a pure packet encoder/diagnostic decoder. It has no network
+or SocketCAN implementation, mode/gripper/calibration command, daemon, lease,
+startup behavior or watchdog. Encoding a batch does not authorize transmission.
+The executable audit above and the matching `positionCanSender::sendPosition`
+(`0x394d8`) / `canRecv::convertfromCan` (`0x38d99`) disassembly define its
+compatibility target, not a claim that motor firmware has been validated.
+
+- Physical RIGHT maps to vendor L-10 / CAN10 / `Left_`; physical LEFT maps to
+  R-11 / CAN11 / `Right_`. Explicit per-joint directions must be +1 or -1.
+- Seven native-reference radian positions become seven standard CAN frames,
+  IDs `0x11..0x17`, DLC 3, opcode `0x40`, big-endian position word. Conversion
+  applies radians-to-degrees once, then direction and 128 counts/degree.
+- The audited sender truncates to an integer **before** checking the sign.
+  Negative integers add 65535, not 65536. Sub-count negative values therefore
+  encode `0x0000`. The decoder preserves `0x8000 => +32768`,
+  `0x8001 => -32766`, and `0xffff => 0`; it does not silently substitute ordinary
+  two's-complement arithmetic. Encoder inputs outside the unambiguous
+  -32767..32767 count domain are rejected before integer conversion.
+- Every input and its quantized result must lie inside explicit caller bounds.
+  NaN, infinity, invalid bounds/signs/arm, overflow or any invalid joint rejects
+  the whole batch. There is no clipping, wrapping or partial output.
+  This is atomic batch construction, not atomic bus delivery: a future transport
+  must separately handle failure after only some of seven frames were written.
+- Diagnostic feedback accepts only exact standard joint IDs `0x91..0x97` and
+  DLC 8. It retains the reply tag, raw status and signed velocity/current counts.
+  The observed current `/256` value is named vendor-scaled, not amperes. Reply
+  tag semantics, physical speed/current units, timestamps, authority, stationary
+  startup proof and firmware behavior are not established by this decoder.
+
+`ROBAmberWireCodecTests.cpp` adds seven groups: 14 golden frames across both
+arms, signed boundary cases, malformed IDs/DLC/flags, atomic input rejection,
+420,014 quantized joint roundtrips with both signs, owner integration with ideal
+quantized feedback, and a rejected batch that latches the owner's output fault.
+The integration records 42,000 frames over 6,000 owner ticks with 20 Hz ideal
+feedback and 1,358 retargets while moving. No packets leave the process.
+
+One position count is about 0.000136354 rad. Quantized wire steps can exceed the
+continuous curve's step by one count; their finite differences are not the
+continuous PVA or measured motor speed/jerk. This matters for future drive
+commissioning. Do not reinitialize the planner's PVA from quantized setpoints.
+The test script runs this suite alongside the existing 19 owner groups and the
+legacy numerical reproduction. Results and source hashes are under
+`docs/calibration/evidence/2026-11-02-amber-codec/`.

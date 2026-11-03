@@ -230,6 +230,25 @@ exclusive ownership, Stop and independent watchdog behavior. Neither approach
 is ready for installation. Preserve the legacy completion guard until that
 integration and physical validation are complete.
 
+## 2026-11-02 offline packet implementation
+
+`Tools/ContinuousArm/AmberWireCodec` now implements the audited position packet
+format and a diagnostic joint-feedback decoder without any transport or mode
+commands. The [component contract](../../Tools/ContinuousArm/README.md#inert-amber-wire-compatibility-component-2026-11-02)
+records physical-side mapping, one SI conversion, the vendor's unusual signed
+word convention and explicit finite/range/whole-batch rejection. Both requested
+and quantized output positions must satisfy caller-provided bounds. Raw feedback
+velocity/current values are not labelled with unverified physical units.
+
+Seven new regression groups cover golden byte values and boundaries, malformed
+packets, all-or-nothing rejection, 420,014 quantized joint roundtrips, output
+failure propagation and the owner feeding recorded frames with ideal 20 Hz
+quantized feedback. The 30-second simulation records 42,000 frames at 200 Hz,
+including 1,358 moving retargets. Its error stays below one 1/128-degree count.
+These are software compatibility results, not live motor measurements. No
+adapter daemon, exclusive hardware ownership, startup proof or independent
+watchdog has been built or enabled. The commissioning prerequisites above remain.
+
 ## Primary implementation references
 
 - [Pinned Ruckig 0.9.2 profile implementation](https://github.com/pantor/ruckig/blob/7de6b1035e1cad509251b31b3287d10fbcda6baf/include/ruckig/profile.hpp)
