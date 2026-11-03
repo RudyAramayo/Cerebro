@@ -32,12 +32,16 @@ std::optional<PositionBatch> encodePositions(PhysicalArm arm, const JointVector&
         const double scaled = (degrees * signs[j]) * position_counts_per_degree;
         // Check before integer conversion; casting NaN/infinity/overflow is UB.
         // Restrict to the unambiguous signed domain, not just the low 16 bits.
-        if (!std::isfinite(scaled) || scaled < -32767.0 || scaled > 32767.0)
+        // Count -32767 would become raw0x8000, which the legacy decoder treats
+        // as POSITIVE32768. The signed domain is deliberately asymmetric.
+        if (!std::isfinite(scaled) || scaled <= -32767.0 || scaled >= 32768.0)
             return std::nullopt;
         const auto count = static_cast<std::int32_t>(scaled);
         const double quantized = (count / position_counts_per_degree) * signs[j] / radians_to_degrees;
         if (quantized < bounds.lower[j] || quantized > bounds.upper[j]) return std::nullopt;
         const auto word = static_cast<std::uint16_t>(count < 0 ? count+65535 : count);
+        if (legacySigned(static_cast<std::uint8_t>(word >> 8), static_cast<std::uint8_t>(word)) != count)
+            return std::nullopt;
         Frame& frame = batch.frames[j];
         frame.identifier = 0x11 + static_cast<std::uint32_t>(j);
         frame.length = 3;

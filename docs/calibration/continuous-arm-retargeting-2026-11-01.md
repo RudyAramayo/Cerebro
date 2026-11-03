@@ -240,14 +240,22 @@ word convention and explicit finite/range/whole-batch rejection. Both requested
 and quantized output positions must satisfy caller-provided bounds. Raw feedback
 velocity/current values are not labelled with unverified physical units.
 
-Seven new regression groups cover golden byte values and boundaries, malformed
-packets, all-or-nothing rejection, 420,014 quantized joint roundtrips, output
+Eight new regression groups cover golden byte values and boundaries, malformed
+packets, all-or-nothing rejection, 420,014 quantized joint roundtrips plus
+917,476 exhaustive signed-domain roundtrips, output
 failure propagation and the owner feeding recorded frames with ideal 20 Hz
 quantized feedback. The 30-second simulation records 42,000 frames at 200 Hz,
 including 1,358 moving retargets. Its error stays below one 1/128-degree count.
 These are software compatibility results, not live motor measurements. No
 adapter daemon, exclusive hardware ownership, startup proof or independent
 watchdog has been built or enabled. The commissioning prerequisites above remain.
+
+Independent review caught the legacy encoder's asymmetric endpoint: negative
+-32767 plus 65535 becomes `0x8000`, which the decoder treats as positive 32768.
+The codec now permits only quantized counts -32766..32767 and verifies that the
+encoded word decodes to the same count. Full-domain tests cover this beyond the
+initial +/-15000-count sweep. This correction was made offline before any
+transport or physical test; the intermediate source commit is not a deployment.
 
 ## Primary implementation references
 

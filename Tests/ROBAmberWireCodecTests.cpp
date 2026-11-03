@@ -118,7 +118,7 @@ void inputRejection() {
         require(!wire::encodePositions(wire::PhysicalArm::Right,q,s,bad),"invalid profile rejected");
     }
     b.lower.fill(-1e300);b.upper.fill(1e300);
-    for(double value : {1e299,-1e299,32768*quantum,-32768*quantum,32767.5*quantum,-32767.5*quantum}) {
+    for(double value : {1e299,-1e299,32768*quantum,-32768*quantum,32768.5*quantum,-32767.5*quantum}) {
         q[0]=value;require(!wire::encodePositions(wire::PhysicalArm::Right,q,s,b),"overflow and ambiguous range rejected before cast");
     }
     passed("finite_profile_range_sign_and_atomic_seven_joint_rejection");
@@ -152,6 +152,37 @@ void quantization() {
     b=bounds();q[0]=-.25*quantum;b.upper[0]=q[0];
     require(!wire::encodePositions(wire::PhysicalArm::Right,q,signs(),b),"quantization may not escape a negative upper bound");
     passed("420014_quantized_joint_roundtrips_both_signs_and_tight_bound_rejection");
+}
+void fullSignedDomain() {
+    auto b=bounds();b.lower.fill(-5);b.upper.fill(5);
+    wire::JointVector q{};auto s=signs();std::size_t checked=0;
+    for(int direction : {-1,1}) {
+        s.fill(direction);
+        for(int count=-32766;count<=32767;++count) {
+            // Quarter-count offset avoids floating point equality at the
+            // truncation boundary while exercising every representable integer.
+            const double native=count+(count<0?-.25:.25);
+            q.fill(native*quantum*direction);
+            const auto batch=wire::encodePositions(wire::PhysicalArm::Right,q,s,b);
+            require(bool(batch),"every unambiguous signed count accepted");
+            for(std::size_t j=0;j<7;++j) {
+                const auto& f=batch->frames[j];
+                const auto word=std::uint16_t((std::uint16_t(f.data[1])<<8)|f.data[2]);
+                require(word!=0x8000,"encoder never produces sign-flipping word");
+                auto response=reply(word);response.identifier=0x91+static_cast<std::uint32_t>(j);
+                const auto d=wire::decodeJointDiagnostic(response,direction);
+                require(d && d->position_native_counts==count,"full-domain exact signed-count roundtrip");
+                require(std::abs(d->position_radians-q[j])<quantum,"full-domain position roundtrip error");
+                if(count==-32766)require(word==0x8001,"negative endpoint golden word");
+                if(count==32767)require(word==0x7fff,"positive endpoint golden word");
+                ++checked;
+            }
+        }
+        q.fill(-32767.25*quantum*direction);
+        require(!wire::encodePositions(wire::PhysicalArm::Right,q,s,b),"negative32767 rejected for both directions");
+    }
+    require(checked==917476,"entire integer domain checked for all joints and directions");
+    passed("917476_full_signed_domain_roundtrips_reject_negative32767_sign_flip");
 }
 void ownerIntegration() {
     motion::Limits l;l.lower.fill(-2.09);l.upper.fill(2.09);l.velocity.fill(.3);l.acceleration.fill(.6);l.jerk.fill(2);
@@ -209,7 +240,7 @@ void uncertainOutput() {
 } // namespace
 int main() {
     try {
-        routingAndGoldenFrames();signedBoundaries();diagnosticRejection();inputRejection();quantization();ownerIntegration();uncertainOutput();
+        routingAndGoldenFrames();signedBoundaries();diagnosticRejection();inputRejection();quantization();fullSignedDomain();ownerIntegration();uncertainOutput();
         std::cout << "{\"passed\":" << cases << ",\"failed\":0,\"hardware_io\":false}\n";return 0;
     } catch(const std::exception& e) { std::cerr << e.what() << '\n';return 1; }
 }

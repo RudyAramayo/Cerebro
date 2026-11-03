@@ -117,8 +117,10 @@ compatibility target, not a claim that motor firmware has been validated.
   Negative integers add 65535, not 65536. Sub-count negative values therefore
   encode `0x0000`. The decoder preserves `0x8000 => +32768`,
   `0x8001 => -32766`, and `0xffff => 0`; it does not silently substitute ordinary
-  two's-complement arithmetic. Encoder inputs outside the unambiguous
-  -32767..32767 count domain are rejected before integer conversion.
+  two's-complement arithmetic. Quantized counts must lie in the asymmetric
+  -32766..32767 domain. In particular, negative -32767 would encode `0x8000`
+  and flip sign on decode; it is rejected. An encoded-word roundtrip is also
+  checked before returning a batch.
 - Every input and its quantized result must lie inside explicit caller bounds.
   NaN, infinity, invalid bounds/signs/arm, overflow or any invalid joint rejects
   the whole batch. There is no clipping, wrapping or partial output.
@@ -130,9 +132,11 @@ compatibility target, not a claim that motor firmware has been validated.
   tag semantics, physical speed/current units, timestamps, authority, stationary
   startup proof and firmware behavior are not established by this decoder.
 
-`ROBAmberWireCodecTests.cpp` adds seven groups: 14 golden frames across both
+`ROBAmberWireCodecTests.cpp` adds eight groups: 14 golden frames across both
 arms, signed boundary cases, malformed IDs/DLC/flags, atomic input rejection,
-420,014 quantized joint roundtrips with both signs, owner integration with ideal
+420,014 quantized joint roundtrips with both signs, 917,476 exhaustive integer-
+domain roundtrips including both endpoint words and the sign-flip rejection,
+owner integration with ideal
 quantized feedback, and a rejected batch that latches the owner's output fault.
 The integration records 42,000 frames over 6,000 owner ticks with 20 Hz ideal
 feedback and 1,358 retargets while moving. No packets leave the process.

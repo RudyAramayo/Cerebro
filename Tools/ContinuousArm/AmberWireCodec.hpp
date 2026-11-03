@@ -37,8 +37,10 @@ struct PositionBatch { Route destination; std::array<Frame, joint_count> frames;
 
 // Converts radians to degrees exactly once, then applies the explicit native
 // direction (+1/-1) and 128 counts/degree. Truncates toward zero like the audited
-// sender, with +65535 for negative counts (NOT two's complement). The ambiguous
-// -32768 encoding and all overflow/nonfinite/out-of-bounds inputs are rejected.
+// sender, with +65535 for negative counts (NOT two's complement). Only integer
+// counts -32766..32767 roundtrip without ambiguity. In particular -32767 would
+// encode 0x8000 and decode as POSITIVE32768. Reject it and all overflow,
+// nonfinite and out-of-bounds inputs before producing a batch.
 // Returns an entire seven-joint batch or no batch; never clips/wraps a target.
 // Both the requested and quantized output positions must satisfy the bounds.
 // Bounds/signs are caller-supplied, not a hardware-rating or calibration claim.

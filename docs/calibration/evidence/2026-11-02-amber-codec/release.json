@@ -8,10 +8,10 @@
     "Tools/ContinuousArm/ContinuousArmController.hpp": "8a0e1ac411769cec03c53f1c65b252358a98e5fc7d6caf2faf0a5eadf751e7b8",
     "Tools/ContinuousArm/ContinuousArmController.cpp": "f1e0eac811ea4e073ce39c76fa4a493c09f7b2a8e5ed47f8aa01b4893ae9cfb2",
     "Tests/ROBContinuousArmControllerTests.cpp": "a87d4672530cbc2f4b080ad64a846dcd58d9f7e387035807338e636a9aa410fd",
-    "Tools/ContinuousArm/AmberWireCodec.hpp": "e4bc8b5621891afb7fe6b47ef93098d12ae504e11bbe1dffee1454538a7010a7",
-    "Tools/ContinuousArm/AmberWireCodec.cpp": "7e6bbef38c1e4554063e3823477ec863d227f4a679a3e4952e68905df00d3ae0",
+    "Tools/ContinuousArm/AmberWireCodec.hpp": "08e422501b0ae2cf980271990267500c45b47ae4f12804f09cf335d0c5b5f216",
+    "Tools/ContinuousArm/AmberWireCodec.cpp": "0c4a6de4c3d013eeb9621db92c2cacd85044e072f0132c9ca8cf61ba0cfebd54",
     "Tools/ContinuousArm/CMakeLists.txt": "e4736656b38dbd3b42525ecdd1b0ba520e11f014199e74605be0a0326ea4df8a",
-    "Tests/ROBAmberWireCodecTests.cpp": "12f17b5153b6dcd2bfdd0f2d9acd677ec8dce75f08cb9b4b70b2d88a323cf2b5",
+    "Tests/ROBAmberWireCodecTests.cpp": "531803b3fb7ae90f6bdfe51954ebcd5655f8c33105f8f0f163aa073c5904631d",
     "Scripts/test-continuous-arm.py": "9cdd5489b7c9404ab3c72212ad251ffb5d1aebcc59d7836645fc6341473503b0"
   },
   "tests": [
@@ -173,6 +173,10 @@
       "passed": true
     },
     {
+      "test": "917476_full_signed_domain_roundtrips_reject_negative32767_sign_flip",
+      "passed": true
+    },
+    {
       "metrics": "owner_to_recorded_CAN",
       "samples": 6000,
       "frames": 42000,
@@ -190,7 +194,7 @@
       "passed": true
     },
     {
-      "passed": 7,
+      "passed": 8,
       "failed": 0,
       "hardware_io": false
     }
