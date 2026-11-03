@@ -102,7 +102,7 @@ def scenario(binary, interface, action):
                 last = command('target', sequence=sequence, position=[.45 * math.sin(.5 + tick * .01)] * 7)
                 assert last['accepted'], last
                 time.sleep(.01)
-            assert arm.frames > 100 and abs(last['velocity'][0]) > .01, last
+            assert arm.frames > 100 and abs(last['commanded_velocity'][0]) > .01, last
             if action == 'disconnect':
                 client.close()
                 client = None
@@ -122,6 +122,10 @@ def scenario(binary, interface, action):
             elif action == 'oversized':
                 client.send(b'x' * 4096)
                 assert client.recv(8192) == b'', 'oversized packet connection is closed'
+            elif action == 'duplicate':
+                packet = json.dumps(dict(op='stop', nonce=token, generation=generation, created_ns=time.monotonic_ns()))
+                client.send(('{"op":"heartbeat",' + packet[1:]).encode())
+                assert client.recv(8192) == b'', 'duplicate top-level key is malformed'
             elif action == 'signal':
                 process.send_signal(signal.SIGTERM)
             elif action == 'feedback_loss':
@@ -149,7 +153,7 @@ def scenario(binary, interface, action):
                 assert status['boundary_fault'] == 5, status  # BoundaryFault::Feedback
             else:
                 assert process.returncode == 0 and status['mode'] == 'held' and status['shutdown_complete'], (status, error)
-                assert all(abs(x) < 1e-9 for x in status['velocity']), status
+                assert all(abs(x) < 1e-9 for x in status['commanded_velocity']), status
             assert not runtime.exists(), 'private socket and directory removed after exit'
             return {'test': action, 'passed': True, 'status': status, 'virtual_frames': arm.frames}
     finally:
@@ -182,9 +186,9 @@ def main():
     info = json.loads(subprocess.check_output([str(binary), '--self-check'], text=True))
     assert info['hardware_io'] is False and info['physical_transmit_available'] is False
     print(json.dumps({'test': 'no_io_self_check_and_no_physical_transmit_capability', 'passed': True}), flush=True)
-    for action in ['disconnect', 'stop', 'replay', 'nonce', 'oversized', 'signal', 'feedback_loss']:
+    for action in ['disconnect', 'stop', 'replay', 'nonce', 'oversized', 'duplicate', 'signal', 'feedback_loss']:
         print(json.dumps(scenario(binary, args.interface, action)), flush=True)
-    print(json.dumps({'passed': 8, 'failed': 0, 'robot_io': False, 'virtual_CAN_io': True}))
+    print(json.dumps({'passed': 9, 'failed': 0, 'robot_io': False, 'virtual_CAN_io': True}))
 
 
 if __name__ == '__main__':

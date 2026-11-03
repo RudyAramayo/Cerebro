@@ -14,6 +14,7 @@ on:
       - Scripts/test-continuous-arm.py
       - Scripts/test-amber-linux-isolation.py
       - Scripts/test-amber-runtime.py
+      - Scripts/package-amber-controller.py
       - .github/workflows/continuous-arm-linux.yml
   workflow_dispatch:
 
@@ -73,6 +74,22 @@ jobs:
           --binary "$RUNNER_TEMP/arm-build/amber_linux_transport_tests"
           --runtime-binary "$RUNNER_TEMP/arm-build/rob-amber-controller"
           --summary "$RUNNER_TEMP/results/virtual-can-isolation.json"
+      - name: Stage default-off Release commissioning artifact
+        if: matrix.sanitizer == 'none'
+        run: >-
+          python3 Scripts/package-amber-controller.py
+          --build-dir "$RUNNER_TEMP/arm-build"
+          --ruckig-source "$RUNNER_TEMP/ruckig"
+          --portable-results "$RUNNER_TEMP/results/continuous-arm.json"
+          --linux-results "$RUNNER_TEMP/results/virtual-can-isolation.json"
+          --output-dir "$RUNNER_TEMP/amber-commissioning"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: matrix.sanitizer == 'none' && success()
+        with:
+          name: amber-commissioning-linux-x86_64
+          path: ${{ runner.temp }}/amber-commissioning.tar.gz
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

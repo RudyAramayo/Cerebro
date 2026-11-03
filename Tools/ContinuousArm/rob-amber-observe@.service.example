@@ -1,0 +1,16 @@
+# Review-only example. This package does not install or enable a unit.
+# There is deliberately no [Install] target and the condition file is absent.
+[Unit]
+Description=Amber passive commissioning observation (%i)
+ConditionPathExists=/opt/rob-amber/commissioning/PASSIVE_OBSERVATION_ENABLED
+
+[Service]
+Type=exec
+User=amber
+ExecStart=/opt/rob-amber/commissioning/bin/rob-amber-controller --observe --arm %i --duration 60
+Restart=no
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+RestrictAddressFamilies=AF_CAN AF_NETLINK

@@ -209,11 +209,25 @@ Json snapshot(const w::ArmSession &session,
           {"boundary_attempted_frames", s.boundary.attempted_frames},
           {"backend_attempted_frames", t.attempted},
           {"published_batches", s.boundary.published_batches},
-          {"position", s.owner.commanded.position},
-          {"velocity", s.owner.commanded.velocity},
-          {"acceleration", s.owner.commanded.acceleration},
+          {"commanded_position", s.owner.commanded.position},
+          {"commanded_velocity", s.owner.commanded.velocity},
+          {"commanded_acceleration", s.owner.commanded.acceleration},
           {"shutdown_complete", s.shutdown_complete},
           {"physical_transmit_available", false}};
+}
+Json parsePacket(const char *begin, const char *end) {
+  std::set<std::string> keys;
+  bool duplicate = false;
+  auto parsed = Json::parse(
+      begin, end, [&](int depth, Json::parse_event_t event, Json &value) {
+        if (depth == 1 && event == Json::parse_event_t::key &&
+            !keys.insert(value.get<std::string>()).second)
+          duplicate = true;
+        return true;
+      });
+  if (duplicate)
+    throw std::runtime_error("duplicate packet key");
+  return parsed;
 }
 bool exactKeys(const Json &j, const std::set<std::string> &keys) {
   if (!j.is_object() || j.size() != keys.size())
@@ -360,7 +374,8 @@ int run(const Options &o) {
                  {"virtual_fixture", true}}))
           drop();
       }
-      for (int count = 0; server->client >= 0 && count < 16; ++count) {
+      for (int count = 0; server->client >= 0 && count < 16 && !stop_requested;
+           ++count) {
         std::array<char, 2048> bytes{};
         const auto n = recv(server->client, bytes.data(), bytes.size(),
                             MSG_DONTWAIT | MSG_TRUNC);
@@ -376,7 +391,7 @@ int run(const Options &o) {
         }
         bool accepted = false;
         try {
-          accepted = dispatch(Json::parse(bytes.begin(), bytes.begin() + n),
+          accepted = dispatch(parsePacket(bytes.data(), bytes.data() + n),
                               token, peer, session, end);
         } catch (...) {
           drop();
@@ -400,6 +415,8 @@ int run(const Options &o) {
         }
       }
     }
+    if (stop_requested)
+      session.shutdown();
     if (now >= next_tick) {
       session.tick();
       next_tick = w::SocketCanTransport::monotonicSeconds() + .005;

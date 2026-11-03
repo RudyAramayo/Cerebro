@@ -12,7 +12,10 @@ import subprocess
 
 
 def run(args):
-    return subprocess.run(args, check=True, text=True, capture_output=True, timeout=60).stdout
+    result = subprocess.run(args, text=True, capture_output=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError(f'Fixture command failed ({result.returncode}): {args}\n{result.stdout}\n{result.stderr}')
+    return result.stdout
 
 
 def main():
@@ -76,6 +79,8 @@ def main():
                    'Tools/ContinuousArm/AmberControllerMain.cpp', 'Scripts/test-amber-runtime.py',
                    'Tools/ContinuousArm/ArmSession.hpp', 'Tools/ContinuousArm/ArmSession.cpp']
         report['source_sha256'] = {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in sources}
+        if args.runtime_binary:
+            report['runtime_binary_sha256'] = hashlib.sha256(args.runtime_binary.read_bytes()).hexdigest()
         args.summary.parent.mkdir(parents=True, exist_ok=True)
         args.summary.write_text(json.dumps(report, indent=2) + '\n')
         print(json.dumps(report))
