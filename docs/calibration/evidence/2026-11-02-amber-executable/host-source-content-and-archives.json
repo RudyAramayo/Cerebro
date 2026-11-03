@@ -1,0 +1,64 @@
+{
+  "root_directory_names": [
+    "boot",
+    "cdrom",
+    "dev",
+    "etc",
+    "home",
+    "lost+found",
+    "media",
+    "mnt",
+    "opt",
+    "proc",
+    "root",
+    "run",
+    "snap",
+    "srv",
+    "sys",
+    "tmp",
+    "usr",
+    "var"
+  ],
+  "content_search_roots": [
+    "/home",
+    "/opt",
+    "/usr/local",
+    "/usr/src",
+    "/srv",
+    "/mnt",
+    "/media"
+  ],
+  "source_files_examined": 30572,
+  "matches": [],
+  "large_sources_skipped": 0,
+  "permission_errors": [],
+  "archives": [
+    {
+      "path": "/home/amber/L-10/urdf/dual_b1.zip",
+      "entries": 19,
+      "file_suffix_counts": {
+        ".urdf": 3,
+        ".stl": 15
+      },
+      "source_or_build_entries": []
+    },
+    {
+      "path": "/home/amber/L-10/urdf/amber_l1.zip",
+      "entries": 9,
+      "file_suffix_counts": {
+        ".urdf": 1,
+        ".stl": 8
+      },
+      "source_or_build_entries": []
+    },
+    {
+      "path": "/home/amber/L-10/useless/urdf.zip",
+      "entries": 32,
+      "file_suffix_counts": {
+        ".urdf": 2,
+        ".stl": 30
+      },
+      "source_or_build_entries": []
+    }
+  ]
+}

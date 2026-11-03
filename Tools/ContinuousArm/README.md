@@ -83,6 +83,14 @@ acceleration interior-maximum fixture.
 
 ## Hardware integration is outstanding
 
+The [2026-11-02 executable audit](../../docs/calibration/evidence/2026-11-02-amber-executable/identity-and-startup.json)
+rules out treating the existing configuration flags as a driver-only mode.
+The matching live/archived executable constructs ten threads unconditionally,
+including Ruckig, direct-position LCM, UDP and the solver. Its later enable
+checks guard `join()`, after construction; they do not disable those workers.
+The direct-position LCM handler writes the same target array as Ruckig. This
+library must therefore not be connected to that handler alongside the old core.
+
 Replace the installed vendor worker/handler with this ownership pattern or
 build a fully exclusive commissioned driver. Do not run this beside the old
 workers, feed samples to UDP command 4, or publish raw LCM/CAN around Cerebro's

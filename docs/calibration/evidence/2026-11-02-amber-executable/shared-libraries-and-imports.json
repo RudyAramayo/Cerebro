@@ -1,0 +1,3279 @@
+{
+  "captured_utc": "2026-11-03T05:42:09.411180+00:00",
+  "method": "Read /proc/974/maps; readelf -dW/-nW and nm -D on files. No library/executable execution, attachment, packet or configuration change.",
+  "pid": 974,
+  "core": "/home/amber/L-10/amber_core_L",
+  "nodes": [
+    {
+      "path": "/home/amber/L-10/amber_core_L",
+      "size": 1921528,
+      "sha256": "554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100",
+      "build_id": "376e8d04f9075e4e7166403f4f50ea3c2a7d740f",
+      "soname": null,
+      "dt_needed": [
+        "libdrake.so",
+        "libruckig.so",
+        "libdrake_lcm.so",
+        "libstdc++.so.6",
+        "libm.so.6",
+        "libgcc_s.so.1",
+        "libc.so.6"
+      ],
+      "runpath": [
+        "/opt/drake/lib:/opt/ros/humble/lib/x86_64-linux-gnu"
+      ],
+      "observed_mapping": false
+    },
+    {
+      "path": "/opt/drake/lib/libdrake.so",
+      "size": 65688448,
+      "sha256": "1b134a5e38aa95edf435b62e3f4b202504ed861c0e0ccf72e110153ad48f6c2d",
+      "build_id": "6eafa161f7da228c8f802a101d47734414ee9eed",
+      "soname": "libdrake.so",
+      "dt_needed": [
+        "libdrake_lcm.so",
+        "libdrake_marker.so",
+        "libgfortran.so.5",
+        "libquadmath.so.0",
+        "libtbb.so.12",
+        "libmosek64.so.10.0",
+        "libfmt.so.8",
+        "libspdlog.so.1",
+        "libglib-2.0.so.0",
+        "libz.so.1",
+        "libm.so.6",
+        "libX11.so.6",
+        "libOpenGL.so.0",
+        "libGLX.so.0",
+        "libblas.so.3",
+        "liblapack.so.3",
+        "libdmumps_seq-5.4.so",
+        "libstdc++.so.6",
+        "libgomp.so.1",
+        "libgcc_s.so.1",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "runpath": [
+        "$ORIGIN/:/usr/lib/x86_64-linux-gnu/blas/:/usr/lib/x86_64-linux-gnu/lapack/"
+      ],
+      "observed_mapping": true
+    },
+    {
+      "path": "/opt/drake/lib/libdrake_lcm.so",
+      "size": 104360,
+      "sha256": "21084488f04daf0f64a832c57a26aceff8b3c2e0131a0da4328c08114b9f74d0",
+      "build_id": "407473c2667394554967daa631d2c6e823c07011",
+      "soname": "libdrake_lcm.so",
+      "dt_needed": [
+        "libglib-2.0.so.0",
+        "libstdc++.so.6",
+        "libm.so.6",
+        "libgomp.so.1",
+        "libc.so.6"
+      ],
+      "runpath": [
+        ""
+      ],
+      "observed_mapping": true
+    },
+    {
+      "path": "/opt/drake/lib/libdrake_marker.so",
+      "size": 9328,
+      "sha256": "220654edb4adcd5aabe2359c5483528cbc7babe518d81169ad34b8db3d82955c",
+      "build_id": "1d5c808fd43407d79e31b1d4208c8e7ad7b828d9",
+      "soname": "libdrake_marker.so",
+      "dt_needed": [
+        "libstdc++.so.6",
+        "libm.so.6",
+        "libgomp.so.1",
+        "libc.so.6"
+      ],
+      "runpath": [
+        ""
+      ],
+      "observed_mapping": true
+    },
+    {
+      "path": "/opt/drake/lib/libmosek64.so.10.0",
+      "size": 27704280,
+      "sha256": "0979c6a3f6c8c992ea504b1b496e2fb34c26a9915458d68ed9af984c72a8f714",
+      "build_id": null,
+      "soname": "libmosek64.so.10.0",
+      "dt_needed": [
+        "librt.so.1",
+        "libtbb.so.12",
+        "libdl.so.2",
+        "libm.so.6",
+        "libgcc_s.so.1",
+        "libpthread.so.0",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "runpath": [
+        "$ORIGIN/"
+      ],
+      "observed_mapping": true
+    },
+    {
+      "path": "/opt/drake/lib/libtbb.so.12.6",
+      "size": 408872,
+      "sha256": "8bd0924907f1e815db4468c59a79ea0bb63e7919f71c4920250753d816f701c5",
+      "build_id": "2d4ec6228dc817651c7c9d20b519abae2fbe965f",
+      "soname": "libtbb.so.12",
+      "dt_needed": [
+        "libdl.so.2",
+        "libstdc++.so.6",
+        "libm.so.6",
+        "libgcc_s.so.1",
+        "libpthread.so.0",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "runpath": [
+        ""
+      ],
+      "observed_mapping": true
+    },
+    {
+      "path": "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so",
+      "size": 133456,
+      "sha256": "e6f6e27ecc6aa7ad9440e90d50c9c85b23b18035a32d4b005d3a0a6e4502e84e",
+      "build_id": "5c790f5e7ac8cda17306343cc514d0ab073d3db2",
+      "soname": "libruckig.so",
+      "dt_needed": [
+        "libstdc++.so.6",
+        "libm.so.6",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.10.0",
+      "size": 673632,
+      "sha256": "bd8a282c845e100cbb28dd31f9cf19757d508bf7a07a7f62bbe8c04cafb81646",
+      "build_id": "1109279411513955440cb5bcde4aba492e925636",
+      "soname": "libblas.so.3",
+      "dt_needed": [
+        "libgcc_s.so.1",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.10.0",
+      "size": 7567224,
+      "sha256": "86b2c20720e2aafb6b84d20d252cd39c5b22a6f7452f8bb920a06d8c8439124c",
+      "build_id": "ce2d7026539054156dcba9458c1c4c1a613a6765",
+      "soname": "liblapack.so.3",
+      "dt_needed": [
+        "libblas.so.3",
+        "libgfortran.so.5",
+        "libm.so.6",
+        "libgcc_s.so.1",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+      "size": 240936,
+      "sha256": "35611512d50a8a878e1c2989685dbbf11c1ca53394825fca5f7debaf18add552",
+      "build_id": "9cb53985768bb99f138f48655f7b8bf7e420d13d",
+      "soname": "ld-linux-x86-64.so.2",
+      "dt_needed": [],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libGLX.so.0.0.0",
+      "size": 141896,
+      "sha256": "19ad2625b20a3afe6f5e55f9acd1e18e0dfc81b0965d7d3f2181a05b6d48edbf",
+      "build_id": "ac8b68a74f1ead77477f89bc98998ecb064e3ae5",
+      "soname": "libGLX.so.0",
+      "dt_needed": [
+        "libGLdispatch.so.0",
+        "libX11.so.6",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0.0.0",
+      "size": 715200,
+      "sha256": "a4f2642498fba54d2f39e90ca3daa94340cdd52198473185a5285608ae318cb6",
+      "build_id": "19c339ecd74c020f1db1342213a07114f4baf5e0",
+      "soname": "libGLdispatch.so.0",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libOpenGL.so.0.0.0",
+      "size": 174408,
+      "sha256": "35ea98e979c5bcadf06a79b8ca5a767a197c77bc77428a9a8a16b95bf78e99e9",
+      "build_id": "19bb1d13712da197419d0359c3796da1f040e7dd",
+      "soname": "libOpenGL.so.0",
+      "dt_needed": [
+        "libGLdispatch.so.0",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libX11.so.6.4.0",
+      "size": 1306280,
+      "sha256": "34b7869a1ba702462a1aa862fc0afe5b2608a7d5a09552c07796802fcf0c684b",
+      "build_id": "37a5d7bbb78e3a99ea8376a7c80ea0c62fe06494",
+      "soname": "libX11.so.6",
+      "dt_needed": [
+        "libxcb.so.1",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libXau.so.6.0.0",
+      "size": 18720,
+      "sha256": "98343a8324ea62ed75a13c923ed5dea96b7a8ad41aeba9f18126c4cbf7178064",
+      "build_id": "7089b383cacbfc1760634a3be19a923e51fe3315",
+      "soname": "libXau.so.6",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0",
+      "size": 26800,
+      "sha256": "1dc3ff1269a5ede69ef9a8ec2436d73fccbcd10531055b359292e0bde4e29b46",
+      "build_id": "6b60f99504aa1d3999ea02a14366d1a39d6c5dcf",
+      "soname": "libXdmcp.so.6",
+      "dt_needed": [
+        "libbsd.so.0",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.5",
+      "size": 89096,
+      "sha256": "e4ad21c203d8e8b9b7f49071311339af6b438026e1ad236403e3b379b022f23d",
+      "build_id": "9a6c72469251e2feb63e175ef5cb944ce6e00df3",
+      "soname": "libbsd.so.0",
+      "dt_needed": [
+        "libmd.so.0",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4",
+      "size": 74848,
+      "sha256": "5e516f77fc36dd924fdf02c8489a217f55fa1548883d32c3a5e041fb25d47d6e",
+      "build_id": "e56b62c27bcc7ace8f9be36b255bd7b31bfde405",
+      "soname": "libbz2.so.1.0",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+      "size": 2220400,
+      "sha256": "6813de4f45796f58134ca3f06b3179344ddfea192cad73ea0af35375b1b66e76",
+      "build_id": "d5197096f709801829b118af1b7cf6631efa2dcd",
+      "soname": "libc.so.6",
+      "dt_needed": [
+        "ld-linux-x86-64.so.2"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libdl.so.2",
+      "size": 14432,
+      "sha256": "b970e7f9969a175b5e0726977ee998753fd7cc10512937dafc24ce659508a16a",
+      "build_id": "c71c8c73dd8b7323bd6190420f0ebc4301e93186",
+      "soname": "libdl.so.2",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so",
+      "size": 2159688,
+      "sha256": "d93b4b367ea010d8ba073dc44f1f3d1d307a3c8b32ffdfc1a46fd3542a8a00e5",
+      "build_id": "ac9f87febadccdbd10216f684f07a03417ae6350",
+      "soname": "libdmumps_seq-5.4.so",
+      "dt_needed": [
+        "libmumps_common_seq-5.4.so",
+        "libmpiseq_seq-5.4.so",
+        "libblas.so.3",
+        "liblapack.so.3",
+        "libgfortran.so.5",
+        "libm.so.6",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libesmumps-6.1.3.so",
+      "size": 31248,
+      "sha256": "561ad99c9514a98865aa17f2b7363beea13b159890f13581731b3d772b3e8195",
+      "build_id": "592d3b270ab7690d0ecd936908f037a3ffd2944d",
+      "soname": "libesmumps-6.1.so",
+      "dt_needed": [
+        "libscotch-6.1.so",
+        "libscotcherr-6.1.so",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libfmt.so.8.1.1",
+      "size": 133816,
+      "sha256": "d463bedd51d449b2346d329fad8080e0900120ad0aeab8bf93e325b6cff4a587",
+      "build_id": "1a50cf7c320e3ffcb933ec2c05701af5770b2f09",
+      "soname": "libfmt.so.8",
+      "dt_needed": [
+        "libstdc++.so.6",
+        "libgcc_s.so.1",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "size": 125488,
+      "sha256": "a93ec41b336a895a7f0d7b789d66f6fc816de1a5ad0da37e8cfc428d7e9f8dd4",
+      "build_id": "3ae8ad2eded3e51695b509273c67832869daf90b",
+      "soname": "libgcc_s.so.1",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0",
+      "size": 2989432,
+      "sha256": "3ec471016fbfea6ccda4736fbbf2d0098e6386d2c34fb7ae9b15d91fa1b38874",
+      "build_id": "40c7b5d5908894fd9da75aa461b82ebce686c006",
+      "soname": "libgfortran.so.5",
+      "dt_needed": [
+        "libquadmath.so.0",
+        "libm.so.6",
+        "libgcc_s.so.1",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.7200.4",
+      "size": 1277712,
+      "sha256": "1e6586791e183643510c8b958cf61f8e126dd83e629553a580a00c12f5430ef3",
+      "build_id": "abcc0ea5e864452570bd1eb5a45f3c6a52b5891c",
+      "soname": "libglib-2.0.so.0",
+      "dt_needed": [
+        "libpcre.so.3",
+        "libm.so.6",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "size": 298776,
+      "sha256": "115302e45583ad3e8df681c0a5af4c8273b7399f764965280d70d8780e5ee454",
+      "build_id": "0077c10706ee8ee3acb4d07e303ae8ca0167429c",
+      "soname": "libgomp.so.1",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/liblzma.so.5.2.5",
+      "size": 170456,
+      "sha256": "493cb401ab4aa3bba611ca464d12996afb3b327940d29476f535f999e167439b",
+      "build_id": "b85da6c48eb60a646615392559483b93617ef265",
+      "soname": "liblzma.so.5",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+      "size": 940560,
+      "sha256": "297737a3541eb0bbe4c288045edc483321f24c21a237972c51d589cf2864a0b7",
+      "build_id": "a3ad9bb40b4907e509e4404cb972645c19675ca3",
+      "soname": "libm.so.6",
+      "dt_needed": [
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libmd.so.0.0.5",
+      "size": 47472,
+      "sha256": "bb376813876bb214535bbbdac70f2c0c4b00baecb81557dab78a79518248df06",
+      "build_id": "cd2d2f71b3967ebde30e2aa43b8eb63339020c06",
+      "soname": "libmd.so.0",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libmpiseq_seq-5.4.0.so",
+      "size": 43016,
+      "sha256": "719b0f0d9cfb311f50820adf848475a11d42a8729054594e0fa225d4055cd02b",
+      "build_id": "23b60aab45d346ecd48ad933d2499a290c92edf8",
+      "soname": "libmpiseq_seq-5.4.so",
+      "dt_needed": [
+        "libgfortran.so.5",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so",
+      "size": 368496,
+      "sha256": "b8e51cc982e8e853e02dfc9d8ce3e13ac7e26a5af0b1d70f80ee1f7debec3d56",
+      "build_id": "d296b094593ed12f32be5326e1d5b0177bef02bb",
+      "soname": "libmumps_common_seq-5.4.so",
+      "dt_needed": [
+        "libpord_seq-5.4.so",
+        "libesmumps-6.1.so",
+        "libscotch-6.1.so",
+        "libmpiseq_seq-5.4.so",
+        "libgfortran.so.5",
+        "libm.so.6",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libpcre.so.3.13.3",
+      "size": 477296,
+      "sha256": "baae995e98223eee1afe6c640f21bdbba91b9c170584ce766418b59810d98a93",
+      "build_id": "3982f316c887e3ad9598015fa5bae8557320476a",
+      "soname": "libpcre.so.3",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libpord_seq-5.4.0.so",
+      "size": 97144,
+      "sha256": "ff8fd0126a0526ede7d7c923787b239c8c3672306f11f9ef64eea862aa21961b",
+      "build_id": "4cf451c65eae7b87c324736f47ea73c5cde715a6",
+      "soname": "libpord_seq-5.4.so",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+      "size": 21448,
+      "sha256": "fdfd7d83a335ba12bd73e857f95a798dae0355f37935231966fd088647978e23",
+      "build_id": "81f46d553e2f7c999e43c3eede73a822bc8d5d93",
+      "soname": "libpthread.so.0",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0",
+      "size": 289592,
+      "sha256": "67d3147512460e56dc805582ed5d32b66a7a199247ba5a27b7cb3054d2b2fef2",
+      "build_id": "a5b49ad99dd441391c4c868cd8e9076d5a7c9551",
+      "soname": "libquadmath.so.0",
+      "dt_needed": [
+        "libm.so.6",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/librt.so.1",
+      "size": 14664,
+      "sha256": "90fb160909274fd6e967ecded88653c1ceeec579b9e92bdada2e7a1d0ca04c69",
+      "build_id": "cb5b17a9bdf060b73ecac80f77fb2c535ef84612",
+      "soname": "librt.so.1",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so",
+      "size": 576312,
+      "sha256": "ebc5bf524a38c081cff46100ce6a6a417297e335ac6e0a28ad16e8d95d894966",
+      "build_id": "20d1653ddd180f5e39a861d1651e9a1330eeaa3d",
+      "soname": "libscotch-6.1.so",
+      "dt_needed": [
+        "libscotcherr-6.1.so",
+        "libz.so.1",
+        "libbz2.so.1.0",
+        "liblzma.so.5",
+        "libm.so.6",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libscotcherr-6.1.3.so",
+      "size": 14656,
+      "sha256": "c154ad8b0c5db16d3f596dc203de7a2e202fb06652bfa7a3e31787d8537f2621",
+      "build_id": "ab40f6536aad9d3a7f78ce313177fb50ad76b07b",
+      "soname": "libscotcherr-6.1.so",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libspdlog.so.1.9.2",
+      "size": 498040,
+      "sha256": "1de96ba8296808433bf3ad601f2410c179a3e422a05ad012b49e4ad364f72bc0",
+      "build_id": "678c05cd95763f3f0e3373e02da1c2cd2b2447ca",
+      "soname": "libspdlog.so.1",
+      "dt_needed": [
+        "libfmt.so.8",
+        "libstdc++.so.6",
+        "libgcc_s.so.1",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30",
+      "size": 2260296,
+      "sha256": "2fb167641d95f9701f9e5aea01f0caec9a539d257212116aef650c2d7fd6e041",
+      "build_id": "e72c155b714bc42a767ec9c0dd94589110e5b42f",
+      "soname": "libstdc++.so.6",
+      "dt_needed": [
+        "libm.so.6",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2",
+        "libgcc_s.so.1"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0",
+      "size": 166504,
+      "sha256": "aabc489094abd96c876d1c989a2da8a8aa6d28f5a676c4a84dd6d0a0c34aec5d",
+      "build_id": "1bef862a339557aa16c34c7a4b27f8f3aea90517",
+      "soname": "libxcb.so.1",
+      "dt_needed": [
+        "libXau.so.6",
+        "libXdmcp.so.6",
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libz.so.1.2.11",
+      "size": 108936,
+      "sha256": "64c206f0146cc58bbddc4f22054436f4ff278f5a554aa3ce6921ddf7e9133370",
+      "build_id": "30840b79ac329ecbf1dec0bb60180eed256d319f",
+      "soname": "libz.so.1",
+      "dt_needed": [
+        "libc.so.6"
+      ],
+      "runpath": [],
+      "observed_mapping": true
+    }
+  ],
+  "dt_needed_edges": [
+    {
+      "from": "/home/amber/L-10/amber_core_L",
+      "needed": "libdrake.so",
+      "mapped_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "from": "/home/amber/L-10/amber_core_L",
+      "needed": "libruckig.so",
+      "mapped_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "from": "/home/amber/L-10/amber_core_L",
+      "needed": "libdrake_lcm.so",
+      "mapped_candidates": [
+        "/opt/drake/lib/libdrake_lcm.so"
+      ]
+    },
+    {
+      "from": "/home/amber/L-10/amber_core_L",
+      "needed": "libstdc++.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "from": "/home/amber/L-10/amber_core_L",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/home/amber/L-10/amber_core_L",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/home/amber/L-10/amber_core_L",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libdrake_lcm.so",
+      "mapped_candidates": [
+        "/opt/drake/lib/libdrake_lcm.so"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libdrake_marker.so",
+      "mapped_candidates": [
+        "/opt/drake/lib/libdrake_marker.so"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libgfortran.so.5",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libquadmath.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libtbb.so.12",
+      "mapped_candidates": [
+        "/opt/drake/lib/libtbb.so.12.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libmosek64.so.10.0",
+      "mapped_candidates": [
+        "/opt/drake/lib/libmosek64.so.10.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libfmt.so.8",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libfmt.so.8.1.1"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libspdlog.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libspdlog.so.1.9.2"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libglib-2.0.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.7200.4"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libz.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libz.so.1.2.11"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libX11.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libX11.so.6.4.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libOpenGL.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libOpenGL.so.0.0.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libGLX.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libGLX.so.0.0.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libblas.so.3",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.10.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "liblapack.so.3",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.10.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libdmumps_seq-5.4.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libstdc++.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libgomp.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake.so",
+      "needed": "ld-linux-x86-64.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_lcm.so",
+      "needed": "libglib-2.0.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.7200.4"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_lcm.so",
+      "needed": "libstdc++.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_lcm.so",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_lcm.so",
+      "needed": "libgomp.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_lcm.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_marker.so",
+      "needed": "libstdc++.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_marker.so",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_marker.so",
+      "needed": "libgomp.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libdrake_marker.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libmosek64.so.10.0",
+      "needed": "librt.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/librt.so.1"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libmosek64.so.10.0",
+      "needed": "libtbb.so.12",
+      "mapped_candidates": [
+        "/opt/drake/lib/libtbb.so.12.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libmosek64.so.10.0",
+      "needed": "libdl.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libdl.so.2"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libmosek64.so.10.0",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libmosek64.so.10.0",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libmosek64.so.10.0",
+      "needed": "libpthread.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libpthread.so.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libmosek64.so.10.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libmosek64.so.10.0",
+      "needed": "ld-linux-x86-64.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libtbb.so.12.6",
+      "needed": "libdl.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libdl.so.2"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libtbb.so.12.6",
+      "needed": "libstdc++.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libtbb.so.12.6",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libtbb.so.12.6",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libtbb.so.12.6",
+      "needed": "libpthread.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libpthread.so.0"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libtbb.so.12.6",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/opt/drake/lib/libtbb.so.12.6",
+      "needed": "ld-linux-x86-64.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+      ]
+    },
+    {
+      "from": "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so",
+      "needed": "libstdc++.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "from": "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.10.0",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.10.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.10.0",
+      "needed": "libblas.so.3",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.10.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.10.0",
+      "needed": "libgfortran.so.5",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.10.0",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.10.0",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.10.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libGLX.so.0.0.0",
+      "needed": "libGLdispatch.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libGLX.so.0.0.0",
+      "needed": "libX11.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libX11.so.6.4.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libGLX.so.0.0.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0.0.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libOpenGL.so.0.0.0",
+      "needed": "libGLdispatch.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libOpenGL.so.0.0.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libX11.so.6.4.0",
+      "needed": "libxcb.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libX11.so.6.4.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libXau.so.6.0.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0",
+      "needed": "libbsd.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.5"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.5",
+      "needed": "libmd.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libmd.so.0.0.5"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libbsd.so.0.11.5",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+      "needed": "ld-linux-x86-64.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libdl.so.2",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so",
+      "needed": "libmumps_common_seq-5.4.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so",
+      "needed": "libmpiseq_seq-5.4.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libmpiseq_seq-5.4.0.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so",
+      "needed": "libblas.so.3",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.10.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so",
+      "needed": "liblapack.so.3",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.10.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so",
+      "needed": "libgfortran.so.5",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libdmumps_seq-5.4.0.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libesmumps-6.1.3.so",
+      "needed": "libscotch-6.1.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libesmumps-6.1.3.so",
+      "needed": "libscotcherr-6.1.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libscotcherr-6.1.3.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libesmumps-6.1.3.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libfmt.so.8.1.1",
+      "needed": "libstdc++.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libfmt.so.8.1.1",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libfmt.so.8.1.1",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0",
+      "needed": "libquadmath.so.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0",
+      "needed": "ld-linux-x86-64.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.7200.4",
+      "needed": "libpcre.so.3",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libpcre.so.3.13.3"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.7200.4",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.7200.4",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/liblzma.so.5.2.5",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+      "needed": "ld-linux-x86-64.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmd.so.0.0.5",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmpiseq_seq-5.4.0.so",
+      "needed": "libgfortran.so.5",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmpiseq_seq-5.4.0.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so",
+      "needed": "libpord_seq-5.4.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libpord_seq-5.4.0.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so",
+      "needed": "libesmumps-6.1.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libesmumps-6.1.3.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so",
+      "needed": "libscotch-6.1.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so",
+      "needed": "libmpiseq_seq-5.4.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libmpiseq_seq-5.4.0.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so",
+      "needed": "libgfortran.so.5",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libmumps_common_seq-5.4.0.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libpcre.so.3.13.3",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libpord_seq-5.4.0.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/librt.so.1",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so",
+      "needed": "libscotcherr-6.1.so",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libscotcherr-6.1.3.so"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so",
+      "needed": "libz.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libz.so.1.2.11"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so",
+      "needed": "libbz2.so.1.0",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so",
+      "needed": "liblzma.so.5",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/liblzma.so.5.2.5"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libscotch-6.1.3.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libscotcherr-6.1.3.so",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libspdlog.so.1.9.2",
+      "needed": "libfmt.so.8",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libfmt.so.8.1.1"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libspdlog.so.1.9.2",
+      "needed": "libstdc++.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libspdlog.so.1.9.2",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libspdlog.so.1.9.2",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libspdlog.so.1.9.2",
+      "needed": "ld-linux-x86-64.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30",
+      "needed": "libm.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30",
+      "needed": "ld-linux-x86-64.so.2",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30",
+      "needed": "libgcc_s.so.1",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0",
+      "needed": "libXau.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libXau.so.6.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0",
+      "needed": "libXdmcp.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "from": "/usr/lib/x86_64-linux-gnu/libz.so.1.2.11",
+      "needed": "libc.so.6",
+      "mapped_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    }
+  ],
+  "core_undefined_dynamic_symbols": [
+    {
+      "symbol": "_ITM_deregisterTMCloneTable",
+      "demangled": "_ITM_deregisterTMCloneTable",
+      "mapped_export_candidates": []
+    },
+    {
+      "symbol": "_ITM_registerTMCloneTable",
+      "demangled": "_ITM_registerTMCloneTable",
+      "mapped_export_candidates": []
+    },
+    {
+      "symbol": "_Unwind_Resume@GCC_3.0",
+      "demangled": "_Unwind_Resume@GCC_3.0",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake4math12RollPitchYawIdEC1ERKNS0_14RotationMatrixIdEE",
+      "demangled": "drake::math::RollPitchYaw<double>::RollPitchYaw(drake::math::RotationMatrix<double> const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake4math14RigidTransformIdE12set_rotationERKNS0_14RotationMatrixIdEE",
+      "demangled": "drake::math::RigidTransform<double>::set_rotation(drake::math::RotationMatrix<double> const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake4math14RigidTransformIdE15set_translationERKN5Eigen6MatrixIdLi3ELi1ELi0ELi3ELi1EEE",
+      "demangled": "drake::math::RigidTransform<double>::set_translation(Eigen::Matrix<double, 3, 1, 0, 3, 1> const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake4math14RotationMatrixIdEC1ERKN5Eigen6MatrixIdLi3ELi3ELi0ELi3ELi3EEE",
+      "demangled": "drake::math::RotationMatrix<double>::RotationMatrix(Eigen::Matrix<double, 3, 3, 0, 3, 3> const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake4math14RotationMatrixIdEC1Ev",
+      "demangled": "drake::math::RotationMatrix<double>::RotationMatrix()",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake7solvers11IpoptSolver2idEv",
+      "demangled": "drake::solvers::IpoptSolver::id()",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake7solvers11IpoptSolverC1Ev",
+      "demangled": "drake::solvers::IpoptSolver::IpoptSolver()",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake7solvers11IpoptSolverD1Ev",
+      "demangled": "drake::solvers::IpoptSolver::~IpoptSolver()",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake7solvers13SolverOptions9SetOptionERKNS0_8SolverIdERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEd",
+      "demangled": "drake::solvers::SolverOptions::SetOption(drake::solvers::SolverId const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, double)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake7solvers13SolverOptions9SetOptionERKNS0_8SolverIdERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEi",
+      "demangled": "drake::solvers::SolverOptions::SetOption(drake::solvers::SolverId const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake7solvers16GetVariableValueERKNS_8symbolic8VariableERKSt8optionalISt13unordered_mapImiSt4hashImESt8equal_toImESaISt4pairIKmiEEEERKN5Eigen3RefIKNSJ_6MatrixIdLin1ELi1ELi0ELin1ELi1EEELi0ENSJ_11InnerStrideILi1EEEEE",
+      "demangled": "drake::solvers::GetVariableValue(drake::symbolic::Variable const&, std::optional<std::unordered_map<unsigned long, int, std::hash<unsigned long>, std::equal_to<unsigned long>, std::allocator<std::pair<unsigned long const, int> > > > const&, Eigen::Ref<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::InnerStride<1> > const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake7solvers19MathematicalProgram15SetInitialGuessERKNS_8symbolic8VariableEd",
+      "demangled": "drake::solvers::MathematicalProgram::SetInitialGuess(drake::symbolic::Variable const&, double)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake7solvers5SolveERKNS0_19MathematicalProgramE",
+      "demangled": "drake::solvers::Solve(drake::solvers::MathematicalProgram const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake8internal15AssertionFailedEPKcS2_S2_i",
+      "demangled": "drake::internal::AssertionFailed(char const*, char const*, char const*, int)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody10PackageMapD1Ev",
+      "demangled": "drake::multibody::PackageMap::~PackageMap()",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody14MultibodyPlantIdE10WeldFramesERKNS0_5FrameIdEES6_RKNS_4math14RigidTransformIdEE",
+      "demangled": "drake::multibody::MultibodyPlant<double>::WeldFrames(drake::multibody::Frame<double> const&, drake::multibody::Frame<double> const&, drake::math::RigidTransform<double> const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody14MultibodyPlantIdE8FinalizeEv",
+      "demangled": "drake::multibody::MultibodyPlant<double>::Finalize()",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody14MultibodyPlantIdEC1Ed",
+      "demangled": "drake::multibody::MultibodyPlant<double>::MultibodyPlant(double)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody17InverseKinematics21AddPositionConstraintERKNS0_5FrameIdEERKN5Eigen3RefIKNS6_6MatrixIdLi3ELi1ELi0ELi3ELi1EEELi0ENS6_11InnerStrideILi1EEEEES5_SF_SF_",
+      "demangled": "drake::multibody::InverseKinematics::AddPositionConstraint(drake::multibody::Frame<double> const&, Eigen::Ref<Eigen::Matrix<double, 3, 1, 0, 3, 1> const, 0, Eigen::InnerStride<1> > const&, drake::multibody::Frame<double> const&, Eigen::Ref<Eigen::Matrix<double, 3, 1, 0, 3, 1> const, 0, Eigen::InnerStride<1> > const&, Eigen::Ref<Eigen::Matrix<double, 3, 1, 0, 3, 1> const, 0, Eigen::InnerStride<1> > const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody17InverseKinematics24AddOrientationConstraintERKNS0_5FrameIdEERKNS_4math14RotationMatrixIdEES5_SA_d",
+      "demangled": "drake::multibody::InverseKinematics::AddOrientationConstraint(drake::multibody::Frame<double> const&, drake::math::RotationMatrix<double> const&, drake::multibody::Frame<double> const&, drake::math::RotationMatrix<double> const&, double)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody17InverseKinematicsC1ERKNS0_14MultibodyPlantIdEEb",
+      "demangled": "drake::multibody::InverseKinematics::InverseKinematics(drake::multibody::MultibodyPlant<double> const&, bool)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody6Parser9AddModelsERKNSt10filesystem7__cxx114pathE",
+      "demangled": "drake::multibody::Parser::AddModels(std::filesystem::__cxx11::path const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN5drake9multibody6ParserC1EPNS0_14MultibodyPlantIdEEPNS_8geometry10SceneGraphIdEE",
+      "demangled": "drake::multibody::Parser::Parser(drake::multibody::MultibodyPlant<double>*, drake::geometry::SceneGraph<double>*)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig12BrakeProfile29get_position_brake_trajectoryEddddddd",
+      "demangled": "ruckig::BrakeProfile::get_position_brake_trajectory(double, double, double, double, double, double, double)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig12BrakeProfile29get_velocity_brake_trajectoryEdddd",
+      "demangled": "ruckig::BrakeProfile::get_velocity_brake_trajectory(double, double, double, double)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig13PositionStep111get_profileERKNS_7ProfileERNS_5BlockE",
+      "demangled": "ruckig::PositionStep1::get_profile(ruckig::Profile const&, ruckig::Block&)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig13PositionStep1C1Eddddddddddd",
+      "demangled": "ruckig::PositionStep1::PositionStep1(double, double, double, double, double, double, double, double, double, double, double)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig13PositionStep211get_profileERNS_7ProfileE",
+      "demangled": "ruckig::PositionStep2::get_profile(ruckig::Profile&)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig13PositionStep2C1Edddddddddddd",
+      "demangled": "ruckig::PositionStep2::PositionStep2(double, double, double, double, double, double, double, double, double, double, double, double)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig13VelocityStep111get_profileERKNS_7ProfileERNS_5BlockE",
+      "demangled": "ruckig::VelocityStep1::get_profile(ruckig::Profile const&, ruckig::Block&)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig13VelocityStep1C1Eddddddd",
+      "demangled": "ruckig::VelocityStep1::VelocityStep1(double, double, double, double, double, double, double)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig13VelocityStep211get_profileERNS_7ProfileE",
+      "demangled": "ruckig::VelocityStep2::get_profile(ruckig::Profile&)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZN6ruckig13VelocityStep2C1Edddddddd",
+      "demangled": "ruckig::VelocityStep2::VelocityStep2(double, double, double, double, double, double, double, double)",
+      "mapped_export_candidates": [
+        "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake4math12RollPitchYawIdE10roll_angleEv",
+      "demangled": "drake::math::RollPitchYaw<double>::roll_angle() const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake4math12RollPitchYawIdE11pitch_angleEv",
+      "demangled": "drake::math::RollPitchYaw<double>::pitch_angle() const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake4math12RollPitchYawIdE9yaw_angleEv",
+      "demangled": "drake::math::RollPitchYaw<double>::yaw_angle() const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake7solvers10SolverBase5SolveERKNS0_19MathematicalProgramERKSt8optionalIN5Eigen6MatrixIdLin1ELi1ELi0ELin1ELi1EEEERKS5_INS0_13SolverOptionsEE",
+      "demangled": "drake::solvers::SolverBase::Solve(drake::solvers::MathematicalProgram const&, std::optional<Eigen::Matrix<double, -1, 1, 0, -1, 1> > const&, std::optional<drake::solvers::SolverOptions> const&) const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake7solvers25MathematicalProgramResult10is_successEv",
+      "demangled": "drake::solvers::MathematicalProgramResult::is_success() const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake7systems6SystemIdE20CreateDefaultContextEv",
+      "demangled": "drake::systems::System<double>::CreateDefaultContext() const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake9multibody14MultibodyPlantIdE11world_frameEv",
+      "demangled": "drake::multibody::MultibodyPlant<double>::world_frame() const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake9multibody14MultibodyPlantIdE12SetPositionsEPNS_7systems7ContextIdEERKN5Eigen3RefIKNS7_6MatrixIdLin1ELi1ELi0ELin1ELi1EEELi0ENS7_11InnerStrideILi1EEEEE",
+      "demangled": "drake::multibody::MultibodyPlant<double>::SetPositions(drake::systems::Context<double>*, Eigen::Ref<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::InnerStride<1> > const&) const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake9multibody14MultibodyPlantIdE14GetFrameByNameESt17basic_string_viewIcSt11char_traitsIcEE",
+      "demangled": "drake::multibody::MultibodyPlant<double>::GetFrameByName(std::basic_string_view<char, std::char_traits<char> >) const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake9multibody14MultibodyPlantIdE19CalcPointsPositionsERKNS_7systems7ContextIdEERKNS0_5FrameIdEERKN5Eigen3RefIKNSC_6MatrixIdLin1ELin1ELi0ELin1ELin1EEELi0ENSC_11OuterStrideILin1EEEEESB_NS_8EigenPtrISF_EE",
+      "demangled": "drake::multibody::MultibodyPlant<double>::CalcPointsPositions(drake::systems::Context<double> const&, drake::multibody::Frame<double> const&, Eigen::Ref<Eigen::Matrix<double, -1, -1, 0, -1, -1> const, 0, Eigen::OuterStride<-1> > const&, drake::multibody::Frame<double> const&, drake::EigenPtr<Eigen::Matrix<double, -1, -1, 0, -1, -1> >) const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNK5drake9multibody14MultibodyPlantIdE26CalcRelativeRotationMatrixERKNS_7systems7ContextIdEERKNS0_5FrameIdEESB_",
+      "demangled": "drake::multibody::MultibodyPlant<double>::CalcRelativeRotationMatrix(drake::systems::Context<double> const&, drake::multibody::Frame<double> const&, drake::multibody::Frame<double> const&) const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt10filesystem7__cxx114path5_List13_Impl_deleterclEPNS2_5_ImplE@GLIBCXX_3.4.26",
+      "demangled": "_ZNKSt10filesystem7__cxx114path5_List13_Impl_deleterclEPNS2_5_ImplE@GLIBCXX_3.4.26",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt13runtime_error4whatEv@GLIBCXX_3.4",
+      "demangled": "_ZNKSt13runtime_error4whatEv@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE3endEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE3endEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4backEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4backEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4dataEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4dataEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4findERKS4_m@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4findERKS4_m@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4sizeEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4sizeEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5beginEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5beginEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5c_strEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5c_strEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5emptyEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5emptyEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7_M_dataEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7_M_dataEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEPKc",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::compare(char const*) const",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareERKS4_@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareERKS4_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE8max_sizeEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE8max_sizeEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEcvSt17basic_string_viewIcS2_EEv@GLIBCXX_3.4.26",
+      "demangled": "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEcvSt17basic_string_viewIcS2_EEv@GLIBCXX_3.4.26",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx118numpunctIcE13decimal_pointEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx118numpunctIcE13decimal_pointEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx118numpunctIcE13thousands_sepEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx118numpunctIcE13thousands_sepEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt7__cxx118numpunctIcE8groupingEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNKSt7__cxx118numpunctIcE8groupingEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt9basic_iosIcSt11char_traitsIcEE5rdbufEv@GLIBCXX_3.4",
+      "demangled": "_ZNKSt9basic_iosIcSt11char_traitsIcEE5rdbufEv@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNKSt9basic_iosIcSt11char_traitsIcEE7rdstateEv@GLIBCXX_3.4",
+      "demangled": "_ZNKSt9basic_iosIcSt11char_traitsIcEE7rdstateEv@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSaIcEC1ERKS_@GLIBCXX_3.4",
+      "demangled": "_ZNSaIcEC1ERKS_@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSaIcEC1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSaIcEC1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSaIcEC2Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSaIcEC2Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSaIcED1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSaIcED1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSaIcED2Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSaIcED2Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSolsEPFRSoS_E@GLIBCXX_3.4",
+      "demangled": "_ZNSolsEPFRSoS_E@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSolsEd@GLIBCXX_3.4",
+      "demangled": "_ZNSolsEd@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSolsEi@GLIBCXX_3.4",
+      "demangled": "_ZNSolsEi@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSolsEm@GLIBCXX_3.4",
+      "demangled": "_ZNSolsEm@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt10filesystem7__cxx114path14_M_split_cmptsEv@GLIBCXX_3.4.26",
+      "demangled": "_ZNSt10filesystem7__cxx114path14_M_split_cmptsEv@GLIBCXX_3.4.26",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt10filesystem7__cxx114path5_ListC1Ev@GLIBCXX_3.4.26",
+      "demangled": "_ZNSt10filesystem7__cxx114path5_ListC1Ev@GLIBCXX_3.4.26",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt11logic_errorC1EPKc@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt11logic_errorC1EPKc@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt11logic_errorC1ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt11logic_errorC1ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt11logic_errorD1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt11logic_errorD1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt13runtime_errorC1EPKc@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt13runtime_errorC1EPKc@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt13runtime_errorC1ERKS_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt13runtime_errorC1ERKS_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt13runtime_errorC2EPKc@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt13runtime_errorC2EPKc@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt13runtime_errorD1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt13runtime_errorD1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt13runtime_errorD2Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt13runtime_errorD2Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode@GLIBCXX_3.4",
+      "demangled": "_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt15basic_streambufIcSt11char_traitsIcEE6sbumpcEv@GLIBCXX_3.4",
+      "demangled": "_ZNSt15basic_streambufIcSt11char_traitsIcEE6sbumpcEv@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6chrono3_V212steady_clock3nowEv@GLIBCXX_3.4.19",
+      "demangled": "_ZNSt6chrono3_V212steady_clock3nowEv@GLIBCXX_3.4.19",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6chrono3_V212system_clock3nowEv@GLIBCXX_3.4.19",
+      "demangled": "_ZNSt6chrono3_V212system_clock3nowEv@GLIBCXX_3.4.19",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6localeC1ERKS_@GLIBCXX_3.4",
+      "demangled": "_ZNSt6localeC1ERKS_@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6localeC1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt6localeC1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6localeD1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt6localeD1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6thread15_M_start_threadESt10unique_ptrINS_6_StateESt14default_deleteIS1_EEPFvvE@GLIBCXX_3.4.22",
+      "demangled": "_ZNSt6thread15_M_start_threadESt10unique_ptrINS_6_StateESt14default_deleteIS1_EEPFvvE@GLIBCXX_3.4.22",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6thread4joinEv@GLIBCXX_3.4.11",
+      "demangled": "_ZNSt6thread4joinEv@GLIBCXX_3.4.11",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6thread6_StateD2Ev@GLIBCXX_3.4.22",
+      "demangled": "_ZNSt6thread6_StateD2Ev@GLIBCXX_3.4.22",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt6thread6detachEv@GLIBCXX_3.4.11",
+      "demangled": "_ZNSt6thread6detachEv@GLIBCXX_3.4.11",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_disposeEv",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_dispose()",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE11_M_capacityEm@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE11_M_capacityEm@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_Alloc_hiderC1EPcRKS3_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_Alloc_hiderC1EPcRKS3_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructEmc",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_construct(unsigned long, char)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12__sv_wrapperC1ESt17basic_string_viewIcS2_E@GLIBCXX_3.4.26",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12__sv_wrapperC1ESt17basic_string_viewIcS2_E@GLIBCXX_3.4.26",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13_M_local_dataEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13_M_local_dataEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13_M_set_lengthEm@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13_M_set_lengthEm@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13_S_copy_charsEPcPKcS7_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13_S_copy_charsEPcPKcS7_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE17_S_to_string_viewESt17basic_string_viewIcS2_E@GLIBCXX_3.4.26",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE17_S_to_string_viewESt17basic_string_viewIcS2_E@GLIBCXX_3.4.26",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4dataEv@GLIBCXX_3.4.26",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4dataEv@GLIBCXX_3.4.26",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5clearEv@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5clearEv@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6appendEPKc",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::append(char const*)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6appendERKS4_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6appendERKS4_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6insertEmPKc@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6insertEmPKc@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7_M_dataEPc@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7_M_dataEPc@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7replaceEmmRKS4_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7replaceEmmRKS4_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7reserveEm",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::reserve(unsigned long)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_create(unsigned long&, unsigned long)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9push_backEc",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::push_back(char)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1ENS4_12__sv_wrapperERKS3_@GLIBCXX_3.4.26",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1ENS4_12__sv_wrapperERKS3_@GLIBCXX_3.4.26",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EOS4_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EOS4_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EPKcmRKS3_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EPKcmRKS3_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1ERKS4_",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1Ev@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1Ev@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEED1Ev",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::~basic_string()",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSEOS4_",
+      "demangled": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::operator=(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&&)",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake.so",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSEPKc@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSEPKc@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSERKS4_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSERKS4_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEixEm@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEixEm@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLEPKc@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLEPKc@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLERKS4_@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLERKS4_@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLEc@GLIBCXX_3.4.21",
+      "demangled": "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLEc@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt8ios_base4InitC1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt8ios_base4InitC1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt8ios_base4InitD1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt8ios_base4InitD1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt9bad_allocD1Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt9bad_allocD1Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate@GLIBCXX_3.4",
+      "demangled": "_ZNSt9basic_iosIcSt11char_traitsIcEE5clearESt12_Ios_Iostate@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZNSt9exceptionD2Ev@GLIBCXX_3.4",
+      "demangled": "_ZNSt9exceptionD2Ev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt17__throw_bad_allocv@GLIBCXX_3.4",
+      "demangled": "_ZSt17__throw_bad_allocv@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base@GLIBCXX_3.4",
+      "demangled": "_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base@GLIBCXX_3.4",
+      "demangled": "_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt18_Rb_tree_incrementPSt18_Rb_tree_node_base@GLIBCXX_3.4",
+      "demangled": "_ZSt18_Rb_tree_incrementPSt18_Rb_tree_node_base@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt19__throw_logic_errorPKc@GLIBCXX_3.4",
+      "demangled": "_ZSt19__throw_logic_errorPKc@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt20__throw_length_errorPKc@GLIBCXX_3.4",
+      "demangled": "_ZSt20__throw_length_errorPKc@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt20__throw_system_errori@GLIBCXX_3.4.11",
+      "demangled": "_ZSt20__throw_system_errori@GLIBCXX_3.4.11",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt25__throw_bad_function_callv@GLIBCXX_3.4.14",
+      "demangled": "_ZSt25__throw_bad_function_callv@GLIBCXX_3.4.14",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_@GLIBCXX_3.4",
+      "demangled": "_ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt28__throw_bad_array_new_lengthv@GLIBCXX_3.4.29",
+      "demangled": "_ZSt28__throw_bad_array_new_lengthv@GLIBCXX_3.4.29",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_@GLIBCXX_3.4",
+      "demangled": "_ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt4endlIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_@GLIBCXX_3.4",
+      "demangled": "_ZSt4endlIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE@GLIBCXX_3.4.21",
+      "demangled": "_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt9terminatev@GLIBCXX_3.4",
+      "demangled": "_ZSt9terminatev@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZSt9use_facetINSt7__cxx118numpunctIcEEERKT_RKSt6locale@GLIBCXX_3.4.21",
+      "demangled": "_ZSt9use_facetINSt7__cxx118numpunctIcEEERKT_RKSt6locale@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZStlsISt11char_traitsIcEERSt13basic_ostreamIcT_ES5_PKc@GLIBCXX_3.4",
+      "demangled": "_ZStlsISt11char_traitsIcEERSt13basic_ostreamIcT_ES5_PKc@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZStlsIcSt11char_traitsIcESaIcEERSt13basic_ostreamIT_T0_ES7_RKNSt7__cxx1112basic_stringIS4_S5_T1_EE@GLIBCXX_3.4.21",
+      "demangled": "_ZStlsIcSt11char_traitsIcESaIcEERSt13basic_ostreamIT_T0_ES7_RKNSt7__cxx1112basic_stringIS4_S5_T1_EE@GLIBCXX_3.4.21",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZTINSt6thread6_StateE@GLIBCXX_3.4.22",
+      "demangled": "_ZTINSt6thread6_StateE@GLIBCXX_3.4.22",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZTISt13runtime_error@GLIBCXX_3.4",
+      "demangled": "_ZTISt13runtime_error@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZTISt9exception@GLIBCXX_3.4",
+      "demangled": "_ZTISt9exception@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZTVN10__cxxabiv117__class_type_infoE@CXXABI_1.3",
+      "demangled": "_ZTVN10__cxxabiv117__class_type_infoE@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZTVN10__cxxabiv120__si_class_type_infoE@CXXABI_1.3",
+      "demangled": "_ZTVN10__cxxabiv120__si_class_type_infoE@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZdaPv@GLIBCXX_3.4",
+      "demangled": "_ZdaPv@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_ZdlPvm@CXXABI_1.3.9",
+      "demangled": "_ZdlPvm@CXXABI_1.3.9",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_Znam@GLIBCXX_3.4",
+      "demangled": "_Znam@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "_Znwm@GLIBCXX_3.4",
+      "demangled": "_Znwm@GLIBCXX_3.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__assert_fail@GLIBC_2.2.5",
+      "demangled": "__assert_fail@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "__cxa_allocate_exception@CXXABI_1.3",
+      "demangled": "__cxa_allocate_exception@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__cxa_atexit@GLIBC_2.2.5",
+      "demangled": "__cxa_atexit@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "__cxa_begin_catch@CXXABI_1.3",
+      "demangled": "__cxa_begin_catch@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__cxa_end_catch@CXXABI_1.3",
+      "demangled": "__cxa_end_catch@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__cxa_finalize@GLIBC_2.2.5",
+      "demangled": "__cxa_finalize@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "__cxa_free_exception@CXXABI_1.3",
+      "demangled": "__cxa_free_exception@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__cxa_guard_acquire@CXXABI_1.3",
+      "demangled": "__cxa_guard_acquire@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__cxa_guard_release@CXXABI_1.3",
+      "demangled": "__cxa_guard_release@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__cxa_pure_virtual@CXXABI_1.3",
+      "demangled": "__cxa_pure_virtual@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__cxa_rethrow@CXXABI_1.3",
+      "demangled": "__cxa_rethrow@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__cxa_throw@CXXABI_1.3",
+      "demangled": "__cxa_throw@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__errno_location@GLIBC_2.2.5",
+      "demangled": "__errno_location@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "__gmon_start__",
+      "demangled": "__gmon_start__",
+      "mapped_export_candidates": []
+    },
+    {
+      "symbol": "__gxx_personality_v0@CXXABI_1.3",
+      "demangled": "__gxx_personality_v0@CXXABI_1.3",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30"
+      ]
+    },
+    {
+      "symbol": "__libc_start_main@GLIBC_2.34",
+      "demangled": "__libc_start_main@GLIBC_2.34",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "__stack_chk_fail@GLIBC_2.4",
+      "demangled": "__stack_chk_fail@GLIBC_2.4",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "__udivti3@GCC_3.0",
+      "demangled": "__udivti3@GCC_3.0",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "symbol": "__umodti3@GCC_3.0",
+      "demangled": "__umodti3@GCC_3.0",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "symbol": "bind@GLIBC_2.2.5",
+      "demangled": "bind@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "close@GLIBC_2.2.5",
+      "demangled": "close@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "cos@GLIBC_2.2.5",
+      "demangled": "cos@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "symbol": "exp@GLIBC_2.29",
+      "demangled": "exp@GLIBC_2.29",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libmosek64.so.10.0",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "symbol": "fmin@GLIBC_2.2.5",
+      "demangled": "fmin@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "symbol": "fmod@GLIBC_2.2.5",
+      "demangled": "fmod@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "symbol": "fprintf@GLIBC_2.2.5",
+      "demangled": "fprintf@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "free@GLIBC_2.2.5",
+      "demangled": "free@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "freeaddrinfo@GLIBC_2.2.5",
+      "demangled": "freeaddrinfo@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "fwrite@GLIBC_2.2.5",
+      "demangled": "fwrite@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "gai_strerror@GLIBC_2.2.5",
+      "demangled": "gai_strerror@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "getaddrinfo@GLIBC_2.2.5",
+      "demangled": "getaddrinfo@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "htons@GLIBC_2.2.5",
+      "demangled": "htons@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "inet_ntop@GLIBC_2.2.5",
+      "demangled": "inet_ntop@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "inet_pton@GLIBC_2.2.5",
+      "demangled": "inet_pton@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "ioctl@GLIBC_2.2.5",
+      "demangled": "ioctl@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "lcm_create",
+      "demangled": "lcm_create",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake_lcm.so"
+      ]
+    },
+    {
+      "symbol": "lcm_destroy",
+      "demangled": "lcm_destroy",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake_lcm.so"
+      ]
+    },
+    {
+      "symbol": "lcm_handle",
+      "demangled": "lcm_handle",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake_lcm.so"
+      ]
+    },
+    {
+      "symbol": "lcm_publish",
+      "demangled": "lcm_publish",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake_lcm.so"
+      ]
+    },
+    {
+      "symbol": "lcm_subscribe",
+      "demangled": "lcm_subscribe",
+      "mapped_export_candidates": [
+        "/opt/drake/lib/libdrake_lcm.so"
+      ]
+    },
+    {
+      "symbol": "ldiv@GLIBC_2.2.5",
+      "demangled": "ldiv@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "localeconv@GLIBC_2.2.5",
+      "demangled": "localeconv@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "malloc@GLIBC_2.2.5",
+      "demangled": "malloc@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "memchr@GLIBC_2.2.5",
+      "demangled": "memchr@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "memcmp@GLIBC_2.2.5",
+      "demangled": "memcmp@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "memcpy@GLIBC_2.14",
+      "demangled": "memcpy@GLIBC_2.14",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "memmove@GLIBC_2.2.5",
+      "demangled": "memmove@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "memset@GLIBC_2.2.5",
+      "demangled": "memset@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "ntohs@GLIBC_2.2.5",
+      "demangled": "ntohs@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "perror@GLIBC_2.2.5",
+      "demangled": "perror@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "printf@GLIBC_2.2.5",
+      "demangled": "printf@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "pthread_mutex_lock@GLIBC_2.2.5",
+      "demangled": "pthread_mutex_lock@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "pthread_mutex_trylock@GLIBC_2.34",
+      "demangled": "pthread_mutex_trylock@GLIBC_2.34",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "pthread_mutex_unlock@GLIBC_2.2.5",
+      "demangled": "pthread_mutex_unlock@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "puts@GLIBC_2.2.5",
+      "demangled": "puts@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "read@GLIBC_2.2.5",
+      "demangled": "read@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "recv@GLIBC_2.2.5",
+      "demangled": "recv@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "recvfrom@GLIBC_2.2.5",
+      "demangled": "recvfrom@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "sched_yield@GLIBC_2.2.5",
+      "demangled": "sched_yield@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "sendto@GLIBC_2.2.5",
+      "demangled": "sendto@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "setsockopt@GLIBC_2.2.5",
+      "demangled": "setsockopt@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "shutdown@GLIBC_2.2.5",
+      "demangled": "shutdown@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "sin@GLIBC_2.2.5",
+      "demangled": "sin@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      ]
+    },
+    {
+      "symbol": "sleep@GLIBC_2.2.5",
+      "demangled": "sleep@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "snprintf@GLIBC_2.2.5",
+      "demangled": "snprintf@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "socket@GLIBC_2.2.5",
+      "demangled": "socket@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "strcmp@GLIBC_2.2.5",
+      "demangled": "strcmp@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "strcpy@GLIBC_2.2.5",
+      "demangled": "strcpy@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "strlen@GLIBC_2.2.5",
+      "demangled": "strlen@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "strtod@GLIBC_2.2.5",
+      "demangled": "strtod@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "strtoll@GLIBC_2.2.5",
+      "demangled": "strtoll@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "strtoull@GLIBC_2.2.5",
+      "demangled": "strtoull@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "usleep@GLIBC_2.2.5",
+      "demangled": "usleep@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    },
+    {
+      "symbol": "write@GLIBC_2.2.5",
+      "demangled": "write@GLIBC_2.2.5",
+      "mapped_export_candidates": [
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      ]
+    }
+  ],
+  "limits": [
+    "DT_NEEDED is a declared ELF dependency. A mapped library is loaded, not proof each exported function or solver backend ran.",
+    "Export candidates match symbol base names; this is not a live relocation/binding trace and does not resolve symbol-version or interposition ambiguity.",
+    "Inline/header-defined wrapper and Ruckig state-update code reside in the executable; replacing a .so cannot repair its detached-worker ownership."
+  ]
+}

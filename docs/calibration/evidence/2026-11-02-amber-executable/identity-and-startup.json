@@ -1,0 +1,176 @@
+{
+  "captured_utc": "2026-11-03T05:36:13.315933+00:00",
+  "hardware_commands_sent": false,
+  "installed": false,
+  "processes_restarted": false,
+  "method": "Read-only SSH file/process metadata and local static disassembly; no process attachment or executable launch.",
+  "core": {
+    "sha256": "554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100",
+    "size": 1921528,
+    "build_id": "376e8d04f9075e4e7166403f4f50ea3c2a7d740f",
+    "format": "ELF64 x86_64 PIE",
+    "live_processes": [
+      {
+        "pid": 974,
+        "executable": "/home/amber/L-10/amber_core_L",
+        "physical_arm": "RIGHT"
+      },
+      {
+        "pid": 975,
+        "executable": "/home/amber/R-11/amber_core_R",
+        "physical_arm": "LEFT"
+      }
+    ],
+    "sha256_matches_both_proc_exe": true,
+    "archived_paths": [
+      "amber/L-10/amber_core_L",
+      "amber/R-11/amber_core_R",
+      "amber/amber_core/amber_core"
+    ]
+  },
+  "launch_sha256": {
+    "L-10": "baea5d73603f3e44eb603fde26c8d06268e2949b1adc4fb880f65a73a901f572",
+    "R-11": "5de7ef5c9e8f2315b5fc88d6b4db4dac54065cb2d0b1569484636435f649410d"
+  },
+  "loaded_libraries": [
+    {
+      "path": "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so",
+      "resolved": "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so",
+      "size": 133456,
+      "sha256": "e6f6e27ecc6aa7ad9440e90d50c9c85b23b18035a32d4b005d3a0a6e4502e84e"
+    },
+    {
+      "path": "/opt/drake/lib/libdrake.so",
+      "resolved": "/opt/drake/lib/libdrake.so",
+      "size": 65688448,
+      "sha256": "1b134a5e38aa95edf435b62e3f4b202504ed861c0e0ccf72e110153ad48f6c2d"
+    },
+    {
+      "path": "/opt/drake/lib/libdrake_lcm.so",
+      "resolved": "/opt/drake/lib/libdrake_lcm.so",
+      "size": 104360,
+      "sha256": "21084488f04daf0f64a832c57a26aceff8b3c2e0131a0da4328c08114b9f74d0"
+    },
+    {
+      "path": "/opt/drake/lib/libdrake_marker.so",
+      "resolved": "/opt/drake/lib/libdrake_marker.so",
+      "size": 9328,
+      "sha256": "220654edb4adcd5aabe2359c5483528cbc7babe518d81169ad34b8db3d82955c"
+    }
+  ],
+  "ruckig_package": "ros-humble-ruckig 0.9.2-1jammy.20231117.163632",
+  "toolchain_observed": {
+    "cmake": "3.22.1-1ubuntu1.22.04.1",
+    "g++": "4:11.2.0-1ubuntu1",
+    "libc6": "2.35-0ubuntu3.10"
+  },
+  "unconditional_thread_construction": [
+    {
+      "entry": "RealTimer::lockKeeper",
+      "entry_pointer_address": "0x12ee7",
+      "constructor_call": "0x12ef4"
+    },
+    {
+      "entry": "RosInterface::spin",
+      "entry_pointer_address": "0x12f00",
+      "constructor_call": "0x12f0d"
+    },
+    {
+      "entry": "canRecv::spin",
+      "entry_pointer_address": "0x12f19",
+      "constructor_call": "0x12f26"
+    },
+    {
+      "entry": "positionCanSender::spin",
+      "entry_pointer_address": "0x12f32",
+      "constructor_call": "0x12f3f"
+    },
+    {
+      "entry": "lcmCanSender::spin",
+      "entry_pointer_address": "0x12f52",
+      "constructor_call": "0x12f5f"
+    },
+    {
+      "entry": "solverDriver::DrakeSolverDriver",
+      "entry_pointer_address": "0x12f83",
+      "constructor_call": "0x12f8d"
+    },
+    {
+      "entry": "RuckigController::spin",
+      "entry_pointer_address": "0x12f99",
+      "constructor_call": "0x12fa6"
+    },
+    {
+      "entry": "UdpServer::UdpServer",
+      "entry_pointer_address": "0x12fb2",
+      "constructor_call": "0x12fbf"
+    },
+    {
+      "entry": "UdpServer::LcmInit",
+      "entry_pointer_address": "0x12fcb",
+      "constructor_call": "0x12fd8"
+    },
+    {
+      "entry": "speedoMeter::spin",
+      "entry_pointer_address": "0x12fe4",
+      "constructor_call": "0x12ff1"
+    }
+  ],
+  "first_join": "0x13000 (RealTimer::lockKeeper thread)",
+  "observed_config_branches": [
+    {
+      "setting": "LCM_Interface.UDP_Enable",
+      "branch": "0x12d14",
+      "effect": "print only"
+    },
+    {
+      "setting": "Robot.Robot_Interface == CAN",
+      "branch": "0x13059",
+      "effect": "joins CAN threads after they were already started"
+    },
+    {
+      "setting": "SolverSettings.Enable / Type",
+      "branch": "0x130c0 / 0x13107",
+      "effect": "joins solver thread after it was already started"
+    },
+    {
+      "setting": "LCM_Interface.UDP_Enable",
+      "branch": "0x1315f",
+      "effect": "joins UDP threads after they were already started"
+    },
+    {
+      "setting": "LCM_Interface.ROS2_Enable",
+      "branch": "0x131c1",
+      "effect": "joins RosInterface after it was already started"
+    }
+  ],
+  "conclusions": [
+    {
+      "status": "direct_static_evidence",
+      "finding": "An LCM direct-position packet reaches the same jointPositionTarget array as Ruckig; no exclusive-owner arbitration is present in that handler."
+    },
+    {
+      "status": "direct_static_evidence",
+      "finding": "The named enable settings do not prevent construction of the listed threads in this executable."
+    },
+    {
+      "status": "engineering_conclusion",
+      "finding": "A configuration-only driver mode has not been established; raw LCM streaming beside the installed core is not an acceptable replacement."
+    },
+    {
+      "status": "scope_limit",
+      "finding": "Controller::spin and Planner::spin exist as linked symbols, but no startup reference was found in main or the complete local disassembly. Do not label their PosPlan pipeline an observed running thread."
+    },
+    {
+      "status": "unknown",
+      "finding": "Motor-side command timeout, hold behavior after core death and independent safe stop remain unverified by these static files."
+    }
+  ],
+  "reproduction": [
+    "sha256sum /proc/974/exe /proc/975/exe",
+    "readelf -h -n -d /home/amber/L-10/amber_core_L",
+    "cat /proc/974/maps",
+    "xcrun llvm-objdump -d --demangle /Users/rob/dev/Amber-HomeFolder/amber/L-10/amber_core_L"
+  ],
+  "raw_local_artifacts": "/Users/rob/Documents/ROB Test Reports/2026-11-02/amber-feasibility"
+}

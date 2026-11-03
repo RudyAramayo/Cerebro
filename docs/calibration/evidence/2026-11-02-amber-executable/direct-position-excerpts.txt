@@ -1,0 +1,55 @@
+READ-ONLY STATIC EVIDENCE; no vendor executable was run.
+Binary SHA-256: 554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100
+Tool: GNU objdump -d -C on /home/amber/L-10/amber_core_L via read-only SSH; captured before editing.
+RosInterface starts and detaches publisher/listener threads. The PosCmd handler copies seven doubles into the shared directControl::jointPositionTarget array.
+C++ JSON template names below are shortened to [JSON operation]; instruction bytes and addresses are retained.
+
+Range 0x98102 <= address < 0x98169
+   98102:	f3 0f 1e fa          	endbr64
+   98106:	55                   	push   %rbp
+   98107:	48 89 e5             	mov    %rsp,%rbp
+   9810a:	53                   	push   %rbx
+   9810b:	48 83 ec 28          	sub    $0x28,%rsp
+   9810f:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax
+   98116:	00 00
+   98118:	48 89 45 e8          	mov    %rax,-0x18(%rbp)
+   9811c:	31 c0                	xor    %eax,%eax
+   9811e:	48 8d 45 d8          	lea    -0x28(%rbp),%rax
+   98122:	48 8d 15 dc fd ff ff 	lea    -0x224(%rip),%rdx        # 97f05 <RosInterface::RosDataPublisher()>
+   98129:	48 89 d6             	mov    %rdx,%rsi
+   9812c:	48 89 c7             	mov    %rax,%rdi
+   9812f:	e8 4e de f7 ff       	call   15f82 <std::thread::thread<int (&)(), , void>(int (&)())>
+   98134:	48 8d 45 e0          	lea    -0x20(%rbp),%rax
+   98138:	48 8d 15 15 fe ff ff 	lea    -0x1eb(%rip),%rdx        # 97f54 <RosInterface::LCM_ListenerStart()>
+   9813f:	48 89 d6             	mov    %rdx,%rsi
+   98142:	48 89 c7             	mov    %rax,%rdi
+   98145:	e8 38 de f7 ff       	call   15f82 <std::thread::thread<int (&)(), , void>(int (&)())>
+   9814a:	48 8d 45 d8          	lea    -0x28(%rbp),%rax
+   9814e:	48 89 c7             	mov    %rax,%rdi
+   98151:	e8 9a 91 f7 ff       	call   112f0 <std::thread::detach()@plt>
+   98156:	48 8d 45 e0          	lea    -0x20(%rbp),%rax
+   9815a:	48 89 c7             	mov    %rax,%rdi
+   9815d:	e8 8e 91 f7 ff       	call   112f0 <std::thread::detach()@plt>
+   98162:	e8 f3 15 fa ff       	call   3975a <std::this_thread::yield()>
+   98167:	eb f9                	jmp    98162 <RosInterface::spin()+0x60>
+
+Range 0x98844 <= address < 0x98883
+   98844:	c7 45 fc 00 00 00 00 	movl   $0x0,-0x4(%rbp)
+   9884b:	eb 2c                	jmp    98879 <RosInterface::Handler::handleMessage(lcm::ReceiveBuffer const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, lcmTypes::posCmd_t const*)+0x1a1>
+   9884d:	48 8b 45 d0          	mov    -0x30(%rbp),%rax
+   98851:	8b 55 fc             	mov    -0x4(%rbp),%edx
+   98854:	48 63 d2             	movslq %edx,%rdx
+   98857:	f2 0f 10 04 d0       	movsd  (%rax,%rdx,8),%xmm0
+   9885c:	8b 45 fc             	mov    -0x4(%rbp),%eax
+   9885f:	48 98                	cltq
+   98861:	48 8d 14 c5 00 00 00 	lea    0x0(,%rax,8),%rdx
+   98868:	00
+   98869:	48 8d 05 d0 c6 04 00 	lea    0x4c6d0(%rip),%rax        # e4f40 <directControl::jointPositionTarget>
+   98870:	f2 0f 11 04 02       	movsd  %xmm0,(%rdx,%rax,1)
+   98875:	83 45 fc 01          	addl   $0x1,-0x4(%rbp)
+   98879:	83 7d fc 06          	cmpl   $0x6,-0x4(%rbp)
+   9887d:	7e ce                	jle    9884d <RosInterface::Handler::handleMessage(lcm::ReceiveBuffer const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, lcmTypes::posCmd_t const*)+0x175>
+   9887f:	90                   	nop
+   98880:	90                   	nop
+   98881:	c9                   	leave
+   98882:	c3                   	ret

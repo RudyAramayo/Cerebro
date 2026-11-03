@@ -1,0 +1,129 @@
+{
+  "roots": {
+    "/home": "walked without symlink traversal",
+    "/opt": "walked without symlink traversal",
+    "/usr/local/src": "walked without symlink traversal",
+    "/usr/src": "walked without symlink traversal",
+    "/srv": "walked without symlink traversal",
+    "/mnt": "walked without symlink traversal",
+    "/media": "walked without symlink traversal",
+    "/workspace": "absent",
+    "/workspaces": "absent",
+    "/root": "not readable/searchable",
+    "/tmp": "walked without symlink traversal",
+    "/var/tmp": "walked without symlink traversal",
+    "/var/backups": "walked without symlink traversal"
+  },
+  "matching_source_files": [],
+  "project_build_files": [
+    "/home/amber/R-11/useless/CMakeCache.txt",
+    "/home/amber/R-11/useless/Makefile",
+    "/home/amber/L-10/useless/CMakeCache.txt",
+    "/home/amber/L-10/useless/Makefile"
+  ],
+  "archives": [
+    {
+      "path": "/home/amber/R-11/urdf/amber_l1.zip",
+      "size": 12356553
+    },
+    {
+      "path": "/home/amber/amber_core/urdf/amber_l1.zip",
+      "size": 12356553
+    },
+    {
+      "path": "/home/amber/L-10/urdf/dual_b1.zip",
+      "size": 240156469
+    },
+    {
+      "path": "/home/amber/L-10/urdf/amber_l1.zip",
+      "size": 12356553
+    }
+  ],
+  "candidate_project_directories": [
+    "/home/amber/amber_core",
+    "/home/amber/R-11/useless/CMakeFiles/amber_core_dev_O.dir",
+    "/home/amber/R-11/useless/CMakeFiles/amber_core_dev_O.dir/DirectControl",
+    "/home/amber/L-10/useless/CMakeFiles/amber_core_dev_O.dir",
+    "/home/amber/L-10/useless/CMakeFiles/amber_core_dev_O.dir/DirectControl"
+  ],
+  "errors": [
+    {
+      "path_class": "/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/tmp/snap-private-tmp",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/var/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/var/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/var/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/var/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/var/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    },
+    {
+      "path_class": "/var/tmp/systemd-private-<runtime-id>",
+      "error": "Permission denied"
+    }
+  ],
+  "skipped_directory_names": [
+    ".cache",
+    ".cargo",
+    ".colcon",
+    ".config",
+    ".gazebo",
+    ".git",
+    ".gnupg",
+    ".ignition",
+    ".local",
+    ".mozilla",
+    ".npm",
+    ".ros",
+    ".rustup",
+    ".ssh",
+    ".vscode",
+    "__pycache__",
+    "node_modules",
+    "snap"
+  ],
+  "file_count": 78325,
+  "scanned_utc": "2026-11-03T05:39:39Z",
+  "limitations": [
+    "Named-file search excludes listed private/cache directories and does not traverse symlinks. /root and private service temporary directories were inaccessible.",
+    "This records absence within the examined scopes, not proof that vendor source does not exist elsewhere."
+  ]
+}

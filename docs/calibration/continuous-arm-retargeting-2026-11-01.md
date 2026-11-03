@@ -166,6 +166,70 @@ There is no overnight request for an answer or automatic morning motor action.
 The deliverable provides the software ownership implementation and evidence;
 driver integration and physical validation remain open blockers.
 
+## 2026-11-02 executable feasibility follow-up
+
+Rudy resumed software investigation and requested a deep comparison of rebuilding
+the vendor executable with replacing its controller. No adapter, motor command,
+installation or restart was performed in this follow-up. The trajectory library
+above remains an offline component, not a deployable replacement driver.
+
+The [identity and startup evidence](evidence/2026-11-02-amber-executable/identity-and-startup.json)
+binds the analysis to both running executables and the three matching archived
+copies: SHA-256 `554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100`,
+ELF build ID `376e8d04f9075e4e7166403f4f50ea3c2a7d740f`.
+
+`main` constructs ten threads in the straight-line range `0x12ee0..0x12ff1`,
+including Ruckig, RosInterface, UDP, the solver and the CAN sender. The first
+`join()` is at `0x13000`. Subsequent enable checks only guard joins; the earlier
+UDP-enable check only guards a print. They do not provide a driver-only mode.
+RosInterface starts its publisher and direct-position listener unconditionally;
+the listener copies seven doubles into `directControl::jointPositionTarget`,
+the same array used by Ruckig. Sending the new owner's output through that
+existing listener would leave competing writers. Linked `Controller::spin` and
+`Planner::spin` symbols have no startup reference identified in this audit;
+their presence alone is not evidence of a running PosPlan pipeline.
+
+The [backup inventory](evidence/2026-11-02-amber-executable/source-inventory.json)
+examined the current home-folder repository and its complete reachable history.
+It contains the matching binaries, URDFs and historical build records, but no
+matching project source or disk-image path was found. This does not establish
+that a separate Ubuntu image or vendor source is absent elsewhere. Historical
+link records refer to `/home/amber/amber_core_dev_O` and a different Ruckig
+library path. The live process maps Ruckig 0.9.2 from ROS Humble. These records
+support rollback/reference and dependency reconstruction, not a verified source
+rebuild. Changing a URDF or replacing `libruckig.so` cannot remove ownership
+and worker races compiled into the executable.
+
+Direct Ubuntu inspection extended the search beyond the backup: 78,325 files
+across the readable home, opt, source, mounted-volume and temporary trees yielded
+no named controller source. A content search of 30,572 readable C/C++ files for
+the controller's distinctive identifiers also found none. The large host-only
+`dual_b1.zip` and examined URDF archives contain URDF/STL assets, not controller
+source. `/root`, private service temporary directories, excluded private/cache
+directories and symlink destinations were not searched. The exact scopes and
+limitations are recorded in
+[host-source-search.json](evidence/2026-11-02-amber-executable/host-source-search.json)
+and [the content/archive inventory](evidence/2026-11-02-amber-executable/host-source-content-and-archives.json).
+
+The [live dependency graph](evidence/2026-11-02-amber-executable/shared-libraries-and-imports.json)
+records the core plus 42 mapped libraries, their hashes/build IDs, 141 declared
+`DT_NEEDED` edges and 235 undefined core dynamic symbols. The core directly
+requires Drake, Ruckig, Drake's LCM library and the C/C++ runtimes. It imports ten
+Ruckig-specific functions, 44 Drake-specific functions and five LCM functions.
+Drake's transitive dependencies include its marker library, TBB, Mosek and other
+math/graphics libraries. Being mapped does not prove a solver backend ran; symbol
+export candidates do not establish live binding or actual function use. The
+replacement boundary is the executable's ownership, ingress and motor-facing
+driver code, not the motor firmware or an assumed third-party `.so` patch.
+
+A maintainable rebuild requires the matching source and an isolated baseline
+build before replacing every target writer with one owner. Without that source,
+a separate controller must replace the vendor executable's motor-facing role
+completely and establish CAN encoding, feedback, mode/startup, error handling,
+exclusive ownership, Stop and independent watchdog behavior. Neither approach
+is ready for installation. Preserve the legacy completion guard until that
+integration and physical validation are complete.
+
 ## Primary implementation references
 
 - [Pinned Ruckig 0.9.2 profile implementation](https://github.com/pantor/ruckig/blob/7de6b1035e1cad509251b31b3287d10fbcda6baf/include/ruckig/profile.hpp)

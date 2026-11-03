@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/RudyAramayo/Amber-HomeFolder",
+  "commit": "16796c4b1e4d608230eab0d8d26b8020760eaddb",
+  "remote_main_verified_equal": true,
+  "shallow": false,
+  "tracked_entries": 8424,
+  "reachable_git_objects": 5665,
+  "branches_observed": [
+    "main"
+  ],
+  "github_releases_observed": 0,
+  "source_search_regex": "/(RuckigController|main|positionCanSender|directControl|canRecv)\\.(cpp|h|hpp)$",
+  "source_search_excluded": "third-party Install trees",
+  "matching_project_source_paths": [],
+  "disk_image_paths": [],
+  "historical_build_root": "/home/amber/amber_core_dev_O",
+  "historical_link_records": [
+    "amber/L-10/useless/CMakeFiles/amber_core_dev_O.dir/link.txt",
+    "amber/L-10/useless/CMakeFiles/amber_core_dev_O.dir/DependInfo.cmake"
+  ],
+  "historical_ruckig_link_path": "/usr/local/lib/libruckig.so",
+  "current_loaded_ruckig_path": "/opt/ros/humble/lib/x86_64-linux-gnu/libruckig.so",
+  "limits": "This is the discovered home-folder backup, not proof that no separate disk image or vendor source exists elsewhere. Missing source prevents a verified rebuild; archived executables remain useful for rollback/reference."
+}

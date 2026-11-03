@@ -1,0 +1,171 @@
+READ-ONLY STATIC EVIDENCE; no vendor executable was run.
+Binary SHA-256: 554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100
+Tool: GNU objdump -d -C on /home/amber/L-10/amber_core_L via read-only SSH; captured before editing.
+All thread constructors precede the first join. Later configuration branches control joins. Constructors start execution; join only waits.
+C++ JSON template names below are shortened to [JSON operation]; instruction bytes and addresses are retained.
+
+Range 0x12ee0 <= address < 0x13014
+   12ee0:	48 8d 85 d8 fc ff ff 	lea    -0x328(%rbp),%rax
+   12ee7:	48 8d 15 dd 5d 08 00 	lea    0x85ddd(%rip),%rdx        # 98ccb <RealTimer::lockKeeper()>
+   12eee:	48 89 d6             	mov    %rdx,%rsi
+   12ef1:	48 89 c7             	mov    %rax,%rdi
+   12ef4:	e8 99 2f 00 00       	call   15e92 <std::thread::thread<void (&)(), , void>(void (&)())>
+   12ef9:	48 8d 85 e0 fc ff ff 	lea    -0x320(%rbp),%rax
+   12f00:	48 8d 15 fb 51 08 00 	lea    0x851fb(%rip),%rdx        # 98102 <RosInterface::spin()>
+   12f07:	48 89 d6             	mov    %rdx,%rsi
+   12f0a:	48 89 c7             	mov    %rax,%rdi
+   12f0d:	e8 70 30 00 00       	call   15f82 <std::thread::thread<int (&)(), , void>(int (&)())>
+   12f12:	48 8d 85 e8 fc ff ff 	lea    -0x318(%rbp),%rax
+   12f19:	48 8d 15 e5 62 02 00 	lea    0x262e5(%rip),%rdx        # 39205 <canRecv::spin()>
+   12f20:	48 89 d6             	mov    %rdx,%rsi
+   12f23:	48 89 c7             	mov    %rax,%rdi
+   12f26:	e8 57 30 00 00       	call   15f82 <std::thread::thread<int (&)(), , void>(int (&)())>
+   12f2b:	48 8d 85 f0 fc ff ff 	lea    -0x310(%rbp),%rax
+   12f32:	48 8d 15 6a 67 02 00 	lea    0x2676a(%rip),%rdx        # 396a3 <positionCanSender::spin()>
+   12f39:	48 89 d6             	mov    %rdx,%rsi
+   12f3c:	48 89 c7             	mov    %rax,%rdi
+   12f3f:	e8 4e 2f 00 00       	call   15e92 <std::thread::thread<void (&)(), , void>(void (&)())>
+   12f44:	48 8d 95 c8 fc ff ff 	lea    -0x338(%rbp),%rdx
+   12f4b:	48 8d 85 f8 fc ff ff 	lea    -0x308(%rbp),%rax
+   12f52:	48 8d 0d 0d 6d 02 00 	lea    0x26d0d(%rip),%rcx        # 39c66 <lcmCanSender::spin(int)>
+   12f59:	48 89 ce             	mov    %rcx,%rsi
+   12f5c:	48 89 c7             	mov    %rax,%rdi
+   12f5f:	e8 0e 31 00 00       	call   16072 <std::thread::thread<int (&)(int), int&, void>(int (&)(int), int&)>
+   12f64:	48 8d b5 c0 fd ff ff 	lea    -0x240(%rbp),%rsi
+   12f6b:	48 8d 8d d0 fc ff ff 	lea    -0x330(%rbp),%rcx
+   12f72:	48 8d 95 cc fc ff ff 	lea    -0x334(%rbp),%rdx
+   12f79:	48 8d 85 00 fd ff ff 	lea    -0x300(%rbp),%rax
+   12f80:	49 89 f0             	mov    %rsi,%r8
+   12f83:	48 8d 35 20 16 03 00 	lea    0x31620(%rip),%rsi        # 445aa <solverDriver::DrakeSolverDriver(int, double, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)>
+   12f8a:	48 89 c7             	mov    %rax,%rdi
+   12f8d:	e8 ea 31 00 00       	call   1617c <std::thread::thread<int (&)(int, double, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >), int&, int&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, void>(int (&)(int, double, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >), int&, int&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&)>
+   12f92:	48 8d 85 08 fd ff ff 	lea    -0x2f8(%rbp),%rax
+   12f99:	48 8d 15 c7 41 07 00 	lea    0x741c7(%rip),%rdx        # 87167 <RuckigController::spin()>
+   12fa0:	48 89 d6             	mov    %rdx,%rsi
+   12fa3:	48 89 c7             	mov    %rax,%rdi
+   12fa6:	e8 d7 2f 00 00       	call   15f82 <std::thread::thread<int (&)(), , void>(int (&)())>
+   12fab:	48 8d 85 10 fd ff ff 	lea    -0x2f0(%rbp),%rax
+   12fb2:	48 8d 15 e0 f2 06 00 	lea    0x6f2e0(%rip),%rdx        # 82299 <UdpServer::UdpServer()>
+   12fb9:	48 89 d6             	mov    %rdx,%rsi
+   12fbc:	48 89 c7             	mov    %rax,%rdi
+   12fbf:	e8 be 2f 00 00       	call   15f82 <std::thread::thread<int (&)(), , void>(int (&)())>
+   12fc4:	48 8d 85 18 fd ff ff 	lea    -0x2e8(%rbp),%rax
+   12fcb:	48 8d 15 c0 e3 06 00 	lea    0x6e3c0(%rip),%rdx        # 81392 <UdpServer::LcmInit()>
+   12fd2:	48 89 d6             	mov    %rdx,%rsi
+   12fd5:	48 89 c7             	mov    %rax,%rdi
+   12fd8:	e8 a5 2f 00 00       	call   15f82 <std::thread::thread<int (&)(), , void>(int (&)())>
+   12fdd:	48 8d 85 30 fd ff ff 	lea    -0x2d0(%rbp),%rax
+   12fe4:	48 8d 15 dc 5e 08 00 	lea    0x85edc(%rip),%rdx        # 98ec7 <speedoMeter::spin()>
+   12feb:	48 89 d6             	mov    %rdx,%rsi
+   12fee:	48 89 c7             	mov    %rax,%rdi
+   12ff1:	e8 9c 2e 00 00       	call   15e92 <std::thread::thread<void (&)(), , void>(void (&)())>
+   12ff6:	48 8d 85 d8 fc ff ff 	lea    -0x328(%rbp),%rax
+   12ffd:	48 89 c7             	mov    %rax,%rdi
+   13000:	e8 0b e0 ff ff       	call   11010 <std::thread::join()@plt>
+   13005:	48 8d 85 30 fd ff ff 	lea    -0x2d0(%rbp),%rax
+   1300c:	48 89 c7             	mov    %rax,%rdi
+   1300f:	e8 fc df ff ff       	call   11010 <std::thread::join()@plt>
+
+Range 0x13014 <= address < 0x131d2
+   13014:	48 8d 85 20 fd ff ff 	lea    -0x2e0(%rbp),%rax
+   1301b:	48 8d 15 7a 71 08 00 	lea    0x8717a(%rip),%rdx        # 9a19c [JSON operation]
+   13022:	48 89 d6             	mov    %rdx,%rsi
+   13025:	48 89 c7             	mov    %rax,%rdi
+   13028:	e8 59 25 00 00       	call   15586 [JSON operation]
+   1302d:	48 89 c2             	mov    %rax,%rdx
+   13030:	48 8d 05 30 72 08 00 	lea    0x87230(%rip),%rax        # 9a267 [JSON operation]
+   13037:	48 89 c6             	mov    %rax,%rsi
+   1303a:	48 89 d7             	mov    %rdx,%rdi
+   1303d:	e8 44 25 00 00       	call   15586 [JSON operation]
+   13042:	48 89 c2             	mov    %rax,%rdx
+   13045:	48 8d 05 2b 72 08 00 	lea    0x8722b(%rip),%rax        # 9a277 [JSON operation]
+   1304c:	48 89 c6             	mov    %rax,%rsi
+   1304f:	48 89 d7             	mov    %rdx,%rdi
+   13052:	e8 a7 2d 00 00       	call   15dfe <bool nlohmann::json_abi_v3_11_2::operator==<char const*, 0>(nlohmann::json_abi_v3_11_2::basic_json<std::map, std::vector, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool, long, unsigned long, double, std::allocator, nlohmann::json_abi_v3_11_2::adl_serializer, std::vector<unsigned char, std::allocator<unsigned char> >, void> const&, char const*)>
+   13057:	84 c0                	test   %al,%al
+   13059:	74 2d                	je     13088 <main+0xafb>
+   1305b:	48 8d 85 e8 fc ff ff 	lea    -0x318(%rbp),%rax
+   13062:	48 89 c7             	mov    %rax,%rdi
+   13065:	e8 a6 df ff ff       	call   11010 <std::thread::join()@plt>
+   1306a:	48 8d 85 f0 fc ff ff 	lea    -0x310(%rbp),%rax
+   13071:	48 89 c7             	mov    %rax,%rdi
+   13074:	e8 97 df ff ff       	call   11010 <std::thread::join()@plt>
+   13079:	48 8d 85 f8 fc ff ff 	lea    -0x308(%rbp),%rax
+   13080:	48 89 c7             	mov    %rax,%rdi
+   13083:	e8 88 df ff ff       	call   11010 <std::thread::join()@plt>
+   13088:	48 8d 85 20 fd ff ff 	lea    -0x2e0(%rbp),%rax
+   1308f:	48 8d 15 3e 72 08 00 	lea    0x8723e(%rip),%rdx        # 9a2d4 [JSON operation]
+   13096:	48 89 d6             	mov    %rdx,%rsi
+   13099:	48 89 c7             	mov    %rax,%rdi
+   1309c:	e8 e5 24 00 00       	call   15586 [JSON operation]
+   130a1:	48 89 c2             	mov    %rax,%rdx
+   130a4:	48 8d 05 48 72 08 00 	lea    0x87248(%rip),%rax        # 9a2f3 [JSON operation]
+   130ab:	48 89 c6             	mov    %rax,%rsi
+   130ae:	48 89 d7             	mov    %rdx,%rdi
+   130b1:	e8 d0 24 00 00       	call   15586 [JSON operation]
+   130b6:	48 89 c7             	mov    %rax,%rdi
+   130b9:	e8 b6 2d 00 00       	call   15e74 [JSON operation]
+   130be:	84 c0                	test   %al,%al
+   130c0:	74 56                	je     13118 <main+0xb8b>
+   130c2:	48 8d 85 20 fd ff ff 	lea    -0x2e0(%rbp),%rax
+   130c9:	48 8d 15 04 72 08 00 	lea    0x87204(%rip),%rdx        # 9a2d4 [JSON operation]
+   130d0:	48 89 d6             	mov    %rdx,%rsi
+   130d3:	48 89 c7             	mov    %rax,%rdi
+   130d6:	e8 ab 24 00 00       	call   15586 [JSON operation]
+   130db:	48 89 c2             	mov    %rax,%rdx
+   130de:	48 8d 05 fe 71 08 00 	lea    0x871fe(%rip),%rax        # 9a2e3 [JSON operation]
+   130e5:	48 89 c6             	mov    %rax,%rsi
+   130e8:	48 89 d7             	mov    %rdx,%rdi
+   130eb:	e8 96 24 00 00       	call   15586 [JSON operation]
+   130f0:	48 89 c2             	mov    %rax,%rdx
+   130f3:	48 8d 05 ee 71 08 00 	lea    0x871ee(%rip),%rax        # 9a2e8 [JSON operation]
+   130fa:	48 89 c6             	mov    %rax,%rsi
+   130fd:	48 89 d7             	mov    %rdx,%rdi
+   13100:	e8 f9 2c 00 00       	call   15dfe <bool nlohmann::json_abi_v3_11_2::operator==<char const*, 0>(nlohmann::json_abi_v3_11_2::basic_json<std::map, std::vector, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool, long, unsigned long, double, std::allocator, nlohmann::json_abi_v3_11_2::adl_serializer, std::vector<unsigned char, std::allocator<unsigned char> >, void> const&, char const*)>
+   13105:	84 c0                	test   %al,%al
+   13107:	74 0f                	je     13118 <main+0xb8b>
+   13109:	48 8d 85 00 fd ff ff 	lea    -0x300(%rbp),%rax
+   13110:	48 89 c7             	mov    %rax,%rdi
+   13113:	e8 f8 de ff ff       	call   11010 <std::thread::join()@plt>
+   13118:	48 8d 85 08 fd ff ff 	lea    -0x2f8(%rbp),%rax
+   1311f:	48 89 c7             	mov    %rax,%rdi
+   13122:	e8 e9 de ff ff       	call   11010 <std::thread::join()@plt>
+   13127:	48 8d 85 20 fd ff ff 	lea    -0x2e0(%rbp),%rax
+   1312e:	48 8d 15 bf 6f 08 00 	lea    0x86fbf(%rip),%rdx        # 9a0f4 [JSON operation]
+   13135:	48 89 d6             	mov    %rdx,%rsi
+   13138:	48 89 c7             	mov    %rax,%rdi
+   1313b:	e8 46 24 00 00       	call   15586 [JSON operation]
+   13140:	48 89 c2             	mov    %rax,%rdx
+   13143:	48 8d 05 44 71 08 00 	lea    0x87144(%rip),%rax        # 9a28e [JSON operation]
+   1314a:	48 89 c6             	mov    %rax,%rsi
+   1314d:	48 89 d7             	mov    %rdx,%rdi
+   13150:	e8 31 24 00 00       	call   15586 [JSON operation]
+   13155:	48 89 c7             	mov    %rax,%rdi
+   13158:	e8 17 2d 00 00       	call   15e74 [JSON operation]
+   1315d:	84 c0                	test   %al,%al
+   1315f:	74 1e                	je     1317f <main+0xbf2>
+   13161:	48 8d 85 18 fd ff ff 	lea    -0x2e8(%rbp),%rax
+   13168:	48 89 c7             	mov    %rax,%rdi
+   1316b:	e8 a0 de ff ff       	call   11010 <std::thread::join()@plt>
+   13170:	48 8d 85 10 fd ff ff 	lea    -0x2f0(%rbp),%rax
+   13177:	48 89 c7             	mov    %rax,%rdi
+   1317a:	e8 91 de ff ff       	call   11010 <std::thread::join()@plt>
+   1317f:	bf 03 00 00 00       	mov    $0x3,%edi
+   13184:	e8 57 e9 ff ff       	call   11ae0 <sleep@plt>
+   13189:	48 8d 85 20 fd ff ff 	lea    -0x2e0(%rbp),%rax
+   13190:	48 8d 15 5d 6f 08 00 	lea    0x86f5d(%rip),%rdx        # 9a0f4 [JSON operation]
+   13197:	48 89 d6             	mov    %rdx,%rsi
+   1319a:	48 89 c7             	mov    %rax,%rdi
+   1319d:	e8 e4 23 00 00       	call   15586 [JSON operation]
+   131a2:	48 89 c2             	mov    %rax,%rdx
+   131a5:	48 8d 05 42 71 08 00 	lea    0x87142(%rip),%rax        # 9a2ee [JSON operation]
+   131ac:	48 89 c6             	mov    %rax,%rsi
+   131af:	48 89 d7             	mov    %rdx,%rdi
+   131b2:	e8 cf 23 00 00       	call   15586 [JSON operation]
+   131b7:	48 89 c7             	mov    %rax,%rdi
+   131ba:	e8 b5 2c 00 00       	call   15e74 [JSON operation]
+   131bf:	84 c0                	test   %al,%al
+   131c1:	74 0f                	je     131d2 <main+0xc45>
+   131c3:	48 8d 85 e0 fc ff ff 	lea    -0x320(%rbp),%rax
+   131ca:	48 89 c7             	mov    %rax,%rdi
+   131cd:	e8 3e de ff ff       	call   11010 <std::thread::join()@plt>

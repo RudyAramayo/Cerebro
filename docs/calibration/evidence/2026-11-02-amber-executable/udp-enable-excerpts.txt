@@ -1,0 +1,30 @@
+READ-ONLY STATIC EVIDENCE; no vendor executable was run.
+Binary SHA-256: 554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100
+Tool: GNU objdump -d -C on /home/amber/L-10/amber_core_L via read-only SSH; captured before editing.
+LCM_Interface.UDP_Enable at rodata0x9a28e controls a print at0x12d16..0x12d3c, not the unconditional UDP thread construction at0x12fb2..0x12fbf.
+C++ JSON template names below are shortened to [JSON operation]; instruction bytes and addresses are retained.
+
+Range 0x12cdc <= address < 0x12d41
+   12cdc:	48 8d 85 20 fd ff ff 	lea    -0x2e0(%rbp),%rax
+   12ce3:	48 8d 15 0a 74 08 00 	lea    0x8740a(%rip),%rdx        # 9a0f4 [JSON operation]
+   12cea:	48 89 d6             	mov    %rdx,%rsi
+   12ced:	48 89 c7             	mov    %rax,%rdi
+   12cf0:	e8 91 28 00 00       	call   15586 [JSON operation]
+   12cf5:	48 89 c2             	mov    %rax,%rdx
+   12cf8:	48 8d 05 8f 75 08 00 	lea    0x8758f(%rip),%rax        # 9a28e [JSON operation]
+   12cff:	48 89 c6             	mov    %rax,%rsi
+   12d02:	48 89 d7             	mov    %rdx,%rdi
+   12d05:	e8 7c 28 00 00       	call   15586 [JSON operation]
+   12d0a:	48 89 c7             	mov    %rax,%rdi
+   12d0d:	e8 62 31 00 00       	call   15e74 [JSON operation]
+   12d12:	84 c0                	test   %al,%al
+   12d14:	74 2b                	je     12d41 <main+0x7b4>
+   12d16:	48 8d 05 7c 75 08 00 	lea    0x8757c(%rip),%rax        # 9a299 [JSON operation]
+   12d1d:	48 89 c6             	mov    %rax,%rsi
+   12d20:	48 8d 05 19 13 0d 00 	lea    0xd1319(%rip),%rax        # e4040 <std::cout@GLIBCXX_3.4>
+   12d27:	48 89 c7             	mov    %rax,%rdi
+   12d2a:	e8 81 ea ff ff       	call   117b0 <std::basic_ostream<char, std::char_traits<char> >& std::operator<< <std::char_traits<char> >(std::basic_ostream<char, std::char_traits<char> >&, char const*)@plt>
+   12d2f:	48 8b 15 7a 12 0d 00 	mov    0xd127a(%rip),%rdx        # e3fb0 <std::basic_ostream<char, std::char_traits<char> >& std::endl<char, std::char_traits<char> >(std::basic_ostream<char, std::char_traits<char> >&)@GLIBCXX_3.4>
+   12d36:	48 89 d6             	mov    %rdx,%rsi
+   12d39:	48 89 c7             	mov    %rax,%rdi
+   12d3c:	e8 2f ed ff ff       	call   11a70 <std::ostream::operator<<(std::ostream& (*)(std::ostream&))@plt>
