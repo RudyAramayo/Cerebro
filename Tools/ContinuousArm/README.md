@@ -1,9 +1,10 @@
 # Continuous arm trajectory owner
 
 This is an offline-tested replacement for the **trajectory ownership layer**,
-with an inert CAN codec and a fake-transport driver boundary. It is not an
-installed Amber driver. It contains no sockets, CAN/LCM I/O, torque/mode
-commands, hardware backend, daemon, installer or automatic startup. The running
+with an inert CAN codec, driver boundary and explicit Linux SocketCAN backend.
+It is not an installed Amber driver. The portable tests have no socket I/O;
+the Linux integration fixture uses only isolated virtual CAN on a disposable
+runner. There are no torque/mode commands, daemon, installer or automatic startup. The running
 vendor cores and Cerebro's measured-completion containment remain unchanged.
 See the [investigation and integration handoff](../../docs/calibration/continuous-arm-retargeting-2026-11-01.md).
 
@@ -255,3 +256,44 @@ The Ubuntu 22.04 CI job uses a disposable GitHub-hosted runner with a read-only
 repository token. It builds the same pinned source without robot access and
 reports virtual-CAN module availability separately from test success. An absent
 vcan module is not a passing transport integration test.
+
+## Explicit Linux SocketCAN backend
+
+`SocketCanTransport` construction opens nothing. `open` needs a new source
+epoch and defaults to a kernel-verified virtual interface with transmission
+disabled. A trusted future lifecycle may select physical interfaces only via
+the existing physical-side mapping; setting an option is not proof of exclusive
+ownership, commissioning or motion authority. No hardware instance has been
+opened during development.
+
+The backend binds one nonblocking, close-on-exec raw socket, exact standard
+joint filters, error-frame subscription, nanosecond kernel timestamps and
+overflow reporting. It checks the current `SO_MEMINFO` receive-drop counter
+before and after reading and before every send. Ancillary drop metadata alone
+can be stale when earlier queued frames predate an overflow. Bounded receive
+batches, queue age, address/ID/DLC, truncated control data and clock errors all
+fail closed. Rtnetlink virtual-interface verification checks the kernel sender
+and truncation, not just an interface name.
+
+Each position write is one nonblocking call with a deadline check and no retry.
+The socket's allocated transmit memory is a backpressure threshold, not a
+device FIFO length, delivery deadline or motor acknowledgement. CAN_RAW's
+target 5.15 implementation does not provide a socket-level `SIOCOUTQ` handler;
+the backend uses `SO_MEMINFO` instead. Its receive-address minimum covers the
+family and interface index, matching the shorter address returned by CAN_RAW.
+
+The backend records kernel-accepted frames separately from the boundary's
+Accepted-reported count. If a post-send clock read fails, the return is
+Uncertain while the backend can still record a known kernel acceptance. A
+lifecycle must retain both diagnostics; it must never replay that write.
+Accepted traffic may remain in serial/device queues after software faults.
+The slcan limitations and independent watchdog requirements above still apply.
+
+`test-amber-linux-isolation.py` refuses non-hosted environments and hosts with
+existing CAN devices. It creates only its own virtual fixture, checks both a
+socket opened before the namespace move and a new host bind, then runs the
+backend tests in the private namespace. The fixture verifies virtual type
+before sending any frame. Passing this does not prove that the real slcan
+interface can be moved or that old physical-controller sockets are excluded;
+those remain supervised cutover checks. Linux compilation and native integration
+results are recorded by CI, separately from portable simulation results.

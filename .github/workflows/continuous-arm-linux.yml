@@ -38,7 +38,6 @@ jobs:
           --sanitizer '${{ matrix.sanitizer }}'
           --summary "$RUNNER_TEMP/results/continuous-arm.json"
       - name: Check hosted runner virtual CAN support
-        if: matrix.sanitizer == 'none'
         shell: python
         run: |
           import json, os, subprocess
@@ -64,6 +63,13 @@ jobs:
           path = Path(os.environ['RUNNER_TEMP']) / 'results/vcan-support.json'
           path.write_text(json.dumps(report, indent=2) + '\n')
           print(json.dumps(report))
+          if result.returncode:
+              raise SystemExit('Virtual CAN support is required for the transport integration stage')
+      - name: Verify isolated virtual CAN transport and namespace exclusion
+        run: >-
+          python3 Scripts/test-amber-linux-isolation.py
+          --binary "$RUNNER_TEMP/arm-build/amber_linux_transport_tests"
+          --summary "$RUNNER_TEMP/results/virtual-can-isolation.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
