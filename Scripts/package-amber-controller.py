@@ -69,8 +69,12 @@ def main():
     needed = re.findall(r'Shared library: \[(.*?)\]', dynamic)
     if any('asan' in x or 'ubsan' in x or 'tsan' in x for x in needed):
         raise SystemExit('Do not package sanitizer executable for deployment')
-    versions = sorted(set(re.findall(r'\b(?:GLIBC|GLIBCXX|CXXABI)_[0-9.]+',
+    versions = sorted(set(re.findall(r'\b(?:GLIBC|GLIBCXX|CXXABI|GCC)_[0-9.]+',
                                     run(['readelf', '--version-info', str(binary)]))))
+    interpreter = re.findall(r'Requesting program interpreter: ([^\]]+)\]',
+                             run(['readelf', '--program-headers', str(binary)]))
+    if len(interpreter) != 1:
+        raise SystemExit('Expected one explicit Linux ELF interpreter')
     glibc = [tuple(map(int, x.split('_', 1)[1].split('.'))) for x in versions if x.startswith('GLIBC_')]
     if max(glibc, default=(0,)) > (2, 35):
         raise SystemExit('Candidate exceeds observed Amber glibc 2.35 ABI')
@@ -87,7 +91,7 @@ def main():
     shutil.copy2(args.portable_results, output / 'validation/portable.json')
     shutil.copy2(args.linux_results, output / 'validation/linux.json')
     manifest = {'source_commit': commit, 'ruckig_commit': PIN, 'binary_abi': 'ELF64 x86_64',
-                'needed_libraries': needed, 'required_symbol_versions': versions,
+                'needed_libraries': needed, 'required_symbol_versions': versions, 'interpreter': interpreter[0],
                 'observed_amber': {'os': 'Ubuntu 22.04.3', 'architecture': 'x86_64', 'glibc': '2.35'},
                 'physical_transmit_available': False, 'installed': False, 'service_enabled': False,
                 'portable_groups': 53, 'transport_groups': 8, 'runtime_groups': 9,

@@ -62,6 +62,7 @@ def receive(client):
 
 
 def scenario(binary, interface, action):
+    scenario_started = time.monotonic()
     arm = VirtualArm(interface)
     process = None
     client = None
@@ -109,14 +110,16 @@ def scenario(binary, interface, action):
                 client.close()
                 client = None
             elif action == 'stop':
-                assert command('stop')['accepted']
+                stop_reply = command('stop')
+                assert stop_reply['accepted'], (stop_reply, time.monotonic() - scenario_started)
                 assert not command('target', sequence=sequence + 1, position=[0] * 7)['accepted']
             elif action == 'replay':
                 assert not command('target', sequence=sequence, position=[0] * 7)['accepted']
                 assert not command('target', sequence=sequence + 1, position=[0] * 7,
                                    created_ns=time.monotonic_ns() - 250000000)['accepted']
                 assert not command('stop', generation=generation + 1)['accepted']
-                assert command('stop')['accepted']
+                stop_reply = command('stop')
+                assert stop_reply['accepted'], (stop_reply, time.monotonic() - scenario_started)
             elif action == 'nonce':
                 client.send(json.dumps(dict(op='stop', nonce='0' * 32, generation=generation,
                                             created_ns=time.monotonic_ns())).encode())

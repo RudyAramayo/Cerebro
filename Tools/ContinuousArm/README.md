@@ -4,7 +4,9 @@ This is an offline-tested replacement for the **trajectory ownership layer**,
 with an inert CAN codec, driver boundary and explicit Linux SocketCAN backend.
 It is not an installed Amber driver. The portable tests have no socket I/O;
 the Linux integration fixture uses only isolated virtual CAN on a disposable
-runner. There are no torque/mode commands, daemon, installer or automatic startup. The running
+runner. The commissioning executable supports passive physical observation and
+isolated virtual-arm control, with no physical transmit switch. There are no
+torque/mode commands, installer or automatic startup. The running
 vendor cores and Cerebro's measured-completion containment remain unchanged.
 See the [investigation and integration handoff](../../docs/calibration/continuous-arm-retargeting-2026-11-01.md).
 
@@ -339,3 +341,22 @@ Release, ASan/UBSan and TSan. Source-bound reports are in
 [`2026-11-02-amber-session`](../../docs/calibration/evidence/2026-11-02-amber-session/).
 The preceding 42-group + eight native virtual-CAN Linux results are separately
 recorded in [`2026-11-02-amber-socketcan`](../../docs/calibration/evidence/2026-11-02-amber-socketcan/).
+
+## Commissioning executable and artifact
+
+`rob-amber-controller` runs only on Linux. No arguments and `--self-check` open
+no devices. Physical observation cannot create a client session or transmit.
+Only the explicit isolated fixture can bind its private UID-checked local socket
+and obtain synthetic grants after kernel verification of **vcan**. Nonces,
+exact generations, monotonic creation age, sequence checks, duplicate-key/schema
+rejection and bounded packet batches prevent a disconnected or prior session
+from silently reacquiring control. Signals request controlled shutdown; faults
+never mean the robot is physically stopped. Responses label all owner state as
+`commanded_*`, and retain separate boundary/backend acceptance counts.
+
+The hosted-runner packaging script requires successful source-matched Release
+and native process reports and checks the exact tested executable hash. It
+records ELF dependencies and symbol versions, includes licenses, and produces
+an inactive archive; it cannot install, enable a service or contact Amber.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the protocol, commissioning prerequisites
+and the rollback contract. The service file is an inactive review example.
