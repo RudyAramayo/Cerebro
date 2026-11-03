@@ -1,8 +1,9 @@
 # Continuous arm trajectory owner
 
 This is an offline-tested replacement for the **trajectory ownership layer**,
-not an installed Amber driver. It contains no sockets, CAN, LCM, torque/mode
-commands, hardware adapter, daemon, installer or automatic startup. The running
+with an inert CAN codec and a fake-transport driver boundary. It is not an
+installed Amber driver. It contains no sockets, CAN/LCM I/O, torque/mode
+commands, hardware backend, daemon, installer or automatic startup. The running
 vendor cores and Cerebro's measured-completion containment remain unchanged.
 See the [investigation and integration handoff](../../docs/calibration/continuous-arm-retargeting-2026-11-01.md).
 
@@ -35,7 +36,8 @@ Repeat in a distinct build directory with `--sanitizer address,undefined` or
 `--sanitizer thread`. The wrapper rejects a changed or wrong-version checkout.
 The CMake project can alternatively link an installed exact Ruckig 0.9.2 package.
 It disables the online/cloud client, examples and Python bindings for a source
-build. CTest also registers both the new suite and the legacy numerical fixture.
+build. CTest also registers the owner, codec and driver-boundary suites plus the
+legacy numerical fixture.
 
 ## Ownership and integration contract
 
@@ -148,3 +150,73 @@ commissioning. Do not reinitialize the planner's PVA from quantized setpoints.
 The test script runs this suite alongside the existing 19 owner groups and the
 legacy numerical reproduction. Results and source hashes are under
 `docs/calibration/evidence/2026-11-02-amber-codec/`.
+
+## Offline driver boundary (2026-11-02)
+
+`ArmDriverBoundary` connects the owner to a supplied fake frame writer. It
+implements admission and failure handling without opening a transport. The
+tests are the executable integration example; this component is not a daemon
+or a deployment switch.
+
+1. A trusted receiver calls `resetSource` with a strictly increasing source
+   epoch, then `observe` for each of seven joints with receiver-owned monotonic
+   timestamps. Wrong arm/epoch, future/stale/duplicate observations and malformed
+   packets are rejected. Each joint retains its timestamp watermark even when
+   a bad tag or out-of-bounds position invalidates its observation.
+   The boundary samples one injected monotonic clock after acquiring its lock.
+   A receive timestamp captured before waiting behind a write is checked for
+   actual age, not misclassified as a clock reversal from a stale caller `now`.
+2. `begin` needs an explicit external stationary-start grant, a new generation,
+   a bounded writer lease and fresh observations for **every** joint. A bounded
+   history checks sample count, time span, maximum sample gap and position range.
+   The returned zero-derivative seed is an authorized stationary assumption:
+   quantized position history cannot prove physical zero velocity, torque or
+   safe payload support. A host adapter must establish those conditions before
+   granting the start. Reply tag and position-status admission are explicit
+   fixture policy, separate from raw decoding; their firmware contract still
+   needs commissioning.
+3. The thread that called `begin` is the only publication thread. Calls to
+   receive, renew, revoke and publish serialize through this instance. The
+   complete seven-frame batch is encoded and validated before the first write.
+   Publication checks source/lease, every joint's freshness, sample timestamp
+   and sequence, finite state, bounds and one shared deadline. Replay and return
+   to following after a braking sample are rejected.
+4. Each callback reports accepted, definitely rejected, or uncertain. An
+   exception is uncertain. Failure, a late return or a clock reversal records
+   the attempted/accepted prefix, latches the first fault and sends no retries.
+   An accepted frame means transport acceptance, not actuator receipt. Seven
+   separately delivered frames are not an atomic robot command.
+5. Receive processing itself latches loss of admitted mode, bad tag/range,
+   elapsed freshness or lease expiry. A good packet or recovery burst cannot
+   hide that loss between owner ticks. Faults clear all stationary history.
+   Recovery needs a complete new history and a new explicit generation/grant;
+   renewing an expired lease cannot revive it.
+
+The owner handles target expiry and controlled Stop while the driver claim is
+still valid. Driver lease/feedback loss revokes publication; it cannot promise
+a physical stop when the channel is unavailable. An in-flight batch completes
+or faults before `revoke` returns, and no later frame from that claim is sent.
+Callbacks must be bounded and nonreentrant. Checking a deadline after a callback
+returns **cannot interrupt a blocked write**. The future backend needs bounded
+queueing/I/O, OS-level exclusive ownership and an independent watchdog.
+
+There must be one shared boundary instance per physical arm. This mutex does
+not exclude another object, process or existing vendor core from CAN. Epochs,
+timestamps, grants and the clock are trusted adapter inputs, not client claims.
+A future receiver must discard pre-epoch queued data and establish physical
+feedback age; assigning a fresh timestamp to an old buffered frame is not proof
+of freshness. No physical velocity/current interpretation or mode command is
+implemented here.
+
+Eleven boundary regression groups cover admission, timestamp watermarks,
+transient feedback loss, source restart, replay, leases, thread ownership,
+concurrent receive/revoke, and every failure position in a seven-frame batch.
+The 35 write-fault cases inject rejection, uncertainty, exception, late return
+and backward clock at each of seven frames. An integrated 200 Hz owner with
+20 Hz ideal quantized feedback emits 8,127 recorded frames over 1,161 ticks and
+100 targets, renews its lease, then reaches controlled hold after Stop. These
+are simulated timing and ideal-feedback results, not a physical motion test.
+The full suite has 38 groups (19 owner + 8 codec + 11 boundary), plus the legacy
+fixture. Source-bound results are recorded separately under
+`docs/calibration/evidence/2026-11-02-arm-driver-boundary/`; the earlier codec
+reports remain historical snapshots.

@@ -257,6 +257,49 @@ encoded word decodes to the same count. Full-domain tests cover this beyond the
 initial +/-15000-count sweep. This correction was made offline before any
 transport or physical test; the intermediate source commit is not a deployment.
 
+## 2026-11-02 offline driver-boundary implementation
+
+The new [ArmDriverBoundary](../../Tools/ContinuousArm/ArmDriverBoundary.cpp)
+adds a fake-transport adapter between the persistent owner and inert codec.
+Its [contract](../../Tools/ContinuousArm/README.md#offline-driver-boundary-2026-11-02)
+separates raw diagnostic decoding from an explicit simulated mode-admission
+policy. It requires per-joint fresh observations, receiver-owned epochs and
+timestamps, an external stationary-start grant, a new owner generation and a
+bounded writer lease. It does not connect to the robot or issue mode commands.
+One injected monotonic clock is sampled inside the publication lock; a queued
+receive keeps its earlier receive timestamp without causing a false clock fault
+merely because another thread finished a write before it acquired the lock.
+
+The boundary validates the whole seven-frame batch before output, serializes
+publication with receive/revocation, and checks a shared deadline around each
+fake write. It records the accepted/attempted prefix when a write is rejected,
+uncertain, late or throws. The first failure stays latched, no retry is issued,
+and all stationary history is cleared. Good feedback arriving after a transient
+bad mode/tag/position, stale interval or expired lease cannot silently rearm the
+old writer between controller ticks. A new stationary history and explicit new
+generation/grant are required.
+
+Eleven new groups exercise these boundaries, including 35 injected failures
+across all seven output positions and concurrent receive/revocation. The
+integrated owner/boundary simulation records 8,127 frames over 1,161 ticks with
+100 targets, 20 Hz ideal feedback, lease renewal and controlled Stop. Together
+with the prior owner/codec suites there are 38 groups, plus the legacy fixture.
+All passed in Release, Address/Undefined Behavior Sanitizer and Thread Sanitizer
+builds against pinned Ruckig 0.9.2; the recorded source hashes were rechecked.
+Results and exact source hashes are in
+[`evidence/2026-11-02-arm-driver-boundary`](evidence/2026-11-02-arm-driver-boundary).
+
+This implements the offline admission/publication layer, not physical driver
+exclusivity or watchdogs. A mutex covers one shared instance only; a callback
+deadline cannot interrupt blocked I/O. Quantized quiet-position samples do not
+prove physical stationarity, and transport acceptance is not motor receipt.
+No sockets, backend, service, mode changes, install or restart were added. The
+remaining exclusive backend, commissioned feedback/mode/current interpretation,
+physical limits, collision calibration, watchdog and supervised tests are still
+required before live continuous control. The 14-page report delivered earlier
+that evening documents the preceding 27-group owner/codec phase; these later
+boundary results are recorded here rather than attributed to that PDF.
+
 ## Primary implementation references
 
 - [Pinned Ruckig 0.9.2 profile implementation](https://github.com/pantor/ruckig/blob/7de6b1035e1cad509251b31b3287d10fbcda6baf/include/ruckig/profile.hpp)
