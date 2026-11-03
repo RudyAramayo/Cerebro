@@ -1,0 +1,23 @@
+{
+  "commit": "26d602ee5c744121e208d8f3614bba57d1a2d5b9",
+  "ci_run": "https://github.com/RudyAramayo/Cerebro/actions/runs/41594788700",
+  "result": "success",
+  "portable_groups": 42,
+  "native_virtual_can_groups": 8,
+  "kernel": "6.8.0-1070-azure",
+  "robot_io": false,
+  "installed": false,
+  "limitations": [
+    "virtual CAN namespace exclusion is not commissioned physical slcan ownership",
+    "kernel receipt timestamps do not establish motor or serial bridge sample age",
+    "socket acceptance and queue counts are not motor acknowledgement"
+  ],
+  "files_sha256": {
+    "address,undefined-continuous-arm.json": "a59bc75190a5ef2142eb2d4e566768f09735940cc5c9765572cfebc26c96b8e4",
+    "address,undefined-vcan-support.json": "313af8ebbf243c467db3a45461edf7a25c596ef4bfaa828fb402a84002195750",
+    "address,undefined-virtual-can-isolation.json": "e6427744cfe79f89348292414a1b7d30108b12ebc02d193f173823754b680978",
+    "none-continuous-arm.json": "bfed579c4cc92e4ec699a97e041fb1a599ef6dde56479b720c9dd70ddab32acb",
+    "none-vcan-support.json": "313af8ebbf243c467db3a45461edf7a25c596ef4bfaa828fb402a84002195750",
+    "none-virtual-can-isolation.json": "e6427744cfe79f89348292414a1b7d30108b12ebc02d193f173823754b680978"
+  }
+}

@@ -208,6 +208,11 @@ void ContinuousArmController::fault(Reason reason) {
     status_.pending = false;
 }
 
+void ContinuousArmController::revoke() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (status_.mode != Mode::Fault) fault(Reason::AuthorityLost);
+}
+
 bool ContinuousArmController::brake(Reason why) {
     Trajectory stop;
     pending_.reset();
@@ -322,6 +327,7 @@ const char* name(Reason x) {
         ROB_REASON(BadStart); ROB_REASON(Timing); ROB_REASON(Feedback); ROB_REASON(TrackingError);
         ROB_REASON(Planning); ROB_REASON(JointBounds); ROB_REASON(PathRejected);
         ROB_REASON(UnsafeStop); ROB_REASON(OutputFailure); ROB_REASON(WrongThread);
+        ROB_REASON(AuthorityLost);
 #undef ROB_REASON
     } return "unknown";
 }

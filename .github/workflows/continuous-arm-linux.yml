@@ -8,6 +8,7 @@ on:
       - Tests/ROBContinuousArmControllerTests.cpp
       - Tests/ROBAmberWireCodecTests.cpp
       - Tests/ROBArmDriverBoundaryTests.cpp
+      - Tests/ROBArmSessionTests.cpp
       - Tests/ROBReceiveClockTests.cpp
       - Tests/ROBAmberLinuxTransportTests.cpp
       - Scripts/test-continuous-arm.py

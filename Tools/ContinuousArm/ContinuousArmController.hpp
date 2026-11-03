@@ -45,7 +45,7 @@ enum class Mode { Unarmed, Following, Braking, Held, Fault };
 enum class Reason {
     None, Released, Expired, InvalidTarget, OldSequence, WrongGeneration,
     NotFollowing, BadStart, Timing, Feedback, TrackingError, Planning,
-    JointBounds, PathRejected, UnsafeStop, OutputFailure, WrongThread
+    JointBounds, PathRejected, UnsafeStop, OutputFailure, WrongThread, AuthorityLost
 };
 struct Sample {
     State state;
@@ -79,6 +79,7 @@ public:
     bool start(uint64_t generation, const State& stationary, const Feedback&, double now);
     Reason submit(const Target&, double now); // one slot; never a waypoint FIFO
     bool stop(uint64_t generation);          // latches; invalidates pending target
+    void revoke(); // no output; discards state after external authority/source loss
     bool tick(double now, const Feedback&, const Sink&); // one owner thread only
     Status status() const;
 

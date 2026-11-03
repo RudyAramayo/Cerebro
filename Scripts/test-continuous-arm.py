@@ -46,6 +46,7 @@ def main():
     codec = [json.loads(line) for line in run([str(build / "amber_wire_codec_tests")]).splitlines() if line.strip()]
     boundary = [json.loads(line) for line in run([str(build / "arm_driver_boundary_tests")]).splitlines() if line.strip()]
     receive_clock = [json.loads(line) for line in run([str(build / "receive_clock_tests")]).splitlines() if line.strip()]
+    session = [json.loads(line) for line in run([str(build / "arm_session_tests")]).splitlines() if line.strip()]
     linux_executable = build / "amber_linux_transport_tests"
     linux_transport = ([json.loads(line) for line in run([str(linux_executable)]).splitlines() if line.strip()]
                        if sys.platform.startswith("linux") else None)
@@ -56,6 +57,9 @@ def main():
                     "Tools/ContinuousArm/AmberWireCodec.cpp",
                     "Tools/ContinuousArm/ArmDriverBoundary.hpp",
                     "Tools/ContinuousArm/ArmDriverBoundary.cpp",
+                    "Tools/ContinuousArm/ArmSession.hpp",
+                    "Tools/ContinuousArm/ArmSession.cpp",
+                    "Tests/ROBArmSessionTests.cpp",
                     "Tools/ContinuousArm/ReceiveClock.hpp",
                     "Tools/ContinuousArm/ReceiveClock.cpp",
                     "Tools/ContinuousArm/SocketCanTransport.hpp",
@@ -71,7 +75,7 @@ def main():
               "ruckig_commit": revision, "sanitizer": args.sanitizer,
               "source_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in source_files},
               "tests": records, "legacy_comparison": legacy, "wire_codec_tests": codec, "driver_boundary_tests": boundary,
-              "receive_clock_tests": receive_clock, "linux_transport_no_io_tests": linux_transport}
+              "receive_clock_tests": receive_clock, "session_tests": session, "linux_transport_no_io_tests": linux_transport}
     if args.summary:
         args.summary.parent.mkdir(parents=True, exist_ok=True)
         args.summary.write_text(json.dumps(report, indent=2) + "\n")
@@ -82,6 +86,7 @@ def main():
     print(json.dumps({"sanitizer": args.sanitizer, "driver_boundary": boundary[-1]}))
     print(json.dumps(next(x for x in boundary if "metrics" in x)))
     print(json.dumps({"sanitizer": args.sanitizer, "receive_clock": receive_clock[-1]}))
+    print(json.dumps({"sanitizer": args.sanitizer, "session": session[-1]}))
 
 
 if __name__ == "__main__":

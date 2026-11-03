@@ -297,3 +297,45 @@ before sending any frame. Passing this does not prove that the real slcan
 interface can be moved or that old physical-controller sockets are excluded;
 those remain supervised cutover checks. Linux compilation and native integration
 results are recorded by CI, separately from portable simulation results.
+
+## Trusted session lifecycle (2026-11-02)
+
+`ArmSession` joins the owner and driver boundary without creating threads or
+opening devices. Startup is passive. Only a trusted host can supply a bounded
+stationary-start grant after fresh all-joint observations. Every client operation
+is bound to both client identity and the exact generation; reusing a connection
+does not attach prior-grant commands, Stop or disconnect events to a new grant.
+Target creation times are preserved, and heartbeat freshness does not refresh
+a pose. Disconnect, client timeout and Stop clear client authority immediately
+while the internal writer lease can renew to finish an authorized controlled
+brake. A held state ends publication and requires new history and a new grant.
+
+Grant-ending checks include **each proposed sample's stop trajectory**, not
+just the prior PVA. A regression demonstrated why the latter was insufficient:
+braking duration can grow faster than elapsed time while accelerating. The
+candidate guard reserves the remaining brake duration plus one maximum tick
+gap and the publication budget before grant expiry. Failure replaces the
+candidate with an admissible stop or faults before publication. This depends
+on bounded scheduling and callbacks; it is not a hardware watchdog guarantee.
+
+External source/transport/authority loss revokes both the boundary and motion
+owner without output. It does not claim the mechanism stopped physically.
+An incomplete deadline-limited shutdown reports Fault, never successful hold.
+First fault diagnostics and partial-frame counts remain available. An owner
+guard rejection or zero-duration stop retains its actual reason. The mandatory
+path guard still must come from commissioned world/model context on hardware;
+a JSON flag or fixture guard cannot replace it.
+
+Eleven lifecycle groups cover client disconnect beyond the original internal
+lease, independent target/client expiry, grant-ending stops, candidate deadline
+rejection, explicit rearm, shutdown/timeout, seven partial-write positions,
+source restart, timestamp/sequence/generation replay, clock reversal, owner
+thread, revoked-world behavior and delayed path checks. Deadline fit is checked
+again after the external guard returns. A final publication check also bounds
+total planning age, retaining room for the next period and publication budget;
+it faults before output if guard computation consumed that time. The complete
+53-group portable suite passes
+Release, ASan/UBSan and TSan. Source-bound reports are in
+[`2026-11-02-amber-session`](../../docs/calibration/evidence/2026-11-02-amber-session/).
+The preceding 42-group + eight native virtual-CAN Linux results are separately
+recorded in [`2026-11-02-amber-socketcan`](../../docs/calibration/evidence/2026-11-02-amber-socketcan/).

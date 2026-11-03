@@ -1,0 +1,56 @@
+{
+  "robot_io": false,
+  "virtual_CAN_io": true,
+  "old_socket_send_errno": 6,
+  "new_host_bind_errno": 19,
+  "tests": [
+    {
+      "test": "physical_route_mismatch_rejected_without_socket",
+      "passed": true
+    },
+    {
+      "test": "virtual_CAN_real_receive_timestamps_and_seven_position_frames",
+      "passed": true
+    },
+    {
+      "test": "passive_default_opens_receiver_without_transmitting",
+      "passed": true
+    },
+    {
+      "test": "kernel_queue_age_latches_and_reopen_requires_explicit_new_epoch",
+      "passed": true
+    },
+    {
+      "test": "deadline_and_wrong_arm_reject_before_send",
+      "passed": true
+    },
+    {
+      "test": "malformed_feedback_and_bounded_receive_backlog_latch",
+      "passed": true
+    },
+    {
+      "test": "virtual_bus_error_frame_latches_without_claiming_slcan_error_support",
+      "passed": true
+    },
+    {
+      "test": "current_socket_drop_counter_blocks_TX_before_old_ancillary_is_dequeued",
+      "passed": true
+    },
+    {
+      "passed": 8,
+      "failed": 0,
+      "robot_io": false,
+      "virtual_CAN_io": true
+    }
+  ],
+  "git_commit": "26d602ee5c744121e208d8f3614bba57d1a2d5b9",
+  "scope": "Disposable hosted runner and virtual CAN only; physical slcan transfer remains uncommissioned",
+  "source_sha256": {
+    "Tools/ContinuousArm/SocketCanTransport.hpp": "a80933e8499fbb97a08df12360cac0386f90cbc1fc9f0d7b6ecd31ddb3f8ee8a",
+    "Tools/ContinuousArm/SocketCanTransport.cpp": "fd7bd20ae54bee5e8840dc299ca81b13baee8aa316db79f397e167be7447d460",
+    "Tools/ContinuousArm/ReceiveClock.hpp": "ac0807a4b6b8a7e6e05314c2021b2c697287571d3dc93f9ca5f05dbf64ac6a9c",
+    "Tools/ContinuousArm/ReceiveClock.cpp": "8036b9d47100bae76886eaf5825db9dff99225cdb9007ac9d8921370a323323a",
+    "Tests/ROBAmberLinuxTransportTests.cpp": "e1d90756d8a06a65016b2744a4f6d059ef5e4650386db714eb05b5486d155dee",
+    "Scripts/test-amber-linux-isolation.py": "67ec05a3060983841d15b09a33060cd63c1d301ec96a34f3ecf7c4e0db07ea6e"
+  }
+}
