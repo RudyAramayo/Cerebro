@@ -1,0 +1,60 @@
+name: Continuous arm Linux validation
+
+on:
+  push:
+    branches: [codex/continuous-arm-retargeting]
+    paths:
+      - Tools/ContinuousArm/**
+      - Tests/ROBContinuousArmControllerTests.cpp
+      - Tests/ROBAmberWireCodecTests.cpp
+      - Tests/ROBArmDriverBoundaryTests.cpp
+      - Tests/ROBAmberLinuxTransportTests.cpp
+      - Scripts/test-continuous-arm.py
+      - Scripts/test-amber-linux-isolation.py
+      - .github/workflows/continuous-arm-linux.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [none, 'address,undefined']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch pinned trajectory math
+        run: git clone --depth 1 --branch v0.9.2 https://github.com/pantor/ruckig.git "$RUNNER_TEMP/ruckig"
+      - name: Build and test without robot access
+        run: >-
+          python3 Scripts/test-continuous-arm.py
+          --ruckig-source "$RUNNER_TEMP/ruckig"
+          --build-dir "$RUNNER_TEMP/arm-build"
+          --sanitizer '${{ matrix.sanitizer }}'
+          --summary "$RUNNER_TEMP/results/continuous-arm.json"
+      - name: Check hosted runner virtual CAN support
+        if: matrix.sanitizer == 'none'
+        shell: python
+        run: |
+          import json, os, subprocess
+          from pathlib import Path
+          if os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
+              raise SystemExit('This virtual CAN check requires a disposable GitHub-hosted runner')
+          result = subprocess.run(['sudo', 'modprobe', 'vcan'], text=True, capture_output=True, timeout=30)
+          report = {'hosted_runner': True, 'vcan_module_available': result.returncode == 0,
+                    'returncode': result.returncode, 'detail': result.stderr.strip(),
+                    'robot_io': False, 'interfaces_created': False}
+          path = Path(os.environ['RUNNER_TEMP']) / 'results/vcan-support.json'
+          path.write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report))
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: continuous-arm-linux-${{ matrix.sanitizer }}
+          path: ${{ runner.temp }}/results/
+          if-no-files-found: error
+          retention-days: 14
