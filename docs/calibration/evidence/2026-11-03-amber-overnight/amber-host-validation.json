@@ -1,0 +1,306 @@
+{
+  "scope": "Inactive staging and no-I/O rehearsal on actual Amber Ubuntu; no physical commissioning",
+  "controller_source": "d98ebd3791b9509249212e2c754f4061f78458f9",
+  "ownership_source": "7c3b2449936a017c5f7049f6d562764a9fdb3f94",
+  "self_check": {
+    "hardware_io": false,
+    "modes": [
+      "passive_observation",
+      "isolated_virtual_fixture"
+    ],
+    "physical_transmit_available": false,
+    "protocol": 1,
+    "ruckig": "0.9.2"
+  },
+  "rehearsal": [
+    {
+      "test": "small_move_retargets_stop",
+      "passed": true,
+      "hardware_io": false,
+      "simulated_seconds": 15.54,
+      "target_changes": 13,
+      "mid_motion_changes": 11,
+      "velocity_reversals": 12,
+      "recorded_frames": 21056,
+      "owner_generations": 1,
+      "peak_velocity_rad_s": 0.08,
+      "peak_acceleration_rad_s2": 0.16,
+      "peak_wire_step_rad": 0.0004090615434
+    },
+    {
+      "test": "small_move_retargets_disconnect",
+      "passed": true,
+      "hardware_io": false,
+      "simulated_seconds": 15.54,
+      "target_changes": 13,
+      "mid_motion_changes": 11,
+      "velocity_reversals": 12,
+      "recorded_frames": 21056,
+      "owner_generations": 1,
+      "peak_velocity_rad_s": 0.08,
+      "peak_acceleration_rad_s2": 0.16,
+      "peak_wire_step_rad": 0.0004090615434
+    },
+    {
+      "test": "small_move_retargets_shutdown",
+      "passed": true,
+      "hardware_io": false,
+      "simulated_seconds": 15.54,
+      "target_changes": 13,
+      "mid_motion_changes": 11,
+      "velocity_reversals": 12,
+      "recorded_frames": 21056,
+      "owner_generations": 1,
+      "peak_velocity_rad_s": 0.08,
+      "peak_acceleration_rad_s2": 0.16,
+      "peak_wire_step_rad": 0.0004090615434
+    },
+    {
+      "test": "small_move_retargets_stale_target",
+      "passed": true,
+      "hardware_io": false,
+      "simulated_seconds": 15.635,
+      "target_changes": 13,
+      "mid_motion_changes": 11,
+      "velocity_reversals": 12,
+      "recorded_frames": 21189,
+      "owner_generations": 1,
+      "peak_velocity_rad_s": 0.08,
+      "peak_acceleration_rad_s2": 0.16,
+      "peak_wire_step_rad": 0.0004090615434
+    },
+    {
+      "test": "small_move_retargets_feedback_loss",
+      "passed": true,
+      "hardware_io": false,
+      "simulated_seconds": 14.51,
+      "target_changes": 13,
+      "mid_motion_changes": 11,
+      "velocity_reversals": 12,
+      "recorded_frames": 19747,
+      "owner_generations": 1,
+      "peak_velocity_rad_s": 0.08,
+      "peak_acceleration_rad_s2": 0.16,
+      "peak_wire_step_rad": 0.0004090615434
+    },
+    {
+      "passed": 5,
+      "failed": 0,
+      "hardware_io": false,
+      "feedback": "synthetic ideal quantized plant"
+    }
+  ],
+  "network_trace": {
+    "tool": "strace -f -qq -e trace=network",
+    "available": true,
+    "output": ""
+  },
+  "physical_stream_ready": false,
+  "vendor_files": {
+    "right": {
+      "path": "/home/amber/L-10/amber_core_L",
+      "sha256": "554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100",
+      "size": 1921528,
+      "mode": "0o777",
+      "uid": 1000
+    },
+    "left": {
+      "path": "/home/amber/R-11/amber_core_R",
+      "sha256": "554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100",
+      "size": 1921528,
+      "mode": "0o777",
+      "uid": 1000
+    }
+  },
+  "rc_local": {
+    "path": "/etc/rc.local",
+    "sha256": "2369a9576604b945df2c8bb4913967430ea0d3790eca196102ecdbdc5ebe37b9",
+    "size": 1157,
+    "mode": "0o755",
+    "uid": 0
+  },
+  "recovery_helper": {
+    "path": "/usr/local/sbin/rob-amber-recover",
+    "sha256": "275e0cae85a55f71c528d32127bc493b1fffb270c89b87b9ff427edf7c47dcd4",
+    "size": 40774,
+    "mode": "0o755",
+    "uid": 0
+  },
+  "legacy_cores": [
+    {
+      "pid": 974,
+      "name": "amber_core_L",
+      "threads": 19,
+      "network_namespace": "net:[4026531840]"
+    },
+    {
+      "pid": 975,
+      "name": "amber_core_R",
+      "threads": 19,
+      "network_namespace": "net:[4026531840]"
+    }
+  ],
+  "blocked_root_process_observations": [
+    "process observation unavailable: 765",
+    "process observation unavailable: 783"
+  ],
+  "serial_access": [
+    {
+      "device": "/dev/ttyACM0",
+      "mode": "0o660",
+      "writable_by_audit_user": false
+    },
+    {
+      "device": "/dev/ttyACM1",
+      "mode": "0o660",
+      "writable_by_audit_user": false
+    }
+  ],
+  "background_can_counters_before": {
+    "can10": {
+      "rx": {
+        "bytes": 0,
+        "packets": 0,
+        "errors": 0,
+        "dropped": 0,
+        "over_errors": 0,
+        "multicast": 0
+      },
+      "tx": {
+        "bytes": 478210971,
+        "packets": 159403657,
+        "errors": 0,
+        "dropped": 0,
+        "carrier_errors": 0,
+        "collisions": 0
+      }
+    },
+    "can11": {
+      "rx": {
+        "bytes": 0,
+        "packets": 0,
+        "errors": 0,
+        "dropped": 0,
+        "over_errors": 0,
+        "multicast": 0
+      },
+      "tx": {
+        "bytes": 478422573,
+        "packets": 159474191,
+        "errors": 0,
+        "dropped": 0,
+        "carrier_errors": 0,
+        "collisions": 0
+      }
+    }
+  },
+  "background_can_counters_after": {
+    "can10": {
+      "rx": {
+        "bytes": 0,
+        "packets": 0,
+        "errors": 0,
+        "dropped": 0,
+        "over_errors": 0,
+        "multicast": 0
+      },
+      "tx": {
+        "bytes": 478213290,
+        "packets": 159404430,
+        "errors": 0,
+        "dropped": 0,
+        "carrier_errors": 0,
+        "collisions": 0
+      }
+    },
+    "can11": {
+      "rx": {
+        "bytes": 0,
+        "packets": 0,
+        "errors": 0,
+        "dropped": 0,
+        "over_errors": 0,
+        "multicast": 0
+      },
+      "tx": {
+        "bytes": 478425066,
+        "packets": 159475022,
+        "errors": 0,
+        "dropped": 0,
+        "carrier_errors": 0,
+        "collisions": 0
+      }
+    }
+  },
+  "counter_interpretation": "Legacy cores stayed running. Background TX counters advanced; no network syscalls came from the rehearsal. These are not motor acknowledgements.",
+  "blockers": [
+    {
+      "code": "legacy_cores_running",
+      "detail": "Vendor controllers remain active; no exclusive replacement ownership."
+    },
+    {
+      "code": "incomplete_process_observation",
+      "detail": "Some processes could not be inspected."
+    },
+    {
+      "code": "physical_can_visible_in_audit_namespace",
+      "detail": "CAN remains reachable from this namespace; socket bind/flock would not prove sole ownership."
+    },
+    {
+      "code": "recovery_entry_point_present",
+      "detail": "Recovery helper remains installed; its restart authority must be coordinated with cutover."
+    },
+    {
+      "code": "physical_backend_unavailable",
+      "detail": "This candidate supports passive physical observation and virtual output only."
+    },
+    {
+      "code": "fresh_stationary_feedback_required",
+      "detail": "Obtain fresh all-joint feedback in the morning; quiet CAN is not a pose or power-state measurement."
+    },
+    {
+      "code": "joint_profile_uncommissioned",
+      "detail": "Confirm native lift axis/sign, limits and mode/status semantics; rehearsal values are simulation settings."
+    },
+    {
+      "code": "physical_clearance_review_required",
+      "detail": "Review the actual empty-arm sweep, other arm and surroundings. No head/camera geometry is assumed."
+    },
+    {
+      "code": "independent_stop_unmeasured",
+      "detail": "Operator reports the present failure stops motion; firmware timeout, torque retention and supported-arm stop still need measurement."
+    },
+    {
+      "code": "physical_ownership_unverified",
+      "detail": "Real slcan isolation, blocked legacy/recovery entry points and old serial/adapter traffic still need commissioning."
+    },
+    {
+      "code": "testing_paused_for_sleep",
+      "detail": "No activation, mode change, core restart, CAN cutover or motion until Rudy resumes testing."
+    }
+  ],
+  "staging": {
+    "staged_directory": "/home/amber/rob-controller-staging/d98ebd3",
+    "source_commit": "d98ebd3791b9509249212e2c754f4061f78458f9",
+    "archive_sha256": "3628a1d4bc60aeacc40fb9fc3930ebb65419a019f3afe730c5734853fd9a909e",
+    "files_verified": 9,
+    "activated": false,
+    "service_installed": false,
+    "vendor_files_modified": false
+  },
+  "ownership_staging": {
+    "staged_directory": "/home/amber/rob-controller-staging/ownership-7c3b244-complete",
+    "source_commit": "7c3b2449936a017c5f7049f6d562764a9fdb3f94",
+    "archive_sha256": "e355402bc0f67acf081dc1bd1f9612720da2afb6b1843773656de11bdb292c72",
+    "files_verified": 9,
+    "activated": false,
+    "service_installed": false,
+    "vendor_files_modified": false
+  },
+  "ownership_host_tests": {
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "...........................\n----------------------------------------------------------------------\nRan 27 tests in 0.030s\n\nOK\n",
+    "hardware_io": false
+  }
+}

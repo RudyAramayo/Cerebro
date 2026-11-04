@@ -8,6 +8,46 @@ mount is unfinished; Rudy explicitly permits later arm tests without it.
 
 ## Actual host observations and deployment
 
+**Final inactive release:** source `d98ebd3791b9509249212e2c754f4061f78458f9`,
+staged at `/home/amber/rob-controller-staging/d98ebd3`. All nine manifest files
+verified remotely. The 355,069-byte archive SHA-256 is
+`3628a1d4bc60aeacc40fb9fc3930ebb65419a019f3afe730c5734853fd9a909e`.
+Controller SHA-256:
+`f023a0f3ece4e6a3a8c9c3ba4c66c2f4b511a16f4865917d8241dc6f860cb73b`.
+Rehearsal SHA-256:
+`98afe3785ff1d1c40154dbe5fe118e55f7525f69cda465ea6c8afa5c6133f7e7`.
+
+[Linux validation run 41787018510](https://github.com/RudyAramayo/Cerebro/actions/runs/41787018510)
+passes Release and ASan/UBSan: 53 existing portable groups, five new rehearsal
+groups, seven preflight checks, eight native transport groups and eleven process
+groups (84 total). Both executable process runs exercise eleven switches while
+moving and twelve velocity reversals, with one thread/generation. The 58 portable
+C++ groups also pass local TSan. All reported source hashes and both tested binary
+hashes were checked independently. Both ELF dependency closures resolve against
+the verified Amber library backup, with no missing strong imports or versions.
+
+On Amber, self-check and all five inert rehearsals pass. `strace -f` with network
+syscalls selected records **zero network calls** from the rehearsal. Legacy cores
+remain PIDs 974/975, with unchanged original hashes. Background CAN TX counters
+advanced during the read-only work; the robot was not a silent bus, and those
+counters are not motor acknowledgements. No candidate activation, service install,
+namespace move, mode change, motor command or vendor-core restart occurred.
+
+Ownership prerequisite source `7c3b2449936a017c5f7049f6d562764a9fdb3f94` is staged at
+`/home/amber/rob-controller-staging/ownership-7c3b244-complete`. All nine files verify
+and all 27 offline recovery/initializer tests pass on Ubuntu. The privileged
+installed helpers and startup files are unchanged. The first staging bundle
+omitted two test fixtures; the complete bundle corrects this and was retested.
+Earlier Linux test iterations were also rejected before packaging: a timer could
+switch near zero velocity, and an early reversal had insufficient travel. The
+final fixture uses observed motion, a finite program and unchanged controller
+guards/grant limits. It passes both Linux variants; failed iterations were never
+deployed as controllers.
+
+See [sanitized, source-bound evidence](evidence/2026-11-03-amber-overnight/).
+
+Initial observations before the final release:
+
 - Both original core files match SHA-256
   `554e7088b94b98f03f152f394c5e5b1d1ecfd16dacd470889e65dc83c36d2100`.
   The rc.local baseline is
@@ -55,6 +95,29 @@ hold the existing recovery lock, install/verify protected guards, set the durabl
 inhibit, prevent legacy service launches and raw serial bypass, and keep CAN in
 a pinned namespace. No PID expiry or process crash should clear the inhibit.
 Virtual-CAN isolation does not establish real slcan/adapter queue behavior.
+
+### Adapter source identification
+
+The USB product strings advertise CANable2 `b158aa7`. That resolves to public
+source commit `b158aa7ab106bc018715cd4d5f02f544f9de1830`; treating it as the installed
+source lineage is an inference, not verification of the flashed image.
+
+The header allocates 64 transmit slots; the ring reserves one slot, yielding
+63 usable entries. Entries contain CAN headers/data, with no command generation
+or expiry field. The transmitter defaults to automatic retransmission and
+`can_disable()` does not explicitly reset this software queue. A channel-close
+or kernel-link operation therefore has not been established as a complete
+old-traffic flush. These are source findings, not observed motor behavior.
+[Queue definition](https://github.com/normaldotcom/canable2-fw/blob/b158aa7ab106bc018715cd4d5f02f544f9de1830/inc/can.h),
+[transmit/disable implementation](https://github.com/normaldotcom/canable2-fw/blob/b158aa7ab106bc018715cd4d5f02f544f9de1830/src/can.c).
+
+The serial parser discards the return value of `can_tx`, and the README says
+serial commands receive no ACK/NACK. Kernel send acceptance is consequently
+not evidence of adapter acceptance or motor delivery. No adapter query, reset,
+configuration or firmware update was performed; source files and hashes were
+saved privately for review.
+[Parser](https://github.com/normaldotcom/canable2-fw/blob/b158aa7ab106bc018715cd4d5f02f544f9de1830/src/slcan.c),
+[firmware protocol](https://github.com/normaldotcom/canable2-fw/blob/b158aa7ab106bc018715cd4d5f02f544f9de1830/README.md).
 
 ## Morning test progression
 

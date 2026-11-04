@@ -1,0 +1,33 @@
+{
+  "commit": "b158aa7ab106bc018715cd4d5f02f544f9de1830",
+  "identification": "USB product string advertises b158aa7; source match is inferred, not flashed-image attestation",
+  "files": {
+    "src/can.c": {
+      "url": "https://raw.githubusercontent.com/normaldotcom/canable2-fw/b158aa7ab106bc018715cd4d5f02f544f9de1830/src/can.c",
+      "sha256": "9e6120c6fa309f62b036d9d95ba50c330bc2fd68974e1dd767afb99b8c04cbcd",
+      "bytes": 8606
+    },
+    "inc/can.h": {
+      "url": "https://raw.githubusercontent.com/normaldotcom/canable2-fw/b158aa7ab106bc018715cd4d5f02f544f9de1830/inc/can.h",
+      "sha256": "defda3b4210698f796e5b35c08194dc7ae760dedb0bce7d489df827c9ea5c606",
+      "bytes": 1609
+    },
+    "src/slcan.c": {
+      "url": "https://raw.githubusercontent.com/normaldotcom/canable2-fw/b158aa7ab106bc018715cd4d5f02f544f9de1830/src/slcan.c",
+      "sha256": "2a7958b78973363339ebd98b0662c0c0ceba6f5feabe1b0faf9050f52b3bfa8b",
+      "bytes": 9651
+    },
+    "src/main.c": {
+      "url": "https://raw.githubusercontent.com/normaldotcom/canable2-fw/b158aa7ab106bc018715cd4d5f02f544f9de1830/src/main.c",
+      "sha256": "8e9fd4c345ea0aa38490261a4861bb07add4cd319ed2acf4414955c162726aa1",
+      "bytes": 1144
+    },
+    "README.md": {
+      "url": "https://raw.githubusercontent.com/normaldotcom/canable2-fw/b158aa7ab106bc018715cd4d5f02f544f9de1830/README.md",
+      "sha256": "efec2b5b49057d5f360803b176065822529815dd68d3fed59f324d30b3e66317",
+      "bytes": 2787
+    }
+  },
+  "hardware_io": false,
+  "firmware_changed": false
+}

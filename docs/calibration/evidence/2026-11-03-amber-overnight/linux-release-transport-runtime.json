@@ -1,0 +1,653 @@
+{
+  "robot_io": false,
+  "virtual_CAN_io": true,
+  "old_socket_send_errno": 6,
+  "new_host_bind_errno": 19,
+  "tests": [
+    {
+      "test": "physical_route_mismatch_rejected_without_socket",
+      "passed": true
+    },
+    {
+      "test": "virtual_CAN_real_receive_timestamps_and_seven_position_frames",
+      "passed": true
+    },
+    {
+      "test": "passive_default_opens_receiver_without_transmitting",
+      "passed": true
+    },
+    {
+      "test": "kernel_queue_age_latches_and_reopen_requires_explicit_new_epoch",
+      "passed": true
+    },
+    {
+      "test": "deadline_and_wrong_arm_reject_before_send",
+      "passed": true
+    },
+    {
+      "test": "malformed_feedback_and_bounded_receive_backlog_latch",
+      "passed": true
+    },
+    {
+      "test": "virtual_bus_error_frame_latches_without_claiming_slcan_error_support",
+      "passed": true
+    },
+    {
+      "test": "current_socket_drop_counter_blocks_TX_before_old_ancillary_is_dequeued",
+      "passed": true
+    },
+    {
+      "passed": 8,
+      "failed": 0,
+      "robot_io": false,
+      "virtual_CAN_io": true
+    }
+  ],
+  "runtime_tests": [
+    {
+      "test": "no_io_self_check_and_no_physical_transmit_capability",
+      "passed": true
+    },
+    {
+      "test": "raw_observation_before_any_grant_has_zero_transmission",
+      "passed": true
+    },
+    {
+      "test": "disconnect",
+      "passed": true,
+      "status": {
+        "accepted_targets": 45,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.23260835913637634,
+          0.23260835913637634,
+          0.23260835913637634,
+          0.23260835913637634,
+          0.23260835913637634,
+          0.23260835913637634,
+          0.23260835913637634
+        ],
+        "commanded_velocity": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 2,
+        "reason_name": "ClientDisconnected",
+        "received_target_sequence": 45,
+        "replaced_pending_targets": 0,
+        "replans": 46,
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "stop",
+      "passed": true,
+      "status": {
+        "accepted_targets": 45,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.2326409134360564,
+          0.2326409134360564,
+          0.2326409134360564,
+          0.2326409134360564,
+          0.2326409134360564,
+          0.2326409134360564,
+          0.2326409134360564
+        ],
+        "commanded_velocity": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 1,
+        "reason_name": "Stop",
+        "received_target_sequence": 45,
+        "replaced_pending_targets": 0,
+        "replans": 46,
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "replay",
+      "passed": true,
+      "status": {
+        "accepted_targets": 45,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.23296773003899374,
+          0.23296773003899374,
+          0.23296773003899374,
+          0.23296773003899374,
+          0.23296773003899374,
+          0.23296773003899374,
+          0.23296773003899374
+        ],
+        "commanded_velocity": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 1,
+        "reason_name": "Stop",
+        "received_target_sequence": 45,
+        "replaced_pending_targets": 0,
+        "replans": 46,
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "nonce",
+      "passed": true,
+      "status": {
+        "accepted_targets": 45,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.23295306726961754,
+          0.23295306726961754,
+          0.23295306726961754,
+          0.23295306726961754,
+          0.23295306726961754,
+          0.23295306726961754,
+          0.23295306726961754
+        ],
+        "commanded_velocity": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 2,
+        "reason_name": "ClientDisconnected",
+        "received_target_sequence": 45,
+        "replaced_pending_targets": 0,
+        "replans": 46,
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "oversized",
+      "passed": true,
+      "status": {
+        "accepted_targets": 45,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 2044,
+        "backend_attempted_frames": 2044,
+        "boundary_accepted_frames": 2044,
+        "boundary_attempted_frames": 2044,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.23190581320864107,
+          0.23190581320864107,
+          0.23190581320864107,
+          0.23190581320864107,
+          0.23190581320864107,
+          0.23190581320864107,
+          0.23190581320864107
+        ],
+        "commanded_velocity": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 292,
+        "reason": 2,
+        "reason_name": "ClientDisconnected",
+        "received_target_sequence": 45,
+        "replaced_pending_targets": 0,
+        "replans": 46,
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2044
+    },
+    {
+      "test": "duplicate",
+      "passed": true,
+      "status": {
+        "accepted_targets": 45,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 2051,
+        "backend_attempted_frames": 2051,
+        "boundary_accepted_frames": 2051,
+        "boundary_attempted_frames": 2051,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.23279323638930505,
+          0.23279323638930505,
+          0.23279323638930505,
+          0.23279323638930505,
+          0.23279323638930505,
+          0.23279323638930505,
+          0.23279323638930505
+        ],
+        "commanded_velocity": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 293,
+        "reason": 2,
+        "reason_name": "ClientDisconnected",
+        "received_target_sequence": 45,
+        "replaced_pending_targets": 0,
+        "replans": 46,
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2051
+    },
+    {
+      "test": "signal",
+      "passed": true,
+      "status": {
+        "accepted_targets": 45,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 2058,
+        "backend_attempted_frames": 2058,
+        "boundary_accepted_frames": 2058,
+        "boundary_attempted_frames": 2058,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.23297268079297223,
+          0.23297268079297223,
+          0.23297268079297223,
+          0.23297268079297223,
+          0.23297268079297223,
+          0.23297268079297223,
+          0.23297268079297223
+        ],
+        "commanded_velocity": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 294,
+        "reason": 7,
+        "reason_name": "Shutdown",
+        "received_target_sequence": 45,
+        "replaced_pending_targets": 0,
+        "replans": 46,
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 2058
+    },
+    {
+      "test": "feedback_loss",
+      "passed": true,
+      "status": {
+        "accepted_targets": 45,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 889,
+        "backend_attempted_frames": 889,
+        "boundary_accepted_frames": 889,
+        "boundary_attempted_frames": 889,
+        "boundary_fault": 5,
+        "commanded_acceleration": [
+          0.22780414000008015,
+          0.22780414000008015,
+          0.22780414000008015,
+          0.22780414000008015,
+          0.22780414000008015,
+          0.22780414000008015,
+          0.22780414000008015
+        ],
+        "commanded_position": [
+          0.08632195539468791,
+          0.08632195539468791,
+          0.08632195539468791,
+          0.08632195539468791,
+          0.08632195539468791,
+          0.08632195539468791,
+          0.08632195539468791
+        ],
+        "commanded_velocity": [
+          0.28702631844970594,
+          0.28702631844970594,
+          0.28702631844970594,
+          0.28702631844970594,
+          0.28702631844970594,
+          0.28702631844970594,
+          0.28702631844970594
+        ],
+        "generation": 1,
+        "mode": "fault",
+        "owner_reason": "Feedback",
+        "physical_transmit_available": false,
+        "published_batches": 127,
+        "reason": 10,
+        "reason_name": "Feedback",
+        "received_target_sequence": 45,
+        "replaced_pending_targets": 0,
+        "replans": 46,
+        "shutdown_complete": false,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "virtual_frames": 889
+    },
+    {
+      "test": "finite_small_move_then_twelve_mid_motion_retargets",
+      "passed": true,
+      "mid_motion_changes": 11,
+      "velocity_reversals": 12,
+      "peak_velocity_rad_s": 0.15614009589415628,
+      "final_status": {
+        "accepted_targets": 797,
+        "applied_target_sequence": 0,
+        "backend_accepted_frames": 12145,
+        "backend_attempted_frames": 12145,
+        "boundary_accepted_frames": 12145,
+        "boundary_attempted_frames": 12145,
+        "boundary_fault": 2,
+        "commanded_acceleration": [
+          0.0,
+          1.1102230246251565e-16,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_position": [
+          0.0,
+          0.08726646259971646,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "commanded_velocity": [
+          0.0,
+          3.469446951953614e-17,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "generation": 1,
+        "mode": "held",
+        "owner_reason": "Released",
+        "physical_transmit_available": false,
+        "published_batches": 1735,
+        "reason": 1,
+        "reason_name": "Stop",
+        "received_target_sequence": 797,
+        "replaced_pending_targets": 0,
+        "replans": 798,
+        "shutdown_complete": true,
+        "transport_errno": 0,
+        "transport_fault": 0
+      },
+      "owner_threads": 1,
+      "legs": [
+        {
+          "leg": 0,
+          "sequence": 134,
+          "position": 0.07705728354772348,
+          "velocity": -0.08708192808543488,
+          "target": 0.03490658503988659
+        },
+        {
+          "leg": 1,
+          "sequence": 182,
+          "position": 0.03672945868261945,
+          "velocity": 0.02016762347381371,
+          "target": 0.08726646259971647
+        },
+        {
+          "leg": 2,
+          "sequence": 244,
+          "position": 0.08530903627347249,
+          "velocity": -0.023816631127599137,
+          "target": 0.03490658503988659
+        },
+        {
+          "leg": 3,
+          "sequence": 305,
+          "position": 0.03675516229613046,
+          "velocity": 0.020918350145139784,
+          "target": 0.08726646259971647
+        },
+        {
+          "leg": 4,
+          "sequence": 367,
+          "position": 0.0852793788213508,
+          "velocity": -0.024539835155692274,
+          "target": 0.03490658503988659
+        },
+        {
+          "leg": 5,
+          "sequence": 428,
+          "position": 0.03678208477025757,
+          "velocity": 0.021675851959857773,
+          "target": 0.08726646259971647
+        },
+        {
+          "leg": 6,
+          "sequence": 490,
+          "position": 0.08525125365332875,
+          "velocity": -0.025203882882419627,
+          "target": 0.03490658503988659
+        },
+        {
+          "leg": 7,
+          "sequence": 551,
+          "position": 0.03680961829839573,
+          "velocity": 0.022421084300033586,
+          "target": 0.08726646259971647
+        },
+        {
+          "leg": 8,
+          "sequence": 613,
+          "position": 0.08521458268620026,
+          "velocity": -0.026040672180604144,
+          "target": 0.03490658503988659
+        },
+        {
+          "leg": 9,
+          "sequence": 674,
+          "position": 0.036840576751366545,
+          "velocity": 0.023227008422157136,
+          "target": 0.08726646259971647
+        },
+        {
+          "leg": 10,
+          "sequence": 735,
+          "position": 0.08544378256805789,
+          "velocity": -0.02016186259481931,
+          "target": 0.03490658503988659
+        },
+        {
+          "leg": 11,
+          "sequence": 797,
+          "position": 0.036854317199490214,
+          "velocity": 0.023574751192896978,
+          "target": 0.08726646259971647
+        }
+      ],
+      "feedback": "synthetic ideal virtual CAN plant"
+    },
+    {
+      "passed": 11,
+      "failed": 0,
+      "robot_io": false,
+      "virtual_CAN_io": true
+    }
+  ],
+  "git_commit": "d98ebd3791b9509249212e2c754f4061f78458f9",
+  "scope": "Disposable hosted runner and virtual CAN only; physical slcan transfer remains uncommissioned",
+  "source_sha256": {
+    "Tools/ContinuousArm/SocketCanTransport.hpp": "a80933e8499fbb97a08df12360cac0386f90cbc1fc9f0d7b6ecd31ddb3f8ee8a",
+    "Tools/ContinuousArm/SocketCanTransport.cpp": "fd7bd20ae54bee5e8840dc299ca81b13baee8aa316db79f397e167be7447d460",
+    "Tools/ContinuousArm/ReceiveClock.hpp": "ac0807a4b6b8a7e6e05314c2021b2c697287571d3dc93f9ca5f05dbf64ac6a9c",
+    "Tools/ContinuousArm/ReceiveClock.cpp": "8036b9d47100bae76886eaf5825db9dff99225cdb9007ac9d8921370a323323a",
+    "Tests/ROBAmberLinuxTransportTests.cpp": "e1d90756d8a06a65016b2744a4f6d059ef5e4650386db714eb05b5486d155dee",
+    "Scripts/test-amber-linux-isolation.py": "c067fac19f0a7b5d641976a9953d95e7559530a2bf130c789146d1f48f9f7a83",
+    "Tools/ContinuousArm/AmberControllerMain.cpp": "98c9654c0d51c5451d401f37fa416b66f1bc69f7973681a3e16d8a13b5b9ceaf",
+    "Scripts/test-amber-runtime.py": "664842ee56148ecd2b62f4b03df9edc967099592699318ba49fc7637e5ef8796",
+    "Tools/ContinuousArm/ArmSession.hpp": "e828e290e2fc46a82c26002fafa8a91af39b5c014eb23e72910c69ed70d0a9f3",
+    "Tools/ContinuousArm/ArmSession.cpp": "2711e3e19e35ee54370c493825c6735f4934e50ba1bce0a5983e74ff393f6842"
+  },
+  "runtime_binary_sha256": "f023a0f3ece4e6a3a8c9c3ba4c66c2f4b511a16f4865917d8241dc6f860cb73b"
+}

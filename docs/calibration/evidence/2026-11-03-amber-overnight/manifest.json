@@ -1,0 +1,59 @@
+{
+  "source_commit": "d98ebd3791b9509249212e2c754f4061f78458f9",
+  "ruckig_commit": "7de6b1035e1cad509251b31b3287d10fbcda6baf",
+  "binary_abi": "ELF64 x86_64",
+  "needed_libraries": [
+    "libstdc++.so.6",
+    "libm.so.6",
+    "libgcc_s.so.1",
+    "libc.so.6"
+  ],
+  "required_symbol_versions": [
+    "CXXABI_1.3",
+    "CXXABI_1.3.9",
+    "GCC_3.0",
+    "GLIBCXX_3.4",
+    "GLIBCXX_3.4.11",
+    "GLIBCXX_3.4.14",
+    "GLIBCXX_3.4.20",
+    "GLIBCXX_3.4.21",
+    "GLIBCXX_3.4.26",
+    "GLIBCXX_3.4.29",
+    "GLIBCXX_3.4.9",
+    "GLIBC_2.10",
+    "GLIBC_2.14",
+    "GLIBC_2.17",
+    "GLIBC_2.2.5",
+    "GLIBC_2.25",
+    "GLIBC_2.3.4",
+    "GLIBC_2.32",
+    "GLIBC_2.34",
+    "GLIBC_2.4"
+  ],
+  "interpreter": "/lib64/ld-linux-x86-64.so.2",
+  "observed_amber": {
+    "os": "Ubuntu 22.04.3",
+    "architecture": "x86_64",
+    "glibc": "2.35"
+  },
+  "physical_transmit_available": false,
+  "installed": false,
+  "service_enabled": false,
+  "portable_groups": 53,
+  "transport_groups": 8,
+  "runtime_groups": 11,
+  "rehearsal_groups": 5,
+  "preflight_tests": 7,
+  "release_scope": "Passive commissioning and isolated virtual-CAN control only",
+  "files_sha256": {
+    "DEPLOYMENT.md": "b3c885aea606e45938d66a82e6489a23805def27f1482ac76d17d00a5388a770",
+    "amber-commissioning-preflight.py": "f5622d6ee487395b4952c657e165cffeb65220b2e5ef6277fa534df1e66a5d30",
+    "bin/rob-amber-controller": "f023a0f3ece4e6a3a8c9c3ba4c66c2f4b511a16f4865917d8241dc6f860cb73b",
+    "bin/rob-amber-rehearse": "98afe3785ff1d1c40154dbe5fe118e55f7525f69cda465ea6c8afa5c6133f7e7",
+    "licenses/Ruckig-LICENSE": "94ad283da40528d820de7bbd7df73871521c346205e208c801d233cb6b813a2f",
+    "licenses/nlohmann-json-LICENSE": "86b998c792894ccb911a1cb7994f7a9652894e7a094c0b5e45be2f553f45cf14",
+    "rob-amber-observe@.service.example": "b79a0beaff2d4f3aa980f3010befc304cde601490aa971f719070fe777437a19",
+    "validation/linux.json": "27baf69d6c2aab2168a25881c0ffae11da0b56adb41857aa6aac5beac68ceaef",
+    "validation/portable.json": "a1423e895c956d2ab413c086ecf665c5db4437daba54204913f55fa8169607bc"
+  }
+}
