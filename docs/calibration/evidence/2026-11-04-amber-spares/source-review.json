@@ -1,0 +1,78 @@
+{
+  "review_date": "2026-11-04",
+  "user_report": {
+    "spare_master_count": 2,
+    "working_spare_preferred_for_clone": true,
+    "other_spare_loses_power_when_cord_moves": true,
+    "likely_arm_generation": "B1 V1 / X-hub; user belief, not inspected",
+    "spares_in_storage": true,
+    "preferred_motor_transport": "USB-CAN, subject to actual compatibility",
+    "matching_arm_harnesses": "Two wires emerge from J1; same four-wire CAN plugs across the arms.",
+    "connector_difference": "Current USB-CAN adapters use an RJ-style/telephone-like connector; old arms connect to the X-hub CAN plug. Exact RJ connector type is unverified."
+  },
+  "source_revisions": {
+    "MrAsana/AMBER_B1_ROS2": "407451125c2adb2dbac8a9c823b54f7cfee4a71a",
+    "MrAsana/AMBER_B1_Robotic_Arm_V2": "2b8c6ce97fd7b662d99aac048c607756481150a3",
+    "MrAsana/Python_API": "6d65f6086a504fcd6dc894230a85330483ca75f0"
+  },
+  "downloaded_sources": [
+    {
+      "name": "v1-wiring.png",
+      "url": "https://raw.githubusercontent.com/MrAsana/AMBER_B1_ROS2/407451125c2adb2dbac8a9c823b54f7cfee4a71a/docs/imgs/B1_2nd%20edition%20%20Quickstart%20-0000.png",
+      "sha256": "a07dd8f935df9cb5259f3cfe21ff23b44693d74a175d7fd99fcf44436716f2ed",
+      "bytes": 231608
+    },
+    {
+      "name": "v1-xhub.jpeg",
+      "url": "https://raw.githubusercontent.com/MrAsana/AMBER_B1_ROS2/407451125c2adb2dbac8a9c823b54f7cfee4a71a/docs/imgs/Aspose.Words.de6c2f2d-c7c1-4a2d-8a80-6bf831c7ab5f.006.jpeg",
+      "sha256": "ef485dee942c8361e4f917260f5fc99433e58867f43a6bdacbebcd8524421217",
+      "bytes": 16815
+    },
+    {
+      "name": "v1-master.jpeg",
+      "url": "https://raw.githubusercontent.com/MrAsana/AMBER_B1_ROS2/407451125c2adb2dbac8a9c823b54f7cfee4a71a/docs/imgs/Aspose.Words.de6c2f2d-c7c1-4a2d-8a80-6bf831c7ab5f.007.jpeg",
+      "sha256": "ab3c8a49c994b4ff04dbfd107866d01e10444e688a7cad145c45ac2126f57cdb",
+      "bytes": 22471
+    },
+    {
+      "name": "v1-b1.sh",
+      "url": "https://raw.githubusercontent.com/MrAsana/AMBER_B1_ROS2/407451125c2adb2dbac8a9c823b54f7cfee4a71a/Scripts/b1.sh",
+      "sha256": "831e4e59416b398293d354a47bfd622af0c8cea4ef03e742963cb5323ba49760",
+      "bytes": 4506
+    },
+    {
+      "name": "v1-master.sh",
+      "url": "https://raw.githubusercontent.com/MrAsana/AMBER_B1_ROS2/407451125c2adb2dbac8a9c823b54f7cfee4a71a/Scripts/master.sh",
+      "sha256": "0b48e5aff651a9cbb53768972a018ffcaa2ae6e47246afbdfee698ab4ba52af4",
+      "bytes": 1954
+    }
+  ],
+  "vendor_wiring_diagrams_visually_reviewed": [
+    "v1-wiring.png",
+    "v1-xhub.jpeg",
+    "v1-master.jpeg"
+  ],
+  "findings": {
+    "v1_launcher_names_ethercat_driver": true,
+    "ethercat_link_inference_not_hardware_confirmation": true,
+    "v1_launcher_kills_matching_ros_processes": true,
+    "v1_web_backend_fixed_port": 8080,
+    "vendor_status_example_fixed_local_udp_port": 12321,
+    "vendor_status_example_destination_udp_port": 25001,
+    "v2_initializer_uses_slcand": true,
+    "xhub_motor_side_bus_and_pinout_verified": false,
+    "generic_usb_can_compatibility_established": false,
+    "same_detached_worker_bug_proven_on_spares": false,
+    "current_working_hypothesis": "Both arm generations may share motor-side CAN, with different host-side bridge and cable packaging.",
+    "ethercat_host_link_does_not_rule_out_motor_side_can": true
+  },
+  "work_performed": {
+    "spare_host_access": false,
+    "vendor_script_execution": false,
+    "controller_code_changed": false,
+    "full_disk_image_created": false,
+    "clone_restored": false,
+    "motor_or_bus_operation": false
+  },
+  "next_step": "Read-only inventory of the stable spare after it is physically available, with motor links disconnected; preserve its V1 image before clone or software migration."
+}

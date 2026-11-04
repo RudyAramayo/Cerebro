@@ -66,6 +66,88 @@ still fails with `Sky Computer Use native pipe startup failed`; no group deliver
 or inbox check is claimed. The PDF is delivered in chat, not claimed as a Messages
 attachment. Physical testing remains paused until Rudy resumes it.
 
+## Two spare masters and likely V1/X-hub arms, November 4
+
+Rudy has two additional Ubuntu master boxes with two older arms. He believes
+they are the first B1/X-hub generation. One spare loses power when its cord moves;
+the other is the preferred bootable clone/development host. Both are in storage,
+so neither has been inspected or reached over SSH. Keep the unstable-power box
+out of the recovery chain until the fault is repaired and verified. Rudy prefers
+moving the extra arms to USB-CAN, with the investigation and software work handled
+here rather than making him reverse engineer the hardware.
+
+Rudy subsequently reports that the arm wiring is the same: two wires emerge
+from J1, and both generations use the same four-wire CAN plugs. He identifies
+the visible difference at the controller connection: an RJ-style/telephone-like
+plug on the current USB-CAN adapters versus the CAN plug on the old X-hub. The
+exact RJ connector type and pin count are not yet identified. This makes a common
+motor-side CAN bus with different bridge/cable packaging a useful working
+hypothesis. The Ethernet-side transport does not exclude CAN on the arm side.
+Prioritize verifying that hypothesis and preparing a documented adapter cable;
+do not presume that the arms need different actuator electronics. Matching
+connectors still do not establish supply pins, polarity, voltage, bitrate,
+motor protocol or joint/profile compatibility. Do not label the two J1 wires
+as power or data without identification.
+
+The vendor documentation distinguishes the V1/X-hub system from V2/Mini-Hub.
+The [V1 wiring guide](https://github.com/MrAsana/AMBER_B1_ROS2/wiki/AMBER-B1%E2%80%90%E2%80%90V1-version-hardware--quickstart)
+and its diagrams show Master LAN2 connected to the X-hub, with a separate
+six-pin arm cable and power circuit. This does not establish that cable's signal
+pinout. The pinned [V1 launcher](https://github.com/MrAsana/AMBER_B1_ROS2/blob/407451125c2adb2dbac8a9c823b54f7cfee4a71a/Scripts/b1.sh)
+starts `amber_b1_hw_gui_ethercat.launch.py`. An EtherCAT-related transport is
+therefore a source-based inference, not verified identification of these spare
+units or the X-hub's internal motor bus. The
+[V2 initializer](https://github.com/MrAsana/AMBER_B1_Robotic_Arm_V2/blob/2b8c6ce97fd7b662d99aac048c607756481150a3/scripts/initCAN.sh)
+instead uses ttyACM/SLCAN. A generic USB-CAN adapter is not yet an established
+replacement for a V1 X-hub. CAN_H/CAN_L are differential bus connections, not
+selectable pin modes that translate Ethernet/EtherCAT into CAN.
+
+There are concrete single-instance assumptions in the old software: the V1
+launcher kills processes matching `ros` and starts its web backend on port 8080;
+the [vendor Python status example](https://github.com/MrAsana/Python_API/blob/6d65f6086a504fcd6dc894230a85330483ca75f0/cmd_01_get_status.py)
+binds local UDP 12321 and sends to one master IP on UDP 25001. These are candidates
+for multi-arm isolation work, not proof of the cause of Rudy's earlier failures.
+The example also declares length 44 for an eight-byte status request, whereas
+the [protocol](https://github.com/MrAsana/UDP-Protocol-API/wiki/Robotic-Arm-API-based-on-UDP-Protocol)
+specifies eight. No downloaded script was executed. Do not assume the V1 binary
+has the same detached-worker implementation until its actual code is examined.
+
+The revised sequence is to preserve the stable spare's original V1 disk/software,
+then capture the current Amber's entire offline boot disk and restore a verified
+copy onto a distinct, identified destination SSD for the stable spare. A backup
+image stored on that box is useful but does not itself make the box a bootable
+clone. Keep a separate immutable image copy and the original disk; the working
+development clone is not the sole backup. Before joining it to the same LAN,
+review hostname, network/machine identity, credentials and disabled controller
+startup. Motor links remain disconnected during boot validation. The current
+Mac has approximately 28 GiB available, below the conservative 70 GB raw-image
+budget; check real destination capacity or use separate storage before imaging.
+The existing 64,023,257,088-byte source disk must fit the chosen restore target.
+
+Once accessible, inventory the spare's OS, disk and boot mode, NICs, original ROS
+workspace, launch/configuration files and exact driver/binary dependencies without
+starting the vendor launcher. Determine its actual link protocol from source,
+configuration and a controlled passive capture before any adapter purchase or
+rewiring. Passive electrical identification, if needed, requires identified pins
+and appropriate instruments; do not attach a USB-CAN adapter to guessed pins.
+If CAN is established, select a documented Linux/SocketCAN adapter with suitable
+physical layer, bitrate, isolation, termination and bounded/error-visible queues.
+Keep each arm on an independent bus unless IDs and topology have been verified.
+
+The intended software rollout uses the shared persistent trajectory owner,
+one owner per arm and one coordinated client layer. Hardware transport, joint
+identity, sign/zero, limits, feedback and stopping profiles stay specific to each
+arm revision. Fixing current CAN workers does not validate a V1 transport, and
+streaming through the old UDP command 4 would retain the legacy worker risk.
+Inert candidate staging can be copied, but only a commissioned release may be
+enabled for motion on a clone. The candidate remains physically inert; no spare
+imaging, installation, CAN or EtherCAT operation, adapter probing or motor command
+occurred in this review.
+
+[Source pins and findings](evidence/2026-11-04-amber-spares/)
+preserve the investigation. Downloaded vendor diagrams and scripts are stored
+privately under `Documents/ROB Test Reports/2026-11-04/amber-spare-box-review`.
+
 ## Actual host observations and deployment
 
 **Final inactive release:** source `d98ebd3791b9509249212e2c754f4061f78458f9`,
