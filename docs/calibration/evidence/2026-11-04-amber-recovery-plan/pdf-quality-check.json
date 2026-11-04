@@ -1,0 +1,30 @@
+{
+  "pdf_sha256": "38ce01e9bff04b89309eaa93ee1a92306a21147cf81d0880fc86e685e8c26cf5",
+  "pdf_bytes": 66305,
+  "page_count": 8,
+  "canonical_field_count": 41,
+  "widget_count": 41,
+  "all_fields_have_normal_appearances": true,
+  "widget_values_match_canonical_fields": true,
+  "pending_execution_gates": 12,
+  "form_roundtrip_pass": true,
+  "source_pdf_unchanged": true,
+  "link_annotations": 16,
+  "distinct_source_urls": 8,
+  "visual_review": {
+    "render_dpi": 120,
+    "pages_reviewed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "clipping_overlap_or_missing_glyphs_observed": false
+  },
+  "physical_actions_performed": false,
+  "final_renders_match_visually_inspected_pages": true
+}

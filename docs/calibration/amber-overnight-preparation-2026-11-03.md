@@ -6,6 +6,45 @@ and inactive staging. Do not activate motors, change modes, restart cores or
 Cerebro, move/reset CAN, or automatically resume a saved motion. The camera/head
 mount is unfinished; Rudy explicitly permits later arm tests without it.
 
+## Recovery plan and read-only verification, November 4
+
+Rudy requested a traceable PDF and a backup plan before starting the takeover.
+The eight-page fillable plan covers current readiness, whole-disk recovery,
+exclusive CAN handoff, rollback, stop commissioning and an execution log. All
+12 execution gates remain Pending. The staged executable still cannot transmit
+to physical motors; the protected takeover is not installed or commissioned.
+
+Fresh read-only checks identify a 64,023,257,088-byte HOGE SSD with separate EFI,
+boot and LVM/root partitions. The existing 43,686,735-byte controller archive
+has 48 payload files; every payload hash was rechecked. It is not a full disk
+image or a demonstrated boot restore. A new local archive captures seven
+readable startup/recovery files with hashes and original ownership/mode metadata.
+The live sudoers file was unreadable, so this new backup is explicitly partial.
+The original core and rc.local hashes still match the prior baseline.
+
+The preferred next maintenance procedure is to image the entire unmounted
+original disk, verify an independent second image copy, restore onto an
+identified compatible spare and prove that spare boots with motor power off
+and CAN disconnected. Develop on the clone and keep the original SSD labelled
+and disconnected. Preserve UEFI settings separately; a host image does not
+back up actuator EEPROM. Physical media selection, offline imaging, restoration
+and boot testing have not been performed.
+
+The report generator is `Scripts/build-amber-takeover-plan.py`. Private source
+evidence and backups are under `Documents/ROB Test Reports/2026-11-04/amber-backup-review`;
+the finalized PDF and its manifest are under that date's `output/pdf` directory.
+[Sanitized report and backup evidence](evidence/2026-11-04-amber-recovery-plan/)
+records the hashes and PDF checks. All eight rendered pages were visually
+inspected; 41 canonical form fields match 41 widgets with appearance streams,
+and a disposable fill/save/reopen check passed without changing the original.
+No new controller test results are implied by this report-only change.
+
+No reboot, disk restore, protected install, service/core restart, CAN reset or
+namespace move, mode change or motor command occurred. Messages native access
+still fails with `Sky Computer Use native pipe startup failed`; no group delivery
+or inbox check is claimed. The PDF is delivered in chat, not claimed as a Messages
+attachment. Physical testing remains paused until Rudy resumes it.
+
 ## Actual host observations and deployment
 
 **Final inactive release:** source `d98ebd3791b9509249212e2c754f4061f78458f9`,

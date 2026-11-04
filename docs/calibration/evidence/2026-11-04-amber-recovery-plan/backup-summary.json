@@ -1,0 +1,54 @@
+{
+  "verified_date": "2026-11-04",
+  "original_archive": {
+    "archive_sha256": "782db5d7b746591cb34c3eea0b57107cd25fbe3a0c1735c1880549d4223631e1",
+    "archive_bytes": 43686735,
+    "files_verified": 48,
+    "full_disk_backup": false,
+    "boot_restore_tested": false
+  },
+  "startup_baseline": {
+    "archive_sha256": "3f054a1e9c8cb843f54860b08399de15fb36d1c434004dfe35f170ec08c12975",
+    "archive_bytes": 12750,
+    "files_verified": 7,
+    "complete": false,
+    "missing_protected_file": "/etc/sudoers.d/rob-amber-recovery",
+    "error": "PermissionError"
+  },
+  "disk": {
+    "observed_path": "/dev/sda",
+    "model": "HOGE SSD 64GB",
+    "bytes": 64023257088,
+    "uefi_boot_observed": true,
+    "partitions": [
+      {
+        "name": "sda1",
+        "bytes": 1127219200,
+        "filesystem": "vfat",
+        "mount": "/boot/efi"
+      },
+      {
+        "name": "sda2",
+        "bytes": 2147483648,
+        "filesystem": "ext4",
+        "mount": "/boot"
+      },
+      {
+        "name": "sda3",
+        "bytes": 28739371008,
+        "type": "LVM2_member",
+        "root_lv_bytes": 27917287424,
+        "root_filesystem": "ext4"
+      }
+    ]
+  },
+  "original_core_hashes_match": true,
+  "rc_local_hash_matches": true,
+  "full_disk_image_created": false,
+  "independent_second_image_copy_verified": false,
+  "spare_restore_and_boot_tested": false,
+  "physical_actions_performed": false,
+  "protected_guards_installed": false,
+  "messages_delivery_verified": false,
+  "messages_error": "Sky Computer Use native pipe startup failed"
+}
