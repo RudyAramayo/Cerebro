@@ -19,8 +19,29 @@ boot and LVM/root partitions. The existing 43,686,735-byte controller archive
 has 48 payload files; every payload hash was rechecked. It is not a full disk
 image or a demonstrated boot restore. A new local archive captures seven
 readable startup/recovery files with hashes and original ownership/mode metadata.
-The live sudoers file was unreadable, so this new backup is explicitly partial.
+At PDF creation, the live sudoers file was unreadable without authenticated
+sudo, so that initial seven-file archive is explicitly partial.
 The original core and rc.local hashes still match the prior baseline.
+
+**Follow-up at 17:51 UTC:** Rudy asked to use the existing login password for
+sudo and copy the protected policy. The SSH password already saved in the
+Cerebro Keychain authenticated sudo successfully. A single read-only root
+command copied `/etc/sudoers`, the complete `/etc/sudoers.d` tree and all source
+paths reported by `visudo -c`; no persistent `su` shell was needed. The three
+regular files are sudoers, the directory README and `rob-amber-recovery`.
+All three payload hashes and their numeric ownership/mode metadata verify
+locally; extended attributes are recorded in the private manifest. Existing
+sudoers syntax validates successfully. The password was neither printed nor
+written to backup files, and no source policy was modified.
+
+The 2,320-byte supplemental archive is
+`amber-sudoers-baseline-20261104T175132Z.tar.gz` in the private backup-review
+directory below, with SHA-256
+`9b2c27411331a845af1c221c9b36deea0c3c23d1277a0b2c8e717eb6db7a6ce0`.
+Both archive and manifest are owner-only (`0600`). This closes the PDF revision
+1 protected-file gap; that PDF and its original evidence remain an unchanged
+snapshot. It does not complete a full disk image, full system-state inventory
+or restore test. No motor, service, startup or CAN operation was performed.
 
 The preferred next maintenance procedure is to image the entire unmounted
 original disk, verify an independent second image copy, restore onto an

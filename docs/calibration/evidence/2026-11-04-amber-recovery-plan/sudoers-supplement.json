@@ -1,0 +1,60 @@
+{
+  "created_utc": "2026-11-04T17:51:32.624624+00:00",
+  "effective_uid": 0,
+  "scope": "/etc/sudoers, complete /etc/sudoers.d, symlink targets and all sources reported by visudo -c",
+  "source_files_modified": false,
+  "visudo_exit_code": 0,
+  "visudo_parsed_sources": [
+    "/etc/sudoers",
+    "/etc/sudoers.d/README",
+    "/etc/sudoers.d/rob-amber-recovery"
+  ],
+  "archive_sha256": "9b2c27411331a845af1c221c9b36deea0c3c23d1277a0b2c8e717eb6db7a6ce0",
+  "archive_bytes": 2320,
+  "files_verified_locally": 3,
+  "archive_metadata_verified": true,
+  "password_saved_or_printed": false,
+  "archive_filename": "amber-sudoers-baseline-20261104T175132Z.tar.gz",
+  "private_archive_and_manifest_mode": "0600",
+  "files": [
+    {
+      "path": "/etc/sudoers",
+      "type": "file",
+      "mode": "0o440",
+      "uid": 0,
+      "gid": 0,
+      "size": 1671,
+      "sha256": "5ae1d5673f987e403c3d08a209798e737169f5f89286862963b6b28d09fb619c"
+    },
+    {
+      "path": "/etc/sudoers.d",
+      "type": "directory",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "size": 0
+    },
+    {
+      "path": "/etc/sudoers.d/README",
+      "type": "file",
+      "mode": "0o440",
+      "uid": 0,
+      "gid": 0,
+      "size": 1096,
+      "sha256": "016d919662c52917d4bb5976f50519011c333ab3b0ba686370bba16dec88baf5"
+    },
+    {
+      "path": "/etc/sudoers.d/rob-amber-recovery",
+      "type": "file",
+      "mode": "0o440",
+      "uid": 0,
+      "gid": 0,
+      "size": 260,
+      "sha256": "492c3f8d9ff5f9fb65353d53636e3a7eca86233ea6cdef5c22d41e584ccb8d87"
+    }
+  ],
+  "authorization": "User requested authenticated sudo access to copy the protected sudoers files.",
+  "authentication": "Existing Cerebro SSH password from Keychain, supplied over encrypted SSH stdin to a scoped sudo command.",
+  "protected_file_gap_closed": true,
+  "physical_actions_performed": false
+}

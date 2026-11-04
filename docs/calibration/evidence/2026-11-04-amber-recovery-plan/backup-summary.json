@@ -13,7 +13,8 @@
     "files_verified": 7,
     "complete": false,
     "missing_protected_file": "/etc/sudoers.d/rob-amber-recovery",
-    "error": "PermissionError"
+    "error": "PermissionError",
+    "scope_note": "Original seven-file snapshot remains unchanged; its protected-file gap is closed by the later sudoers supplement."
   },
   "disk": {
     "observed_path": "/dev/sda",
@@ -50,5 +51,13 @@
   "physical_actions_performed": false,
   "protected_guards_installed": false,
   "messages_delivery_verified": false,
-  "messages_error": "Sky Computer Use native pipe startup failed"
+  "messages_error": "Sky Computer Use native pipe startup failed",
+  "sudoers_supplement": {
+    "evidence": "sudoers-supplement.json",
+    "archive_sha256": "9b2c27411331a845af1c221c9b36deea0c3c23d1277a0b2c8e717eb6db7a6ce0",
+    "archive_bytes": 2320,
+    "files_verified": 3,
+    "protected_file_gap_closed": true,
+    "visudo_exit_code": 0
+  }
 }
