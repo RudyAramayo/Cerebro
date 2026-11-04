@@ -89,6 +89,25 @@ connectors still do not establish supply pins, polarity, voltage, bitrate,
 motor protocol or joint/profile compatibility. Do not label the two J1 wires
 as power or data without identification.
 
+The follow-up read-only `/proc` and USB-sysfs inspection found two adapters
+advertising Openlight Labs CANable2 `b158aa7`, VID/PID `16d0:117e`. Both active
+slcand command lines use `-s8`: ttyACM1 -> can10 and ttyACM0 -> can11. The pinned
+[firmware command reference](https://github.com/normaldotcom/canable2-fw/blob/b158aa7ab106bc018715cd4d5f02f544f9de1830/README.md)
+defines S8 as 1 Mbit/s. This establishes the configured high-speed CAN rate;
+it is not a fresh bus waveform measurement or verification of the spare arms.
+No CAN or serial command was sent for this observation.
+
+Rudy recalls a jumper labelled for CAN_H/CAN_L. Its physical function remains
+unidentified. The [CANable guide](https://www.canable.io/getting-started.html)
+describes termination and bootloader controls. Other CANable-compatible RJ45
+boards such as [CANchovy](https://github.com/fred314159265/CANchovy) have separate
+solder jumpers that route CAN_H, CAN_L and reference ground to connector pins.
+These are examples, not identification of Rudy's board. Keep the working jumper
+positions unchanged until the exact board and labels are inspected. CAN_H and
+CAN_L are used together; neither a termination jumper nor a bootloader control
+selects one of those bus wires. Termination is also separate from high-speed
+versus low-speed CAN and from a motor Stop command.
+
 The vendor documentation distinguishes the V1/X-hub system from V2/Mini-Hub.
 The [V1 wiring guide](https://github.com/MrAsana/AMBER_B1_ROS2/wiki/AMBER-B1%E2%80%90%E2%80%90V1-version-hardware--quickstart)
 and its diagrams show Master LAN2 connected to the X-hub, with a separate
