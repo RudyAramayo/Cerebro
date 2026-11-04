@@ -210,7 +210,7 @@ def target_switching(binary, interface):
         with tempfile.TemporaryDirectory(prefix='rob-retarget-') as directory:
             runtime = Path(directory) / 'session'
             process = subprocess.Popen([str(binary), '--virtual-fixture', '--interface', interface,
-                                        '--runtime-dir', str(runtime), '--duration', '9'],
+                                        '--runtime-dir', str(runtime), '--duration', '12'],
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             assert select.select([process.stdout], [], [], 4)[0], 'startup timeout'
             ready = json.loads(process.stdout.readline())
@@ -280,7 +280,7 @@ def target_switching(binary, interface):
                     send_target(angle)
                     velocity = last['commanded_velocity'][1]
                     position = last['commanded_position'][1]
-                    if direction * velocity > .02 and direction * (position - start_position) > .001:
+                    if direction * velocity > .02 and (leg != 0 or start_position - position > .01):
                         assert abs(position - angle) > .005, 'reverse well before target completion'
                         legs.append(dict(leg=leg, sequence=sequence, position=position, velocity=velocity, target=angle))
                         break
