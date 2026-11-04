@@ -266,13 +266,27 @@ def target_switching(binary, interface):
                     break
             else:
                 raise AssertionError('initial simulated move did not settle')
+            legs = []
             for leg in range(12):
                 if abs(last['commanded_velocity'][1]) > .001:
                     moving_changes += 1
-                end = time.monotonic() + .35
-                while time.monotonic() < end:
-                    send_target(math.radians(5 if leg % 2 else 2))
-            assert moving_changes >= 10 and reversals >= 8, (moving_changes, reversals)
+                angle = math.radians(5 if leg % 2 else 2)
+                direction = 1 if leg % 2 else -1
+                start_position = last['commanded_position'][1]
+                # Trigger by observed motion, not a timer that can land near a
+                # zero-velocity crossing on differently scheduled runners.
+                deadline = time.monotonic() + 1.5
+                while time.monotonic() < deadline:
+                    send_target(angle)
+                    velocity = last['commanded_velocity'][1]
+                    position = last['commanded_position'][1]
+                    if direction * velocity > .02 and direction * (position - start_position) > .001:
+                        assert abs(position - angle) > .005, 'reverse well before target completion'
+                        legs.append(dict(leg=leg, sequence=sequence, position=position, velocity=velocity, target=angle))
+                        break
+                else:
+                    raise AssertionError(('no bounded moving-switch point', leg, last))
+            assert moving_changes == 11 and reversals >= 11, (moving_changes, reversals)
             assert command('stop')['accepted']
             assert not command('target', sequence=sequence + 1, position=[0] * 7)['accepted']
             output, error = process.communicate(timeout=6)
@@ -285,7 +299,7 @@ def target_switching(binary, interface):
             return dict(test='finite_small_move_then_twelve_mid_motion_retargets', passed=True,
                         mid_motion_changes=moving_changes, velocity_reversals=reversals,
                         peak_velocity_rad_s=peak_velocity, final_status=final,
-                        owner_threads=1, feedback='synthetic ideal virtual CAN plant')
+                        owner_threads=1, legs=legs, feedback='synthetic ideal virtual CAN plant')
     finally:
         if client is not None:
             client.close()
