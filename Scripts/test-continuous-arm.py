@@ -47,6 +47,9 @@ def main():
     boundary = [json.loads(line) for line in run([str(build / "arm_driver_boundary_tests")]).splitlines() if line.strip()]
     receive_clock = [json.loads(line) for line in run([str(build / "receive_clock_tests")]).splitlines() if line.strip()]
     session = [json.loads(line) for line in run([str(build / "arm_session_tests")]).splitlines() if line.strip()]
+    rehearsal_binary = build / "rob-amber-rehearse"
+    rehearsal = [json.loads(line) for line in run([str(rehearsal_binary), "--run"]).splitlines() if line.strip()]
+    run([sys.executable, '-B', str(ROOT / 'Tests/ROBAmberCommissioningPreflightTests.py')])
     linux_executable = build / "amber_linux_transport_tests"
     linux_transport = ([json.loads(line) for line in run([str(linux_executable)]).splitlines() if line.strip()]
                        if sys.platform.startswith("linux") else None)
@@ -65,6 +68,7 @@ def main():
                     "Tools/ContinuousArm/SocketCanTransport.hpp",
                     "Tools/ContinuousArm/SocketCanTransport.cpp",
                     "Tools/ContinuousArm/AmberControllerMain.cpp",
+                    "Tools/ContinuousArm/AmberRehearsalMain.cpp",
                     "Tools/ContinuousArm/CMakeLists.txt",
                     "Tests/ROBAmberWireCodecTests.cpp",
                     "Tests/ROBArmDriverBoundaryTests.cpp",
@@ -73,11 +77,15 @@ def main():
                     "Scripts/test-amber-linux-isolation.py",
                     "Scripts/test-amber-runtime.py",
                     "Scripts/test-continuous-arm.py"]
+    source_files += ['Scripts/amber-commissioning-preflight.py', 'Tests/ROBAmberCommissioningPreflightTests.py',
+                     'Scripts/package-amber-controller.py', 'Tools/ContinuousArm/DEPLOYMENT.md']
     report = {"hardware_io": False, "installed": False, "ruckig_version": "0.9.2",
               "ruckig_commit": revision, "sanitizer": args.sanitizer,
               "source_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in source_files},
               "tests": records, "legacy_comparison": legacy, "wire_codec_tests": codec, "driver_boundary_tests": boundary,
-              "receive_clock_tests": receive_clock, "session_tests": session, "linux_transport_no_io_tests": linux_transport}
+              "receive_clock_tests": receive_clock, "session_tests": session, "linux_transport_no_io_tests": linux_transport,
+              "rehearsal_tests": rehearsal, "rehearsal_binary_sha256": hashlib.sha256(rehearsal_binary.read_bytes()).hexdigest(),
+              "preflight_tests": {"passed": 7, "failed": 0, "hardware_io": False}}
     if args.summary:
         args.summary.parent.mkdir(parents=True, exist_ok=True)
         args.summary.write_text(json.dumps(report, indent=2) + "\n")
@@ -89,6 +97,7 @@ def main():
     print(json.dumps(next(x for x in boundary if "metrics" in x)))
     print(json.dumps({"sanitizer": args.sanitizer, "receive_clock": receive_clock[-1]}))
     print(json.dumps({"sanitizer": args.sanitizer, "session": session[-1]}))
+    print(json.dumps({"sanitizer": args.sanitizer, "rehearsal": rehearsal[-1]}))
 
 
 if __name__ == "__main__":

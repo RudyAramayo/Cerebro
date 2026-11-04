@@ -7,6 +7,38 @@ installed vendor cores and Cerebro completion guard remain in service. No
 installer, automatic restart, mode command, gripper command or physical transmit
 switch is included. A client JSON field cannot change this restriction.
 
+## Overnight preparation (2026-11-03)
+
+Rudy authorized side-by-side inactive staging, then deferred physical testing
+until morning. The head and camera mounts are not built. Arm-only testing may
+proceed after explicit resume without waiting for those mounts, using a checked
+empty-arm sweep. No automatic start, activation, mode change, namespace cutover,
+core restart or target replay is part of this package.
+
+`bin/rob-amber-rehearse --run` exercises the real owner/session/codec against an
+ideal, quantized simulated plant. It has no SocketCAN dependency, socket, device
+or network code. A five-degree synthetic native-J2 move settles, then twelve
+two/five-degree target switches exercise moving reversals. Five runs end with
+Stop, disconnect, shutdown, stale target or lost feedback. Reported time is
+simulated, not a real-time scheduling benchmark. The synthetic .08 rad/s,
+.16 rad/s² and .5 rad/s³ bounds are conservative test settings, not verified
+motor ratings; positive native J2 is not established as a physical raise.
+
+`python3 amber-commissioning-preflight.py --package ABSOLUTE_PACKAGE_DIRECTORY`
+reads process, namespace, serial permissions, service and binary-hash evidence.
+It never opens CAN/UDP, calls sudo, reads credentials, executes the recovery
+helper, or changes services. Exit zero means the inventory ran; the report
+always states `physical_stream_ready: false` for this receive-only release.
+Manifest checks prove self-consistency; pin the downloaded archive hash from the
+verified CI artifact separately. An inventory is not a continuing ownership
+lease, a power-state measurement or motor authority.
+
+The matching Amber-HomeFolder source adds a persistent legacy-startup/recovery
+inhibit. Until that root-owned code is installed and verified during a reviewed
+cutover, copying its files to staging changes no active protection. See the
+repository handoff `docs/calibration/amber-overnight-preparation-2026-11-03.md`
+for the actual deployment and remaining commissioning work.
+
 ## Artifact and verification
 
 The package targets ELF64 x86_64 on Ubuntu 22.04, matching Amber's read-only OS
@@ -78,9 +110,10 @@ actuator traffic cannot be made safe by a userspace process alone.
 
 ## Physical commissioning prerequisites
 
-Keep physical testing paused during the neck-mount repair and coordinate the
-runtime handoff with the pouring and other robot sessions. No automatic morning
-resume is authorized. Before enabling a future physical backend, establish:
+Keep physical testing paused while Rudy sleeps and coordinate the runtime
+handoff with other robot sessions. Head-mount completion is not required for
+Rudy's requested later arm-only test. No automatic morning resume is authorized.
+Before enabling a future physical backend, establish:
 
 1. Verified native joint signs/zeros, ratings, velocity/acceleration/jerk limits,
    mode/status meaning and a stationary-start procedure. The current values are

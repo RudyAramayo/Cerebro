@@ -54,8 +54,15 @@ def main():
         if portable[field][-1]['passed'] != count or portable[field][-1]['failed']:
             raise SystemExit('Validation missing: ' + field)
     if (native['tests'][-1]['passed'] != 8 or native['tests'][-1]['failed'] or
-            native['runtime_tests'][-1]['passed'] != 10 or native['runtime_tests'][-1]['failed']):
+            native['runtime_tests'][-1]['passed'] != 11 or native['runtime_tests'][-1]['failed']):
         raise SystemExit('Native transport and executable validation required')
+    if portable['rehearsal_tests'][-1]['passed'] != 5 or portable['rehearsal_tests'][-1]['failed']:
+        raise SystemExit('Finite commissioning rehearsal validation required')
+    if portable['preflight_tests']['passed'] != 7 or portable['preflight_tests']['failed']:
+        raise SystemExit('Read-only preflight validation required')
+    rehearsal_binary = args.build_dir.resolve() / 'rob-amber-rehearse'
+    if hashlib.sha256(rehearsal_binary.read_bytes()).hexdigest() != portable['rehearsal_binary_sha256']:
+        raise SystemExit('Rehearsal binary differs from the tested executable')
     binary = args.build_dir.resolve() / 'rob-amber-controller'
     raw = binary.read_bytes()
     if hashlib.sha256(raw).hexdigest() != native['runtime_binary_sha256']:
@@ -84,6 +91,8 @@ def main():
     (output / 'licenses').mkdir()
     (output / 'validation').mkdir()
     shutil.copy2(binary, output / 'bin/rob-amber-controller')
+    shutil.copy2(rehearsal_binary, output / 'bin/rob-amber-rehearse')
+    shutil.copy2(ROOT / 'Scripts/amber-commissioning-preflight.py', output / 'amber-commissioning-preflight.py')
     shutil.copy2(source / 'LICENSE', output / 'licenses/Ruckig-LICENSE')
     shutil.copy2(source / 'third_party/json/LICENSE', output / 'licenses/nlohmann-json-LICENSE')
     shutil.copy2(ROOT / 'Tools/ContinuousArm/DEPLOYMENT.md', output / 'DEPLOYMENT.md')
@@ -94,7 +103,7 @@ def main():
                 'needed_libraries': needed, 'required_symbol_versions': versions, 'interpreter': interpreter[0],
                 'observed_amber': {'os': 'Ubuntu 22.04.3', 'architecture': 'x86_64', 'glibc': '2.35'},
                 'physical_transmit_available': False, 'installed': False, 'service_enabled': False,
-                'portable_groups': 53, 'transport_groups': 8, 'runtime_groups': 10,
+                'portable_groups': 53, 'transport_groups': 8, 'runtime_groups': 11, 'rehearsal_groups': 5, 'preflight_tests': 7,
                 'release_scope': 'Passive commissioning and isolated virtual-CAN control only',
                 'files_sha256': {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
                                  for p in sorted(output.rglob('*')) if p.is_file()}}

@@ -201,6 +201,104 @@ def scenario(binary, interface, action):
         arm.close()
 
 
+def target_switching(binary, interface):
+    """Small initial move, then 12 finite reversals through the actual IPC path."""
+    arm = VirtualArm(interface)
+    process = None
+    client = None
+    try:
+        with tempfile.TemporaryDirectory(prefix='rob-retarget-') as directory:
+            runtime = Path(directory) / 'session'
+            process = subprocess.Popen([str(binary), '--virtual-fixture', '--interface', interface,
+                                        '--runtime-dir', str(runtime), '--duration', '9'],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            assert select.select([process.stdout], [], [], 4)[0], 'startup timeout'
+            ready = json.loads(process.stdout.readline())
+            assert ready['interface_kind'] == 'vcan'
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+            client.settimeout(2)
+            client.connect(str(runtime / 'control.sock'))
+            hello = receive(client)
+            assert hello['virtual_fixture'] is True
+            time.sleep(.3)
+            generation = 0
+            sequence = 0
+
+            def command(op, **extra):
+                packet = dict(op=op, nonce=hello['nonce'], generation=generation,
+                              created_ns=time.monotonic_ns(), **extra)
+                client.send(json.dumps(packet).encode())
+                return receive(client)
+
+            started = command('start')
+            assert started['accepted']
+            generation = started['generation']
+            last = started
+            reversals = 0
+            previous_direction = 0
+            moving_changes = 0
+            peak_velocity = 0
+
+            def send_target(angle):
+                nonlocal sequence, last, reversals, previous_direction, peak_velocity
+                q = [0.] * 7
+                q[1] = angle
+                sequence += 1
+                last = command('target', sequence=sequence, position=q)
+                assert last['accepted'] and last['generation'] == generation, last
+                assert last['mode'] == 'following', last
+                assert len(list(Path(f'/proc/{process.pid}/task').iterdir())) == 1, 'one owner thread throughout retargets'
+                assert all(abs(x) < 1e-10 for i, x in enumerate(last['commanded_position']) if i != 1)
+                velocity = last['commanded_velocity'][1]
+                peak_velocity = max(peak_velocity, abs(velocity))
+                direction = 1 if velocity > .001 else -1 if velocity < -.001 else 0
+                if direction and previous_direction and direction != previous_direction:
+                    reversals += 1
+                if direction:
+                    previous_direction = direction
+                time.sleep(.01)
+
+            # Arrival of an ideal synthetic plant; never physical arrival proof.
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                send_target(math.radians(5))
+                if abs(last['commanded_position'][1] - math.radians(5)) < .0002 and abs(last['commanded_velocity'][1]) < 1e-8:
+                    break
+            else:
+                raise AssertionError('initial simulated move did not settle')
+            for leg in range(12):
+                if abs(last['commanded_velocity'][1]) > .001:
+                    moving_changes += 1
+                end = time.monotonic() + .35
+                while time.monotonic() < end:
+                    send_target(math.radians(5 if leg % 2 else 2))
+            assert moving_changes >= 10 and reversals >= 8, (moving_changes, reversals)
+            assert command('stop')['accepted']
+            assert not command('target', sequence=sequence + 1, position=[0] * 7)['accepted']
+            output, error = process.communicate(timeout=6)
+            final = json.loads(output.splitlines()[-1])['status']
+            assert process.returncode == 0 and final['mode'] == 'held' and final['reason_name'] == 'Stop', (final, error)
+            assert final['generation'] == generation == 1 and final['accepted_targets'] == sequence
+            assert final['replans'] >= 12 and final['received_target_sequence'] == sequence
+            assert final['backend_accepted_frames'] == final['boundary_accepted_frames'] > 1000
+            assert not runtime.exists()
+            return dict(test='finite_small_move_then_twelve_mid_motion_retargets', passed=True,
+                        mid_motion_changes=moving_changes, velocity_reversals=reversals,
+                        peak_velocity_rad_s=peak_velocity, final_status=final,
+                        owner_threads=1, feedback='synthetic ideal virtual CAN plant')
+    finally:
+        if client is not None:
+            client.close()
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.communicate(timeout=4)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=2)
+        arm.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=Path)
@@ -221,7 +319,8 @@ def main():
     print(json.dumps(observe_without_start(binary, args.interface)), flush=True)
     for action in ['disconnect', 'stop', 'replay', 'nonce', 'oversized', 'duplicate', 'signal', 'feedback_loss']:
         print(json.dumps(scenario(binary, args.interface, action)), flush=True)
-    print(json.dumps({'passed': 10, 'failed': 0, 'robot_io': False, 'virtual_CAN_io': True}))
+    print(json.dumps(target_switching(binary, args.interface)), flush=True)
+    print(json.dumps({'passed': 11, 'failed': 0, 'robot_io': False, 'virtual_CAN_io': True}))
 
 
 if __name__ == '__main__':
