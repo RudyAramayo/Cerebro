@@ -24,8 +24,9 @@ still takes approximately 0.5 seconds to respond.
 The operator also verified **8000 ON / 4000 OFF for both relays**. Existing calibrations using those
 exact values receive a one-time wiring confirmation; different saved values are not confirmed.
 The runtime never restores authorization or live output mode from disk. On Maestro connection,
-it applies the confirmed relay OFF values and the saved startup tuck: Tilt first,
-then Pan after 0.75 seconds (the installed values are 8000 / 4000). The separate
+it applies the confirmed relay OFF values, centers Pan, sweeps front-right/front-left
+twice, parks Pan at the saved startup value, and only then parks Tilt. No tilt
+command is sent during pan travel or its final settling interval. The separate
 default-on **Settings → Arms and motion → Run saved laser mount startup after
 connecting** setting (`ROBLaserMountAutomaticStartupEnabled`) controls this
 sequence. Passive arm/gripper startup cannot suppress it. An explicit disabled
@@ -56,8 +57,8 @@ progress and accepted targets; these are not measured shaft positions.
    settled for 0.5 seconds. Turning off the fan also turns off bubbles.
 5. **Pulse** uses a 0.5-second spin lead, 3 seconds of blower command, then 5 seconds with both off.
    **Continuous** runs until the working budget ends. Neither mode restarts after cooldown.
-6. **STOP** disarms and sends both relay OFF values. **Stow laser** stops first, tucks Tilt down, then
-   rotates Pan to the saved side. Remote stow requires mount authorization; authorization is
+6. **STOP** disarms and sends both relay OFF values. **Stow laser** stops first, parks Pan at the saved side, waits, then
+   parks Tilt (without the decorative sweeps). Remote stow requires mount authorization; authorization is
    inhibited during the stow sequence. **Release Tilt/Pan** is always available as an OFF action.
 
 **At Cerebro**, local sliders and buttons are direct operator actions. They enable the appropriate
@@ -248,3 +249,35 @@ delivery methods from a background queue and checks main-thread delivery and pac
 
 The operator verified the relay thresholds. Software tests do not verify nozzle alignment, laser
 clearance, controller button mapping, or real cooling performance.
+
+### Configurable pan-first startup (2026-11-13)
+
+Settings → Arms and motion includes **Save laser animation**, with oscillation on/off,
+center/front-right/front-left pan targets, 1–4 right/left cycles, and independent pan
+and tilt settling intervals (0.75–10 seconds). Defaults are 6000 / 7000 / 5000, two
+cycles and two seconds per target. Final pan/tilt retain `stowPan` / `stowTilt` in the
+existing calibration (factory 4000 / 8000). The startup animation is persisted separately
+as `ROBLaserStartupAnimation.v1`; malformed saved values block startup instead of
+silently substituting a path. Disabling oscillation preserves pan-before-tilt parking.
+
+The new path does not first command the presumed left-facing starting position:
+it leaves the initial tilt alone and commands pan center. Directions are nominal
+from the existing calibration convention, not physically verified. This is an appearance
+animation, not a sensor calibration. Servo profiles remain those already configured in
+Maestro; these intervals are waits after target dispatch, not a new velocity profile.
+There is no shaft feedback: timed settling cannot establish that a stalled or slow
+servo reached its target, or that a starting tilt pose clears the sweep. Commission
+endpoint directions, path clearance and adequate timing before relying on it.
+
+Each run freezes its settings. Stop, pulse release, local manual takeover, sleep,
+termination and reconnect invalidate pending steps. A rejected pan target prevents
+tilt parking. Remote authorization and local relay activation stay blocked until the
+actual callback sequence finishes, even if the main queue was delayed. Settings
+**Stop + hold** also cancels this laser sequence. Cancellation prevents future targets;
+it does not brake an already moving servo. Release Tilt/Pan explicitly disables pulses.
+
+Offline validation: `bash Scripts/test-bubbles.sh` runs the production sequencer with
+a fake serial device and a deterministic scheduler. It checks exact ordering, preserved
+park targets, setting edits/persistence, corrupt input, cancellation at every phase,
+reconnect invalidation, relay/pan/tilt failures and absence of automatic authorization.
+No production preferences or hardware are touched by these fixtures.

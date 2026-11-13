@@ -98,96 +98,132 @@ struct CameraFrameSet {
         precondition(box.writes == [[6, 0], [7, 0]], "Explicit OFF must still release servo pulses in dry run")
 
         var now = ProcessInfo.processInfo.systemUptime
+        final class Scheduler {
+            var pending: [(Double, () -> Void)] = []
+            func next() { let work = pending.removeFirst(); precondition(work.0 >= 0.75); work.1() }
+            func drain() { var count = 0; while !pending.isEmpty { next(); count += 1; precondition(count < 100) } }
+        }
+        func mountFixture() -> (ROBBubbleRuntime, ROBSerialBox, Scheduler) {
+            let clock = Scheduler()
+            let runtime = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults,
+                uptime: { now }, scheduleMountStep: { clock.pending.append(($0, $1)) })
+            let box = ROBSerialBox(); runtime.serialBox = box
+            return (runtime, box, clock)
+        }
         defaults.set(true, forKey: "ROBPassiveHardwareStartup")
-        let passive = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults, uptime: { now })
-        let passiveHardware = ROBSerialBox(); passive.serialBox = passiveHardware
-        precondition(passive.automaticMountStartupEnabled, "Saved laser startup defaults on independently of passive arms")
+        let (passive, passiveHardware, clock) = mountFixture()
+        precondition(passive.automaticMountStartupEnabled)
         passive.maestroReconnected()
-        precondition(passiveHardware.writes == [[9, 4000], [8, 4000], [6, 8000]], "Relays OFF, then tuck tilt before any pan")
-        precondition(passive.mountStartupStatus()["startup_in_progress"] as? Bool == true)
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.8))
-        precondition(passiveHardware.writes == [[9, 4000], [8, 4000], [6, 8000], [7, 4000]], "Passive arms must not suppress automatic laser positioning")
+        precondition(passiveHardware.writes == [[9, 4000], [8, 4000], [7, 6000]])
+        for target in [7000, 5000, 7000, 5000, 4000] {
+            precondition(passive.mountStartupStatus()["startup_in_progress"] as? Bool == true)
+            clock.next()
+            precondition(passiveHardware.writes.last == [7, target])
+            precondition(!passiveHardware.writes.contains { $0[0] == 6 }, "Tilt must remain untouched until final pan settles")
+        }
+        clock.next()
+        precondition(passiveHardware.writes.last == [6, 8000])
+        precondition(passive.mountStartupStatus()["startup_state"] as? String == "tilt")
+        clock.next()
         precondition(passive.mountStartupStatus()["startup_state"] as? String == "complete")
-        precondition(passive.mountStartupStatus()["commanded_pan"] as? Int == 4000)
-        precondition(passive.mountStartupStatus()["commanded_tilt"] as? Int == 8000)
-        precondition(!passive.snapshot().armed && !passive.liveOutputs && !passive.liveMountOutputs,
-                     "Automatic positioning must not authorize later mount or relay operations")
-        now += 2
-        passive.manualPan(6200, tilt: 5800)
-        precondition(passiveHardware.writes.suffix(2) == [[7, 6200], [6, 5800]], "Passive startup blocked explicit controls")
-
-        // Persist non-factory values and exercise the actual runtime without
-        // serial ports or the production preferences domain.
+        precondition(!passive.snapshot().armed && !passive.liveOutputs && !passive.liveMountOutputs)
+        precondition(clock.pending.isEmpty)
         let savedCalibration = defaults.data(forKey: "ROBBubbleCalibration.v1")
         var custom = ROBBubbleCalibration(); custom.stowTilt = 7810; custom.stowPan = 4210
         let customData = try JSONEncoder().encode(custom)
         defaults.set(customData, forKey: "ROBBubbleCalibration.v1")
-        func mountFixture() -> (ROBBubbleRuntime, ROBSerialBox) {
-            let runtime = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults, uptime: { now })
-            let box = ROBSerialBox(); runtime.serialBox = box
-            return (runtime, box)
-        }
-        let (saved, savedBox) = mountFixture()
+        let (saved, savedBox, savedClock) = mountFixture()
         saved.maestroReconnected()
-        precondition(savedBox.writes == [[9, 4000], [8, 4000], [6, 7810]])
-        let (stopped, stoppedBox) = mountFixture()
-        stopped.maestroReconnected(); stopped.localCommand(.init(.stop))
-        let (released, releasedBox) = mountFixture()
-        released.maestroReconnected(); released.releaseMount()
-        let (overridden, overriddenBox) = mountFixture()
-        overridden.maestroReconnected(); overridden.manualPan(6100, tilt: 5900)
-        let (failedTilt, failedTiltBox) = mountFixture()
-        failedTiltBox.failedChannels = [6]; failedTilt.maestroReconnected()
-        let (failedRelay, failedRelayBox) = mountFixture()
-        failedRelayBox.failedChannels = [9]; failedRelay.maestroReconnected()
-        let (disconnected, disconnectedBox) = mountFixture()
-        disconnected.maestroReconnected(); disconnectedBox.bubbleHardwareReady = false
-        let (failedPan, failedPanBox) = mountFixture()
-        failedPanBox.failedChannels = [7]; failedPan.maestroReconnected()
-        let (reconnected, reconnectedBox) = mountFixture()
-        reconnected.maestroReconnected(); reconnected.maestroReconnected()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.8))
-        precondition(savedBox.writes == [[9, 4000], [8, 4000], [6, 7810], [7, 4210]])
-        precondition(saved.pan == 4210 && saved.tilt == 7810, "Published position must use the saved values actually sent")
-        precondition(defaults.data(forKey: "ROBBubbleCalibration.v1") == customData, "Startup must never rewrite saved calibration")
-        precondition(stoppedBox.writes.allSatisfy { $0[0] != 7 } && stopped.mountStartupStatus()["startup_state"] as? String == "cancelled")
-        precondition(releasedBox.writes.suffix(2) == [[6, 0], [7, 0]], "Release must cancel delayed pan")
-        precondition(overriddenBox.writes.suffix(2) == [[7, 6100], [6, 5900]], "Manual action must cancel delayed pan")
-        precondition(failedTiltBox.writes.allSatisfy { $0[0] != 7 }, "A failed tuck must never be followed by pan")
-        precondition(failedRelayBox.writes.allSatisfy { ![6, 7].contains($0[0]) }, "Unverified relay OFF must prevent positioning")
-        precondition(disconnectedBox.writes.allSatisfy { $0[0] != 7 }, "Disconnection must prevent delayed pan")
-        for failed in [failedTilt, failedRelay, disconnected, failedPan] {
+        var animation = ROBLaserStartupAnimation(); animation.oscillate = false
+        precondition(saved.saveStartupAnimation(animation))
+        savedClock.drain()
+        precondition(savedBox.writes == [[9, 4000], [8, 4000], [7, 6000], [7, 7000], [7, 5000], [7, 7000], [7, 5000], [7, 4210], [6, 7810]], "In-flight configuration must stay frozen")
+        precondition(defaults.data(forKey: "ROBBubbleCalibration.v1") == customData)
+        let (direct, directBox, directClock) = mountFixture()
+        direct.maestroReconnected(); directClock.drain()
+        precondition(directBox.writes == [[9, 4000], [8, 4000], [7, 4210], [6, 7810]])
+        animation.oscillate = true; animation.cycles = 3; animation.frontRightPan = 6800
+        precondition(saved.saveStartupAnimation(animation))
+        let (configured, configuredBox, configuredClock) = mountFixture()
+        configured.maestroReconnected(); configuredClock.drain()
+        precondition(configuredBox.writes.filter { $0 == [7, 6800] }.count == 3)
+        animation.panSettleSeconds = .nan
+        precondition(!saved.saveStartupAnimation(animation))
+        defaults.set(Data("bad".utf8), forKey: ROBLaserStartupAnimation.defaultsKey)
+        let (invalid, invalidBox, invalidClock) = mountFixture()
+        invalid.maestroReconnected(); invalidClock.drain()
+        precondition(invalidBox.writes == [[9, 4000], [8, 4000]])
+        precondition(invalid.mountStartupStatus()["startup_state"] as? String == "failed")
+        defaults.removeObject(forKey: ROBLaserStartupAnimation.defaultsKey)
+        for phase in 0...6 {
+            let (stopped, stoppedBox, stoppedClock) = mountFixture()
+            stopped.maestroReconnected()
+            for _ in 0..<phase { stoppedClock.next() }
+            stopped.stop(reason: "fixture stop")
+            let before = stoppedBox.writes; stoppedClock.drain()
+            precondition(stoppedBox.writes == before)
+            precondition(stopped.mountStartupStatus()["startup_state"] as? String == "cancelled")
+        }
+        for action in 0...2 {
+            let (cancelled, cancelledBox, cancelledClock) = mountFixture()
+            cancelled.maestroReconnected()
+            if action == 0 { cancelled.releaseMount() }
+            if action == 1 { cancelled.manualPan(6100, tilt: 5900) }
+            if action == 2 { NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: nil) }
+            let before = cancelledBox.writes; cancelledClock.drain()
+            precondition(cancelledBox.writes == before)
+        }
+        for channel in [6, 7, 8, 9] {
+            let (failed, failedBox, failedClock) = mountFixture()
+            failedBox.failedChannels = [channel]; failed.maestroReconnected(); failedClock.drain()
             precondition(failed.mountStartupStatus()["startup_state"] as? String == "failed")
-            precondition(failed.mountStartupStatus()["commanded_pan"] is NSNull, "Rejected targets cannot be reported as commanded")
+            if channel != 6 { precondition(!failedBox.writes.contains { $0[0] == 6 }) }
+            precondition(failed.mountStartupStatus()[channel == 6 ? "commanded_tilt" : "commanded_pan"] is NSNull)
         }
-        precondition(reconnectedBox.writes.filter { $0[0] == 7 } == [[7, 4210]], "Reconnect must invalidate the old delayed pan")
-
-        let writesBeforeSetting = savedBox.writes
+        let (delayed, delayedBox, delayedClock) = mountFixture()
+        delayed.maestroReconnected()
+        now += 120 // An overdue main-queue callback is not completion.
+        delayed.localCommand(.init(.spinOn))
+        delayed.receive(.init(controllerID: UUID(), sessionID: UUID(), sequence: 1,
+                             command: .init(.authorizeMount)))
+        precondition(!delayed.snapshot().armed && delayed.snapshot().mountAuthorized != true)
+        precondition(!delayedBox.writes.contains([8, 8000]))
+        delayed.stop(reason: "test completed"); delayedClock.drain()
+        let (lateFailure, lateBox, lateClock) = mountFixture()
+        lateFailure.maestroReconnected()
+        for _ in 0..<4 { lateClock.next() }
+        lateBox.failedChannels = [7] // Fail the final park, after the sweeps succeeded.
+        lateClock.drain()
+        precondition(!lateBox.writes.contains { $0[0] == 6 })
+        precondition(lateFailure.mountStartupStatus()["startup_state"] as? String == "failed")
+        let (sleeping, sleepingBox, sleepingClock) = mountFixture()
+        sleeping.maestroReconnected()
+        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
+        let beforeSleep = sleepingBox.writes; sleepingClock.drain()
+        precondition(sleepingBox.writes == beforeSleep)
+        let (disconnected, disconnectedBox, disconnectedClock) = mountFixture()
+        disconnected.maestroReconnected(); disconnectedBox.bubbleHardwareReady = false; disconnectedClock.drain()
+        precondition(!disconnectedBox.writes.contains { $0[0] == 6 })
+        precondition(disconnected.mountStartupStatus()["startup_state"] as? String == "failed")
+        let (reconnected, reconnectedBox, reconnectedClock) = mountFixture()
+        reconnected.maestroReconnected(); reconnected.maestroReconnected(); reconnectedClock.drain()
+        precondition(reconnectedBox.writes.filter { $0[0] == 6 } == [[6, 7810]])
+        let beforeSetting = savedBox.writes
         saved.automaticMountStartupEnabled = false
-        precondition(savedBox.writes == writesBeforeSetting, "Changing the preference must not move hardware")
-        let (disabled, disabledBox) = mountFixture()
-        precondition(!disabled.automaticMountStartupEnabled, "Explicit opt-out survives runtime recreation")
-        disabled.maestroReconnected()
-        defaults.set("invalid", forKey: "ROBLaserMountAutomaticStartupEnabled")
-        let (invalidSetting, invalidSettingBox) = mountFixture()
-        precondition(!invalidSetting.automaticMountStartupEnabled)
-        invalidSetting.maestroReconnected()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.8))
-        for box in [disabledBox, invalidSettingBox] {
-            precondition(box.writes == [[9, 4000], [8, 4000]], "Disabled startup still sends relay OFF but never positions servos")
+        precondition(savedBox.writes == beforeSetting)
+        for setting: Any in [false, "invalid"] {
+            defaults.set(setting, forKey: "ROBLaserMountAutomaticStartupEnabled")
+            let (disabled, disabledBox, disabledClock) = mountFixture()
+            disabled.maestroReconnected(); disabledClock.drain()
+            precondition(disabledBox.writes == [[9, 4000], [8, 4000]])
         }
-        precondition(disabled.mountStartupStatus()["startup_state"] as? String == "disabled")
-        disabled.automaticMountStartupEnabled = true
-        let (reenabled, reenabledBox) = mountFixture()
-        reenabled.maestroReconnected()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.8))
-        precondition(reenabledBox.writes.suffix(2) == [[6, 7810], [7, 4210]], "Explicit enable restores the saved sequence")
         defaults.removeObject(forKey: "ROBLaserMountAutomaticStartupEnabled")
         defaults.set(savedCalibration, forKey: "ROBBubbleCalibration.v1")
         defaults.set(false, forKey: "ROBPassiveHardwareStartup")
-        let live = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults, uptime: { now })
-        let hardware = ROBSerialBox(); live.serialBox = hardware
-        live.maestroReconnected()
+        let (live, hardware, liveClock) = mountFixture()
+        live.maestroReconnected(); liveClock.drain()
+        live.localCommand(.init(.stow)); precondition(hardware.writes.last == [7, 4000])
+        liveClock.drain(); precondition(hardware.writes.last == [6, 8000])
         now += 2
         var sequence: UInt64 = 0
         func liveRequest(_ operation: ROBBubbleOperation, pan: Int? = nil, tilt: Int? = nil) {
