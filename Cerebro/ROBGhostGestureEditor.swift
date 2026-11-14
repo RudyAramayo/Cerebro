@@ -32,6 +32,7 @@ import simd
     @nonobjc private var proposal: ROBLeftGestureProposal?
     @nonobjc private var canPreview: ROBCanGrabPreview?
     @nonobjc private var collisionPreview: ROBLeftGestureProposal?
+    private var lastObservedCollisionProposalID: UUID?
     @nonobjc private var displayedCan: ROBWorkspaceLocatedObject?
     private var lastCanInfoUpdate = 0.0
     private var canRequestID: UUID?
@@ -214,7 +215,8 @@ import simd
 
     private func updateHeadInfo() {
         let lift=model.map{ROBNeckRGBPoseDisplay.robotModelDisplayLiftMeters(model:$0)} ?? 0
-        let modelLabel=lift==0 ? "":String(format:"\nRobot display %+.2f in · presentation only",lift/0.0254)
+        let modelLabel=(lift==0 ? "":String(format:"\nRobot display %+.2f in · presentation only",lift/0.0254))+
+            "\nUpright body display · lateral QR-fit tilt removed"
         guard let pitch = headOpticalPitchRadians else {
             headInfo.stringValue = "Head: command estimate unavailable"+modelLabel; return
         }
@@ -258,6 +260,7 @@ import simd
 
     @objc private func depthAlignmentDidChange() {
         invalidateReview(); displayedCan = nil
+        lastObservedCollisionProposalID=nil
         clearCanVisuals()
         collisionMapOverlay.childNodes.forEach { $0.removeFromParentNode() }
         collisionMapRenderKey = nil
@@ -282,9 +285,14 @@ import simd
             guard let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return [] }
             alignedFrame = alignment.applying(to: frame)
         }
+        let rawGauge=fitted?.modelToDisplay ?? matrix_identity_double4x4
+        let gauge=ROBNeckRGBPoseDisplay.uprightPresentationGauge(model:model,modelToDisplay:rawGauge)
         let transform:simd_double4x4
-        if !belly,let fitted { transform=basis*fitted.depthCloudCameraToModel }
-        else { transform=basis*(fitted?.modelToDisplay ?? matrix_identity_double4x4)*alignedFrame }
+        if !belly,let fitted {
+            var cloud=gauge*alignedFrame
+            cloud.columns.3.z+=fitted.headDepthDisplayLiftMeters
+            transform=basis*cloud
+        } else { transform=basis*gauge*alignedFrame }
         return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
     }
 
@@ -530,7 +538,9 @@ import simd
     /// This is a value-only review of the last checked artifact. It deliberately
     /// never assigns the executable proposal or binds a live execution baseline.
     @objc private func showLatestCollisionReview() {
-        guard !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning else { return }
+        // A read-only live path may be shown during travel. Never replace or
+        // cancel an execution request owned by this editor to display it.
+        guard !ownsPendingRequest || !ROBControllerArmApproval.shared.isPending else { return }
         let selectedSide = ROBLeftArmTrial.shared.physicalSide
         if model?.physicalSide != selectedSide, let directory = model?.directory {
             do { model = try ROBGhostRobotModel(directory:directory,physicalSide:selectedSide) }
@@ -544,6 +554,7 @@ import simd
             status.stringValue = collisionInfo.stringValue
             return
         }
+        lastObservedCollisionProposalID=candidate.id
         guard candidate.validForReplay(model: model) else {
             identity.stringValue = "Path preview unavailable for this robot model"
             status.stringValue = "The stored preview does not match the current model or route format. Capture and plan again."
@@ -578,7 +589,12 @@ import simd
             collisionPathOverlay.addChildNode(node)
         }
         collisionPathOverlay.isHidden = collisionPathVisible.state != .on
-        executeButton.isEnabled = false; renderTime(0); play()
+        executeButton.isEnabled = false
+        if ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning {
+            // The start ghost often coincides with the real arm and is hidden.
+            // Keep the complete line and proposed endpoint visible during travel.
+            timeline.doubleValue=candidate.seconds;renderTime(candidate.seconds)
+        } else {renderTime(0);play()}
     }
 
     private func refreshCollisionScene(force: Bool) {
@@ -590,7 +606,7 @@ import simd
             admissionCurrent: admissionCurrent)
         collisionMapOverlay.isHidden = collisionMapVisible.state != .on
         guard let snapshot, let model, snapshot.modelID == model.modelID,
-              snapshot.geometryID == model.geometryID, snapshot.mappingID == ROBGhostRobotModel.mappingID else {
+              snapshot.geometryID == model.geometryID, snapshot.mappingID == model.selectedMappingID else {
             if collisionMapRenderKey != nil { collisionMapOverlay.childNodes.forEach { $0.removeFromParentNode() }; collisionMapRenderKey = nil }
             return
         }
@@ -1121,6 +1137,11 @@ import simd
         }
     }
     private func tick() {
+        if let candidate=ROBLeftArmTrial.shared.collisionReviewProposal,
+           candidate.id != lastObservedCollisionProposalID, !ownsPendingRequest,
+           proposal == nil, canPlanTask == nil, canPreview == nil, !replayingRecording, poses.isEmpty {
+            showLatestCollisionReview()
+        }
         guard let model else { return }
         refreshInteractionStage()
         let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
@@ -1142,11 +1163,13 @@ import simd
         if displayedRGBProfileID != displayProfileID {
             displayedRGBProfileID=displayProfileID
             invalidateReview()
+            lastObservedCollisionProposalID=nil
             updateNodes(originalNodes,positions:renderPositions(originalPositions,preview:false))
             updateNodes(ghostNodes,positions:renderPositions(ghostDisplayPositions,preview:true))
             updateHeadInfo()
         }
-        let gauge=fitted?.modelToDisplay ?? matrix_identity_double4x4
+        let gauge=ROBNeckRGBPoseDisplay.uprightPresentationGauge(model:model,
+            modelToDisplay:fitted?.modelToDisplay ?? matrix_identity_double4x4)
         let displayGauge=simd_float4x4(columns:(SIMD4<Float>(gauge.columns.0),SIMD4<Float>(gauge.columns.1),SIMD4<Float>(gauge.columns.2),SIMD4<Float>(gauge.columns.3)))
         let base = capturedRobot.presentation.simdWorldTransform * modelBasis * displayGauge
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }

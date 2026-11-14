@@ -16,31 +16,67 @@ enum ROBWorkspaceHumanProximity {
         let modelAllowanceMeters:Double,humanBufferMeters:Double
         let sweptSampleAllowanceMeters:Double,openJawAdditionalMarginMeters:Double
     }
+    fileprivate struct Configuration:Codable {
+        let kind:String,modelID:String,referenceID:String,geometryID:String,mappingID:String,physicalSide:String
+        let baseline:[Double],route:[[Double]],cameraToRobotColumnMajor:[Double]
+        let width:Int,height:Int
+        let fx:Double,fy:Double,cx:Double,cy:Double
+        let modelAllowanceMeters:Double,humanBufferMeters:Double,sweptSampleAllowanceMeters:Double,openJawAdditionalMarginMeters:Double
+    }
+    fileprivate struct ProjectedEnvelope {
+        let link:String,rectangle:[Double]
+    }
+    /// Sealed, immutable native geometry. No decoding/import initializer exists.
+    /// Preparation performs CAD/FK once off the live frame path; this value
+    /// binds exact physical model, route, projection, K and uncertainty inputs.
+    struct PreparedCorridor {
+        fileprivate let configuration:Configuration
+        fileprivate let envelopes:[ProjectedEnvelope]
+        fileprivate let summary:Assessment
+        let routeIdentity:String
+        var modelID:String{configuration.modelID}
+        var referenceID:String{configuration.referenceID}
+        var geometryID:String{configuration.geometryID}
+        var mappingID:String{configuration.mappingID}
+        var physicalSide:String{configuration.physicalSide}
+        var baseline:[Double]{configuration.baseline}
+        var route:[[Double]]{configuration.route}
+        var cameraToRobotColumnMajor:[Double]{configuration.cameraToRobotColumnMajor}
+        var width:Int{configuration.width}
+        var height:Int{configuration.height}
+        var fx:Double{configuration.fx}
+        var fy:Double{configuration.fy}
+        var cx:Double{configuration.cx}
+        var cy:Double{configuration.cy}
+        var modelAllowanceMeters:Double{configuration.modelAllowanceMeters}
+        var humanBufferMeters:Double{configuration.humanBufferMeters}
+        var sweptSampleAllowanceMeters:Double{configuration.sweptSampleAllowanceMeters}
+        var openJawAdditionalMarginMeters:Double{configuration.openJawAdditionalMarginMeters}
+        var fullCorridorVisible:Bool{summary.fullCorridorVisible}
+        fileprivate init(configuration:Configuration,envelopes:[ProjectedEnvelope],summary:Assessment)throws {
+            self.configuration=configuration;self.envelopes=envelopes;self.summary=summary
+            let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+            routeIdentity=ROBGhostRobotModel.hash(try encoder.encode(configuration))
+        }
+    }
 
-    /// Human regions use the actual image's normalized TOP-LEFT coordinates.
-    /// The supplied regions must conservatively cover every relevant detected
-    /// hand/person; an unlocalized detection is a localization failure. No
-    /// sparse person-depth sample is used to dismiss an overlapping hand.
-    static func assess(model:ROBGhostRobotModel,baseline:[Double],route:[[Double]],
+    static func prepare(model:ROBGhostRobotModel,baseline:[Double],route:[[Double]],
         cameraToRobot:simd_double4x4,width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
-        humanRegions:[[Double]],localizationSucceeded:Bool,spatialErrorMeters:Double=0.05,
-        humanBufferMeters:Double=0.10)->Assessment {
+        spatialErrorMeters:Double=0.05,humanBufferMeters:Double=0.10)throws->PreparedCorridor {
         let sampleAllowance=ROBWorkspaceCollisionPlan.sweptPointTravelMeters
         let jawAllowance=ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters
-        var checked=0,projected=0,union:[Double]?
-        func result(_ clear:Bool,_ reason:String,_ visible:Bool=false,_ rejected:[String]=[],_ rejectedBounds:[Double]?=nil)->Assessment {
-            .init(clear:clear,reason:reason,fullCorridorVisible:visible,checkedPoseCount:checked,
-                projectedLinkCount:projected,humanRegionCount:humanRegions.count,rejectedLinks:Array(rejected.prefix(16)),rejectedBoundsNormalized:rejectedBounds,
+        var checked=0,projected=0,union:[Double]?,envelopes:[ProjectedEnvelope]=[]
+        func result(_ clear:Bool,_ reason:String,_ visible:Bool=false,_ rejected:[String]=[],_ rejectedBounds:[Double]?=nil)throws->PreparedCorridor {
+            let summary=Assessment(clear:clear,reason:reason,fullCorridorVisible:visible,checkedPoseCount:checked,
+                projectedLinkCount:projected,humanRegionCount:0,rejectedLinks:Array(rejected.prefix(16)),rejectedBoundsNormalized:rejectedBounds,
                 corridorBoundsNormalized:union,modelAllowanceMeters:spatialErrorMeters,humanBufferMeters:humanBufferMeters,
                 sweptSampleAllowanceMeters:sampleAllowance,openJawAdditionalMarginMeters:jawAllowance)
+            let configuration=Configuration(kind:"padded_whole_arm_human_projection_v1",modelID:model.modelID,referenceID:model.referenceID,
+                geometryID:model.geometryID,mappingID:model.selectedMappingID,physicalSide:model.physicalSide,baseline:baseline,route:route,
+                cameraToRobotColumnMajor:(0..<4).flatMap{c in(0..<4).map{cameraToRobot[c][$0]}},width:width,height:height,fx:fx,fy:fy,cx:cx,cy:cy,
+                modelAllowanceMeters:spatialErrorMeters,humanBufferMeters:humanBufferMeters,sweptSampleAllowanceMeters:sampleAllowance,openJawAdditionalMarginMeters:jawAllowance)
+            return try .init(configuration:configuration,envelopes:envelopes,summary:summary)
         }
-        guard localizationSucceeded else{return result(false,"Actual-frame human localization is unavailable or incomplete.")}
-        guard humanRegions.count<=64,humanRegions.allSatisfy({r in
-            r.count==4 && r.allSatisfy(\.isFinite) && r[0]>=0 && r[1]>=0 && r[2]<=1 && r[3]<=1 && r[0]<r[2] && r[1]<r[3]
-        }) else{return result(false,"Actual-frame human regions are malformed.")}
-        // A successful no-detection frame keeps legacy behavior. This says
-        // nothing about people outside the actual camera image.
-        guard !humanRegions.isEmpty else{return result(true,"No relevant human region was localized in this actual frame; unseen space is not assessed.")}
         let matrix=(0..<4).flatMap{c in (0..<4).map{cameraToRobot[c][$0]}}
         let rotation=simd_double3x3(columns:(SIMD3(cameraToRobot[0].x,cameraToRobot[0].y,cameraToRobot[0].z),
             SIMD3(cameraToRobot[1].x,cameraToRobot[1].y,cameraToRobot[1].z),SIMD3(cameraToRobot[2].x,cameraToRobot[2].y,cameraToRobot[2].z)))
@@ -51,16 +87,16 @@ enum ROBWorkspaceHumanProximity {
               (0..<3).allSatisfy({i in (0..<3).allSatisfy({j in abs(simd_dot(rotation[i],rotation[j])-(i==j ? 1:0))<=1e-6})}),
               spatialErrorMeters.isFinite,(0.05...0.20).contains(spatialErrorMeters),
               humanBufferMeters.isFinite,(0.10...0.50).contains(humanBufferMeters),
-              !route.isEmpty,route.count<=80 else{return result(false,"The current held projection, physical uncertainty or frozen arm route is invalid.")}
+              !route.isEmpty,route.count<=80 else{throw ROBGhostMotionError.blocked("The current held projection, physical uncertainty or frozen arm route is invalid.")}
         let limits=ROBWorkspaceCollisionPlan.jointBounds(model:model)
         func valid(_ q:[Double])->Bool {q.count==7 && zip(q,limits).allSatisfy{$0.isFinite && $1.contains($0)}}
-        guard valid(baseline),route.allSatisfy(valid) else{return result(false,"The frozen human-proximity route has invalid joint coordinates.")}
+        guard valid(baseline),route.allSatisfy(valid) else{throw ROBGhostMotionError.blocked("The frozen human-proximity route has invalid joint coordinates.")}
         let robotToCamera=simd_inverse(cameraToRobot),insetX=2/Double(width-1),insetY=2/Double(height-1)
         var previous=baseline
         for target in route {
             let countValue=max(1,ceil(1.5*zip(previous,target).reduce(0.0){$0+abs($1.0-$1.1)}/sampleAllowance))
             guard countValue.isFinite,countValue<=Double(ROBWorkspaceCollisionPlan.maximumPoseChecks-checked-1) else {
-                return result(false,"The complete human-proximity route exceeds its bounded swept sampling budget.")
+                return try result(false,"The complete human-proximity route exceeds its bounded swept sampling budget.")
             }
             let count=Int(countValue)
             for sample in 0...count {
@@ -68,37 +104,92 @@ enum ROBWorkspaceHumanProximity {
                 let t=Double(sample)/Double(count),q=zip(previous,target).map{$0+($1-$0)*t}
                 let bounds=model.worldCollisionBounds(positions:model.positions(vendorLeft:q))
                 let links=bounds.keys.filter{$0.hasPrefix(model.physicalSide+"_") && ($0.hasSuffix("_Link") || $0==model.toolLink || $0==model.physicalSide+"_base_link")}.sorted()
-                guard links.count>=8 else{return result(false,"The complete arm/jaw envelope is unavailable.")}
+                guard links.count>=8 else{return try result(false,"The complete arm/jaw envelope is unavailable.")}
                 for link in links {
                     let box=bounds[link]!,padding=spatialErrorMeters+humanBufferMeters+sampleAllowance+(link==model.toolLink ? jawAllowance:0)
                     let low=box.low-SIMD3(repeating:padding),high=box.high+SIMD3(repeating:padding)
                     guard (0..<3).allSatisfy({low[$0].isFinite && high[$0].isFinite && low[$0]<=high[$0]}) else {
-                        return result(false,"An arm envelope is malformed.",false,[link])
+                        return try result(false,"An arm envelope is malformed.",false,[link])
                     }
                     var rectangle=[Double.infinity,Double.infinity,-Double.infinity,-Double.infinity]
                     for x in [low.x,high.x] {for y in [low.y,high.y] {for z in [low.z,high.z] {
                         let p=robotToCamera*SIMD4(x,y,z,1)
                         guard p.x.isFinite,p.y.isFinite,p.z.isFinite,p.z>0.001 else {
-                            return result(false,"People are visible but a padded whole-arm envelope is behind or crosses the camera plane.",false,[link])
+                            return try result(false,"People are visible but a padded whole-arm envelope is behind or crosses the camera plane.",false,[link])
                         }
                         let u=(fx*p.x/p.z+cx)/Double(width-1),v=(fy*p.y/p.z+cy)/Double(height-1)
-                        guard u.isFinite,v.isFinite else{return result(false,"An arm projection is nonfinite.",false,[link])}
+                        guard u.isFinite,v.isFinite else{return try result(false,"An arm projection is nonfinite.",false,[link])}
                         rectangle[0]=min(rectangle[0],u);rectangle[1]=min(rectangle[1],v)
                         rectangle[2]=max(rectangle[2],u);rectangle[3]=max(rectangle[3],v)
                     }}}
                     guard rectangle[0]>=insetX,rectangle[1]>=insetY,rectangle[2]<=1-insetX,rectangle[3]<=1-insetY else {
-                        return result(false,"People are visible but the padded whole-arm corridor is partly outside the actual image.",false,[link],rectangle)
+                        return try result(false,"People are visible but the padded whole-arm corridor is partly outside the actual image.",false,[link],rectangle)
                     }
                     projected+=1
                     if let old=union {union=[min(old[0],rectangle[0]),min(old[1],rectangle[1]),max(old[2],rectangle[2]),max(old[3],rectangle[3])]}else{union=rectangle}
-                    if humanRegions.contains(where:{r in rectangle[0]<=r[2] && rectangle[2]>=r[0] && rectangle[1]<=r[3] && rectangle[3]>=r[1]}) {
-                        return result(false,"A localized hand/person overlaps the padded swept whole-arm/jaw corridor.",false,[link])
-                    }
+                    envelopes.append(.init(link:link,rectangle:rectangle))
                 }
             }
             previous=target
         }
-        return result(true,"Every padded swept arm/jaw envelope is visible and disjoint from all localized human regions.",true)
+        return try result(true,"Every padded swept arm/jaw envelope was projected completely.",true)
+    }
+
+    /// Runtime-only rectangle intersection: no model, CAD, FK or projection.
+    /// Regions are actual-image normalized TOP-LEFT coordinates, conservatively
+    /// covering every relevant detection. The caller owns fresh same-frame and
+    /// held-source validation before AND after this bounded operation.
+    static func assess(prepared:PreparedCorridor,humanRegions:[[Double]],localizationSucceeded:Bool)->Assessment {
+        let s=prepared.summary
+        func result(_ clear:Bool,_ reason:String,_ visible:Bool?=nil,_ rejected:[String]?=nil)->Assessment {
+            .init(clear:clear,reason:reason,fullCorridorVisible:visible ?? s.fullCorridorVisible,
+                checkedPoseCount:s.checkedPoseCount,projectedLinkCount:s.projectedLinkCount,humanRegionCount:humanRegions.count,
+                rejectedLinks:rejected ?? s.rejectedLinks,rejectedBoundsNormalized:s.rejectedBoundsNormalized,
+                corridorBoundsNormalized:s.corridorBoundsNormalized,modelAllowanceMeters:s.modelAllowanceMeters,humanBufferMeters:s.humanBufferMeters,
+                sweptSampleAllowanceMeters:s.sweptSampleAllowanceMeters,openJawAdditionalMarginMeters:s.openJawAdditionalMarginMeters)
+        }
+        guard localizationSucceeded else{return result(false,"Actual-frame human localization is unavailable or incomplete.")}
+        guard humanRegions.count<=64,humanRegions.allSatisfy({r in
+            r.count==4 && r.allSatisfy(\.isFinite) && r[0]>=0 && r[1]>=0 && r[2]<=1 && r[3]<=1 && r[0]<r[2] && r[1]<r[3]
+        }) else{return result(false,"Actual-frame human regions are malformed.")}
+        guard !humanRegions.isEmpty else {
+            return result(true,"No relevant human region was localized in this actual frame; unseen space is not assessed.",false)
+        }
+        guard prepared.fullCorridorVisible else{return result(false,s.reason)}
+        func overlaps(_ a:[Double],_ b:[Double])->Bool {a[0]<=b[2] && a[2]>=b[0] && a[1]<=b[3] && a[3]>=b[1]}
+        // The union can prove disjointness only. It never creates an overlap
+        // veto across empty gaps between separately projected link envelopes.
+        if let union=s.corridorBoundsNormalized,!humanRegions.contains(where:{overlaps(union,$0)}) {
+            return result(true,"Every padded swept arm/jaw envelope is visible and disjoint from all localized human regions.")
+        }
+        for envelope in prepared.envelopes where humanRegions.contains(where:{overlaps(envelope.rectangle,$0)}) {
+            return result(false,"A localized hand/person overlaps the padded swept whole-arm/jaw corridor.",nil,[envelope.link])
+        }
+        return result(true,"Every padded swept arm/jaw envelope is visible and disjoint from all localized human regions.")
+    }
+
+    /// Convenience for offline fixtures. Live consumers prepare once, then use
+    /// the sealed overload above for each fresh frame.
+    static func assess(model:ROBGhostRobotModel,baseline:[Double],route:[[Double]],
+        cameraToRobot:simd_double4x4,width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
+        humanRegions:[[Double]],localizationSucceeded:Bool,spatialErrorMeters:Double=0.05,
+        humanBufferMeters:Double=0.10)->Assessment {
+        if localizationSucceeded,humanRegions.isEmpty {
+            return .init(clear:true,reason:"No relevant human region was localized in this actual frame; unseen space is not assessed.",fullCorridorVisible:false,
+                checkedPoseCount:0,projectedLinkCount:0,humanRegionCount:0,rejectedLinks:[],rejectedBoundsNormalized:nil,corridorBoundsNormalized:nil,
+                modelAllowanceMeters:spatialErrorMeters,humanBufferMeters:humanBufferMeters,sweptSampleAllowanceMeters:ROBWorkspaceCollisionPlan.sweptPointTravelMeters,
+                openJawAdditionalMarginMeters:ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters)
+        }
+        do {
+            return assess(prepared:try prepare(model:model,baseline:baseline,route:route,cameraToRobot:cameraToRobot,width:width,height:height,
+                fx:fx,fy:fy,cx:cx,cy:cy,spatialErrorMeters:spatialErrorMeters,humanBufferMeters:humanBufferMeters),
+                humanRegions:humanRegions,localizationSucceeded:localizationSucceeded)
+        } catch {
+            return .init(clear:false,reason:error.localizedDescription,fullCorridorVisible:false,checkedPoseCount:0,projectedLinkCount:0,
+                humanRegionCount:humanRegions.count,rejectedLinks:[],rejectedBoundsNormalized:nil,corridorBoundsNormalized:nil,
+                modelAllowanceMeters:spatialErrorMeters,humanBufferMeters:humanBufferMeters,sweptSampleAllowanceMeters:ROBWorkspaceCollisionPlan.sweptPointTravelMeters,
+                openJawAdditionalMarginMeters:ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters)
+        }
     }
 }
 
@@ -867,6 +958,7 @@ struct ROBWorkspaceStagedEmptyLift:Codable,Equatable {
     let emptyStateEvidenceSource:String
     var initialSelfHypothesis:ROBWorkspaceInitialLiftSelfHypothesis? = nil
     var initialMarginRetreats:[ROBWorkspaceInitialMarginRetreat] = []
+    var operatorReadyPoseRevision:String? = nil
 }
 
 struct ROBWorkspaceInitialMarginRetreat:Codable,Equatable {
@@ -1091,29 +1183,33 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     static func reviewStagedEmptyLift(from baseline:[Double],map:any ROBWorkspaceCollisionMap,
         model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
         trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,emptyTrialEligibility:Bool,
-        emptyStateEvidenceSource:String)throws->ROBWorkspaceStagedEmptyLift {
+        emptyStateEvidenceSource:String,operatorReadyPose:Bool=false)throws->ROBWorkspaceStagedEmptyLift {
         var context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
         guard model.physicalSide=="right",baseline==trial.baseline,
-              (ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) ||
+              (operatorReadyPose && trial.usesOperatorClearedCameraCollisionAdvisory || ROBArmRoutinePlan.near(baseline,Array(repeating:0,count:7)) ||
                trial.usesOperatorClearedCameraCollisionAdvisory && ROBEmptyArmLiftGeometry.acceptsOperatorClearedInitialStart(baseline)),emptyTrialEligibility,
               ["operator_declared_empty","local_first_attempt_no_arm_travel_or_task_grip"].contains(emptyStateEvidenceSource),
               measuredAtMilliseconds.isFinite,(0...250).contains(nowMilliseconds-measuredAtMilliseconds),
               !trial.usesOperatorClearedUnknownApproach else {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift requires fresh measured hanging, current can-task scope and empty-state evidence.")
         }
-        let geometry=try ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline)
+        guard !operatorReadyPose || trial.usesOperatorClearedCameraCollisionAdvisory else {
+            throw ROBGhostMotionError.blocked("The taught ready entry needs its operator-cleared can campaign.")
+        }
+        let steps=try operatorReadyPose ? ROBCanRecyclingReadyPose.steps(model:model,baseline:baseline):ROBEmptyArmLiftGeometry.make(model:model,baseline:baseline).steps
         var proxy=ROBWorkspaceSelfProxyClearance(model:model)
         let initial=try proxy.separations(vendorLeft:baseline)
         let selfHypothesis=try initialLiftSelfHypothesis(baseline:baseline,map:map,model:model,context:context)
-        let result=try reviewEmptyLiftHullPath(baseline:baseline,steps:geometry.steps,initialPairs:initial,
+        let result=try reviewEmptyLiftHullPath(baseline:baseline,steps:steps,initialPairs:initial,
             requireFinalClearance:true,map:map,model:model,context:context,selfHypothesis:selfHypothesis,originalBaseline:baseline)
         context.skippedStaticRobotLinks=result.staticLinks
         context.unknownSpaceAdvisory=result.unknownAdvisory
         context.cameraCollisionAdvisory=result.cameraAdvisory
-        return .init(context:context,baseline:baseline,steps:geometry.steps,checkedPoseCount:result.checked,
+        return .init(context:context,baseline:baseline,steps:steps,checkedPoseCount:result.checked,
             initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:result.endpoint,
-            emptyStateEvidenceSource:emptyStateEvidenceSource,initialSelfHypothesis:selfHypothesis,initialMarginRetreats:result.marginRetreats)
+            emptyStateEvidenceSource:emptyStateEvidenceSource,initialSelfHypothesis:selfHypothesis,initialMarginRetreats:result.marginRetreats,
+            operatorReadyPoseRevision:operatorReadyPose ? ROBCanRecyclingReadyPose.revision:nil)
     }
 
     /// Recheck the exact next segment from ACTUAL feedback. This cannot admit
@@ -1129,7 +1225,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
               proof.context.modelID==model.modelID,proof.context.geometryID==model.geometryID,
               proof.context.mappingID==model.selectedMappingID,proof.context.visualTrial != nil,
               proof.context.visualTrial?.operatorClearedCameraCollisionAdvisory == trial.operatorClearedCameraCollisionAdvisory,
-              proof.steps == (try ROBEmptyArmLiftGeometry.make(model:model,baseline:proof.baseline)).steps,
+              proof.operatorReadyPoseRevision==nil || proof.operatorReadyPoseRevision==ROBCanRecyclingReadyPose.revision && trial.usesOperatorClearedCameraCollisionAdvisory,
+              proof.steps == (try proof.operatorReadyPoseRevision != nil ? ROBCanRecyclingReadyPose.steps(model:model,baseline:proof.baseline):ROBEmptyArmLiftGeometry.make(model:model,baseline:proof.baseline).steps),
               measuredAtMilliseconds.isFinite,(0...250).contains(nowMilliseconds-measuredAtMilliseconds) else {
             throw ROBGhostMotionError.blocked("The staged EMPTY lift segment lost its frozen route or fresh context.")
         }

@@ -59,6 +59,8 @@ final class Sample{var positionsRadians=Array(repeating:NSNumber(value:0),count:
 @MainActor final class Trial{
  let vision=ROBArmRoutineVision.shared,sample=Sample();var localReceiptCommand:String?="right_recycle_cans"
  var activeCameraCollisionAdvisory=false
+ var usesApproachHumanCorridor=false
+ func requireApproachHumanClearance(frame:ROBArmRoutineVision.Frame)throws->Bool{throw ROBArmRoutineError.blocked("No corridor capability in legacy-view fixture")}
  var cameraReady=false,leased=false,armTravelDispatched=false,jawCommandDispatched=false,jawSetupDispatchUncertain=false,recyclingGripDispatched=false,servoPossiblePayloadUncertain=false
  var localReceiptHeldNeckIdentity:String?="head",head="head",stopped=false,feedbackFresh=true,checks=0,strictCalls=0
  var generation:UInt64=1,collisionReviewStatus:NSDictionary=[:]

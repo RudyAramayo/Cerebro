@@ -45,6 +45,8 @@ final class Gateway {
  var waiting=Set<UInt64>(),acks:[UInt64:Bool]=[:],holdConfirmations:[UInt64:Bool]=[:],dispatches=0
  static let neckOnlyCommands=Set<String>()
  var defersOneDegreeCameraInspection=false,defersInitialLiftCameraInspection=false,activeCameraCollisionAdvisory=false
+ var usesApproachHumanCorridor=false
+ func requireApproachHumanClearance(frame:Vision.Frame)throws->Bool{throw ROBArmRoutineError.blocked("No corridor capability in legacy-feedback fixture")}
  var activeApproachUnknownAdvisory=false,approachUnknownAdvisoryEnabled=false
  var activeApproachCanThenHold=false,approachCanThenHoldEnabled=false
  var failure:String?,activeHoldAfterInitialEmptyLift=false,holdAfterInitialEmptyLiftEnabled=false,sourcePixelSelfReviewEnabled=false

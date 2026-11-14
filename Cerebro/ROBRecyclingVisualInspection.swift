@@ -194,6 +194,7 @@ import CoreImage
         var retainedFrames:[ROBGripperVisualServo.Frame]=[]
         var provisionalCoMotion=false
         var canAppearanceSeed:ROBVisualGraspVerifier.AppearanceSeed?
+        var humanClearanceForFrame:((ROBArmRoutineVision.Frame,String)throws->ROBArmRoutineVision.HumanClearance)?
         var cameraCollisionAdvisoryTrial:ROBWorkspaceVisualCalibrationTrial?
         var nativeObservedSupport:ROBVisualGraspVerifier.ObservedSupport?
         @MainActor init(baseline:ServoBaseline,can:ROBWorkspaceLocatedObject,model:ROBGhostRobotModel,box:[Double]) {
@@ -233,6 +234,7 @@ import CoreImage
     static func beginIncrementalVisualServo(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
         map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
         feedbackForFrame:@escaping(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,
+        humanClearanceForFrame:((ROBArmRoutineVision.Frame,String)throws->ROBArmRoutineVision.HumanClearance)?=nil,
         check:() throws->Void) async throws->ServoContext {
         try check()
         let(observation,reference)=try await ROBArmRoutineVision.shared.observeWorkspace()
@@ -264,15 +266,17 @@ import CoreImage
         let view="observed-jaw-servo:"+trial.receiptID+":"+ROBGhostRobotModel.hash(try encoder.encode(scope))+":"+projection.frameContractIdentity
         let baseline=ServoBaseline(projection:.visualTrial(projection),scope:scope,targetIdentity:"can-\(can.sequence)-\(trial.receiptID)",viewIdentity:view)
         let result=ServoContext(baseline:baseline,can:can,model:model,box:detections[0].box)
+        result.humanClearanceForFrame=humanClearanceForFrame
         result.cameraCollisionAdvisoryTrial=trial.usesOperatorClearedCameraCollisionAdvisory ? trial:nil
         guard let seedFeedback=feedbackForFrame(reference),seedFeedback.sampleAgeAtReceiptMilliseconds<=250 else {
             throw ROBGhostMotionError.blocked("Pre-approach can appearance needs its actual exposure-matched held feedback.")
         }
         let seedNow=Date().timeIntervalSince1970*1000
+        let seedHuman=try humanClearanceForFrame?(reference,view)
         let seedPixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:reference,scopeIdentity:view,
             jointPositions:seedFeedback.positionsRadians.map(\.doubleValue),
             jointCapturedAtMilliseconds:seedNow-seedFeedback.effectiveSampleAgeMilliseconds,
-            poseHeldDuringCapture:true,openingCommandAtMilliseconds:nil,nowMilliseconds:seedNow,cameraCollisionAdvisoryTrial:result.cameraCollisionAdvisoryTrial)
+            poseHeldDuringCapture:true,openingCommandAtMilliseconds:nil,nowMilliseconds:seedNow,humanClearance:seedHuman,cameraCollisionAdvisoryTrial:result.cameraCollisionAdvisoryTrial)
         // The seed retains only actual RGB appearance; its exposure-matched
         // feedback never substitutes for current observed finger evidence.
         let seedRGB=Array(seedPixels.rgb)
@@ -329,9 +333,10 @@ import CoreImage
             let optical=simd_inverse(projection.cameraToModel)*SIMD4(middle.x,middle.y,middle.z,1)
             assumedDepth=optical.z>0 ? optical.z:nil
         }
+        let frameHuman=try context.humanClearanceForFrame?(frame,context.baseline.viewIdentity)
         var pixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:frame,scopeIdentity:context.baseline.viewIdentity,
             jointPositions:feedback.positionsRadians.map(\.doubleValue),jointCapturedAtMilliseconds:historicalTime,
-            poseHeldDuringCapture:true,openingCommandAtMilliseconds:openingCommandAtMilliseconds,nowMilliseconds:now,cameraCollisionAdvisoryTrial:context.cameraCollisionAdvisoryTrial)
+            poseHeldDuringCapture:true,openingCommandAtMilliseconds:openingCommandAtMilliseconds,nowMilliseconds:now,humanClearance:frameHuman,cameraCollisionAdvisoryTrial:context.cameraCollisionAdvisoryTrial)
         let currentTool=model.toolPosition(model.positions(vendorLeft:currentFeedback.positionsRadians.map(\.doubleValue)))
         guard let currentTool,let k=frame.intrinsics,let depth=frame.depth else {throw ROBGhostMotionError.blocked("Missing nominal tool search region; no visual jaw location inferred.")}
         let optical=simd_inverse(projection.cameraToModel)*SIMD4(currentTool.x,currentTool.y,currentTool.z,1)

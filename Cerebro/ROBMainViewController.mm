@@ -3146,6 +3146,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
     if (self.controllerDiagnosticsWindowController == nil) {
         SCNView *view = [[SCNView alloc] initWithFrame:NSMakeRect(0, 0, 960, 620)];
+        // SceneKit's thousands of mesh descendants are not UI controls. Expose
+        // one viewport element so reading the adjacent controls remains bounded.
+        view.accessibilityElement = YES;
+        view.accessibilityRole = NSAccessibilityImageRole;
+        view.accessibilityLabel = @"ROB 3D model and planned arm path";
+        view.accessibilityChildren = @[];
         NSWindow *window = [[NSWindow alloc]
             initWithContentRect:NSMakeRect(0, 0, 1330, 820)
                       styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
