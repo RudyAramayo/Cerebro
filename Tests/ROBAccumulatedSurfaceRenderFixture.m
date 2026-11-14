@@ -142,12 +142,18 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     assert([h.surfaceStatusLabel.stringValue containsString:@"cyan = inferred"] && [h.headSurfaceSummary containsString:@"1 inferred cans"]);
     size_t triangles=0;
     for (SCNNode *node in map.childNodes) if ([node.name hasPrefix:@"Observed plane"]) {
-        SCNGeometrySource *vertices=[node.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticVertex].firstObject;
-        SCNGeometrySource *uv=[node.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticTexcoord].firstObject;
-        assert(vertices.bytesPerComponent==4 && vertices.dataStride==12 && uv.dataStride==8);
-        triangles+=node.geometry.geometryElements.firstObject.primitiveCount;assert(node.geometry.firstMaterial.diffuse.contents);
+        assert(!node.geometry); /* No RGB frame: never paint an opaque gray plane. */
     }
-    assert(triangles>0 && triangles<100);
+    SCNNode *fallback=[map childNodeWithName:@"Measured RGB surface voxels · photographic fallback" recursively:NO];assert(fallback.geometry);
+    SCNGeometrySource *vertices=[fallback.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticVertex].firstObject;
+    SCNGeometrySource *rgbSource=[fallback.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticColor].firstObject;
+    assert(vertices.vectorCount>5000 && vertices.bytesPerComponent==4 && vertices.dataStride==12 && rgbSource.dataStride==16);
+    const float *rgbColors=rgbSource.data.bytes;BOOL red=NO,blue=NO;
+    for (NSInteger i=0;i<rgbSource.vectorCount;i++) {
+        red|=fabs(rgbColors[i*4]-208/255.)<1e-6 && fabs(rgbColors[i*4+1]-32/255.)<1e-6;
+        blue|=fabs(rgbColors[i*4]-16/255.)<1e-6 && fabs(rgbColors[i*4+2]-208/255.)<1e-6;
+    }
+    assert(red && blue && [h.headSurfaceSummary containsString:@"0% photo coverage"]);
     double captured=h.lastHeadSurfaceCapture;offer(h,samples,frame,view);
     assert(h.headSurfaceNode.childNodes.firstObject==map && h.lastHeadSurfaceCapture==captured);
     /* A capture/calibration stream change invalidates only its camera. */

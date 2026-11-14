@@ -16,10 +16,21 @@
 }
 - (void)updatePlane:(const ROBSurfacePlane *)plane view:(ROBSurfaceDepthView)view rgb:(CVPixelBufferRef)rgb;
 - (CGImageRef)image;
+- (BOOL)coversPoint:(ROBSurfacePoint)point plane:(const ROBSurfacePlane *)plane;
 @end
 
 @implementation ROBSurfacePhotoAtlas
 - (CGImageRef)image { return filled ? bitmap.CGImage : NULL; }
+- (BOOL)coversPoint:(ROBSurfacePoint)point plane:(const ROBSurfacePlane *)plane
+{
+    if (!filled || !bitmap || fabs(ROBDepthFloorDot(plane->normal,point)+plane->offset)>.02) return NO;
+    double u=ROBDepthFloorDot(plane->u,point),v=ROBDepthFloorDot(plane->v,point);
+    int x=(int)floor((u-originU)/texelMeters-.5),y=(int)floor((v-originV)/texelMeters-.5);
+    if (x<0 || y<0 || x+1>=width || y+1>=height) return NO;
+    const uint32_t *values=pixels.bytes;
+    return values[(size_t)y*width+x] && values[(size_t)y*width+x+1] &&
+        values[(size_t)(y+1)*width+x] && values[(size_t)(y+1)*width+x+1];
+}
 - (void)updatePlane:(const ROBSurfacePlane *)plane view:(ROBSurfaceDepthView)view rgb:(CVPixelBufferRef)rgb
 {
     if (!rgb || !ROBSurfaceViewValid(&view) || CVPixelBufferGetPixelFormatType(rgb)!=kCVPixelFormatType_32BGRA ||
@@ -47,6 +58,13 @@
     if (!source || stride<(size_t)view.width*4) {CVPixelBufferUnlockBaseAddress(rgb,kCVPixelBufferLock_ReadOnly);return;}
     uint32_t *output=pixels.mutableBytes;NSUInteger added=0;
     const double *m=view.cameraToMap;
+    /* The fit's RMS is perpendicular to the plane, not along camera Z.
+     * Compare every measured neighbour in that same metric; a grazing ray
+     * can have large Z variation while remaining on the correct surface. */
+    double normalX=plane->normal.x*m[0]+plane->normal.y*m[4]+plane->normal.z*m[8];
+    double normalY=plane->normal.x*m[1]+plane->normal.y*m[5]+plane->normal.z*m[9];
+    double normalZ=plane->normal.x*m[2]+plane->normal.y*m[6]+plane->normal.z*m[10];
+    double planeAtCamera=plane->normal.x*m[3]+plane->normal.y*m[7]+plane->normal.z*m[11]+plane->offset;
     for (int y=0;y<height;y++) for (int x=0;x<width;x++) {
         size_t index=(size_t)y*width+x;if (output[index]) continue;
         double u=originU+(x+.5)*texelMeters,v=originV+(y+.5)*texelMeters;
@@ -63,7 +81,8 @@
         for (int j=0;j<5;j++) {
             size_t offset=((size_t)(iy+oy[j])*view.width+ix+ox[j])*2;
             unsigned mm=view.depthLittleEndian[offset] | ((unsigned)view.depthLittleEndian[offset+1]<<8);
-            bool matches=mm>=150 && mm<=10000 && fabs(mm*.001-z)<=fmax(.018,plane->rms*3);
+            double rayPlane=normalX*(ix+ox[j]-view.cx)/view.fx+normalY*(iy+oy[j]-view.cy)/view.fy+normalZ;
+            bool matches=mm>=150 && mm<=10000 && fabs(rayPlane*mm*.001+planeAtCamera)<=fmax(.018,plane->rms*3);
             if (!j && !matches) break;
             if (matches) agreement++;
         }
@@ -82,8 +101,8 @@
         hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bitmapFormat:NSBitmapFormatAlphaNonpremultiplied bytesPerRow:width*4 bitsPerPixel:32];
     if (!bitmap.bitmapData) return;
     for (int y=0;y<height;y++) for (int x=0;x<width;x++) {
-        uint32_t c=output[(size_t)y*width+x] ?: 0x70808CFF;uint8_t *p=bitmap.bitmapData+(size_t)y*bitmap.bytesPerRow+x*4;
-        p[0]=(c>>24)&255;p[1]=(c>>16)&255;p[2]=(c>>8)&255;p[3]=255;
+        uint32_t c=output[(size_t)y*width+x];uint8_t *p=bitmap.bitmapData+(size_t)y*bitmap.bytesPerRow+x*4;
+        p[0]=(c>>24)&255;p[1]=(c>>16)&255;p[2]=(c>>8)&255;p[3]=c&255;
     }
 }
 @end
@@ -142,9 +161,24 @@
             child.geometry=ROBSurfacePlaneGeometryWithPhoto(plane,photo,atlas->originU,atlas->originV,atlas->width*atlas->texelMeters,atlas->height*atlas->texelMeters);
         }
     }
-    if (summary) *summary=[NSString stringWithFormat:@"%llu frames · %zu stable voxels → %zu planes / %zu triangles + %zu points · %zu inferred cans · %lu photo planes%@",
-        (unsigned long long)_map->frame,mesh->stableVoxelCount,mesh->planeCount,mesh->quadCount*2,mesh->residualCount,mesh->cylinderCount,
-        (unsigned long)photoCount,
+    NSMutableData *fallback=[NSMutableData dataWithCapacity:mesh->planeSampleCount*sizeof(ROBSurfaceSample)];
+    size_t covered=0;
+    for (size_t i=0;i<mesh->planeSampleCount;i++) {
+        ROBSurfaceSample sample=mesh->planeSamples[i];BOOL photographed=NO;
+        for (size_t j=0;j<mesh->planeCount && !photographed;j++) {
+            ROBSurfacePlane *p=&mesh->planes[j];
+            photographed=[_photos[@(p->trackID)] coversPoint:sample.point plane:p];
+        }
+        if (photographed) covered++;else [fallback appendBytes:&sample length:sizeof(sample)];
+    }
+    SCNGeometry *fallbackGeometry=ROBSurfacePointGeometry(fallback.bytes,fallback.length/sizeof(ROBSurfaceSample));
+    if (fallbackGeometry) {
+        SCNNode *points=[SCNNode nodeWithGeometry:fallbackGeometry];points.name=@"Measured RGB surface voxels · photographic fallback";[node addChildNode:points];
+    }
+    double coverage=mesh->planeSampleCount ? (double)covered/mesh->planeSampleCount : 0;
+    if (summary) *summary=[NSString stringWithFormat:@"%llu frames · %zu stable voxels → %zu planes / %zu triangles · %zu inferred cans · %lu photo planes · %.0f%% photo coverage · %zu color voxels%@",
+        (unsigned long long)_map->frame,mesh->stableVoxelCount,mesh->planeCount,mesh->quadCount*2,mesh->cylinderCount,
+        (unsigned long)photoCount,coverage*100,mesh->residualCount+fallback.length/sizeof(ROBSurfaceSample),
         mesh->truncated ? @" · detail limit reached" : @""];
     ROBSurfaceMeshDestroy(mesh);
     return node;

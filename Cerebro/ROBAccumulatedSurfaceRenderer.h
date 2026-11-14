@@ -16,7 +16,7 @@
 static inline SCNGeometry *ROBSurfacePlaneGeometryWithPhoto(const ROBSurfacePlane *plane, CGImageRef photo,
                                                            double originU, double originV, double spanU, double spanV) {
     size_t count=plane->rectangleCount*4;
-    if (!count || !plane->rgba) return nil;
+    if (!count || !plane->rgba || !photo) return nil;
     typedef struct { float x,y,z; } Vertex;
     typedef struct { float u,v; } UV;
     NSMutableData *positions=[NSMutableData dataWithLength:count*sizeof(Vertex)];
@@ -44,53 +44,50 @@ static inline SCNGeometry *ROBSurfacePlaneGeometryWithPhoto(const ROBSurfacePlan
     SCNGeometryElement *element=[SCNGeometryElement geometryElementWithData:indices primitiveType:SCNGeometryPrimitiveTypeTriangles
         primitiveCount:plane->rectangleCount*2 bytesPerIndex:sizeof(uint32_t)];
     SCNGeometry *geometry=[SCNGeometry geometryWithSources:@[vertex,texture] elements:@[element]];
-    NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:plane->width pixelsHigh:plane->height
-        bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace
-        bitmapFormat:NSBitmapFormatAlphaNonpremultiplied bytesPerRow:plane->width*4 bitsPerPixel:32];
-    if (!bitmap.bitmapData) return nil;
-    for (int y=0;y<plane->height;y++) for (int x=0;x<plane->width;x++) {
-        /* Without a photographic keyframe show neutral geometry. Repainting
-         * coarse voxel RGB cells destroys small printed features such as QR. */
-        uint32_t c=plane->rgba[(size_t)y*plane->width+x] ? 0x70808CFF : 0;uint8_t *pixel=bitmap.bitmapData+y*bitmap.bytesPerRow+x*4;
-        pixel[0]=(c>>24)&255;pixel[1]=(c>>16)&255;pixel[2]=(c>>8)&255;pixel[3]=c&255;
-    }
-    SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=(__bridge id)(photo ?: bitmap.CGImage);
+    SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=(__bridge id)photo;
     material.lightingModelName=SCNLightingModelConstant;material.doubleSided=YES;
     material.diffuse.minificationFilter=photo ? SCNFilterModeLinear : SCNFilterModeNearest;
     material.diffuse.magnificationFilter=photo ? SCNFilterModeLinear : SCNFilterModeNearest;
     material.diffuse.mipFilter=photo ? SCNFilterModeLinear : SCNFilterModeNone;
     if (photo) {material.diffuse.wrapS=SCNWrapModeClampToBorder;material.diffuse.wrapT=SCNWrapModeClampToBorder;}
+    /* Missing photographic texels are transparent. They must not write depth
+     * over the measured RGB points retained underneath them. */
+    material.blendMode=SCNBlendModeAlpha;material.transparencyMode=SCNTransparencyModeAOne;
+    material.writesToDepthBuffer=NO;
     geometry.firstMaterial=material;return geometry;
 }
 static inline SCNGeometry *ROBSurfacePlaneGeometry(const ROBSurfacePlane *plane) {
     return ROBSurfacePlaneGeometryWithPhoto(plane,NULL,0,0,1,1);
 }
-static inline SCNGeometry *ROBSurfaceResidualGeometry(const ROBSurfaceMesh *mesh) {
-    if (!mesh->residualCount) return nil;
+static inline SCNGeometry *ROBSurfacePointGeometry(const ROBSurfaceSample *samples, size_t count) {
+    if (!count) return nil;
     typedef struct { float x,y,z; } Vertex;
     typedef struct { float r,g,b,a; } Color;
-    NSMutableData *positions=[NSMutableData dataWithLength:mesh->residualCount*sizeof(Vertex)],
-        *colors=[NSMutableData dataWithLength:mesh->residualCount*sizeof(Color)],
-        *indices=[NSMutableData dataWithLength:mesh->residualCount*sizeof(uint32_t)];
+    NSMutableData *positions=[NSMutableData dataWithLength:count*sizeof(Vertex)],
+        *colors=[NSMutableData dataWithLength:count*sizeof(Color)],
+        *indices=[NSMutableData dataWithLength:count*sizeof(uint32_t)];
     Vertex *v=positions.mutableBytes;Color *c=colors.mutableBytes;uint32_t *index=indices.mutableBytes;
-    for (size_t i=0;i<mesh->residualCount;i++) {
-        ROBSurfaceSample s=mesh->residuals[i];v[i]=(Vertex){(float)s.point.x,(float)s.point.y,(float)s.point.z};
+    for (size_t i=0;i<count;i++) {
+        ROBSurfaceSample s=samples[i];v[i]=(Vertex){(float)s.point.x,(float)s.point.y,(float)s.point.z};
         c[i]=(Color){((s.rgba>>24)&255)/255.f,((s.rgba>>16)&255)/255.f,((s.rgba>>8)&255)/255.f,1};index[i]=(uint32_t)i;
     }
     SCNGeometrySource *vertices=[SCNGeometrySource geometrySourceWithData:positions semantic:SCNGeometrySourceSemanticVertex
-        vectorCount:mesh->residualCount floatComponents:YES componentsPerVector:3 bytesPerComponent:sizeof(float) dataOffset:0 dataStride:sizeof(Vertex)];
+        vectorCount:count floatComponents:YES componentsPerVector:3 bytesPerComponent:sizeof(float) dataOffset:0 dataStride:sizeof(Vertex)];
     SCNGeometrySource *rgb=[SCNGeometrySource geometrySourceWithData:colors semantic:SCNGeometrySourceSemanticColor
-        vectorCount:mesh->residualCount floatComponents:YES componentsPerVector:4 bytesPerComponent:sizeof(float) dataOffset:0 dataStride:sizeof(Color)];
+        vectorCount:count floatComponents:YES componentsPerVector:4 bytesPerComponent:sizeof(float) dataOffset:0 dataStride:sizeof(Color)];
     SCNGeometryElement *element=[SCNGeometryElement geometryElementWithData:indices primitiveType:SCNGeometryPrimitiveTypePoint
-        primitiveCount:mesh->residualCount bytesPerIndex:sizeof(uint32_t)];
+        primitiveCount:count bytesPerIndex:sizeof(uint32_t)];
     element.pointSize=2;element.minimumPointScreenSpaceRadius=1;element.maximumPointScreenSpaceRadius=3;
     SCNGeometry *geometry=[SCNGeometry geometryWithSources:@[vertices,rgb] elements:@[element]];
     SCNMaterial *material=[SCNMaterial material];material.lightingModelName=SCNLightingModelConstant;geometry.firstMaterial=material;return geometry;
 }
+static inline SCNGeometry *ROBSurfaceResidualGeometry(const ROBSurfaceMesh *mesh) {
+    return ROBSurfacePointGeometry(mesh->residuals,mesh->residualCount);
+}
 static inline SCNNode *ROBSurfaceMeshNode(const ROBSurfaceMesh *mesh) {
     SCNNode *root=[SCNNode node];root.name=@"Accumulated observed surfaces · provisional display submap";
     for (size_t i=0;i<mesh->planeCount;i++) {
-        SCNGeometry *geometry=ROBSurfacePlaneGeometry(&mesh->planes[i]);if (!geometry) continue;
+        SCNGeometry *geometry=ROBSurfacePlaneGeometry(&mesh->planes[i]);
         ROBSurfaceTrackedNode *node=[ROBSurfaceTrackedNode new];node.geometry=geometry;
         node.name=[NSString stringWithFormat:@"Observed plane %zu · %.1f mm RMS",i+1,mesh->planes[i].rms*1000];
         node.surfaceTrackID=mesh->planes[i].trackID;[root addChildNode:node];
