@@ -78,7 +78,9 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
                 [canDetails addObject:@{@"id":@(tracked.cylinderTrackID),@"pixel":@[@(view.fx*(m[0]*dx+m[4]*dy+m[8]*dz)/z+view.cx),@(view.fy*(m[1]*dx+m[5]*dy+m[9]*dz)/z+view.cy)]}];
             }
             if (tracked.surfaceTrackID) {
-                [planeIDs addObject:@(tracked.surfaceTrackID)];CGImageRef image=(__bridge CGImageRef)child.geometry.firstMaterial.diffuse.contents;
+                [planeIDs addObject:@(tracked.surfaceTrackID)];
+                if (!child.geometry) continue;
+                CGImageRef image=(__bridge CGImageRef)child.geometry.firstMaterial.diffuse.contents;
                 SCNGeometrySource *vertices=[child.geometry geometrySourcesForSemantic:SCNGeometrySourceSemanticVertex].firstObject;
                 const float *values=vertices.data.bytes;
                 ROBSurfacePoint a={values[0],values[1],values[2]},b={values[3],values[4],values[5]},c={values[9],values[10],values[11]};

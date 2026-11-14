@@ -11,6 +11,7 @@
 enum { ROBSurfaceSlotCount = 65536, ROBSurfaceMaximumVoxels = 32000,
        ROBSurfaceMaximumInput = 20000, ROBSurfaceMaximumPlanes = 6,
        ROBSurfaceMaximumQuads = 2048, ROBSurfaceMaximumResiduals = 4000,
+       ROBSurfaceMaximumPlaneSamples = 8192,
        ROBSurfaceMaximumTombstones = ROBSurfaceSlotCount/8 };
 static const double ROBSurfaceVoxelSize = .02;
 static const double ROBSurfaceTexelSize = .04;
@@ -87,6 +88,10 @@ typedef struct {
     size_t planeCount, quadCount, stableVoxelCount;
     ROBSurfaceSample residuals[ROBSurfaceMaximumResiduals];
     size_t residualCount;
+    /* Measured plane colors survive until a photographic texel actually
+     * covers them. Plane fitting is not permission to discard their RGB. */
+    ROBSurfaceSample planeSamples[ROBSurfaceMaximumPlaneSamples];
+    size_t planeSampleCount;
     ROBSurfaceCylinder cylinders[4];
     size_t cylinderCount;
     bool truncated;
@@ -584,10 +589,15 @@ static inline ROBSurfaceMesh *ROBSurfaceMapBuildMesh(ROBSurfaceMap *m) {
         }
         matched[mesh->planeCount]=p->trackID;mesh->planeCount++;mesh->quadCount+=p->rectangleCount;
     }
-    size_t residualsSeen=0;uint32_t random=0x971bc3u;
-    for (size_t i=0;i<count;i++) if (used[i]!=1) {
-        residualsSeen++;if (mesh->residualCount<ROBSurfaceMaximumResiduals) mesh->residuals[mesh->residualCount++]=samples[i];
-        else { size_t slot=ROBSurfaceRandom(&random)%residualsSeen;if (slot<ROBSurfaceMaximumResiduals) mesh->residuals[slot]=samples[i]; }
+    size_t residualsSeen=0,planeSamplesSeen=0;uint32_t random=0x971bc3u;
+    for (size_t i=0;i<count;i++) {
+        if (used[i]!=1) {
+            residualsSeen++;if (mesh->residualCount<ROBSurfaceMaximumResiduals) mesh->residuals[mesh->residualCount++]=samples[i];
+            else { size_t slot=ROBSurfaceRandom(&random)%residualsSeen;if (slot<ROBSurfaceMaximumResiduals) mesh->residuals[slot]=samples[i]; }
+        } else {
+            planeSamplesSeen++;if (mesh->planeSampleCount<ROBSurfaceMaximumPlaneSamples) mesh->planeSamples[mesh->planeSampleCount++]=samples[i];
+            else {size_t slot=ROBSurfaceRandom(&random)%planeSamplesSeen;if (slot<ROBSurfaceMaximumPlaneSamples) mesh->planeSamples[slot]=samples[i];}
+        }
     }
     if (residualsSeen > ROBSurfaceMaximumResiduals || mesh->quadCount == ROBSurfaceMaximumQuads) mesh->truncated=true;
     ROBSurfaceUpdateCylinders(m,mesh);
