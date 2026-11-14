@@ -139,9 +139,14 @@ class RGBNormalizationTests(unittest.TestCase):
         self.assertFalse(a["resolvedBackendObserved"])
         self.assertIsNone(a["resolvedBackend"])
         props = {"useHomographyRectification": False, "disparityToDepthUseSpecTranslation": False,
-                 "rectificationUseSpecTranslation": False, "depthAlignmentUseSpecTranslation": False}
+                 "rectificationUseSpecTranslation": False, "depthAlignmentUseSpecTranslation": False,
+                 "initialConfig": {"algorithmControl": {"enableLeftRightCheck": True}, "postProcessing": {
+                     "median": 0, "spatialFilter": {"enable": False, "holeFillingRadius": 0},
+                     "temporalFilter": {"enable": False}, "holeFilling": {"enable": False},
+                     "adaptiveMedianFilter": {"enable": False}, "decimationFilter": {"decimationFactor": 1}}}}
         actual["pipeline"]["nodes"].append([20, {"properties": props}])
         config = dai.StereoDepthConfig(); config.setSubpixel(True)
+        worker.configure_strict_planning_depth(SimpleNamespace(initialConfig=config), dai)
         pipeline = SimpleNamespace(getAutoCalibrationMode=lambda: dai.Pipeline.AutoCalibrationMode.OFF,
                                    serializeToJson=lambda _: actual)
         policy = worker.runtime_stereo_policy(pipeline, SimpleNamespace(initialConfig=config), dai, True, descriptor)

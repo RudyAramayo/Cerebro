@@ -228,3 +228,27 @@ struct ROBBubbleModelEstimate {
         right = offset.x; below = -offset.y; forward = -offset.z
     }
 }
+
+/// Separate from optical calibration: an appearance sequence, not sensor calibration.
+/// Targets are Maestro quarter-microseconds; directions need physical commissioning.
+struct ROBLaserStartupAnimation: Codable, Equatable {
+    static let defaultsKey = "ROBLaserStartupAnimation.v1"
+    var oscillate = true
+    var centerPan = 6000
+    var frontRightPan = 7000
+    var frontLeftPan = 5000
+    var cycles = 2
+    var panSettleSeconds = 2.0
+    var tiltSettleSeconds = 2.0
+
+    var valid: Bool {
+        [centerPan, frontRightPan, frontLeftPan].allSatisfy { (4000...8000).contains($0) }
+            && (1...4).contains(cycles)
+            && panSettleSeconds.isFinite && (0.75...10).contains(panSettleSeconds)
+            && tiltSettleSeconds.isFinite && (0.75...10).contains(tiltSettleSeconds)
+    }
+    func panTargets(park: Int) -> [Int] {
+        guard oscillate else { return [park] }
+        return [centerPan] + (0..<cycles).flatMap { _ in [frontRightPan, frontLeftPan] } + [park]
+    }
+}

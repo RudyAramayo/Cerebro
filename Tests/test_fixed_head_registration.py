@@ -1,5 +1,6 @@
 """Exercise fixed-head acquisition with synthetic RGB-D and real rigid optimizer."""
 import hashlib
+import copy
 import json
 from pathlib import Path
 import sys
@@ -9,10 +10,12 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'Cerebro/Resources/ShadowPlanner'))
-from fixed_head_registration import proper_fit, read_capture, register
+from fixed_head_registration import (balanced_surface_patch_indices, proper_fit,
+                                     read_capture, register, stationary_gravity_initializer)
 from markerless import MarkerlessEstimator
 
 
@@ -91,6 +94,108 @@ class FixedHeadRegistrationTests(unittest.TestCase):
         self.assertLess(np.max(np.abs(matrix-np.eye(4))),.01)
         # Exercise the exact interchange schema with the production Swift fitter.
         (self.root/'registration-input.json').write_text(json.dumps(output))
+
+    def test_patch_cap_preserves_sparse_torso_and_existing_split(self):
+        labels=np.array(['base_link']*97+['left_track_link']*9+
+                        ['right_track_link']*29+['torso_link']*13+['lean_link'])
+        available=np.arange(len(labels))
+        old=available[np.linspace(0,len(available)-1,100,dtype=int)]
+        self.assertLess(sum(labels[old]=='torso_link'),10)
+        selected=balanced_surface_patch_indices(available,labels,100)
+        self.assertEqual(len(selected),100)
+        self.assertEqual(len(np.unique(selected)),100)
+        self.assertEqual(sum(labels[selected]=='torso_link'),13)
+        self.assertTrue(set(selected).issubset(available))
+        held=available[::3]
+        chosen=balanced_surface_patch_indices(held,labels,25)
+        self.assertEqual(len(chosen),25)
+        self.assertTrue(set(chosen).issubset(held))
+
+    def test_actual_fit_keeps_rare_torso_support_when_base_dominates(self):
+        cells=np.floor(self.points/.03).astype(np.int64)
+        _,indices=np.unique(cells,axis=0,return_index=True)
+        indices.sort()
+        spatial=cells[indices]
+        partition=(spatial[:,0]*73856093^spatial[:,1]*19349663^spatial[:,2]*83492791)%3
+        training=indices[partition!=0]
+        torso=training[np.linspace(0,len(training)-1,13,dtype=int)]
+        self.labels[:]='base_link'
+        self.labels[torso]='torso_link'
+        output,report=self.fit()
+        self.assertFalse(report['registrationVerified'])
+        self.assertGreaterEqual(sum(s['landmarkID'].startswith('torso_link:') and
+                                   not s['validationOnly'] for s in output['samples']),8)
+        self.assertGreaterEqual(report['heldOutPatchCount'],6)
+        matrix=np.array(report['candidateCameraToRobotColumnMajor']).reshape((4,4),order='F')
+        self.assertLess(np.max(np.abs(matrix-np.eye(4))),.01)
+
+    def imu_frames(self, gravity_rgb):
+        frames=copy.deepcopy(self.frames)
+        factory=np.diag([1.,-1.,-1.])
+        for i,frame in enumerate(frames):
+            latest=1_000_000_000+i*200_000_000
+            frame['imu']=dict(sensor='fixture-imu',gravity_mps2=(factory.T@gravity_rgb*9.81).tolist(),
+                gravity_std_mps2=[.01,.01,.01],gyro_rad_s=[0.,0.,0.],sample_count=40,
+                window_milliseconds=400.,age_milliseconds=5.,latest_timestamp_ns=latest,
+                reference_timestamp_ns=latest+5_000_000,imu_to_rgb_rotation=factory.flatten().tolist(),
+                stationary=True,gravity_source='stationary_accelerometer_mean',axes='sensor_native')
+        return frames
+
+    def test_stationary_imu_seed_corrects_pitch_keeps_translation_heading_and_sources(self):
+        # A fixed world-yaw rotation keeps the camera X heading equal.
+        true=Rotation.from_euler('z',17.,degrees=True).as_matrix()@Rotation.from_euler('x',170.,degrees=True).as_matrix()
+        prior=np.eye(4);prior[:3,:3]=Rotation.from_euler('z',17.,degrees=True).as_matrix()@Rotation.from_euler('x',177.,degrees=True).as_matrix()
+        prior[:3,3]=[.12,-.03,1.04]
+        frames=self.imu_frames(true.T@np.array([0.,0.,1.]))
+        originals=copy.deepcopy(frames);before=prior.copy()
+        seed,diagnostic=stationary_gravity_initializer(frames,prior)
+        np.testing.assert_allclose(seed[:3,:3],true,atol=1e-12)
+        np.testing.assert_array_equal(seed[:3,3],prior[:3,3])
+        np.testing.assert_array_equal(prior,before)
+        self.assertEqual(frames,originals)
+        self.assertTrue(diagnostic['applied'])
+        self.assertAlmostEqual(diagnostic['rotationChangeDegrees'],7.)
+        self.assertEqual(diagnostic['source'],'stationary_imu_level_base_initializer_only')
+
+    def test_bad_or_missing_imu_preserves_exact_prior(self):
+        prior=np.eye(4);prior[:3,:3]=Rotation.from_euler('x',7.,degrees=True).as_matrix()
+        good=self.imu_frames(np.array([0.,0.,1.]))
+        mutations=[('sensor','other-imu'),('stationary',False),('age_milliseconds',101),('sample_count',1),
+            ('gravity_mps2',[0.,0.,0.]),('gravity_std_mps2',[.5,.01,.01]),
+            ('gyro_rad_s',[.1,0.,0.]),('axes','rgb'),('gravity_source','unknown'),
+            ('imu_to_rgb_rotation',[1.,0.,0.,0.,1.,0.,0.,0.,-1.]),
+            ('reference_timestamp_ns',1),('window_milliseconds',float('nan'))]
+        cases=[copy.deepcopy(self.frames)]
+        for key,value in mutations:
+            frames=copy.deepcopy(good);frames[1]['imu'][key]=value;cases.append(frames)
+        repeated=copy.deepcopy(good);repeated[1]['imu']=copy.deepcopy(repeated[0]['imu']);cases.append(repeated)
+        inconsistent=copy.deepcopy(good);inconsistent[1]['imu']['gravity_mps2']=[1.,0.,-9.75];cases.append(inconsistent)
+        for frames in cases:
+            with self.subTest(frames=frames):
+                seed,diagnostic=stationary_gravity_initializer(frames,prior)
+                np.testing.assert_array_equal(seed,prior)
+                self.assertFalse(diagnostic['applied'])
+
+    def test_imu_seed_does_not_guess_heading_or_large_correction(self):
+        frames=self.imu_frames(np.array([0.,0.,1.]))
+        for angle in [45.,90.]:
+            prior=np.eye(4);prior[:3,:3]=Rotation.from_euler('y',angle,degrees=True).as_matrix()
+            seed,diagnostic=stationary_gravity_initializer(frames,prior)
+            np.testing.assert_array_equal(seed,prior)
+            self.assertFalse(diagnostic['applied'])
+
+    def test_actual_optimizer_uses_gravity_seed_and_original_heldout_gates(self):
+        self.document['frames']=self.imu_frames(np.array([0.,0.,1.]))
+        prior=np.eye(4);prior[:3,:3]=Rotation.from_euler('x',7.,degrees=True).as_matrix()
+        self.document['initialCameraToRobotColumnMajor']=prior.flatten(order='F').tolist()
+        output,report=self.fit()
+        self.assertTrue(report['initializer']['applied'])
+        self.assertFalse(report['registrationVerified'])
+        self.assertEqual(report['originalSeedCameraToRobotColumnMajor'],prior.flatten(order='F').tolist())
+        self.assertGreaterEqual(sum(s['validationOnly'] for s in output['samples']),6)
+        self.labels[:]='torso_link'
+        with self.assertRaisesRegex(ValueError,'visible torso and base-fixed surfaces'):
+            self.fit()
 
     def test_saved_cad_density_is_bounded_and_default_stays_160(self):
         saved=json.loads((ROOT/'Cerebro/Resources/ShadowPlanner/surfaces.json').read_text())['surfaces']

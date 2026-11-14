@@ -18,6 +18,7 @@ final class ROBMarkerlessVisionService {
     private var buffer = Data()
     private var generation = UUID()
     private var requestToken = UUID()
+    private var awaitingWorkerReady = false
     private let resources: URL?
     private let python: URL
     private let workerName: String
@@ -55,6 +56,9 @@ final class ROBMarkerlessVisionService {
             self.process = worker; self.input = incoming.fileHandleForWriting
             self.output = outgoing.fileHandleForReading; self.errors = diagnostics.fileHandleForReading
             let token = self.generation
+            self.awaitingWorkerReady = true
+            self.requestToken = UUID()
+            let startupRequest = self.requestToken
             self.output?.readabilityHandler = { [weak self] handle in
                 var bytes = [UInt8](repeating: 0, count: 32769)
                 let count = bytes.withUnsafeMutableBytes { Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count) }
@@ -69,7 +73,14 @@ final class ROBMarkerlessVisionService {
                 var bytes = [UInt8](repeating: 0, count: 4096)
                 _ = bytes.withUnsafeMutableBytes { Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count) }
             }
-            self.lock.lock(); self.enabled = true; self.busy = false; self.lock.unlock()
+            // Loading the model takes longer than the bounded stdin write.
+            // Drop startup frames; offer a fresh exposure only once Python
+            // has opened its read loop. Never queue/freshen old camera pixels.
+            self.lock.lock(); self.enabled = true; self.busy = true; self.lock.unlock()
+            self.queue.asyncAfter(deadline:.now()+30) { [weak self] in
+                guard let self,self.generation==token,self.awaitingWorkerReady,self.requestToken==startupRequest else{return}
+                self.fail()
+            }
         }
         return observationURL
     }
@@ -78,6 +89,7 @@ final class ROBMarkerlessVisionService {
         lock.lock(); enabled = false; busy = false; lastOffer = [:]; latestCaptureStreams = [:]; lock.unlock()
         queue.sync {
             generation = UUID(); buffer.removeAll(); requestToken = UUID()
+            awaitingWorkerReady = false
             output?.readabilityHandler = nil; errors?.readabilityHandler = nil
             try? input?.close(); try? output?.close(); try? errors?.close()
             input = nil; output = nil; errors = nil
@@ -167,7 +179,14 @@ final class ROBMarkerlessVisionService {
         guard let end = buffer.firstIndex(of: 10) else { return }
         let line = Data(buffer[..<end]); buffer.removeSubrange(...end)
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-              object["source"] as? String == "markerless_rgbd", object["schemaVersion"] as? Int == 1,
+              object["schemaVersion"] as? Int == 1 else {fail();return}
+        if awaitingWorkerReady {
+            guard object["source"] as? String == "markerless_ready" else {fail();return}
+            awaitingWorkerReady=false;requestToken=UUID()
+            lock.lock();busy=false;lock.unlock()
+            return // Process readiness is not a torso/arm observation.
+        }
+        guard object["source"] as? String == "markerless_rgbd",
               let captured = object["capturedAtMilliseconds"] as? Double, captured.isFinite else {
             fail(); return
         }
@@ -194,6 +213,7 @@ final class ROBMarkerlessVisionService {
     }
 
     private func fail() {
+        awaitingWorkerReady = false
         requestToken = UUID()
         lock.lock(); enabled = false; busy = false; lock.unlock()
         output?.readabilityHandler = nil; errors?.readabilityHandler = nil

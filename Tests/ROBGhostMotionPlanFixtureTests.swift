@@ -37,10 +37,114 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
-        if CommandLine.arguments.last=="grasp-hold" {
+        if CommandLine.arguments.last == "torso-ready-preparation" {
+            let leftGoal = try ROBCanRecyclingReadyPose.target(physicalSide: "left")
+            let rightGoal = try ROBCanRecyclingReadyPose.target(physicalSide: "right")
+            precondition(leftGoal == [0.2564815877344792,1.6648804817852159,0,0.9825658273336827,1.107465951929527,-1.7111044361935033,-0.46278495947412146], "Ready target differs from the provisional shared mirror")
+            precondition(ROBArmPoseMirror.mirroredJointValues(leftGoal.map(NSNumber.init(value:)))!.map(\.doubleValue) == rightGoal, "Reverse mirror lost the right ready target")
+            let heldLeft = [0.25594, 1.66461, 0, 0.98393, -1.10692, -1.71083, -0.46278]
+            let recovery = try ROBOperatorObservedReadyPlan.make(model: model, baseline: heldLeft)
+            precondition(recovery.baseline == heldLeft && ROBCanRecyclingReadyPose.reached(recovery.steps.last!.positions, goal: leftGoal))
+            var priorJ5 = heldLeft[4]
+            for step in recovery.steps {
+                precondition(step.positions[4] > priorJ5, "LEFT J5 did not approach the corrected shared target")
+                var shortStart = heldLeft
+                shortStart[4] = priorJ5 - 0.014
+                let required = ROBArmRoutinePlan.duration(from: shortStart, to: step.positions)!
+                precondition(step.seconds >= required - 0.05, "Accepted endpoint lag fails the next segment's cubic timing admission")
+                priorJ5 = step.positions[4]
+            }
+            print("PASS shared mirror target and coordinated recovery from the observed left hold")
+            for side in ["left", "right"] {
+                let arm = try ROBGhostRobotModel(directory: model.directory, physicalSide: side)
+                let zero = [Double](repeating: 0, count: 7)
+                let plan = try ROBOperatorObservedReadyPlan.make(model: arm, baseline: zero)
+                precondition(!plan.steps.isEmpty && plan.steps.allSatisfy { $0.jawAction == nil && $0.seconds <= 5 })
+                precondition(ROBCanRecyclingReadyPose.matches(plan.steps.last!.positions, physicalSide: side))
+                precondition(arm.torsoTurnVerticalClearance(vendorJoints: plan.steps.last!.positions)! >= 0.03)
+                // Check denser samples independently of the planner's sample grid.
+                var proxy = ROBWorkspaceSelfProxyClearance(model: arm), start = zero
+                let narrow = Set(plan.initialPairs.filter { $0.value < 0.03 }.keys)
+                for step in plan.steps {
+                    for sample in 0...200 {
+                        let t = Double(sample)/200, q = zip(start, step.positions).map { $0 + ($1-$0)*t }
+                        let pairs = try proxy.separations(vendorLeft: q, forceNarrowPairs: narrow, minimumRetreatBounds: plan.initialPairs)
+                        precondition(pairs.allSatisfy { $0.value + 1e-8 >= min(0.03, plan.initialPairs[$0.key]!) })
+                    }
+                    let movingJoints = zip(start, step.positions).filter { abs($1-$0) > 1e-6 }.count
+                    precondition(movingJoints >= 5, "Preparation introduced an individual-joint test")
+                    start = step.positions
+                }
+                expectBlocked { _ = try ROBOperatorObservedReadyPlan.make(model: arm, baseline: [Double](repeating: .nan, count: 7)) }
+                print("PASS \(side) full coordinated ready path, nonworsening tread proxy, no jaws, raised endpoint")
+            }
+            return
+        }
+        if CommandLine.arguments.last == "torso-arm-clearance" {
+            for side in ["left", "right"] {
+                let arm = try ROBGhostRobotModel(directory: model.directory, physicalSide: side)
+                let hanging = arm.torsoTurnVerticalClearance(vendorJoints: Array(repeating: 0, count: 7))!
+                precondition(hanging < 0.03, "A hanging gripper was cleared for a torso turn")
+                let upright = side == "right" ? try ROBCanRecyclingReadyPose.target(physicalSide: side)
+                    : ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!
+                let raised = arm.torsoTurnVerticalClearance(vendorJoints: upright)!
+                precondition(raised >= 0.03, "The working hold lacks modeled vertical tread clearance: \(side) \(raised)")
+                precondition(arm.torsoTurnVerticalClearance(vendorJoints: []) == nil)
+                precondition(arm.torsoTurnVerticalClearance(vendorJoints: Array(repeating: .nan, count: 7)) == nil)
+                print("PASS \(side) hanging blocked, raised arm/gripper vertical clearance \(raised)m; model-only check")
+            }
+            return
+        }
+        if CommandLine.arguments.last=="ready-horizontal" {
+            let now=Date().timeIntervalSince1970*1000
+            for side in ["right","left"] {
+                let arm=try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
+                let q=try ROBCanRecyclingReadyPose.target(physicalSide:side)
+                let baseline=arm.positions(vendorLeft:q)
+                let can=ROBWorkspaceLocatedObject(target:.can,position:[0.43,side=="right" ? -0.105:0.105,0.81],
+                    confidence:0.9,capturedAt:now,sequence:100,view:.init(panDegrees:side=="right" ? -15:15,upperTarget:6000))
+                let preview=try ROBCanGrabPreview.make(can:can,model:arm,baseline:baseline,side:side,now:now)
+                if side=="left" {
+                    precondition(preview.dynamicEntryStepCount==4 && preview.steps.contains{$0.stage.contains("Corkscrew")},
+                        "A mirrored LEFT target acquired the physical RIGHT taught-ready shortcut")
+                    print("PASS unmeasured mirrored LEFT pose retains its existing entry")
+                    continue
+                }
+                precondition(preview.dynamicEntryStepCount==1 && preview.dynamicEntryWaypoints.count==1)
+                precondition(preview.steps.first!.pose==baseline && !preview.steps.contains{$0.stage.contains("Corkscrew")})
+                precondition(preview.reachesCan && preview.graspError<=0.012 && preview.gripperTiltDegrees<=5,
+                    "Ready horizontal grasp failed: \(side) error=\(preview.graspError) tilt=\(preview.gripperTiltDegrees)")
+                let start=arm.toolPosition(baseline)!,approach=arm.toolPosition(preview.steps[1].pose)!
+                let bearing=simd_normalize(SIMD3(start.x-can.point.x,start.y-can.point.y,0))
+                let target=can.point+bearing*0.12
+                precondition(simd_distance(approach,target)<=0.012,"Ready pregrasp did not stay beside the can")
+                var lastDistance=simd_distance(approach,can.point)
+                for step in preview.steps.dropFirst(2).prefix(4) {
+                    let point=arm.toolPosition(step.pose)!,distance=simd_distance(point,can.point)
+                    precondition(abs(point.z-can.point.z)<=0.012 && distance<lastDistance,
+                        "Ready grasp descended from above or backed away")
+                    lastDistance=distance
+                }
+                let bounds=ROBWorkspaceCollisionPlan.jointBounds(model:arm)
+                for step in preview.steps {
+                    precondition(zip(arm.vendorLeft(step.pose),bounds).allSatisfy{$1.contains($0)})
+                }
+                var perturbed=q;perturbed[0]+=0.01
+                let fresh=try ROBCanGrabPreview.make(can:can,model:arm,baseline:arm.positions(vendorLeft:perturbed),side:side,now:now)
+                precondition(fresh.dynamicEntryStepCount==1 && ROBArmRoutinePlan.near(arm.vendorLeft(fresh.baseline),perturbed,tolerance:1e-12))
+                print("PASS \(side) taught-ready horizontal approach: one coordinated pregrasp,12cm planar entry, monotonic horizontal grasp, fresh measured baseline and native joint bounds; no hardware")
+            }
+            return
+        }
+        if CommandLine.arguments.last=="grasp-hold" || CommandLine.arguments.last=="carry-release" {
+            let carryingFixture=CommandLine.arguments.last=="carry-release"
             let arm=try ROBGhostRobotModel(directory:model.directory,physicalSide:"right"),now=Date().timeIntervalSince1970*1000
-            let can=ROBWorkspaceLocatedObject(target:.can,position:[0.45334,-0.17957,0.81673],confidence:0.9,capturedAt:now,sequence:100,
+            var can=ROBWorkspaceLocatedObject(target:.can,position:[0.45334,-0.17957,0.81673],confidence:0.9,capturedAt:now,sequence:100,
                 view:.init(panDegrees:0,upperTarget:6306))
+            if carryingFixture {
+                can.sections = .init(top:[can.point.x,can.point.y,can.point.z+0.060],middle:can.position,
+                    bottom:[can.point.x,can.point.y,can.point.z-0.060],heightMeters:0.120,diameterMeters:0.066)
+            }
             let preview=try ROBCanGrabPreview.make(can:can,model:arm,baseline:arm.positions(vendorLeft:Array(repeating:0,count:7)),side:"right",now:now)
             precondition(preview.reachesCan && preview.graspError<0.001)
             let body=Array(preview.recyclingBodySteps),baseline=arm.vendorLeft(body.first!.pose)
@@ -71,7 +175,8 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
             expectBlocked{_=try compile(trial,body.map(\.pose),release)}
             expectBlocked{_=try compile(trial,Array(body.dropLast()).map(\.pose),actions)}
             let grip=raw.steps.firstIndex{$0.jawAction == .grip}!,prepared=raw.steps.firstIndex{$0.jawAction == .prepare}!
-            let payload=ROBWorkspaceCarriedObject(measurementID:"synthetic-shape-prior",centerInToolMeters:[0,0,0],halfExtentsMeters:[0.033,0.033,0.060])
+            let payload=ROBWorkspaceCarriedObject(measurementID:"synthetic-shape-prior",centerInToolMeters:[0,0,0],
+                halfExtentsMeters:carryingFixture ? [0.063,0.036,0.036]:[0.033,0.033,0.060])
             let contact=ROBWorkspaceIntentionalContact(measurementID:payload.measurementID,observationSequence:100,capturedAtMilliseconds:now,
                 sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,mapFingerprint:map.fingerprint,modelID:arm.modelID,
                 geometryID:arm.geometryID,mappingID:arm.selectedMappingID,toolLink:arm.toolLink,
@@ -88,6 +193,91 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
                 collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:trial,nowMilliseconds:now)
             precondition(proof.checkedPoseCount>0 && map.queries>0 && contact.releaseStepIndex==nil)
             print("Terminal grasp hold: actual RIGHT horizontal can reach, explicit trial+checked entry, one grip/6cm lift/no release, payload+full-hull review, decoded default authority/release/missing-lift negatives; synthetic free map only, no hardware")
+            if carryingFixture {
+                let heldQ=raw.steps.last!.positions,held=arm.positions(vendorLeft:heldQ),tool=arm.toolPosition(held)!
+                var carry:ROBCanCarryPreview?
+                for offset in [0.04,0.0,-0.04] where carry==nil {
+                    let bucket=ROBWorkspaceLocatedObject(target:.orangeBucket,position:[tool.x,tool.y-offset,tool.z-0.2],
+                        confidence:0.95,capturedAt:now,sequence:101,view:can.view,openingRadius:0.14)
+                    carry=try?ROBCanCarryPreview.make(from:held,can:can,attachedPayload:payload,destination:bucket,
+                        model:arm,side:"right",now:now,dropUncertaintyMeters:0.035)
+                }
+                guard let carry else {preconditionFailure("Synthetic verified held-can carry must be reachable")}
+                var previous=heldQ
+                let carrySteps=try carry.steps.map { step -> ROBLeftGestureProposal.Step in
+                    let q=arm.vendorLeft(step.pose)
+                    let seconds=max(step.seconds,ROBLeftArmInteractionPlan.duration(from:previous,to:q,padding:ROBArmRoutinePlan.tolerance)!)
+                    guard seconds<=5 else {throw ROBGhostMotionError.blocked("Synthetic carry segment too long")}
+                    previous=q
+                    return .init(positions:q,seconds:seconds,jawAction:step.jawAction,stage:step.stage)
+                }
+                let attachment=ROBWorkspaceVerifiedAttachedCan(nativePhaseID:UUID(),nativeVisualEvidenceSHA256:hash,
+                    sourceContactFingerprint:contact.fingerprint,sourceCylinderFingerprint:contact.sourceCylinderFingerprint,
+                    sourceMapFingerprint:map.fingerprint,payloadFingerprint:payload.fingerprint,
+                    bodyMotionIdentity:"fixture-body",sessionGeneration:42,verificationFirstSequence:100,verificationLastSequence:103,
+                    verificationCapturedAtMilliseconds:now,fixedViewIdentity:hash,targetIdentity:"isolated can100",
+                    baseline:heldQ,baselineTelemetrySequence:999,baselineCapturedAtMilliseconds:now)
+                let carryContact=ROBWorkspaceIntentionalContact(measurementID:payload.measurementID,observationSequence:100,
+                    capturedAtMilliseconds:now,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,mapFingerprint:map.fingerprint,
+                    modelID:arm.modelID,geometryID:arm.geometryID,mappingID:arm.selectedMappingID,toolLink:arm.toolLink,
+                    topCenterMeters:contact.topCenterMeters,bottomCenterMeters:contact.bottomCenterMeters,diameterMeters:0.066,
+                    firstContactStepIndex:0,gripStepIndex:nil,releaseStepIndex:carry.releaseIndex,stepCount:carrySteps.count,
+                    verifiedAttachment:attachment)
+                precondition(carryContact.matchesSourceContact(contact))
+                let carriedTrial=ROBWorkspaceVisualCalibrationTrial(receiptID:trial.receiptID,receiptSHA256:trial.receiptSHA256,
+                    appSessionID:trial.appSessionID,command:trial.command,canCount:trial.canCount,summarySHA256:trial.summarySHA256,
+                    authorizationContextIdentity:trial.authorizationContextIdentity,sessionGeneration:42,sceneID:map.sceneID,
+                    cameraGeneration:map.cameraGeneration,modelID:arm.modelID,geometryID:arm.geometryID,mappingID:arm.selectedMappingID,
+                    mapFingerprint:map.fingerprint,bodyMotionIdentity:"fixture-body",estimatedCameraProjectionIdentity:hash,
+                    observationPoseIdentity:hash,currentPoseIdentity:hash,baseline:heldQ,issuedAtMilliseconds:now-1,
+                    expiresAtMilliseconds:now+30_000,assumedSpatialErrorMeters:0.035)
+                let carryProof=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:heldQ,steps:carrySteps,map:map,
+                    model:arm,generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now,
+                    trial:carriedTrial,payload:payload,intentionalContact:carryContact,carryingAtStart:true)
+                func compileCarry(_ native:ROBWorkspaceVerifiedAttachedCan?=attachment,_ path:ROBWorkspaceCollisionPlan=carryProof,
+                    kind:String="recycling_carry_release",poses:[[String:Double]]=[] )throws->ROBLeftGestureProposal {
+                    try ROBLeftGestureCompiler.compile(kind:kind,name:"Synthetic verified attached carry and gravity release",poses:poses,
+                        model:arm,baseline:heldQ,generation:42,workspaceCollisionPlan:path,collisionMap:map,
+                        collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,
+                        visualCalibrationTrial:carriedTrial,verifiedAttachment:native,nowMilliseconds:now)
+                }
+                expectBlocked{_=try compileCarry(nil)}
+                let carried=try compileCarry(),archivedCarry=try JSONDecoder().decode(ROBLeftGestureProposal.self,from:carried.encoded())
+                precondition(carried.steps==carrySteps && carried.workspaceCollisionPlan?.carryingAtStart==true &&
+                    carried.steps.filter{$0.jawAction == .release}.count==1 &&
+                    !carried.steps.contains{$0.jawAction == .prepare || $0.jawAction == .grip})
+                expectBlocked{try ROBLeftGestureCompiler.validate(archivedCarry,model:arm,collisionMap:map,collisionSceneID:map.sceneID,
+                    collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:carriedTrial,nowMilliseconds:now)}
+                try ROBLeftGestureCompiler.validate(archivedCarry,model:arm,collisionMap:map,collisionSceneID:map.sceneID,
+                    collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:carriedTrial,verifiedAttachment:attachment,nowMilliseconds:now)
+                var wrongPhaseObject=try JSONSerialization.jsonObject(with:JSONEncoder().encode(attachment)) as! [String:Any]
+                wrongPhaseObject["nativePhaseID"]=UUID().uuidString
+                let wrongPhase=try JSONDecoder().decode(ROBWorkspaceVerifiedAttachedCan.self,from:JSONSerialization.data(withJSONObject:wrongPhaseObject))
+                expectBlocked{_=try compileCarry(wrongPhase)}
+                var emptyStart=carryProof;emptyStart.carryingAtStart=false
+                expectBlocked{_=try compileCarry(attachment,emptyStart)}
+                expectBlocked{_=try compileCarry(attachment,carryProof,kind:"workspace_collision")}
+                var otherArm=carried.poses;otherArm[0]["left_joint1",default:0]+=0.01
+                expectBlocked{_=try compileCarry(attachment,carryProof,poses:otherArm)}
+                func alteredCarryProof(_ edit:(inout [String:Any])->Void)throws->ROBWorkspaceCollisionPlan {
+                    var object=try JSONSerialization.jsonObject(with:JSONEncoder().encode(carryProof)) as! [String:Any]
+                    edit(&object)
+                    return try JSONDecoder().decode(ROBWorkspaceCollisionPlan.self,from:JSONSerialization.data(withJSONObject:object))
+                }
+                let fakeGrip=try alteredCarryProof { object in
+                    var steps=object["steps"] as! [[String:Any]];steps[0]["jawAction"]="grip";object["steps"]=steps
+                }
+                expectBlocked{_=try compileCarry(attachment,fakeGrip)}
+                let missingPayload=try alteredCarryProof{$0["payload"]=NSNull()}
+                expectBlocked{_=try compileCarry(attachment,missingPayload)}
+                let changedCylinder=try alteredCarryProof { object in
+                    var target=object["intentionalContact"] as! [String:Any]
+                    target["diameterMeters"]=0.080;object["intentionalContact"]=target
+                }
+                expectBlocked{_=try compileCarry(attachment,changedCylinder)}
+                precondition(carryProof.checkedPoseCount>0 && carrySteps.count<=80 && carryProof.intentionalContact?.gripStepIndex==nil)
+                print("Verified attached carry compiler: real RIGHT held-can geometry/full proof, one release/empty upward retreat, no open/grip; decoded-only, wrong native phase, empty start, alternate kind and opposite-arm pose rejected; no hardware or runtime authority")
+            }
             return
         }
         if CommandLine.arguments.last == "corkscrew-entry" {
@@ -546,6 +736,36 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
             precondition(search.next(confirmed:[.can,.orangeBucket]) == nil && search.attempted.count == completedViews,
                 "Both fresh confirmations must stop the search before another neck move")
             precondition(completedViews == 2)
+            // A preview survey must finish BOTH immediate table sides even
+            // when the first frame pair confirms a remembered distant can.
+            for (side, pans) in [("right", [-30.0, 0, 30, 15, -15]), ("left", [30.0, 0, -30, -15, 15])] {
+                var survey = ROBWorkspaceSearchSchedule(targets: [.can], recall: recall, now: now, frontTableSide: side)
+                precondition(survey.recallViews.isEmpty && survey.plannedViewCount == 5)
+                var surveyed: [ROBWorkspaceView] = []
+                while let view = survey.next(confirmed: [.can]) { surveyed.append(view) }
+                precondition(surveyed.map(\.panDegrees) == pans && surveyed.map(\.upperTarget) == [6306,6306,6306,6000,6000],
+                    "First detection or stale recall skipped the opposite front table corner")
+            }
+            var boundedSurvey = ROBWorkspaceSearchSchedule(targets: [.can], recall: recall, now: now,
+                frontTableSide: "right", boundedPan: { max(-15, min(15, $0)) })
+            var boundedViews: [ROBWorkspaceView] = []
+            while let view = boundedSurvey.next(confirmed: [.can]) { boundedViews.append(view) }
+            precondition(boundedViews.map(\.panDegrees) == [-15, 0, 15, 15, -15], "Survey bypassed the native neck envelope")
+            var recyclingSurvey = ROBWorkspaceSearchSchedule(targets: [.can,.orangeBucket], recall: recall,
+                now: now, frontTableSide: "right")
+            var firstViews: [ROBWorkspaceView] = []
+            for _ in 0..<5 {firstViews.append(recyclingSurvey.next(confirmed:[.can])!)}
+            precondition(firstViews.map(\.panDegrees)==[-30,0,30,15,-15],
+                "Full recycling skipped the near RIGHT/LEFT table survey")
+            precondition(recyclingSurvey.next(confirmed:[.can])==bucketHint.view,
+                "Full recycling lost its destination search after surveying cans")
+            precondition(recyclingSurvey.next(confirmed:[.can,.orangeBucket])==nil,
+                "Confirmed destination did not stop the bucket-only search tail")
+            var alreadyFound = ROBWorkspaceSearchSchedule(targets: [.can,.orangeBucket], recall: recall,
+                now: now, frontTableSide: "right")
+            var requiredFrontViews: [ROBWorkspaceView] = []
+            while let view=alreadyFound.next(confirmed:[.can,.orangeBucket]) {requiredFrontViews.append(view)}
+            precondition(requiredFrontViews==firstViews,"A remembered bucket skipped the fresh near-can survey")
             let onlyCanRecall=ROBWorkspaceRecall(modelID:model.modelID,geometryID:model.geometryID,sightings:[canHint])
             var sideSearch=ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:onlyCanRecall,now:now,
                 boundedPan:{max(-60,min(60,$0))})

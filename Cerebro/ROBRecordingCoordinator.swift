@@ -64,8 +64,11 @@ private struct ROBManualMotionEpisode {
     var commandDirection: String
 }
 
-private final class ROBJSONLinesWriter {
+final class ROBJSONLinesWriter {
     private let handle: FileHandle
+    private(set) var lastError: Error?
+
+    init(handle: FileHandle) { self.handle = handle }
 
     init(url: URL) throws {
         FileManager.default.createFile(atPath: url.path, contents: nil)
@@ -73,10 +76,16 @@ private final class ROBJSONLinesWriter {
     }
 
     func append(_ object: [String: Any]) {
-        guard JSONSerialization.isValidJSONObject(object),
+        guard lastError == nil, JSONSerialization.isValidJSONObject(object),
               var data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else { return }
         data.append(0x0a)
-        handle.write(data)
+        do {
+            // The legacy write(Data) raises an Objective-C exception on ENOSPC,
+            // bypassing Swift error handling and aborting the robot controller.
+            try handle.write(contentsOf: data)
+        } catch {
+            lastError = error
+        }
     }
 
     func finish() {
@@ -100,6 +109,9 @@ private final class ROBTrainingSession {
     private var eventSequence: UInt64 = 0
     private var lastPose: (x: Double, y: Double, yaw: Double)?
     private var manualMotionEpisode: ROBManualMotionEpisode?
+    var writeError: Error? {
+        events.lastError ?? cameraEvents.values.compactMap(\.lastError).first
+    }
 
     init(rootURL: URL, configuration: ROBTrainingRecordingConfiguration) throws {
         self.rootURL = rootURL
@@ -428,7 +440,7 @@ private final class ROBTrainingSession {
         )
         cameraEvents.values.forEach { $0.finish() }
         events.finish()
-        writeManifest(state: "complete", endedAt: Date())
+        writeManifest(state: reason == "recording_failure" ? "interrupted" : "complete", endedAt: Date())
     }
 
     private func writeManifest(state: String, endedAt: Date?) {
@@ -723,6 +735,7 @@ private final class ROBFootageSession {
     public static let shared = ROBRecordingCoordinator()
     private static let minimumFreeBytes: Int64 = 2 * 1_024 * 1_024 * 1_024
     private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.recording", qos: .utility)
+    private var lastStorageCheckUptime: TimeInterval = -.infinity
     private let admissionLock = NSLock()
     private var cameraOfferInFlight: [CameraRole: Bool] = [:]
     private var insta360OfferInFlight = false
@@ -811,15 +824,19 @@ private final class ROBFootageSession {
         cameraOfferInFlight[role] = true
         admissionLock.unlock()
         queue.async {
+            defer {
+                self.admissionLock.lock()
+                self.cameraOfferInFlight[role] = false
+                self.admissionLock.unlock()
+            }
+            guard self.recordingStorageAvailable() else { return }
             let sourceUptime = TimeInterval(frameSet.timestampNanoseconds) / 1_000_000_000
             let uptime = sourceUptime.isFinite && sourceUptime > 0
                 ? sourceUptime
                 : ProcessInfo.processInfo.systemUptime
             self.trainingSession?.recordCameraFrame(role: role, frameSet: frameSet, ciContext: self.context)
             self.footageSession?.appendCamera(role: role, frameSet: frameSet, uptime: uptime)
-            self.admissionLock.lock()
-            self.cameraOfferInFlight[role] = false
-            self.admissionLock.unlock()
+            _ = self.recordingStorageAvailable()
         }
     }
 
@@ -832,10 +849,13 @@ private final class ROBFootageSession {
         insta360OfferInFlight = true
         admissionLock.unlock()
         queue.async {
+            defer {
+                self.admissionLock.lock()
+                self.insta360OfferInFlight = false
+                self.admissionLock.unlock()
+            }
+            guard self.recordingStorageAvailable() else { return }
             self.footageSession?.appendInsta360(jpeg: jpegData, uptime: capturedAtUptime)
-            self.admissionLock.lock()
-            self.insta360OfferInFlight = false
-            self.admissionLock.unlock()
         }
     }
 
@@ -843,6 +863,7 @@ private final class ROBFootageSession {
     public func recordTreadCommand(controllerID: String, model: ROBBaseControllerModel, activeMaster: Bool) {
         let uptime = model.receivedAtUptime > 0 ? model.receivedAtUptime : ProcessInfo.processInfo.systemUptime
         queue.async {
+            guard self.recordingStorageAvailable() else { return }
             self.trainingSession?.recordTreadCommand(
                 controllerID: controllerID,
                 model: model,
@@ -854,6 +875,7 @@ private final class ROBFootageSession {
 
     public func recordLidarScanData(_ data: Data, x: Double, y: Double, yaw: Double, receivedAtUptime: TimeInterval, pointCount: Int) {
         queue.async {
+            guard self.recordingStorageAvailable() else { return }
             self.trainingSession?.recordLidar(
                 data: data,
                 x: x,
@@ -867,6 +889,7 @@ private final class ROBFootageSession {
 
     func addOperatorLabel(_ label: String) {
         queue.async {
+            guard self.recordingStorageAvailable() else { return }
             self.trainingSession?.appendOperatorLabel(label, note: nil)
             self.publishStateChange()
         }
@@ -894,6 +917,37 @@ private final class ROBFootageSession {
             trainingSession = nil
             footageSession = nil
         }
+    }
+
+    /// Recording-queue only. Preserve a disk reserve and stop recording, never
+    /// robot control, if a writer fails or available storage falls below 1 GiB.
+    private func recordingStorageAvailable() -> Bool {
+        guard trainingSession != nil || footageSession != nil else { return false }
+        var failure = trainingSession?.writeError?.localizedDescription
+        let now = ProcessInfo.processInfo.systemUptime
+        if failure == nil, now - lastStorageCheckUptime >= 1 {
+            lastStorageCheckUptime = now
+            let roots = [trainingSession?.rootURL, footageSession?.rootURL].compactMap { $0 }
+            do {
+                for root in roots {
+                    let attributes = try FileManager.default.attributesOfFileSystem(forPath: root.path)
+                    let free = (attributes[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
+                    if free < 1_024 * 1_024 * 1_024 {
+                        failure = "Less than 1 GB of recording storage remains."
+                        break
+                    }
+                }
+            } catch { failure = error.localizedDescription }
+        }
+        guard let failure else { return true }
+        lastError = "Recording stopped: \(failure) Robot controls remain available."
+        trainingSession?.finish(reason: "recording_failure")
+        footageSession?.finish()
+        trainingSession = nil
+        footageSession = nil
+        publishStateChange()
+        publishDemandChange()
+        return false
     }
 
     private func makeSessionDirectory(kind: String) throws -> URL {

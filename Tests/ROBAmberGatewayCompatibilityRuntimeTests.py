@@ -49,6 +49,11 @@ struct GatewayCompatibilityFixtures {
         // The older gateway permits telemetry but rejects gripper_state.
         // Automatic bridge refreshes must not enqueue those unsupported queries.
         try client.fixtureReceive(legacyReady)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.04))
+        expect(client.fixtureSentTypes.filter { $0 == "mode_query" }.count == 2,
+               "Reconnect must refresh both mode caches with read-only queries")
+        expect(!client.fixtureSentTypes.contains("position_mode") && !client.fixtureSentTypes.contains("activate"),
+               "Reconnect must never initialize torque or modes")
         expect(client.state == .ready, "Legacy gateway lost arm diagnostics")
         expect(client.stateDetail.contains("gateway update required"), "Missing upgrade guidance")
         for arm in ["left", "right"] {
@@ -119,6 +124,9 @@ struct GatewayCompatibilityFixtures {
             "statuses": [Double](repeating: 2.0, count: 7),
         ]
         try client.fixtureReceive(motorSample)
+        expect(client.modes(forArm: "left").isEmpty, "Fixture must reproduce the empty post-relaunch mode cache")
+        expect(client.enterPositionMode(forArm: "left") > 0 && client.fixtureSentTypes.last == "mode_query",
+               "Fresh measured position hold must query mode instead of cycling ACTIVE/POSITION")
         let capturedMotorSample = client.telemetry(forArm: "left")!
         expect(capturedMotorSample.sampleAgeAtReceiptMilliseconds == 1,
                "Historical recording quality must retain the controller and individual-joint ages")
@@ -132,6 +140,18 @@ struct GatewayCompatibilityFixtures {
         let admitted = client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: 0)
         expect(admitted["allowed"] as? Bool == true, "Fresh physical-right feedback was not admitted on L10")
         let admittedGeneration = (admitted["sessionGeneration"] as! NSNumber).uint64Value
+        let owner = UUID()
+        expect(ROBAmberArmMotionArbiter.shared.reserve(.right, owner: owner), "Fixture could not reserve the physical right arm")
+        let manualHandoff = client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: admittedGeneration)
+        expect(manualHandoff["allowed"] as? Bool == false && manualHandoff["waitingForOwner"] as? Bool == true,
+               "Fresh local takeover did not distinguish an ownership handoff")
+        var staleOwned = motorSample
+        staleOwned["joint_feedback_age_ms"] = [Double](repeating: 1000, count: 7)
+        try client.fixtureReceive(staleOwned)
+        expect(client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: admittedGeneration)["waitingForOwner"] as? Bool == false,
+               "Stale feedback was queued as an ownership handoff")
+        ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
+        try client.fixtureReceive(motorSample)
         expect(client.manualArmControlReadiness(forUDPPort: 26002, expectedSessionGeneration: 0)["allowed"] as? Bool == false,
                "Physical-left command borrowed physical-right feedback")
         motorSample["sequence"] = 4
@@ -193,6 +213,60 @@ struct GatewayCompatibilityFixtures {
         expect(client.state == .ready, "Valid state acknowledgement closed the connection")
         expect(client.gripperSnapshot(forArm: "left")["commandInFlight"] as? Bool == false,
                "State query did not complete")
+
+        // Explicit manual attempts are separately advertised, remain bounded,
+        // and must not invent calibration acceptance from a successful grip.
+        let existing = ROBAmberGatewayClient()
+        defer { existing.fixtureDisconnect() }
+        try existing.fixtureReceive(modernReady)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
+               "Old gateway gained an unadvertised device-state command")
+        existing.fixtureDisconnect()
+        var existingReady = modernReady
+        existingReady["supported_commands"] = ["gripper_state", "gripper_calibrate", "gripper_control", "gripper_control_existing"]
+        try existing.fixtureReceive(existingReady)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
+               "Unknown calibration attempt bypassed fresh position hold")
+        func existingFeedback(mode: Double = 2, age: Double = 1) throws {
+            try existing.fixtureReceive([
+                "type": "telemetry", "arm": "left", "sequence": 1,
+                "sample_age_ms": age, "controller_sample_age_ms": age,
+                "joint_feedback_age_ms": [Double](repeating: age, count: 7),
+                "gripper_feedback_age_ms": age,
+                "positions_rad": [Double](repeating: 0.3, count: 7),
+                "currents": [Double](repeating: 0, count: 7),
+                "statuses": [Double](repeating: mode, count: 7),
+                "velocities_available": false,
+            ])
+        }
+        try existingFeedback(mode: 0)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
+               "Inactive arm admitted an existing-device attempt")
+        try existingFeedback(age: 1500)
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold") == 0,
+               "Stale feedback admitted an existing-device attempt")
+        try existingFeedback()
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold", holdIntensity: 0) == 0,
+               "Zero-intensity attempt was admitted")
+        expect(existing.controlGripperUsingExistingDeviceState(forArm: "left", action: "hold", holdIntensity: 3) == 0,
+               "Existing-device intensity escalated")
+        for (action, force) in [("hold", 1), ("hold", 2), ("release", 10)] {
+            let id = existing.controlGripperUsingExistingDeviceState(forArm: "left", action: action, holdIntensity: action == "hold" ? force : 1)
+            expect(id > 0, "Explicit bounded attempt was rejected")
+            try existing.fixtureReceive([
+                "type": "gripper_control_existing_ack", "command_id": id, "arm": "left",
+                "accepted": true, "amber_response": 1, "action": action, "force": force,
+                "calibration_state": "required", "calibration_verified": false,
+                "completion_verified": false, "feedback_available": false, "command_in_flight": false,
+                "force_min": 1, "force_max": 300, "force_unit": "vendor_intensity",
+                "supported_actions": ["release", "hold"], "gateway_latency_ms": 1.0,
+            ])
+            expect(existing.state == .ready, "Truthful unknown-calibration acknowledgement was rejected")
+            expect(existing.gripperSnapshot(forArm: "left")["calibrationState"] as? String == "required",
+                   "A grip attempt manufactured calibration acceptance")
+        }
+        expect(existing.controlGripper(forArm: "left", action: "hold", force: 20) == 0,
+               "Explicit bounded attempt enabled ordinary uncalibrated force control")
 
         // Capability and calibration claims never survive a reconnect.
         client.fixtureDisconnect()
@@ -394,10 +468,69 @@ struct GatewayCompatibilityFixtures {
         expect(ghost() > 0, "A physical-right immutable proposal did not reach its selected gateway arm")
         expect(waypoint("left") == 0, "A right task borrowed the legacy left-only taught corridor")
         expect(waypoint("right") == 0, "A right task admitted a waypoint on the other physical arm")
+        UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":true],forName:UserDefaults.argumentDomain)
+        #if DEBUG
+        expect(ROBArmFeedbackTiming.maximumAgeMilliseconds == 1200, "Development Mode did not select1200ms")
+        for age in [262.0,398.0,500.0,512.0,900.0,1190.0] {
+            try motorFeedback(age: age)
+            expect(ghost() > 0, "Native ghost dispatch retained an old250ms feedback blocker")
+        }
+        try motorFeedback(age: 1201)
+        expect(ghost() == 0, "Debug dispatch accepted feedback older than1200ms")
+        try motorFeedback(age: 398)
+        trial.approved = false
+        expect(ghost() == 0, "Debug feedback timing bypassed task authorization")
+        trial.approved = true
+        #else
+        expect(ROBArmFeedbackTiming.maximumAgeMilliseconds == 250, "Release adopted debug timing")
+        try motorFeedback(age: 398)
+        expect(ghost() == 0, "Release ghost dispatch exceeded250ms")
+        #endif
+        UserDefaults.standard.setVolatileDomain(["ROBDevelopmentMode":false],forName:UserDefaults.argumentDomain)
+        try motorFeedback(age: 398)
+        expect(ghost() == 0, "Disabling Development Mode retained1200ms dispatch")
+        UserDefaults.standard.removeVolatileDomain(forName:UserDefaults.argumentDomain)
+        print("Shared feedback policy: actual native ghost dispatch accepts262/398/500/512/900/1190ms only in DEBUG Development Mode;1201ms and revoked authority reject; mode-off and Release unchanged")
         trial.approved = false
         expect(ghost() == 0, "A revoked physical-right proposal retained transport authority")
         trial.physicalSide = "left"
         print("Taught-waypoint admission: fixed five-leg handoff/eleven-leg wave, smooth midpoint recovery and legacy fallback retain corners, reversals, tolerance, timing, side, session and freshness bounds; paired adjacency unchanged")
+        let animation = ROBAnimationPlayback.shared
+        animation.expectedGeneration = generation; animation.expectedArm = "left"
+        try motorFeedback()
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
+            "Animation target without a local run was admitted")
+        animation.step = ([0,0.05,0,0,0,0,0], 1)
+        expect(taught.localAnimationStepRejection(arm: "left", expectedSessionGeneration: generation) == nil,
+            "Paired read-only preflight rejected a valid local segment")
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) > 0,
+            "Valid frozen local animation segment was rejected")
+        expect(taught.sendLocalAnimationStep(arm: "right", expectedSessionGeneration: generation) == 0,
+            "Animation admitted the wrong physical arm")
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation+1) == 0,
+            "Animation target replayed after reconnect")
+        animation.step = ([0,1,0,0,0,0,0], 1)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
+            "Animation exceeded existing transport rate")
+        expect(taught.animationStepRejection?.contains("Right arm J2") == true && taught.animationStepRejection?.contains("scheduled") == true,
+            "Animation rate rejection must identify the physical arm, joint and required timing")
+        animation.step = ([0,0.05,0,0,0,0,0], 0.4)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0 && taught.animationStepRejection?.contains("duration bounds") == true,
+            "Short animation segment needs a specific duration rejection")
+        animation.step = ([0,3,0,0,0,0,0], 10)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0 && taught.animationStepRejection?.contains("joint or duration bounds") == true,
+            "Joint bounds must reject before any paired animation dispatch")
+        animation.step = ([0,0.05,0,0,0,0,0], 1)
+        try motorFeedback(age: 501)
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) == 0,
+            "Animation admitted expired telemetry")
+        expect(taught.animationStepRejection?.contains("feedback expired") == true && taught.animationStepRejection?.contains("motors") == true,
+            "Feedback rejection must report its real cause and measured ages, not suggest transition edits")
+        try motorFeedback()
+        expect(taught.sendLocalAnimationStep(arm: "left", expectedSessionGeneration: generation) > 0 && taught.animationStepRejection == nil,
+            "A previous rejection must not latch or contaminate the next valid local dispatch")
+        animation.step = nil
+        print("Animation gateway: frozen owner segment, physical arm, reconnect, rate and freshness checks passed")
         print("Amber gateway compatibility fixtures passed")
     }
 }
@@ -410,16 +543,22 @@ def main():
         binary = Path(folder) / "gateway-fixtures"
         source.write_text(
             (ROOT / "Cerebro/ROBArmJointLimits.swift").read_text()
-            + (ROOT / "Cerebro/ROBAmberGatewayClient.swift").read_text()
+            + (ROOT / "Cerebro/ROBAmberGatewayClient.swift").read_text().replace(
+                "    private func send(_ message: ROBAmberGatewayMessage) {",
+                "    fileprivate var fixtureSentTypes: [String] = []\n"
+                "    private func send(_ message: ROBAmberGatewayMessage) {\n"
+                "        fixtureSentTypes.append(message.type)")
             + (ROOT / "Cerebro/ROBArmRoutinePlan.swift").read_text()
             + (ROOT / "Tests/ROBArmRoutineGatewayFixtureSupport.swift").read_text() + FIXTURES
         )
-        subprocess.run([
-            "xcrun", "swiftc", "-swift-version", "5", "-parse-as-library",
-            "-module-cache-path", str(Path(folder) / "module-cache"),
-            str(source), "-o", str(binary),
-        ], check=True)
-        subprocess.run([str(binary)], check=True, timeout=15)
+        for flags in [[], ["-D", "DEBUG"]]:
+            subprocess.run([
+                "xcrun", "swiftc", "-swift-version", "5", "-parse-as-library", *flags,
+                "-module-cache-path", str(Path(folder) / "module-cache"),
+                str(source), "-o", str(binary),
+            ], check=True)
+            subprocess.run([str(binary)], check=True, timeout=15)
+
 
 
 if __name__ == "__main__":

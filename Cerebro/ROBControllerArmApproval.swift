@@ -4,6 +4,64 @@ import Darwin
 
 enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedbackLost, cameraSourceChanged }
 
+/// Native relay metadata. Joint positions belong to each fresh phase proof,
+/// never the immutable user authorization that spans those planned motions.
+struct ROBTableRelayContext:Codable,Equatable {
+    let rightModelID:String,rightReferenceID:String,rightMappingID:String
+    let leftModelID:String,leftReferenceID:String,leftMappingID:String
+    let geometryID:String,cameraGeneration:UUID,bodyMotionIdentity:String
+    let gatewayGeneration:UInt64
+    let runtimeCalibrationIdentity:String,stereoPolicySHA256:String,physicalProjectionIdentity:String
+    let assumedSpatialErrorMeters:Double
+    var valid:Bool {
+        [rightModelID,rightReferenceID,rightMappingID,leftModelID,leftReferenceID,leftMappingID,geometryID,
+         runtimeCalibrationIdentity,stereoPolicySHA256,physicalProjectionIdentity].allSatisfy(relayHashIsValid) &&
+        rightMappingID != leftMappingID && !bodyMotionIdentity.isEmpty && bodyMotionIdentity.utf8.count<=256 &&
+        gatewayGeneration>0 && assumedSpatialErrorMeters==0.035
+    }
+    var identity:String {
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        return SHA256.hash(data:(try?encoder.encode(self)) ?? Data()).map{String(format:"%02x",$0)}.joined()
+    }
+    var object:[String:Any] { (try?JSONSerialization.jsonObject(with:JSONEncoder().encode(self)))as?[String:Any] ?? [:] }
+}
+private func relayHashIsValid(_ value:String)->Bool {value.count==64 && value.allSatisfy{$0.isHexDigit && !$0.isUppercase}}
+
+/// Actual native telemetry only. The executor still owns full path admission,
+/// joint limits, ownership and exposure matching; this supplies both-arm liveness.
+struct ROBTableRelayPhaseFeedback {
+    let gatewayGeneration:UInt64
+    let rightPositions:[Double],leftPositions:[Double]
+    let rightModes:[Int],leftModes:[Int]
+    let rightTelemetrySequence:UInt64,leftTelemetrySequence:UInt64
+    let rightStationary:Bool,leftStationary:Bool
+    let rightMotorAgeMilliseconds:Double,leftMotorAgeMilliseconds:Double
+    let rightGripperAgeMilliseconds:Double,leftGripperAgeMilliseconds:Double
+    func valid(movingArm:String?,generation:UInt64)->Bool {
+        guard gatewayGeneration==generation,rightTelemetrySequence>0,leftTelemetrySequence>0,
+              rightPositions.count==7,leftPositions.count==7,(rightPositions+leftPositions).allSatisfy(\.isFinite),
+              [rightMotorAgeMilliseconds,leftMotorAgeMilliseconds,rightGripperAgeMilliseconds,leftGripperAgeMilliseconds]
+                .allSatisfy({$0.isFinite && (0...250).contains($0)}),rightModes.count==7,leftModes.count==7 else{return false}
+        func modes(_ values:[Int],moving:Bool)->Bool {
+            guard let mode=values.first,values.allSatisfy({$0==mode}) else{return false}
+            return moving ? mode==2:[0,2].contains(mode)
+        }
+        return modes(rightModes,moving:movingArm=="right") && modes(leftModes,moving:movingArm=="left") &&
+            (movingArm=="right" || rightStationary) && (movingArm=="left" || leftStationary)
+    }
+}
+
+/// An actual user declaration plus audited task history can establish ASSUMED
+/// empty state; this never claims camera-measured possession or fabricates ASR.
+struct ROBTableRelayInitialEmptyEvidence {
+    let source:String
+    let declarationMessageSHA256:String,declarationAuditSHA256:String,taskHistorySHA256:String
+    let declaredAtMilliseconds:Double,appSessionID:String
+    let rightDeclaredEmpty:Bool,leftDeclaredEmpty:Bool
+    let rightAcquisitionCommandsSinceDeclaration:Int,leftAcquisitionCommandsSinceDeclaration:Int
+    let anyUncertainAcquisitionAcknowledgement:Bool,globalMayHoldPayload:Bool
+}
+
 /// The operator decides on the controller; Cerebro owns execution and its
 /// measured result. No desktop alert, persisted grant, or per-waypoint prompt.
 @objcMembers final class ROBControllerArmApproval: NSObject {
@@ -12,6 +70,12 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     static let supervisedGreetingName = "Supervised greet: confirm hanging/clear route/empty jaws; watch despite poor view; neck scan, arms front, wave"
     private(set) var status = "Arm operations need spoken or controller authorization"
     var isPending: Bool { pending != nil }
+    var manualArmSessionActive: Bool { manualArmSession.map(manualSessionIsFresh) ?? false }
+    var manualArmSessionDetail: String {
+        guard manualArmSessionActive, let session = manualArmSession else { return "No active manual arm session" }
+        let remaining = max(0, Int(ceil(session.expires.timeIntervalSince(now()))))
+        return String(format: "Both-arm manual control: %d:%02d remaining. Mode, position and gripper Hold/Release need no further approval. Stop ends this session.", remaining / 60, remaining % 60)
+    }
     var armSessionActive: Bool { armSession.map(sessionIsFresh) ?? false }
     var armSessionDetail: String {
         guard armSessionActive, let session = armSession else { return "No active arm rehearsal session" }
@@ -29,6 +93,59 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     // restart below are distinct from ordinary chat/model/controller text.
     private let localSessionID = UUID()
     var localRecyclingApprovalSessionID: String { localSessionID.uuidString }
+
+    /// A private, one-use record of the actual operator's two-arm lift request.
+    /// This is not a spoken response, an arm session, or a can-campaign restart.
+    @nonobjc func torsoPreparationTemplate(context: String, readyPoseRevision: String) -> [String: Any] {
+        ["schemaVersion": 1, "kind": "operator_observed_torso_test_preparation",
+         "receiptID": UUID().uuidString, "appSessionID": localSessionID.uuidString,
+         "context": context, "issuedAtMilliseconds": now().timeIntervalSince1970 * 1000,
+         "readyPoseRevision": readyPoseRevision,
+         "source": "explicit_user_messages", "sourceMessages": [], "sourceMessageSHA256": [],
+         "bothArmsEmpty": false, "operatorObservesClearLift": false,
+         "jawCommands": false, "treadCommands": false, "torsoCommands": false]
+    }
+
+    @nonobjc func consumeTorsoPreparationReceipt(_ url: URL, context: String, readyPoseRevision: String) throws -> UUID {
+        #if DEBUG
+        guard UserDefaults.standard.bool(forKey: "ROBDevelopmentMode"), pending == nil,
+              !manualArmSessionActive, !armSessionActive else {
+            throw localApprovalError("Finish the active arm authorization before this supervised debug preparation.")
+        }
+        let data = try readPrivateLocalReceipt(url)
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value["schemaVersion"] as? Int == 1,
+              value["kind"] as? String == "operator_observed_torso_test_preparation",
+              let idText = value["receiptID"] as? String, let id = UUID(uuidString: idText),
+              value["appSessionID"] as? String == localSessionID.uuidString,
+              value["context"] as? String == context,
+              value["readyPoseRevision"] as? String == readyPoseRevision,
+              let issued = value["issuedAtMilliseconds"] as? Double,
+              (0...300_000).contains(now().timeIntervalSince1970 * 1000 - issued),
+              value["source"] as? String == "explicit_user_messages",
+              let messages = value["sourceMessages"] as? [String], (2...6).contains(messages.count),
+              messages.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 4096 }),
+              let hashes = value["sourceMessageSHA256"] as? [String],
+              hashes == messages.map({ Self.localHash(Data($0.utf8)) }),
+              value["bothArmsEmpty"] as? Bool == true,
+              value["operatorObservesClearLift"] as? Bool == true,
+              value["jawCommands"] as? Bool == false,
+              value["treadCommands"] as? Bool == false,
+              value["torsoCommands"] as? Bool == false else {
+            throw localApprovalError("The two-arm preparation receipt is stale or does not match this exact app, controller and empty-arm task.")
+        }
+        // Exclusive creation consumes the receipt before any motor command.
+        // A fault, Stop or relaunch cannot replay it.
+        try writeLocalApprovalAudit(["receipt": value, "receiptSHA256": Self.localHash(data),
+            "consumedAtMilliseconds": now().timeIntervalSince1970 * 1000,
+            "cameraRegistrationVerified": false, "clearanceSource": "operator_observed",
+            "cameraPersonPredictions": "advisory_for_this_empty_lift"],
+            name: "torso-preparation-" + id.uuidString + ".json")
+        return id
+        #else
+        throw localApprovalError("Operator-observed torso preparation is a debug-only sandbox test.")
+        #endif
+    }
     @nonobjc var localRecyclingApprovalAuditDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cerebro/LocalSessionApprovals", isDirectory: true)
     @nonobjc var standingCanCampaignDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -60,6 +177,21 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     private var standingRecovery: DispatchWorkItem?
     private var standingRecoveryToken = UUID()
     private var standingIOFailure: String?
+    private struct EmptyObservationContext {
+        let observationID:UUID,campaignID:UUID,authorizationSHA256:String,stateSHA256:String
+        let lastJobID:String?,lastJobAppSessionID:UUID?,createdAtMilliseconds:Double
+    }
+    private struct EmptyObservationReceipt:Decodable {
+        let schemaVersion:Int,kind:String,observationID:UUID,appSessionID:UUID,campaignID:UUID
+        let authorizationSHA256:String,standingStateSHA256:String
+        let lastJobID:String?,lastJobAppSessionID:UUID?
+        let source:String,sourceMessage:String,sourceMessageSHA256:String,observation:String
+        let issuedAtMilliseconds:Double
+    }
+    private var pendingEmptyObservation:EmptyObservationContext?
+    private static var emptyObservationScope:[String:Any] {
+        ["arms":["left","right"],"objectStateOnly":true,"armTravel":false,"gripperCommands":false,"resume":false]
+    }
     private static func standingScope(canCount: Int, legacy: Bool) -> [String: Any] {
         ["canCount": canCount, "targetObject": "empty_coke_can", "destination": "orange_bucket", "arms": ["left", "right"],
          "treads": false, "torso": false, "manualGestures": false, "permitsUnmeasuredVisualCalibrationTrial": true,
@@ -198,6 +330,92 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     private func standingMayHoldPayload(_ s: StandingState) -> Bool {
         (s.possiblePayloadHeld ?? true) || (s.state == "executing" && s.lastJobAppSessionID != localSessionID)
     }
+    private func emptyObservationState()->StandingState? {
+        guard pending==nil,let state=standingRecord(),state.completedTransfers<state.canCount,
+              standingMayHoldPayload(state),
+              ["active","paused","recovering"].contains(state.state) ||
+                (state.state=="executing" && state.lastJobAppSessionID != localSessionID) else {return nil}
+        return state
+    }
+    /// Object-state evidence is independent of motion authorization. It can
+    /// only clear uncertainty for a nonexecuting, still-authorized campaign.
+    var canImportLocalCanCampaignEmptyObservation:Bool {emptyObservationState() != nil}
+
+    /// Invalid-by-default, one-use challenge for the user's actual observation.
+    /// Export and import never start a task, open a jaw or change permission.
+    @nonobjc func exportLocalCanCampaignEmptyObservationTemplate(to url:URL)throws {
+        precondition(Thread.isMainThread)
+        guard url.isFileURL,let state=emptyObservationState() else {
+            throw localApprovalError("An idle active campaign with uncertain gripper contents is required for an empty-gripper observation.")
+        }
+        let created=now().timeIntervalSince1970*1000
+        guard created.isFinite,created>0 else {throw localApprovalError("The observation clock is invalid.")}
+        let context=EmptyObservationContext(observationID:UUID(),campaignID:state.campaignID,
+            authorizationSHA256:state.authorizationSHA256,stateSHA256:Self.localHash(try readPrivateLocalReceipt(standingStateURL)),
+            lastJobID:state.lastJobID,lastJobAppSessionID:state.lastJobAppSessionID,createdAtMilliseconds:created)
+        let value:[String:Any]=["schemaVersion":1,"kind":"local_user_can_campaign_empty_observation",
+            "observationID":context.observationID.uuidString,"appSessionID":localSessionID.uuidString,
+            "campaignID":context.campaignID.uuidString,"authorizationSHA256":context.authorizationSHA256,
+            "standingStateSHA256":context.stateSHA256,"lastJobID":state.lastJobID as Any? ?? NSNull(),
+            "lastJobAppSessionID":state.lastJobAppSessionID?.uuidString as Any? ?? NSNull(),
+            "source":"explicit_user_observation","sourceMessage":"","sourceMessageSHA256":"",
+            "observation":"both_grippers_empty","issuedAtMilliseconds":created,"scope":Self.emptyObservationScope]
+        let bytes=try localCanonical(value),descriptor=open(url.path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0o600)
+        guard descriptor>=0 else {throw localApprovalError("Choose a new private file for this observation template.")}
+        let handle=FileHandle(fileDescriptor:descriptor,closeOnDealloc:true);defer {try?handle.close()}
+        try handle.write(contentsOf:bytes);try handle.synchronize()
+        pendingEmptyObservation=context
+        update("Empty-gripper observation template exported. No task started and no motion permission changed.")
+    }
+
+    @nonobjc func importLocalCanCampaignEmptyObservation(fromReceiptURL url:URL)throws {
+        precondition(Thread.isMainThread)
+        guard var state=emptyObservationState(),let context=pendingEmptyObservation else {
+            throw localApprovalError("Export a fresh empty-gripper observation template for the idle current campaign first.")
+        }
+        let bytes=try readPrivateLocalReceipt(url),value=try JSONSerialization.jsonObject(with:bytes)as?[String:Any]
+        let receipt=try JSONDecoder().decode(EmptyObservationReceipt.self,from:bytes)
+        let keys:Set<String>=["schemaVersion","kind","observationID","appSessionID","campaignID","authorizationSHA256",
+            "standingStateSHA256","lastJobID","lastJobAppSessionID","source","sourceMessage","sourceMessageSHA256",
+            "observation","issuedAtMilliseconds","scope"]
+        let timestamp=now().timeIntervalSince1970*1000
+        guard let value,Set(value.keys)==keys,let scope=value["scope"]as?[String:Any],
+              try localCanonical(scope)==localCanonical(Self.emptyObservationScope),
+              receipt.schemaVersion==1,receipt.kind=="local_user_can_campaign_empty_observation",
+              receipt.observationID==context.observationID,receipt.appSessionID==localSessionID,
+              receipt.campaignID==context.campaignID,receipt.campaignID==state.campaignID,
+              receipt.authorizationSHA256==context.authorizationSHA256,receipt.authorizationSHA256==state.authorizationSHA256,
+              receipt.standingStateSHA256==context.stateSHA256,
+              context.stateSHA256==Self.localHash(try readPrivateLocalReceipt(standingStateURL)),
+              receipt.lastJobID==context.lastJobID,receipt.lastJobID==state.lastJobID,
+              receipt.lastJobAppSessionID==context.lastJobAppSessionID,receipt.lastJobAppSessionID==state.lastJobAppSessionID,
+              receipt.source=="explicit_user_observation",receipt.observation=="both_grippers_empty",
+              receipt.sourceMessage=="Both grippers are empty",
+              receipt.sourceMessageSHA256==Self.localHash(Data(receipt.sourceMessage.utf8)),
+              timestamp.isFinite,receipt.issuedAtMilliseconds.isFinite,receipt.issuedAtMilliseconds>0,
+              (0...600_000).contains(timestamp-receipt.issuedAtMilliseconds),
+              (0...600_000).contains(timestamp-context.createdAtMilliseconds) else {
+            throw localApprovalError("The empty-gripper observation must be fresh, written by the user, and match this exact campaign, app, job history and one-use template.")
+        }
+        // Persist the fact before changing uncertainty. Exclusive creation is
+        // a durable replay tombstone; any audit/save failure leaves execution
+        // closed instead of manufacturing EMPTY or another motion grant.
+        var audit=value
+        audit["importedAtMilliseconds"]=timestamp;audit["receiptSHA256"]=Self.localHash(bytes)
+        audit["sourceReceiptPath"]=url.path;audit["previousState"]=state.state
+        audit["previousPossiblePayloadHeld"]=standingMayHoldPayload(state)
+        audit["motionAuthority"]=false;audit["taskStarted"]=false
+        try writeLocalApprovalAudit(audit,name:"empty-observation-"+receipt.observationID.uuidString+".json")
+        pendingEmptyObservation=nil
+        standingRecovery?.cancel();standingRecovery=nil;standingRecoveryToken=UUID()
+        state.possiblePayloadHeld=false;state.state="paused"
+        state.detail="User observed both grippers empty. Campaign remains paused; Run requires a fresh scene and plan."
+        do {try saveStanding(state)} catch {
+            standingIOFailure="Empty observation audited, but campaign object state could not be saved: "+error.localizedDescription
+            throw error
+        }
+        update("Both grippers recorded empty. Campaign remains paused; no task started or motion permission changed.")
+    }
     var standingLocalCanCampaignState: NSDictionary? {
         guard let s = standingRecord(includeTerminal: true) else { return standingIOFailure.map { ["state": "blocked", "detail": $0] as NSDictionary } }
         let state = s.state == "executing" && s.lastJobAppSessionID != localSessionID ? "paused" : s.state
@@ -237,6 +455,10 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             _ = unlink(standingStateURL.path); return
         }
         if FileManager.default.fileExists(atPath: standingTerminalURL(s.campaignID).path) { return }
+        // A previous app's unfinished execution is object-state uncertainty,
+        // even if its last saved explicit flag was false. Changing permission
+        // state must persist that uncertainty before removing the OR condition.
+        s.possiblePayloadHeld=standingMayHoldPayload(s)
         s.state = consumed ? "consumed" : "revoked"; s.detail = reason
         do {
             let e = JSONEncoder(); e.outputFormatting = [.sortedKeys]
@@ -251,6 +473,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     @nonobjc func pauseStandingLocalCanCampaign(reason: String) {
         precondition(Thread.isMainThread)
         if var s = standingRecord() {
+            s.possiblePayloadHeld=standingMayHoldPayload(s)
             s.state = "paused"; s.detail = reason
             do { try saveStanding(s) } catch { standingIOFailure = error.localizedDescription }
         }
@@ -261,6 +484,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         precondition(Thread.isMainThread)
         guard pending == nil, var s = standingRecord(), s.completedTransfers < s.canCount,
               s.state != "waiting_for_intervention", !standingMayHoldPayload(s) else { return false }
+        s.possiblePayloadHeld=standingMayHoldPayload(s)
         guard s.recoveryAttempts < 3 else {
             s.state = "waiting_for_intervention"; s.detail = "Automatic recovery reached its three-attempt limit; intervention is required."
             try? saveStanding(s); update(s.detail); return false
@@ -288,6 +512,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         guard !standingMayHoldPayload(s) else {
             throw localApprovalError("A possible payload is held or its state is unknown. Standing authorization remains active; no new empty-can grasp, jaw calibration or parking is admitted without supported release/object-clear evidence.")
         }
+        s.possiblePayloadHeld=standingMayHoldPayload(s)
         let id = UUID()
         let derived: [String: Any] = ["schemaVersion": 1, "kind": "standing_can_campaign_fresh_job_binding",
             "campaignID": s.campaignID.uuidString, "standingAuthorizationSHA256": s.authorizationSHA256,
@@ -346,9 +571,13 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         let contextIdentity: String
         let permitsUnmeasuredVisualCalibrationTrial: Bool
         let nominalEmptyCommissioningStepEnabled: Bool
+        let approachUnknownAdvisoryEnabled:Bool
+        let approachCanThenHoldEnabled:Bool
+        let nominalModelAssumedSelfEnabled: Bool
+        let sourcePixelSelfReviewSHA256:String?
         let oneDegreeEmptyCalibrationStepEnabled: Bool
         var object: [String: Any] {
-            ["command": command, "arm": arm, "canCount": canCount, "summary": summary,
+            var value:[String:Any] = ["command": command, "arm": arm, "canCount": canCount, "summary": summary,
              "summarySHA256": ROBControllerArmApproval.localHash(Data(summary.utf8)),
              "contextIdentity": contextIdentity, "targetObject": "empty_coke_can",
              "destination": "orange_bucket", "bothArmsStationaryHolds": true,
@@ -356,6 +585,11 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
              "permitsUnmeasuredVisualCalibrationTrial": permitsUnmeasuredVisualCalibrationTrial,
              "nominalEmptyCommissioningStepEnabled": nominalEmptyCommissioningStepEnabled,
              "oneDegreeEmptyCalibrationStepEnabled": oneDegreeEmptyCalibrationStepEnabled]
+            if approachUnknownAdvisoryEnabled {value["approachUnknownAdvisoryEnabled"]=true}
+            if approachCanThenHoldEnabled {value["approachCanThenHoldEnabled"]=true}
+            if nominalModelAssumedSelfEnabled {value["nominalModelAssumedSelfEnabled"]=true}
+            if let sourcePixelSelfReviewSHA256 {value["sourcePixelSelfReviewSHA256"]=sourcePixelSelfReviewSHA256}
+            return value
         }
     }
     private struct LocalRecyclingApproval {
@@ -410,12 +644,25 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         summary: String, contextIdentity: @escaping () -> String?, receiptOnly: Bool,
         permitsUnmeasuredVisualCalibrationTrial: Bool = false,
         nominalEmptyCommissioningStepEnabled: Bool = false,
+        nominalModelAssumedSelfEnabled: Bool = false,
+        approachCanThenHoldEnabled:Bool = false,
+        approachUnknownAdvisoryEnabled:Bool = false,
+        sourcePixelSelfReviewSHA256:String? = nil,
         oneDegreeEmptyCalibrationStepEnabled: Bool = false,
         execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
         cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
-        guard (1...8).contains(canCount), ["left", "right"].contains(arm), command == arm + "_recycle_cans",
+        #if !DEBUG
+        guard sourcePixelSelfReviewSHA256==nil,!approachCanThenHoldEnabled,!approachUnknownAdvisoryEnabled else {completion(["status":"rejected","detail":"Experimental source-pixel commissioning is DEBUG-only."]);return}
+        #endif
+        guard !approachUnknownAdvisoryEnabled || (approachCanThenHoldEnabled && standingLocalCanCampaignActive && !standingCanCampaignMayHoldPayload) else {completion(["status":"rejected","detail":"UNKNOWN advisory requires the exact standing open-jaw approach subset."]);return}
+        guard !approachCanThenHoldEnabled || (arm=="right" && receiptOnly && permitsUnmeasuredVisualCalibrationTrial && !nominalEmptyCommissioningStepEnabled && !oneDegreeEmptyCalibrationStepEnabled && !nominalModelAssumedSelfEnabled && sourcePixelSelfReviewSHA256==nil) else {completion(["status":"rejected","detail":"Open-jaw approach needs its separate exact DEBUG local scope."]);return}
+        guard sourcePixelSelfReviewSHA256.map({$0.count==64 && $0.allSatisfy{$0.isHexDigit && !$0.isUppercase} &&
+                  nominalEmptyCommissioningStepEnabled && !nominalModelAssumedSelfEnabled && !oneDegreeEmptyCalibrationStepEnabled &&
+                  arm=="right" && receiptOnly && permitsUnmeasuredVisualCalibrationTrial}) ?? true,
+              (1...8).contains(canCount), ["left", "right"].contains(arm), command == arm + "_recycle_cans",
               !nominalEmptyCommissioningStepEnabled || (receiptOnly && permitsUnmeasuredVisualCalibrationTrial),
+              !nominalModelAssumedSelfEnabled || (nominalEmptyCommissioningStepEnabled && arm=="right" && !oneDegreeEmptyCalibrationStepEnabled),
               !oneDegreeEmptyCalibrationStepEnabled || (arm == "right" && receiptOnly && permitsUnmeasuredVisualCalibrationTrial),
               !(nominalEmptyCommissioningStepEnabled && oneDegreeEmptyCalibrationStepEnabled),
               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, summary.count <= 2048,
@@ -426,6 +673,8 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         let scope = LocalRecyclingScope(command: command, arm: arm, canCount: canCount, summary: summary, contextIdentity: identity,
             permitsUnmeasuredVisualCalibrationTrial: permitsUnmeasuredVisualCalibrationTrial,
             nominalEmptyCommissioningStepEnabled: nominalEmptyCommissioningStepEnabled,
+            approachUnknownAdvisoryEnabled:approachUnknownAdvisoryEnabled,approachCanThenHoldEnabled:approachCanThenHoldEnabled,nominalModelAssumedSelfEnabled:nominalModelAssumedSelfEnabled,
+            sourcePixelSelfReviewSHA256:sourcePixelSelfReviewSHA256,
             oneDegreeEmptyCalibrationStepEnabled: oneDegreeEmptyCalibrationStepEnabled)
         request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm == "right" ? "both" : "left", "summary": summary],
             summary: summary, executionLimit: 600, localRecyclingScope: scope,
@@ -499,9 +748,9 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
 
     /// Separate one-step commissioning permission, never inferred from speech,
     /// a general visual trial or a previously imported ordinary recycling job.
-    @nonobjc func authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: String, arm: String) -> Bool {
+    @nonobjc func authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: String, arm: String,modelAssumedSelfEnabled:Bool=false,sourcePixelSelfReviewSHA256:String?=nil) -> Bool {
         guard let p = pending, let scope = p.localRecyclingScope,
-              scope.nominalEmptyCommissioningStepEnabled, !scope.oneDegreeEmptyCalibrationStepEnabled, p.awaitingLocalReceipt,
+              scope.nominalEmptyCommissioningStepEnabled,scope.nominalModelAssumedSelfEnabled==modelAssumedSelfEnabled,scope.sourcePixelSelfReviewSHA256==sourcePixelSelfReviewSHA256, !scope.oneDegreeEmptyCalibrationStepEnabled, p.awaitingLocalReceipt,
               scope.arm == arm, scope.summary == summary,
               scope.permitsUnmeasuredVisualCalibrationTrial,
               p.localSessionApprovalID != nil else { return false }
@@ -616,6 +865,44 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         try handle.write(contentsOf: data); try handle.synchronize()
     }
 
+    private struct TableRelayScope:Equatable {
+        let canCount:Int,summary:String,context:ROBTableRelayContext
+        var contextIdentity:String {context.identity}
+        var object:[String:Any] {
+            ["scopeVersion":1,"command":"right_table_left_recycle_cans_v1","canCount":canCount,
+             "summary":summary,"summarySHA256":Self.hash(summary),"context":context.object,
+             "contextIdentity":contextIdentity,"targetObject":"empty_coke_can","destination":"orange_bucket",
+             "route":["right_pickup","shared_table","left_pickup","orange_bucket"],"arms":["right","left"],
+             "rightGatewayArm":"left","leftGatewayArm":"right","oneMovingArmAtATime":true,
+             "bothArmsStationaryHolds":true,"treads":false,"torso":false,"manualGestures":false,
+             "permitsUnmeasuredVisualCalibrationTrial":true]
+        }
+        private static func hash(_ value:String)->String {ROBControllerArmApproval.localHash(Data(value.utf8))}
+    }
+    private struct TableRelayBinding {
+        let phase:String,physicalArm:String,proposalID:UUID,proposalSHA256:String
+        let idlePositions:[Double]
+        let rightSequenceAtBind:UInt64,leftSequenceAtBind:UInt64
+        let feedback:()->ROBTableRelayPhaseFeedback?
+    }
+    private struct TableRelayApproval {
+        let receiptID:UUID,receiptSHA256:String,pendingID:String,scope:TableRelayScope
+        let currentContext:()->String?
+        let previousUncertaintyAtMilliseconds:Double?
+        var phaseIndex=0,completedTransfers=0,verifiedBucketLandings=0
+        var rightMayHold=true,leftMayHold=true
+        var supportStage="initial_empty_unverified"
+        var binding:TableRelayBinding?
+        var usedProposals=Set<UUID>()
+        var usedProposalHashes=Set<String>()
+        var pendingBucketLandingVerified=false
+        var lastConsumedPhase:String?
+    }
+    private var tableRelayApproval:TableRelayApproval?
+    private var lastTableRelayLedger:NSDictionary?
+    private var tableRelayAuditFailure:String?
+    private static let tableRelayPhases=["right_pickup","right_place_shared_table","right_retreat","left_pickup","left_place_bucket","left_retreat"]
+
     private struct Peer {
         let device: UUID
         let session: UUID
@@ -637,9 +924,13 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         var started: Date?
         let executionLimit: TimeInterval
         var voiceAuthorized = false
+        var recycleMissionAuthorization: (() -> Bool)?
         var armSessionID: String? = nil
+        var manualArmSessionID: String? = nil
+        var localPanelGeneration: UInt64? = nil
         var attentionReminders = 0
         var localRecyclingScope: LocalRecyclingScope?
+        var tableRelayScope:TableRelayScope?
         var localContextIdentity: (() -> String?)?
         var awaitingLocalReceipt = false
         var localSessionApprovalID: UUID?
@@ -651,6 +942,14 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         let expires: Date
     }
     private var armSession: ArmSession?
+    private struct ManualArmSession {
+        let id: String
+        let peer: Peer?
+        let voiceAuthorized: Bool
+        let expires: Date
+        let gatewayGeneration: UInt64
+    }
+    private var manualArmSession: ManualArmSession?
     private var peers: [UUID: Peer] = [:]
     private struct ControllerStopReceipt {
         let device: UUID, session: UUID, messageID: String, callID: String
@@ -721,8 +1020,121 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         session.expires > now() && (session.voiceAuthorized || session.peer.map(peerIsFresh) == true)
     }
 
+    private func manualSessionIsFresh(_ session: ManualArmSession) -> Bool {
+        session.expires > now() && (session.voiceAuthorized || session.peer.map(peerIsFresh) == true) &&
+            ROBAmberGatewayClient.shared.isReady() &&
+            (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == session.gatewayGeneration
+    }
+
+    /// Explicit native manual controls only. No movement occurs when approved.
+    func beginManualArmSession(completion: @escaping (NSDictionary) -> Void) {
+        precondition(Thread.isMainThread)
+        if manualArmSessionActive {
+            completion(["status": "completed", "detail": manualArmSessionDetail]); return
+        }
+        let gateway = ROBAmberGatewayClient.shared
+        let generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
+        guard gateway.isReady(), generation != 0 else {
+            completion(["status": "blocked", "detail": "Connect Amber before starting manual arm control."]); return
+        }
+        let summary = "Authorize both arms' manual UI controls for 15 minutes: activate, deactivate holding torque, enter position mode, send joint or Cartesian position targets, and use gripper Hold/Release at the selected bounded intensity. Support an arm before removing holding torque, clear the jaw pinch zone before Hold, and support any held object before Release. One spoken or controller approval covers subsequent manual button commands until the fixed deadline. Approval itself sends no movement. Stop, End session, sleep/restart or a changed gateway connection ends this permission. This does not authorize automatic pickup routines, full-travel gripper calibration, encoder reset, current mode or CAN/core restart."
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": "both", "summary": summary],
+            summary: summary, execute: { [weak self] done in
+                guard let self, let p = self.pending else { return }
+                guard gateway.isReady(), (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation else {
+                    done(["status": "blocked", "detail": "The arm connection changed before approval. Request a new manual session."]); return
+                }
+                self.manualArmSession = ManualArmSession(id: p.id, peer: p.peer, voiceAuthorized: p.voiceAuthorized,
+                    expires: self.now().addingTimeInterval(900), gatewayGeneration: generation)
+                done(["status": "completed", "detail": "Both-arm manual control authorized for 15 minutes. Mode, position and gripper Hold/Release buttons are ready."])
+            }, cancel: {}, completion: completion)
+    }
+
+    /// The operation identifier comes from a native UI handler, never a model
+    /// string. Unlisted actions keep their existing separate approval.
+    func requestManualArmCommand(operation: String, arm: String, summary: String,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        let covered = ["activate", "position", "deactivate", "cmd_activate_mode_v2", "cmd_deactivate_mode_v2",
+                       "cmd_position_mode_v2", "cmd_position_input", "cmd_cartesian_input"].contains(operation)
+        guard ["left", "right", "both"].contains(arm) else {
+            completion(["status": "rejected", "detail": "Unknown manual arm selection."]); return
+        }
+        if covered && !manualArmSessionActive {
+            beginManualArmSession { [weak self] result in
+                guard result["status"] as? String == "completed", let self else { completion(result); return }
+                self.requestManualArmCommand(operation: operation, arm: arm, summary: summary,
+                    execute: execute, cancel: cancel, completion: completion)
+            }
+            return
+        }
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm, "summary": summary],
+            summary: summary, allowManualArmSession: covered,
+            execute: execute, cancel: cancel, completion: completion)
+    }
+
+    /// Only native panel handlers call this entry. A local click is authority
+    /// for this captured command, not a spoken response or reusable AI grant.
+    func takeLocalPanelControl() {
+        precondition(Thread.isMainThread)
+        let reason = "Operator took control at the local panel"
+        cancel(reason: reason)
+        NotificationCenter.default.post(name: Notification.Name("ROBLocalManualControlRequested"), object: self)
+    }
+
+    func performLocalPanelArmCommand(operation: String, arm: String, summary: String,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        let allowed = ["activate", "position", "deactivate", "cmd_activate_mode_v2", "cmd_deactivate_mode_v2",
+            "cmd_position_mode_v2", "cmd_current_mode_v2", "zero_position_mode_v2", "cmd_position_input",
+            "cmd_cartesian_input", "close_gripper", "open_gripper", "calibrate_gripper"]
+        guard allowed.contains(operation), ["left", "right"].contains(arm) else {
+            completion(["status": "rejected", "detail": "Unknown local panel command or arm."]); return
+        }
+        takeLocalPanelControl()
+        let gateway = ROBAmberGatewayClient.shared
+        let generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
+        guard gateway.isReady(), generation != 0 else {
+            completion(["status": "blocked", "detail": "Connect Amber before using the local arm controls."]); return
+        }
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm, "summary": summary],
+            summary: summary, localPanelGeneration: generation, execute: { [weak self] done in
+                guard let self, let id = self.pending?.id else { return }
+                let deadline = ProcessInfo.processInfo.systemUptime + 2
+                func dispatchWhenReleased() {
+                    guard self.pending?.id == id else { return }
+                    guard gateway.isReady(), (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation else {
+                        done(["status": "blocked", "detail": "The arm connection changed during manual takeover."]); return
+                    }
+                    let readiness = gateway.manualArmControlReadiness(forUDPPort: arm == "right" ? 26001 : 26002,
+                        expectedSessionGeneration: generation)
+                    if readiness["allowed"] as? Bool == true { execute(done); return }
+                    // Only ownership handoff may wait. Stale feedback never
+                    // gets a relaxed age or an automatic later replay.
+                    if readiness["waitingForOwner"] as? Bool == true,
+                       ProcessInfo.processInfo.systemUptime < deadline {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02, execute: dispatchWhenReleased)
+                    } else {
+                        done(["status": "blocked", "detail": readiness["reason"] as? String ?? "Manual control is unavailable."])
+                    }
+                }
+                dispatchWhenReleased()
+            }, cancel: cancel, completion: completion)
+    }
+
     private func authorizationIsLive(_ p: Pending) -> Bool {
         guard let started = p.started, (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
+        if let generation = p.localPanelGeneration {
+            let gateway = ROBAmberGatewayClient.shared
+            return gateway.isReady() && (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation
+        }
+        if let authorized=p.recycleMissionAuthorization { return authorized() }
+        if let scope=p.tableRelayScope {
+            guard tableRelayAuditFailure==nil,let approval=tableRelayApproval,approval.pendingID==p.id,
+                  approval.scope==scope,approval.currentContext()==scope.contextIdentity else{return false}
+            if let binding=approval.binding {return tableRelayFeedbackIsLive(binding,scope:scope)}
+            return true
+        }
         if let id = p.localSessionApprovalID {
             guard let approval = localRecyclingApproval, approval.receiptID == id,
                   approval.activePendingID == p.id, approval.scope == p.localRecyclingScope,
@@ -735,6 +1147,9 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         }
         if let id = p.armSessionID {
             return armSession.map { $0.id == id && sessionIsFresh($0) } == true
+        }
+        if let id = p.manualArmSessionID {
+            return manualArmSession.map { $0.id == id && manualSessionIsFresh($0) } == true
         }
         return p.voiceAuthorized || p.peer.map(peerIsFresh) == true
     }
@@ -854,6 +1269,12 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
 
     private func beginAcceptedOperation() {
         guard let p = pending, p.started == nil else { return }
+        if let scope=p.tableRelayScope {
+            guard tableRelayAuditFailure==nil,let approval=tableRelayApproval,approval.pendingID==p.id,
+                  approval.scope==scope,approval.currentContext()==scope.contextIdentity else {
+                cancel(reason:"The table-relay authorization lost its exact both-arm context.");return
+            }
+        }
         if p.localSessionApprovalID != nil {
             guard let approval = localRecyclingApproval, approval.activePendingID == p.id,
                   approval.beginBefore > now(), approval.scope == p.localRecyclingScope,
@@ -870,6 +1291,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         p.execute { [weak self] result in
             guard let self, self.pending?.id == p.id else { return }
             precondition(Thread.isMainThread)
+            if p.tableRelayScope != nil {self.finishTableRelayOperation(result);return}
             let outcome = result["status"] as? String ?? "failed"
             let succeeded = ["completed", "accepted_unverified", "ready_for_object", "grip_attempted"].contains(outcome)
             let noReach = result["reach_sent"] as? Bool == false
@@ -894,8 +1316,9 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
                 if var s = self.standingRecord(), s.campaignID == campaign {
                     if s.completedTransfers == s.canCount { self.endStandingCampaign("All \(s.canCount) native transfers reported; bucket landing remains separately verified.", consumed: true) }
                     else {
-                        s.state = self.standingMayHoldPayload(s) || result["requires_intervention"] as? Bool == true ? "waiting_for_intervention" : "paused"
-                        s.detail = self.standingMayHoldPayload(s)
+                        s.possiblePayloadHeld=self.standingMayHoldPayload(s)
+                        s.state = s.possiblePayloadHeld == true || result["requires_intervention"] as? Bool == true ? "waiting_for_intervention" : "paused"
+                        s.detail = s.possiblePayloadHeld == true
                             ? "Possible payload held: empty-can Run blocked; authorization retained. Supported release/object-clear evidence is required."
                             : result["detail"] as? String ?? "Job ended; a fresh plan is required."
                         do { try self.saveStanding(s) } catch { self.standingIOFailure = error.localizedDescription }
@@ -935,22 +1358,22 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     }
 
     func authorizesMotionPath(_ name: String) -> Bool {
-        guard let p = pending, p.started != nil, p.action == "play_gesture",
+        guard let p = pending, p.localPanelGeneration == nil, p.started != nil, p.action == "play_gesture",
               p.arguments["gesture"] as? String == name else { return false }
         return authorizationIsLive(p)
     }
 
     /// Exact one-shot scope for the operator-supervised physical-left trial.
     func authorizesLeftArmTrial(_ summary: String) -> Bool {
-        guard let p = pending,
-              p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
+        guard let p = pending, p.localPanelGeneration == nil,
+              p.tableRelayScope==nil,p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
               p.arguments["arm"] as? String == "left", p.summary == summary,
               authorizationIsLive(p) else { return false }
         return true
     }
 
     func authorizesRightArmTrial(_ summary: String) -> Bool {
-        guard let p = pending, p.action == "arm_operation",
+        guard let p = pending, p.localPanelGeneration == nil, p.tableRelayScope==nil,p.action == "arm_operation",
               p.arguments["operation"] as? String == "manual",
               ["right","both"].contains(p.arguments["arm"] as? String ?? ""), p.summary == summary,
               authorizationIsLive(p) else { return false }
@@ -961,15 +1384,29 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
     /// operator-supervised travel may replace the semantic route inspection.
     /// Never persist or infer this scope from a model's request or a preference.
     func authorizesSupervisedArmRoute() -> Bool {
-        guard let p = pending, authorizationIsLive(p) else { return false }
+        guard let p = pending, p.localPanelGeneration == nil, p.tableRelayScope==nil,authorizationIsLive(p) else { return false }
         return (p.action == "arm_operation" && p.summary.hasSuffix(Self.supervisedRouteNotice))
             || (p.action == "play_gesture" && p.summary == Self.supervisedGreetingName)
     }
 
+    /// Called only by the authenticated Recycle Cans mission adapter. The
+    /// closure binds this one native transfer to its live mission and peer.
+    @nonobjc func requestRecycleMissionTask(summary: String, authorization: @escaping () -> Bool,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        guard authorization() else { completion(["status":"blocked","detail":"Recycling mission authorization ended."]);return }
+        request(action:"arm_operation",arguments:["operation":"manual","arm":"right","summary":summary],
+            summary:summary,executionLimit:600,recycleMissionAuthorization:authorization,
+            execute:execute,cancel:cancel,completion:completion)
+    }
+
     private func request(action: String, arguments: NSDictionary, summary: String, executionLimit: TimeInterval = 120,
+                         recycleMissionAuthorization: (() -> Bool)? = nil,
                          allowArmSession: Bool = false,
+                         allowManualArmSession: Bool = false,
+                         localPanelGeneration: UInt64? = nil,
                          localRecyclingScope: LocalRecyclingScope? = nil,
-                         localContextIdentity: (() -> String?)? = nil, receiptOnly: Bool = false,
+                         localContextIdentity: (() -> String?)? = nil, receiptOnly: Bool = false, tableRelayScope:TableRelayScope? = nil,
                          execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
                          cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
@@ -982,9 +1419,25 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         guard probe.validationError == nil else {
             completion(["status": "rejected", "detail": "Invalid controller motion approval request."]); return
         }
+        if recycleMissionAuthorization != nil,localRecyclingApproval != nil {
+            revokeLocalApproval(reason:"A controller mission replaced the idle local job context.")
+        }
+        // An object observation cannot span an intervening arm operation,
+        // even if that unrelated operation leaves campaign counters unchanged.
+        pendingEmptyObservation=nil
         pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
             created: now(), execute: execute, cancel: cancel, completion: completion, executionLimit: executionLimit)
+        if let generation = localPanelGeneration {
+            pending?.localPanelGeneration = generation
+            startTimer(); beginAcceptedOperation(); return
+        }
+        if let authorization=recycleMissionAuthorization {
+            guard authorization() else { finish(["status":"blocked","detail":"Mission authorization expired"],state:.failed);return }
+            pending?.recycleMissionAuthorization=authorization
+            startTimer();beginAcceptedOperation();return
+        }
         pending?.localRecyclingScope = localRecyclingScope
+        pending?.tableRelayScope = tableRelayScope
         pending?.localContextIdentity = localContextIdentity
         pending?.awaitingLocalReceipt = receiptOnly
         if receiptOnly, let scope = localRecyclingScope, let context = localContextIdentity {
@@ -1008,6 +1461,11 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         if allowArmSession, let session = armSession, sessionIsFresh(session) {
             pending?.peer = session.peer; pending?.voiceAuthorized = session.voiceAuthorized
             pending?.armSessionID = session.id
+            startTimer(); beginAcceptedOperation(); return
+        }
+        if allowManualArmSession, let session = manualArmSession, manualSessionIsFresh(session) {
+            pending?.peer = session.peer; pending?.voiceAuthorized = session.voiceAuthorized
+            pending?.manualArmSessionID = session.id
             startTimer(); beginAcceptedOperation(); return
         }
         update("Awaiting spoken or controller authorization: \(summary)")
@@ -1130,7 +1588,13 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         cancelCurrentOperation(reason: reason, standingPause: false)
     }
     private func cancelCurrentOperation(reason: String, standingPause: Bool) {
+        pendingEmptyObservation=nil
+        revokeTableRelay(reason:reason)
         armSession = nil
+        if manualArmSession != nil {
+            manualArmSession = nil
+            for arm in ["left", "right"] { _ = ROBAmberGatewayClient.shared.priorityHold(forArm: arm) }
+        }
         revokeLocalApproval(reason: reason)
         guard let p = pending else {
             timer?.invalidate(); timer = nil; update(reason); return
@@ -1146,6 +1610,14 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
 
     @nonobjc func tick() {
         precondition(Thread.isMainThread)
+        if let session = manualArmSession, !manualSessionIsFresh(session) {
+            manualArmSession = nil
+            for arm in ["left", "right"] { _ = ROBAmberGatewayClient.shared.priorityHold(forArm: arm) }
+            if pending?.manualArmSessionID != nil {
+                cancel(reason: "Manual arm session expired or its connection ended; hold requested."); return
+            }
+            update("Manual arm session ended; hold requested. A new session needs one approval.")
+        }
         if let approval = localRecyclingApproval,
            approval.contextIdentity() != approval.scope.contextIdentity ||
             (approval.activePendingID == nil && approval.beginBefore <= now()) {
@@ -1154,7 +1626,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             } else { cancel(reason: "Local recycling approval expired or its camera/body/arm context was lost; hold requested.") }
             return
         }
-        if armSession == nil && pending == nil && localRecyclingApproval == nil { timer?.invalidate(); timer = nil; return }
+        if armSession == nil && manualArmSession == nil && pending == nil && localRecyclingApproval == nil { timer?.invalidate(); timer = nil; return }
         if let session = armSession, !sessionIsFresh(session) {
             armSession = nil
             if pending?.armSessionID != nil { cancel(reason: "Arm rehearsal session ended; hold requested."); return }
@@ -1163,7 +1635,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         guard let p = pending else { return }
         if p.awaitingLocalReceipt, p.started == nil {
             if now().timeIntervalSince(p.created) >= Self.localApprovalBeginLimit ||
-                p.localContextIdentity?() != p.localRecyclingScope?.contextIdentity {
+                p.localContextIdentity?() != (p.tableRelayScope?.contextIdentity ?? p.localRecyclingScope?.contextIdentity) {
                 cancel(reason: "The prepared local recycling request expired or lost its context.")
             }
             return
@@ -1176,7 +1648,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             // is missed. Repeat the SAME scope without extending its deadline.
             announceApproval?("Hey! Can I move my arms?")
         }
-        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil {
+        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil || p.tableRelayScope != nil || p.recycleMissionAuthorization != nil || p.localPanelGeneration != nil {
             if !authorizationIsLive(p) { pauseOrCancelLostOperation("Authorized arm operation expired; hold requested.") }
             return
         }
@@ -1225,10 +1697,34 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         return now().timeIntervalSince(current.seen) < 15 && sessionIsActive(peer.device, peer.session)
     }
 
-    /// UI callers capture the selected arm/force before requesting approval.
-    /// Recheck feedback and the gateway generation after the operator decides.
+    /// Controller/session callers retain their existing authorization lane.
     @nonobjc func requestGatewayCommand(operation: String, arm: String, summary: String,
         command: @escaping () -> UInt64, completion: @escaping (NSDictionary) -> Void) {
+        gatewayCommand(operation: operation, arm: arm, summary: summary, localPanel: false,
+            command: command, completion: completion)
+    }
+
+    /// Native buttons capture the selected arm and force at the click. They
+    /// take control directly, with dispatch feedback and acknowledgement checks.
+    @nonobjc func performLocalPanelGatewayCommand(operation: String, arm: String, summary: String,
+        command: @escaping () -> UInt64, completion: @escaping (NSDictionary) -> Void) {
+        gatewayCommand(operation: operation, arm: arm, summary: summary, localPanel: true,
+            command: command, completion: completion)
+    }
+
+    private func gatewayCommand(operation: String, arm: String, summary: String, localPanel: Bool,
+        command: @escaping () -> UInt64, completion: @escaping (NSDictionary) -> Void) {
+        guard ["left", "right"].contains(arm) else {
+            completion(["status": "rejected", "detail": "Unknown manual arm selection."]); return
+        }
+        let covered = ["activate", "position", "deactivate", "close_gripper", "open_gripper"].contains(operation)
+        if !localPanel, covered, !manualArmSessionActive {
+            beginManualArmSession { [weak self] result in
+                guard result["status"] as? String == "completed", let self else { completion(result); return }
+                self.requestGatewayCommand(operation: operation, arm: arm, summary: summary, command: command, completion: completion)
+            }
+            return
+        }
         let gateway = ROBAmberGatewayClient.shared
         let gatewayArm = arm == "right" ? "left" : "right"
         let port = arm == "right" ? 26001 : 26002
@@ -1240,7 +1736,7 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil; timeout?.cancel(); timeout = nil
         }
-        request(operation: operation, arm: arm, summary: summary, execute: { done in
+        let execute: (@escaping (NSDictionary) -> Void) -> Void = { done in
             let readiness = gateway.manualArmControlReadiness(forUDPPort: port,
                 expectedSessionGeneration: generation)
             guard generation != 0, readiness["allowed"] as? Bool == true else {
@@ -1267,9 +1763,17 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
             }
             timeout = deadline
             DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: deadline)
-        }, cancel: {
+        }
+        let cancel: () -> Void = {
             cleanup(); _ = gateway.priorityHold(forArm: gatewayArm)
-        }, completion: completion)
+        }
+        if localPanel {
+            performLocalPanelArmCommand(operation: operation, arm: arm, summary: summary,
+                execute: execute, cancel: cancel, completion: completion)
+        } else {
+            request(action: "arm_operation", arguments: ["operation": operation, "arm": arm, "summary": summary],
+                summary: summary, allowManualArmSession: covered, execute: execute, cancel: cancel, completion: completion)
+        }
     }
     private func publish(_ state: ROBRobotActionState, detail: String, result: NSDictionary) {
         guard let p = pending, let peer = p.peer else { return }
@@ -1281,9 +1785,262 @@ enum ROBStandingCanCampaignRecoveryReason: String { case transportLost, feedback
         guard let p = pending else { return }
         publish(state, detail: result["detail"] as? String ?? "Arm operation ended", result: result)
         pending = nil
-        if armSessionActive || localRecyclingApproval != nil { startTimer() } else { timer?.invalidate(); timer = nil }
+        if armSessionActive || manualArmSessionActive || localRecyclingApproval != nil { startTimer() } else { timer?.invalidate(); timer = nil }
         if cancelExecution { p.cancel() }
         update(result["detail"] as? String ?? "Arm operation ended")
         p.completion(result)
+    }
+}
+
+extension ROBControllerArmApproval {
+    private var tableRelayObjectStateURL:URL {localRecyclingApprovalAuditDirectory.appendingPathComponent("table-relay-object-state.json")}
+
+    /// Persisted object uncertainty is evidence only, never a restored grant.
+    var tableRelayMayHoldPayload:Bool {
+        if tableRelayAuditFailure != nil {return true}
+        guard FileManager.default.fileExists(atPath:tableRelayObjectStateURL.path) else{return false}
+        guard let bytes=try?readPrivateLocalReceipt(tableRelayObjectStateURL),
+              let value=(try?JSONSerialization.jsonObject(with:bytes))as?[String:Any],
+              value["schemaVersion"]as?Int==1,let right=value["rightPossiblePayloadHeld"]as?Bool,
+              let left=value["leftPossiblePayloadHeld"]as?Bool else{return true}
+        return right || left
+    }
+    var activeTableRelayLedger:NSDictionary? {
+        if let a=tableRelayApproval {return tableRelayLedger(a,event:"current",state:"active")as NSDictionary}
+        return lastTableRelayLedger
+    }
+    var pendingTableRelayApprovalScope:NSDictionary? {pending?.tableRelayScope.map{$0.object as NSDictionary}}
+    var pendingTableRelayReceiptTemplate:NSDictionary? {
+        guard let p=pending,p.started==nil,let scope=p.tableRelayScope else{return nil}
+        let issued=now().timeIntervalSince1970*1000
+        return ["schemaVersion":3,"kind":"local_user_table_relay_approval_v1","receiptID":UUID().uuidString,
+            "appSessionID":localSessionID.uuidString,"pendingID":p.id,"issuedAtMilliseconds":issued,
+            "expiresAtMilliseconds":issued+Self.localApprovalBeginLimit*1000,"source":"explicit_user_session_instruction",
+            "sourceMessage":"","sourceMessageSHA256":"","additionalUserInstruction":"","additionalUserInstructionSHA256":"",
+            "scope":scope.object]as NSDictionary
+    }
+    @nonobjc func requestTableRelayWorkspaceTask(canCount:Int,summary:String,
+        currentContext:@escaping()->ROBTableRelayContext?,execute:@escaping(@escaping(NSDictionary)->Void)->Void,
+        cancel:@escaping()->Void,completion:@escaping(NSDictionary)->Void) {
+        precondition(Thread.isMainThread)
+        guard pending==nil,tableRelayApproval==nil,localRecyclingApproval==nil,!standingLocalCanCampaignActive,
+              (1...8).contains(canCount),!summary.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+              summary.utf8.count<=2048,let context=currentContext(),context.valid else {
+            completion(["status":"rejected","detail":"Prepare a separate exact1...8-can table relay with both model/source identities; existing single-arm jobs cannot supply its authority."]);return
+        }
+        let scope=TableRelayScope(canCount:canCount,summary:summary,context:context)
+        let live:()->String? = {guard let value=currentContext(),value.valid else{return nil};return value.identity}
+        request(action:"arm_operation",arguments:["operation":"manual","arm":"both","summary":summary],summary:summary,
+            executionLimit:600,localContextIdentity:live,receiptOnly:true,tableRelayScope:scope,
+            execute:execute,cancel:cancel,completion:completion)
+    }
+    @nonobjc func importLocalTableRelayApproval(fromReceiptURL url:URL)throws {
+        precondition(Thread.isMainThread)
+        guard let p=pending,p.started==nil,p.awaitingLocalReceipt,let scope=p.tableRelayScope,
+              let context=p.localContextIdentity,context()==scope.contextIdentity,tableRelayApproval==nil else {
+            throw localApprovalError("Prepare the exact current both-arm table relay before importing its private receipt.")
+        }
+        let data=try readPrivateLocalReceipt(url)
+        guard let top=try JSONSerialization.jsonObject(with:data)as?[String:Any] else {throw localApprovalError("Invalid relay receipt.")}
+        let keys:Set<String>=["schemaVersion","kind","receiptID","appSessionID","pendingID","issuedAtMilliseconds","expiresAtMilliseconds",
+            "source","sourceMessage","sourceMessageSHA256","additionalUserInstruction","additionalUserInstructionSHA256","scope"]
+        let receipt=try JSONDecoder().decode(LocalReceipt.self,from:data)
+        let current=now().timeIntervalSince1970*1000
+        guard Set(top.keys)==keys,receipt.schemaVersion==3,receipt.kind=="local_user_table_relay_approval_v1",
+              receipt.appSessionID==localSessionID,top["pendingID"]as?String==p.id,
+              receipt.source=="explicit_user_session_instruction",let supplied=top["scope"]as?[String:Any],
+              try localCanonical(supplied)==localCanonical(scope.object),
+              !receipt.sourceMessage.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,receipt.sourceMessage.utf8.count<=8192,
+              receipt.sourceMessageSHA256==Self.localHash(Data(receipt.sourceMessage.utf8)),
+              let additional=receipt.additionalUserInstruction,!additional.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+              additional.utf8.count<=8192,receipt.additionalUserInstructionSHA256==Self.localHash(Data(additional.utf8)),
+              receipt.issuedAtMilliseconds.isFinite,receipt.expiresAtMilliseconds.isFinite,
+              receipt.issuedAtMilliseconds>0,receipt.issuedAtMilliseconds<=current,receipt.expiresAtMilliseconds>current,
+              receipt.expiresAtMilliseconds>receipt.issuedAtMilliseconds,
+              receipt.expiresAtMilliseconds-receipt.issuedAtMilliseconds<=Self.localApprovalBeginLimit*1000,
+              current-receipt.issuedAtMilliseconds<=Self.localApprovalBeginLimit*1000 else {
+            throw localApprovalError("Relay receipt source, version, exact both-arm scope, pending job or expiry does not match.")
+        }
+        var priorUncertainty:Double?
+        if tableRelayMayHoldPayload {
+            if let bytes=try?readPrivateLocalReceipt(tableRelayObjectStateURL),
+               let value=(try?JSONSerialization.jsonObject(with:bytes))as?[String:Any],
+               let time=value["updatedAtMilliseconds"]as?Double,time.isFinite {priorUncertainty=time}
+            else {priorUncertainty=current}
+        }
+        var audit=top;audit["receiptSHA256"]=Self.localHash(data);audit["sourceReceiptPath"]=url.path
+        audit["importedAtMilliseconds"]=current;audit["event"]="table_relay_import_once_no_persisted_grant"
+        try writeLocalApprovalAudit(audit,name:"table-relay-receipt-"+receipt.receiptID.uuidString+".json")
+        let approval=TableRelayApproval(receiptID:receipt.receiptID,receiptSHA256:Self.localHash(data),pendingID:p.id,
+            scope:scope,currentContext:context,previousUncertaintyAtMilliseconds:priorUncertainty)
+        try persistTableRelayLedger(approval,event:"imported_initial_object_state_unknown",state:"active")
+        tableRelayApproval=approval
+        startTimer();beginAcceptedOperation()
+    }
+    @nonobjc func recordTableRelayInitialEmptyEvidence(_ evidence:ROBTableRelayInitialEmptyEvidence,
+        feedback:ROBTableRelayPhaseFeedback)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        let nowMS=now().timeIntervalSince1970*1000
+        let history=evidence.source=="audited_user_declared_empty_plus_no_acquisition_history"
+        let fresh=evidence.source=="fresh_audited_user_declared_empty"
+        guard a.phaseIndex==0,a.completedTransfers==0,a.binding==nil,a.usedProposals.isEmpty,
+              a.supportStage=="initial_empty_unverified",history || fresh,
+              evidence.appSessionID==localSessionID.uuidString,evidence.rightDeclaredEmpty,evidence.leftDeclaredEmpty,
+              evidence.declaredAtMilliseconds.isFinite,evidence.declaredAtMilliseconds>0,evidence.declaredAtMilliseconds<=nowMS,
+              [evidence.declarationMessageSHA256,evidence.declarationAuditSHA256,evidence.taskHistorySHA256].allSatisfy(relayHashIsValid),
+              evidence.rightAcquisitionCommandsSinceDeclaration==0,evidence.leftAcquisitionCommandsSinceDeclaration==0,
+              !evidence.anyUncertainAcquisitionAcknowledgement,!evidence.globalMayHoldPayload,!standingCanCampaignMayHoldPayload,
+              feedback.valid(movingArm:nil,generation:a.scope.context.gatewayGeneration),
+              a.previousUncertaintyAtMilliseconds.map({fresh && evidence.declaredAtMilliseconds>$0}) ?? true else {
+            throw localApprovalError("Initial relay EMPTY needs the actual audited declaration plus no-acquisition history and fresh both-arm feedback. Prior uncertain acquisition needs a newer actual user fact.")
+        }
+        a.rightMayHold=false;a.leftMayHold=false
+        a.supportStage=history ? "initial_empty_ASSUMED_declared_task_history":"initial_empty_ASSUMED_fresh_user_fact"
+        try persistTableRelayLedger(a,event:"initial_empty_assumption",state:"active",evidence:[
+            "source":evidence.source,"declarationMessageSHA256":evidence.declarationMessageSHA256,
+            "declarationAuditSHA256":evidence.declarationAuditSHA256,"taskHistorySHA256":evidence.taskHistorySHA256,
+            "declaredAtMilliseconds":evidence.declaredAtMilliseconds,"possessionMeasured":false])
+        tableRelayApproval=a
+    }
+    @nonobjc func bindTableRelayPhaseProposal(phase:String,physicalArm:String,proposalID:UUID,proposalSHA256:String,
+        feedback:@escaping()->ROBTableRelayPhaseFeedback?)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        guard a.completedTransfers<a.scope.canCount,phase==Self.tableRelayPhases[a.phaseIndex],
+              physicalArm==tableRelaySide(phase),relayHashIsValid(proposalSHA256),a.binding==nil,
+              !a.usedProposals.contains(proposalID),!a.usedProposalHashes.contains(proposalSHA256),a.usedProposals.count<2048,
+              let frame=feedback(),frame.valid(movingArm:physicalArm,generation:a.scope.context.gatewayGeneration),
+              a.supportStage != "initial_empty_unverified" else {
+            throw localApprovalError("Bind exactly one new immutable relay proposal to the current phase, selected physical arm and fresh both-arm feedback.")
+        }
+        if phase=="right_pickup" {guard !a.leftMayHold,(!a.rightMayHold || a.supportStage=="right_acquisition_possible") else {throw localApprovalError("A new relay pickup cannot start with a possible payload.")}}
+        if phase=="left_pickup" {guard !a.rightMayHold,(!a.leftMayHold && a.supportStage=="shared_table_verified_right_clear" || a.leftMayHold && a.supportStage=="left_acquisition_possible") else {throw localApprovalError("LEFT pickup needs the verified table placement and RIGHT clear hold.")}}
+        a.binding=TableRelayBinding(phase:phase,physicalArm:physicalArm,proposalID:proposalID,proposalSHA256:proposalSHA256,
+            idlePositions:physicalArm=="right" ? frame.leftPositions:frame.rightPositions,
+            rightSequenceAtBind:frame.rightTelemetrySequence,leftSequenceAtBind:frame.leftTelemetrySequence,feedback:feedback)
+        a.usedProposals.insert(proposalID);a.usedProposalHashes.insert(proposalSHA256)
+        try persistTableRelayLedger(a,event:"phase_proposal_bound",state:"active")
+        tableRelayApproval=a
+    }
+    @nonobjc func authorizesTableRelayPhaseProposal(phase:String,physicalArm:String,proposalID:UUID,proposalSHA256:String)->Bool {
+        guard Thread.isMainThread,let p=pending,p.tableRelayScope != nil,authorizationIsLive(p),
+              let a=tableRelayApproval,let b=a.binding,phase==Self.tableRelayPhases[a.phaseIndex],
+              b.phase==phase,b.physicalArm==physicalArm,b.proposalID==proposalID,b.proposalSHA256==proposalSHA256 else{return false}
+        return tableRelayFeedbackIsLive(b,scope:a.scope)
+    }
+    @nonobjc func endTableRelayPhaseProposal(proposalID:UUID,proposalSHA256:String)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        guard let b=a.binding,b.proposalID==proposalID,b.proposalSHA256==proposalSHA256,
+              tableRelayFeedbackIsLive(b,scope:a.scope),
+              b.feedback()?.valid(movingArm:nil,generation:a.scope.context.gatewayGeneration)==true else {
+            throw localApprovalError("Only the current fresh relay proposal can end at its measured both-arm hold.")
+        }
+        a.binding=nil;a.lastConsumedPhase=b.phase
+        try persistTableRelayLedger(a,event:"phase_proposal_consumed_at_hold",state:"active")
+        tableRelayApproval=a
+    }
+    /// Call immediately BEFORE a grip dispatch, including one whose ack may
+    /// become uncertain. No subsequent receipt may silently clear this flag.
+    @nonobjc func markTableRelayPossiblePayloadHeld(physicalArm:String)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        guard let b=a.binding,b.physicalArm==physicalArm,["right_pickup","left_pickup"].contains(b.phase),
+              tableRelayFeedbackIsLive(b,scope:a.scope) else {throw localApprovalError("Acquisition uncertainty needs its exact active pickup phase.")}
+        guard physicalArm=="right" ? !a.rightMayHold:!a.leftMayHold else {throw localApprovalError("This pickup already recorded acquisition; no repeated grip is admitted.")}
+        if physicalArm=="right" {a.rightMayHold=true}else{a.leftMayHold=true}
+        a.supportStage=physicalArm+"_acquisition_possible"
+        try persistTableRelayLedger(a,event:"acquisition_possible_before_grip",state:"active")
+        tableRelayApproval=a
+    }
+    @nonobjc func recordTableRelayPhaseCompletion(phase:String,evidenceSHA256:String,
+        feedback:ROBTableRelayPhaseFeedback,bucketLandingVerified:Bool=false)throws {
+        precondition(Thread.isMainThread)
+        var a=try liveTableRelay()
+        guard a.completedTransfers<a.scope.canCount,a.binding==nil,phase==Self.tableRelayPhases[a.phaseIndex],
+              a.lastConsumedPhase==phase,relayHashIsValid(evidenceSHA256),
+              feedback.valid(movingArm:tableRelaySide(phase),generation:a.scope.context.gatewayGeneration),
+              feedback.valid(movingArm:nil,generation:a.scope.context.gatewayGeneration),
+              !bucketLandingVerified || phase=="left_place_bucket" else {throw localApprovalError("Complete only the current measured relay phase with fresh both-arm feedback and native evidence.")}
+        switch phase {
+        case "right_pickup":
+            guard a.rightMayHold,!a.leftMayHold,a.supportStage=="right_acquisition_possible" else {throw localApprovalError("RIGHT pickup lacks recorded acquisition and positive visual grasp evidence.")}
+            a.supportStage="right_grasp_visually_supported"
+        case "right_place_shared_table":
+            guard a.rightMayHold,!a.leftMayHold else {throw localApprovalError("RIGHT table placement has no possible RIGHT payload.")}
+            a.rightMayHold=false;a.supportStage="shared_table_visually_verified"
+        case "right_retreat":
+            guard !a.rightMayHold,!a.leftMayHold,a.supportStage=="shared_table_visually_verified" else {throw localApprovalError("RIGHT retreat needs the supported shared-table release.")}
+            a.supportStage="shared_table_verified_right_clear"
+        case "left_pickup":
+            guard a.leftMayHold,!a.rightMayHold,a.supportStage=="left_acquisition_possible" else {throw localApprovalError("LEFT pickup lacks recorded acquisition and positive visual grasp evidence.")}
+            a.supportStage="left_grasp_visually_supported"
+        case "left_place_bucket":
+            guard a.leftMayHold,!a.rightMayHold else {throw localApprovalError("Bucket release has no possible LEFT payload.")}
+            a.leftMayHold=false;a.supportStage="bucket_release_visually_verified";a.pendingBucketLandingVerified=bucketLandingVerified
+        case "left_retreat":
+            guard !a.leftMayHold,!a.rightMayHold,a.supportStage=="bucket_release_visually_verified" else {throw localApprovalError("Final retreat needs the verified bucket release.")}
+            a.completedTransfers+=1;if a.pendingBucketLandingVerified {a.verifiedBucketLandings+=1}
+            a.pendingBucketLandingVerified=false;a.supportStage="both_empty_after_bucket_release"
+        default:throw localApprovalError("Unknown relay phase.")
+        }
+        a.phaseIndex=(a.phaseIndex+1)%Self.tableRelayPhases.count;a.lastConsumedPhase=nil
+        try persistTableRelayLedger(a,event:"phase_completed",state:"active",evidence:["completedPhase":phase,"evidenceSHA256":evidenceSHA256])
+        tableRelayApproval=a
+    }
+    private func tableRelaySide(_ phase:String)->String {phase.hasPrefix("right_") ? "right":"left"}
+    private func liveTableRelay()throws->TableRelayApproval {
+        guard let p=pending,p.tableRelayScope != nil,authorizationIsLive(p),let a=tableRelayApproval else {
+            throw localApprovalError("No live exact table-relay authority remains; hold both arms.")
+        }
+        return a
+    }
+    private func tableRelayFeedbackIsLive(_ binding:TableRelayBinding,scope:TableRelayScope)->Bool {
+        guard let frame=binding.feedback(),frame.valid(movingArm:binding.physicalArm,generation:scope.context.gatewayGeneration),
+              frame.rightTelemetrySequence>=binding.rightSequenceAtBind,frame.leftTelemetrySequence>=binding.leftSequenceAtBind else{return false}
+        let idle=binding.physicalArm=="right" ? frame.leftPositions:frame.rightPositions
+        return 1.5*zip(idle,binding.idlePositions).reduce(0.0){$0+abs($1.0-$1.1)}<=0.005
+    }
+    private func tableRelayLedger(_ a:TableRelayApproval,event:String,state:String)->[String:Any] {
+        var value:[String:Any]=["schemaVersion":1,"kind":"native_table_relay_phase_ledger_v1","receiptID":a.receiptID.uuidString,
+            "receiptSHA256":a.receiptSHA256,"appSessionID":localSessionID.uuidString,"pendingID":a.pendingID,
+            "command":"right_table_left_recycle_cans_v1","contextIdentity":a.scope.contextIdentity,
+            "canCount":a.scope.canCount,"completedTransfers":a.completedTransfers,"verifiedBucketLandings":a.verifiedBucketLandings,
+            "phase":Self.tableRelayPhases[a.phaseIndex],"state":state,"event":event,"supportStage":a.supportStage,
+            "rightPossiblePayloadHeld":a.rightMayHold,"leftPossiblePayloadHeld":a.leftMayHold,
+            "oneMovingArmAtATime":true,"updatedAtMilliseconds":now().timeIntervalSince1970*1000,
+            "consumedProposalCount":a.usedProposals.count,"persistedMotionGrant":false,"possessionMeasured":false]
+        if let b=a.binding {value["binding"]=["phase":b.phase,"physicalArm":b.physicalArm,"proposalID":b.proposalID.uuidString,"proposalSHA256":b.proposalSHA256]}
+        return value
+    }
+    private func persistTableRelayLedger(_ a:TableRelayApproval,event:String,state:String,evidence:[String:Any]=[:])throws {
+        var value=tableRelayLedger(a,event:event,state:state);if !evidence.isEmpty {value["evidence"]=evidence}
+        do {
+            try writeLocalApprovalAudit(value,name:"table-relay-event-"+UUID().uuidString+".json")
+            if FileManager.default.fileExists(atPath:tableRelayObjectStateURL.path) {_=try readPrivateLocalReceipt(tableRelayObjectStateURL)}
+            try localCanonical(value).write(to:tableRelayObjectStateURL,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:tableRelayObjectStateURL.path)
+            lastTableRelayLedger=value as NSDictionary
+        } catch {tableRelayAuditFailure=error.localizedDescription;throw error}
+    }
+    private func revokeTableRelay(reason:String) {
+        guard let a=tableRelayApproval else{return}
+        do {try persistTableRelayLedger(a,event:"revoked",state:"revoked",evidence:["reason":reason])}
+        catch {var value=tableRelayLedger(a,event:"revoked_audit_failure",state:"blocked");value["auditError"]=error.localizedDescription;lastTableRelayLedger=value as NSDictionary}
+        tableRelayApproval=nil
+    }
+    private func finishTableRelayOperation(_ result:NSDictionary) {
+        guard let a=tableRelayApproval else {finish(["status":"blocked","detail":"Relay authority was lost; hold both arms."],state:.failed);return}
+        let complete=a.completedTransfers==a.scope.canCount && !a.rightMayHold && !a.leftMayHold && a.binding==nil
+        var output=result as? [String:Any] ?? [:]
+        output["status"]=complete ? "completed":"partial_held"
+        output["transfer_completed"]=complete;output["batch_completed"]=a.completedTransfers
+        output["verified_bucket_landings"]=a.verifiedBucketLandings
+        output["possible_payload_held"]=a.rightMayHold || a.leftMayHold
+        do {try persistTableRelayLedger(a,event:complete ? "consumed":"ended_incomplete",state:complete ? "consumed":"revoked")}
+        catch {output["status"]="blocked";output["detail"]="Relay ledger could not be saved: "+error.localizedDescription}
+        tableRelayApproval=nil
+        finish(output as NSDictionary,state:complete && tableRelayAuditFailure==nil ? .completed:.failed)
     }
 }

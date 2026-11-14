@@ -37,6 +37,7 @@ not alter the Administrator's face samples.
 
 ```sh
 swiftc Tests/ROBVideoTransportCompileStub.swift \
+  Cerebro/ROBRoomMapFragment.swift \
   Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift \
   Tests/ROBRemoteDesktopControlProtocolFixtureTests.swift \
   -o /tmp/ROBRemoteDesktopControlProtocolFixtureTests

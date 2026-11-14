@@ -2009,6 +2009,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)requestArmedHeadlessLiveStartupIfReady
 {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"ROBPassiveHardwareStartup"]) return;
     ROBHeadlessLiveStartupAuthorization *authorization =
         [ROBHeadlessLiveStartupAuthorization shared];
     if (!authorization.isArmed || self.runtimeIsShuttingDown ||
@@ -2900,6 +2901,20 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self performOperatorPriorityStopWithReason:reason];
 }
 
+- (void)localManualControlRequested:(NSNotification *)notification
+{
+    if (notification.object != [ROBControllerArmApproval shared] &&
+        notification.object != [ROBTorsoControlCenter shared]) { return; }
+    NSString *reason = @"Operator took control at the local panel";
+    [self.robAI cancelDualDialogue];
+    if (self.stageShowCoordinator.isRunning) {
+        [self.stageShowCoordinator cancelWithReason:reason];
+    }
+    [self applyPrioritySoftwareStopWithReason:reason];
+    (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:reason];
+    (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
+}
+
 - (BOOL)acceptLocalMicrophoneAuthorization:(NSString *)transcript
 {
     // This delegate is called only by SpeechBox's final on-device microphone
@@ -3023,6 +3038,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                              selector:@selector(controllerOperatorPriorityStopRequested:)
                                                  name:@"ROBControllerOperatorPriorityStop"
                                                object:[ROBControllerArmApproval shared]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(localManualControlRequested:)
+                                                 name:@"ROBLocalManualControlRequested"
+                                               object:nil];
     // Register before ROBSerialBox begins discovery so the first successful
     // connection and every later reconnect can establish the approved pose.
     [[NSNotificationCenter defaultCenter] addObserver:self
@@ -3052,6 +3071,40 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.robotActionSenderID = [NSString stringWithFormat:@"Cerebro:%@", hostName];
     self.autonomyCoordinator = [[ROBAutonomyCoordinator alloc] initWithRobotID:self.robotActionSenderID];
     self.autonomyCoordinator.delegate = self;
+    __weak ROBMainViewController *missionOwner = self;
+    [ROBRecycleMissionCoordinator shared].sendStatus = ^(NSData *data, NSUUID *device, NSUUID *session) {
+        [missionOwner.autoNetServer sendFollowTargetMessage:data toDeviceID:device sessionID:session];
+    };
+    [ROBRecycleMissionCoordinator shared].stopBase = ^{
+        ROBBaseControllerModel *stopped = [ROBBaseControllerModel new];
+        stopped.touchPadPointL = CGPointMake(-1000, -1000);
+        stopped.touchPadPointR = CGPointMake(-1000, -1000);
+        stopped.tredBrakeLock = YES; stopped.flipperBrakeLock = YES;
+        stopped.speed = 0; stopped.textInput = @"";
+        [missionOwner.serialBox controllerId:@"Recycle Cans" controllerModelData:stopped];
+        [missionOwner.serialBox stopBaseMotionAndDropHeartbeat];
+    };
+    [ROBRecycleMissionCoordinator shared].setCameraDemand = ^(BOOL active) {
+        [missionOwner ensureBellyCameraRuntime];
+        [missionOwner.bellyCameraWindowController setNavigationDemandActive:
+            active || missionOwner.autonomyCoordinator.active || missionOwner.followPersonCoordinator.active];
+    };
+    [ROBRecycleMissionCoordinator shared].takeControl = ^{
+        [missionOwner.autonomyCoordinator stopWithReason:@"Recycle Cans mission started"];
+        [missionOwner.followPersonCoordinator stopWithReason:@"Recycle Cans mission started"];
+        [missionOwner.serialBox switchToMasterControllerID:@"Recycle Cans"];
+        [missionOwner publishControlAuthorityState];
+    };
+    [ROBRecycleMissionCoordinator shared].driveTreads = ^(NSInteger left, NSInteger right) {
+        if (![ROBRecycleMissionCoordinator shared].active) { return; }
+        ROBBaseControllerModel *model = [ROBBaseControllerModel new];
+        model.touchPadPointL = CGPointMake(0, MAX(-255, MIN(255, left)) / 510.0);
+        model.touchPadPointR = CGPointMake(0, MAX(-255, MIN(255, right)) / 510.0);
+        model.speed = 100; // The mission already ramped and bounded signed demand.
+        model.flipperBrakeLock = YES;
+        model.textInput = @"";
+        [missionOwner.serialBox controllerId:@"Recycle Cans" controllerModelData:model];
+    };
     self.followPersonCoordinator = [[ROBFollowPersonCoordinator alloc] initWithRobotID:self.robotActionSenderID];
     self.followPersonCoordinator.delegate = self;
     self.stageShowCoordinator = [[ROBStageShowCoordinator alloc] init];
@@ -3126,11 +3179,24 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     // this controller's SpeechBox or the embodied room-conversation session.
     [[ROBMessagesBridge shared] start];
     
-    [self showROBControls];
-    [self showROB_Torso_Controls];
-    [self showROBNavigation];
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"ROBLowOverheadDiagnostics"]) {
+        [self showROBControls];
+        [self showROB_Torso_Controls];
+        [self showROBNavigation];
+    }
     [self ensureMainCameraRuntime];
-    [self synchronizeDevelopmentCameraDiagnostics];
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"ROBLowOverheadDiagnostics"]) {
+        [self synchronizeDevelopmentCameraDiagnostics];
+    }
+
+    [[ROBLocalControlService shared] configureWithSerial:self.serialBox speech:self.speechBox recordAssistantStatus:^(NSString *text) {
+        [missionOwner appendConversationText:[NSString stringWithFormat:@"Codex assistant status: %@", text] fromUser:NO];
+    } cameraDemand:^(BOOL active) {
+        [missionOwner ensureMainCameraRuntime];
+        [missionOwner.cameraViewController setLocalControlDemandActive:active];
+    } stopBase:^{
+        [missionOwner.serialBox stopBaseMotionAndDropHeartbeat];
+    }];
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSApp activateIgnoringOtherApps:YES];
@@ -3141,7 +3207,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)showControllerInputDiagnostics:(NSNotification *)notification
 {
     if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey] &&
-        notification.userInfo[@"ghostPreset"] == nil) {
+        notification.userInfo[@"ghostPreset"] == nil && notification.userInfo[@"animationPreview"] == nil) {
         return;
     }
     if (self.controllerDiagnosticsWindowController == nil) {
@@ -3249,37 +3315,43 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
 
-    // Startup has already issued its first hardware command before this event.
-    // Mirror that accepted command rather than painting the eventual resting
-    // defaults over phase 1 (notably L 6011 versus final L 7014). An OFF pan
-    // target cannot be represented by the enabled slider, so retain its
-    // reviewed forward fallback until startup energizes pan in phase 2.
+    // Startup is attempted before this event, but may be disabled or rejected.
+    // Show only accepted commands as enabled. Slider drafts use the saved final
+    // phase; neither a skipped startup nor opening a window grants motion.
     ROBTorsoControlsViewController *controls = self.torsoControlsViewController;
     if (controls != nil) {
-        controls.headPan_enabled.state = NSControlStateValueOn;
-        controls.headTilt_enabled.state = NSControlStateValueOn;
-        controls.headUpperNeckTilt_enabled.state = NSControlStateValueOn;
+        ROBServoSequencePhase *rest = [[ROBServoControlStore shared] startupPhaseAtIndex:2];
+        BOOL starting = connectedSerialBox.isSafeNeckStartupInProgress;
+        controls.headPan_enabled.state = (starting || (connectedSerialBox.neckPanCommandKnown
+            && connectedSerialBox.commandedNeckPanTarget != ROBNeckSafetyTargetOff))
+            ? NSControlStateValueOn : NSControlStateValueOff;
+        controls.headTilt_enabled.state = (starting || (connectedSerialBox.lowerNeckTiltCommandKnown
+            && connectedSerialBox.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff))
+            ? NSControlStateValueOn : NSControlStateValueOff;
+        controls.headUpperNeckTilt_enabled.state = (starting || (connectedSerialBox.upperNeckTiltCommandKnown
+            && connectedSerialBox.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff))
+            ? NSControlStateValueOn : NSControlStateValueOff;
         controls.headPan.integerValue = connectedSerialBox.neckPanCommandKnown
                 && connectedSerialBox.commandedNeckPanTarget
                     != ROBNeckSafetyTargetOff
             ? connectedSerialBox.commandedNeckPanTarget
-            : ROBNeckSafetyDefaultForwardPanTarget;
+            : rest.panTarget;
         controls.headTilt.integerValue =
             connectedSerialBox.lowerNeckTiltCommandKnown
                 && connectedSerialBox.commandedLowerNeckTiltTarget
                     != ROBNeckSafetyTargetOff
             ? connectedSerialBox.commandedLowerNeckTiltTarget
-            : ROBNeckSafetyDefaultLowerTarget;
+            : rest.lowerTarget;
         controls.headUpperNeckTilt.integerValue =
             connectedSerialBox.upperNeckTiltCommandKnown
                 && connectedSerialBox.commandedUpperNeckTiltTarget
                     != ROBNeckSafetyTargetOff
             ? connectedSerialBox.commandedUpperNeckTiltTarget
-            : ROBNeckSafetyDefaultUpperTarget;
+            : rest.upperTarget;
     }
 
-    // ROBSerialBox already started the hardware-owned sequence before posting
-    // this event. This observer only mirrors its accepted phase-1 pose.
+    // ROBSerialBox owns startup and reports any disabled/rejected state.
+    // This observer only mirrors its accepted commands and saved drafts.
 }
 
 - (void)shutdownCerebroRuntime
@@ -3288,6 +3360,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
     self.runtimeIsShuttingDown = YES;
+    [[ROBLocalControlService shared] shutdown];
     [[ROBArmFeedbackAlerts shared] stop];
     [self.robotActionBridgeTimer invalidate];
     self.robotActionBridgeTimer = nil;
@@ -3318,6 +3391,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (self.stageShowCoordinator.isRunning) {
         [self.stageShowCoordinator cancelWithReason:@"Cerebro is shutting down"];
     }
+    [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Cerebro shutting down"];
     [self.autonomyCoordinator shutdown];
     [self.followPersonCoordinator shutdown];
     [self.bellyCameraWindowController setNavigationDemandActive:NO];
@@ -3328,6 +3402,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)applyPrioritySoftwareStopWithReason:(NSString *)reason
 {
+    [[ROBAnimationPlayback shared] stopWithReason:reason];
+    [[ROBRecycleMissionCoordinator shared] stopWithReason:reason];
     [[ROBShowMotionCoordinator shared] stop];
     [[ROBArmRoutineCoordinator shared] cancelWithReason:reason];
     self.currentPersonTrackingID = -1;
@@ -3581,6 +3657,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (!coordinator.active || self.serialBox == nil) {
         return NO;
     }
+    [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Visual follow mode was authorized"];
     if (self.autonomyCoordinator.active) {
         [self.autonomyCoordinator stopWithReason:@"Visual follow mode was authorized"];
     }
@@ -5098,6 +5175,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)didReceiveLidarTelemetry:(NSData *)data deviceID:(NSString *)deviceID
 {
     dispatch_async(dispatch_get_main_queue(), ^{
+        [[ROBRecycleMissionCoordinator shared] updateLidarScanData:data];
         [self.autonomyCoordinator updateLidarScanData:data];
         [self.followPersonCoordinator updateLidarScanData:data];
     });
@@ -5508,6 +5586,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (self.stageShowCoordinator.isRunning) {
             [self.stageShowCoordinator cancelWithReason:@"Manual controller requested motion authority"];
         }
+        [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Manual controller requested motion authority"];
         if (self.autonomyCoordinator.active) {
             [self.autonomyCoordinator stopWithReason:@"Manual controller requested motion authority"];
         }
@@ -5734,7 +5813,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [ROBControllerArmApproval shared].announceApproval = ^(NSString *text) { [weakSelf.speechBox sayArmAuthorizationPrompt:text]; };
     workspace.prepareView = ^BOOL(double pan, NSInteger upper) {
         ROBMainViewController *owner = weakSelf;
-        if (owner == nil || (! [ROBLeftArmTrial shared].isRunning && ![ROBNeckQRCalibration shared].isRunning) || owner.stageShowCoordinator.isRunning ||
+        if (owner == nil || (![ROBLeftArmTrial shared].isRunning &&
+            ![ROBLeftArmTrial shared].isPreparingPreviewedCanObservation && ![ROBNeckQRCalibration shared].isRunning &&
+            ![ROBRecycleMissionCoordinator shared].ownsWorkspaceSearchView) || owner.stageShowCoordinator.isRunning ||
             owner.pendingRobotActionRequests.count > 0 || [ROBAmberStackMaintenanceController shared].isRunning ||
             [ROBTorsoControlCenter shared].isArmed) { return NO; }
         if (!armViewPreparationStarted) {
@@ -5760,6 +5841,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     workspace.boundedPan = ^double(double pan) {
         ROBSerialBox *serial = weakSelf.serialBox;
         return serial == nil ? 0 : MAX(serial.currentNeckPanMinimumDegrees, MIN(serial.currentNeckPanMaximumDegrees, pan));
+    };
+    workspace.panTargetForView = ^NSNumber *(double pan) {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        if (serial == nil || !serial.neckCommandStateKnown || !isfinite(pan) ||
+            pan < serial.currentNeckPanMinimumDegrees || pan > serial.currentNeckPanMaximumDegrees) { return nil; }
+        ROBNeckSafetyConfig config = [serial neckSafetyConfiguration];
+        int32_t target = 0;
+        return ROBNeckSafetyPanDegreesToTarget(&config, pan, &target) ? @(target) : nil;
     };
     ROBNeckQRCalibration *qrCalibration = [ROBNeckQRCalibration shared];
     qrCalibration.cameraDemand = routine.cameraDemand;
@@ -5990,22 +6079,33 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void) showROB_Torso_Controls
 {
-    NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil]; // get a reference to the storyboard
-    self.torsoControlsWindowController = [storyBoard instantiateControllerWithIdentifier:@"TorsoControlsWindowController"]; // instantiate your window controller
-    [self.torsoControlsWindowController showWindow:self]; // show the window}
-    self.torsoControlsViewController = (ROBTorsoControlsViewController *)self.torsoControlsWindowController.contentViewController;
-    [self.torsoControlsViewController setRobMainViewController:self];
-    [self.torsoControlsViewController bindArm_controls];
+    if (self.torsoControlsWindowController == nil) {
+        NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil];
+        self.torsoControlsWindowController = [storyBoard instantiateControllerWithIdentifier:@"TorsoControlsWindowController"];
+        self.torsoControlsViewController = (ROBTorsoControlsViewController *)self.torsoControlsWindowController.contentViewController;
+        (void)self.torsoControlsViewController.view;
+        [self.torsoControlsViewController setRobMainViewController:self];
+        [self.torsoControlsViewController bindArm_controls];
+    }
+    [self.torsoControlsWindowController showWindow:self];
+    [self.torsoControlsWindowController.window makeKeyAndOrderFront:self];
+}
+
+- (IBAction)showTorsoServoControls:(id)sender
+{
+    [self showROB_Torso_Controls];
 }
 
 
 - (void) showROBControls
 {
-    NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil]; // get a reference to the storyboard
-    self.controlsWindowController = [storyBoard instantiateControllerWithIdentifier:@"ControlsWindowController"]; // instantiate your window controller
-    [self.controlsWindowController showWindow:self]; // show the window}
-    
-    [(ROBKeyboardControlsViewController *)self.controlsWindowController.contentViewController setRobMainViewController:self];
+    if (self.controlsWindowController == nil) {
+        NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil];
+        self.controlsWindowController = [storyBoard instantiateControllerWithIdentifier:@"ControlsWindowController"];
+        [(ROBKeyboardControlsViewController *)self.controlsWindowController.contentViewController setRobMainViewController:self];
+    }
+    [self.controlsWindowController showWindow:self];
+    [self.controlsWindowController.window makeKeyAndOrderFront:self];
 }
 
 - (IBAction)showBaseSerialConsole:(id)sender
@@ -6032,7 +6132,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (IBAction)showControls:(id)sender
 {
-    NSLog(@"show controls");
+    [self showROBControls];
 }
 
 

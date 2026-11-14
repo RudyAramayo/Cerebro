@@ -116,13 +116,13 @@ class ManualAmberCommandTests(unittest.TestCase):
                 bus = FakeBus([0] * 7)
                 error, _ = self.run_script(filename, bus)
                 self.assertIsNone(error)
-                self.assertEqual(bus.commands, [10, 110, 10, 110])
+                self.assertEqual(bus.commands, ([110] if mode == 2 else []) + [10, 110, 10, 110])
                 self.assertEqual(bus.mode_changes, [1, mode])
 
     def test_partial_activation_never_proceeds_to_position_or_current(self):
         for filename in ("cmd_position_mode_v2.py", "cmd_current_mode_v2.py"):
             with self.subTest(filename=filename):
-                bus = FakeBus()
+                bus = FakeBus([0] * 7)
                 bus.mode_results[1] = [1, 1, 1, 1, 0, 0, 0]
                 error, _ = self.run_script(filename, bus)
                 self.assertIn("not verified", error)
@@ -130,12 +130,25 @@ class ManualAmberCommandTests(unittest.TestCase):
                 self.assertNotIn(4, bus.commands)
 
     def test_partial_final_mode_is_a_failure(self):
-        bus = FakeBus()
+        bus = FakeBus([0] * 7)
         bus.mode_results[2] = [2, 2, 2, 2, 0, 0, 0]
         error, output = self.run_script("cmd_position_mode_v2.py", bus)
         self.assertIn("[2, 2, 2, 2, 0, 0, 0]", error)
         self.assertNotIn("all seven joints in position", output)
         self.assertEqual(bus.mode_changes, [1, 2])
+
+    def test_repeated_position_mode_is_read_only(self):
+        bus = FakeBus([2] * 7)
+        error, output = self.run_script("cmd_position_mode_v2.py", bus)
+        self.assertIsNone(error)
+        self.assertEqual(bus.commands, [110])
+        self.assertIn("no mode or position command", output)
+
+    def test_position_mode_does_not_release_partially_holding_arm(self):
+        bus = FakeBus([2, 2, 0, 0, 0, 0, 0])
+        error, _ = self.run_script("cmd_position_mode_v2.py", bus)
+        self.assertIn("existing position hold", error)
+        self.assertEqual(bus.commands, [110])
 
     def test_unacknowledged_mode_is_not_retried(self):
         for response in (0, "timeout"):
@@ -169,6 +182,43 @@ class ManualAmberCommandTests(unittest.TestCase):
         error, _ = self.run_script("cmd_position_input_v2.py", bus)
         self.assertIn("Position command blocked", error)
         self.assertEqual(bus.commands, [110])
+
+    def test_hanging_target_preserves_datum_and_does_not_change_mode(self):
+        bus = FakeBus()
+        error, output = self.run_script("zero_position_mode_v2.py", bus, "--cmd_time", "8")
+        self.assertIsNone(error)
+        self.assertEqual(bus.commands, [110, 4])
+        self.assertEqual(bus.mode_changes, [])
+        self.assertEqual(struct.unpack_from("<7f", bus.requests[-1][0], 8), (0.0,) * 7)
+        self.assertIn("does not verify physical arrival", output)
+
+    def test_hanging_after_shutdown_reports_mode_failure_without_moving(self):
+        for modes in ([0] * 7, [1] * 7, [2, 2, 2, 2, 0, 0, 0]):
+            with self.subTest(modes=modes):
+                bus = FakeBus(modes)
+                error, output = self.run_script("zero_position_mode_v2.py", bus)
+                self.assertIn("Hanging target was not sent", error)
+                self.assertIn("Position + Hold", error)
+                self.assertEqual(bus.commands, [110])
+                self.assertNotIn("acknowledged by controller", output)
+
+    def test_rejected_hanging_target_is_not_reported_as_success(self):
+        for response in (0, "timeout"):
+            with self.subTest(response=response):
+                bus = FakeBus()
+                bus.acknowledgements[4] = response
+                error, output = self.run_script("zero_position_mode_v2.py", bus)
+                self.assertIn("rejected or not acknowledged", error)
+                self.assertEqual(bus.commands, [110, 4])
+                self.assertNotIn("acknowledged by controller", output)
+
+    def test_hanging_with_invalid_timing_does_not_open_socket(self):
+        for argument, value in [("--cmd_time", "0"), ("--cmd_time", "nan"), ("--cmd_sleep", "-1")]:
+            with self.subTest(argument=argument, value=value):
+                bus = FakeBus()
+                error, _ = self.run_script("zero_position_mode_v2.py", bus, argument, value)
+                self.assertIn("Hanging command blocked", error)
+                self.assertEqual(bus.requests, [])
 
     def test_mode_change_during_position_preflight_is_blocked(self):
         bus = FakeBus()

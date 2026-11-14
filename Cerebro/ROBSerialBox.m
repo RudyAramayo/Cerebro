@@ -49,6 +49,22 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 #import "ROBSystemDependencyManager.h"
 #import "ROBTaskLaunchGuard.h"
 #import "Cerebro-Swift.h"
+
+// Keep a small live console; the complete controller log remains on Amber.
+// Repeated whole-history text layout and AX extraction delayed native input.
+static void ROBAppendArmConsole(NSTextView *console, NSString *message) {
+    if (console == nil || message.length == 0) return;
+    NSString *tail = message.length > 4096 ? [message substringFromIndex:message.length - 4096] : message;
+    NSString *combined = [console.string ?: @"" stringByAppendingString:tail];
+    if (combined.length > 4096) combined = [combined substringFromIndex:combined.length - 4096];
+    console.string = combined;
+    if (console.window.visible && !console.window.miniaturized) [console scrollToEndOfDocument:nil];
+}
+static void ROBAppendBoundedCoreData(NSMutableData *buffer, NSData *data) {
+    [buffer appendData:data];
+    if (buffer.length > 65536) [buffer replaceBytesInRange:NSMakeRange(0, buffer.length - 65536) withBytes:NULL length:0];
+}
+
 #include <sys/select.h>
 #include <errno.h>
 #include <float.h>
@@ -446,6 +462,11 @@ static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
 
 
 
+@property (nonatomic, copy) NSDictionary<NSString *, NSNumber *> *animationMaestroValues;
+@property (nonatomic, assign) NSTimeInterval animationOutputUntil;
+@property (nonatomic, assign) BOOL animationLACTActive;
+@property (nonatomic, assign) BOOL animationNeckActive;
+@property (nonatomic, assign) BOOL animationNeckPending;
 @end
 
 
@@ -1300,8 +1321,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             if (!connectionIsStillCurrent) return;
             // Hardware readiness owns hardware startup. Do not make servo
             // activation depend on any window controller receiving the event.
-            ROBNeckCommandDisposition startupDisposition =
-                [self startSafeNeckStartup];
+            ROBNeckCommandDisposition startupDisposition = [self startAutomaticNeckStartup];
             [[ROBBubbleRuntime shared] maestroReconnected];
             if (startupDisposition == ROBNeckCommandDispositionRejected) {
                 NSLog(@"Maestro connected, but automatic safe neck startup was rejected: %@",
@@ -1516,6 +1536,81 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     return YES;
 }
 
+- (BOOL)animationMaestroReady { return self.maestroConnectionValid; }
+- (BOOL)animationLACTReady { return serialFileDescriptor_base >= 0; }
+- (BOOL)animationNeckReady { return !self.animationNeckPending && self.neckCommandReadyAtUptime <= NSProcessInfo.processInfo.systemUptime; }
+
+- (NSDictionary<NSString *, NSNumber *> *)animationMaestroSnapshot {
+    NSMutableDictionary *values = [NSMutableDictionary dictionaryWithDictionary:self.animationMaestroValues ?: @{}];
+    [values removeObjectsForKeys:@[@"maestro.0", @"maestro.1", @"maestro.2"]];
+    if (self.neckPanCommandKnown && self.commandedNeckPanTarget != 0) values[@"maestro.0"] = @(self.commandedNeckPanTarget);
+    if (self.lowerNeckTiltCommandKnown && self.commandedLowerNeckTiltTarget != 0) values[@"maestro.1"] = @(self.commandedLowerNeckTiltTarget);
+    if (self.upperNeckTiltCommandKnown && self.commandedUpperNeckTiltTarget != 0) values[@"maestro.2"] = @(self.commandedUpperNeckTiltTarget);
+    return values;
+}
+
+- (BOOL)applyAnimationMaestroValues:(NSDictionary<NSString *, NSNumber *> *)values {
+    if (![NSThread isMainThread] || ![ROBAnimationPlayback shared].isRunning || !self.maestroConnectionValid) return NO;
+    NSSet *allowed = [NSSet setWithArray:@[@"maestro.0",@"maestro.1",@"maestro.2",@"maestro.4",@"maestro.5",@"maestro.10",@"maestro.11",@"maestro.12",@"maestro.13",@"maestro.14",@"maestro.15",@"maestro.16",@"maestro.17"]];
+    for (NSString *key in values) {
+        double value = values[key].doubleValue;
+        if (![allowed containsObject:key] || !isfinite(value) || value < 4000 || value > 8000) return NO;
+    }
+    if (values[@"maestro.0"] || values[@"maestro.1"] || values[@"maestro.2"]) {
+        NSDictionary *start = [self animationMaestroSnapshot];
+        NSNumber *pan = values[@"maestro.0"] ?: start[@"maestro.0"];
+        NSNumber *lower = values[@"maestro.1"] ?: start[@"maestro.1"];
+        NSNumber *upper = values[@"maestro.2"] ?: start[@"maestro.2"];
+        if (!pan || !lower || !upper) return NO;
+        ROBNeckCommandDisposition result = [self requestOperatorNeckPosePanTarget:pan.integerValue lowerTarget:lower.integerValue upperTarget:upper.integerValue];
+        if (result == ROBNeckCommandDispositionRejected) return NO;
+        self.animationNeckActive = YES;
+        self.animationNeckPending = result != ROBNeckCommandDispositionAppliedCommand
+            || self.commandedNeckPanTarget != pan.integerValue
+            || self.commandedLowerNeckTiltTarget != lower.integerValue
+            || self.upperNeckOperatorDemandTarget.integerValue != upper.integerValue;
+    }
+    for (NSString *key in values) {
+        NSInteger channel = [key componentsSeparatedByString:@"."].lastObject.integerValue;
+        if (channel > 2 && ![self sendMaestroTarget:(unsigned short)values[key].integerValue channel:(unsigned char)channel]) return NO;
+    }
+    NSMutableDictionary *stored = [NSMutableDictionary dictionaryWithDictionary:self.animationMaestroValues ?: @{}];
+    [stored addEntriesFromDictionary:values]; self.animationMaestroValues = stored;
+    self.animationOutputUntil = NSProcessInfo.processInfo.systemUptime + 0.5;
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"ROBAnimationMaestroDemand" object:self userInfo:@{@"values":values}];
+    return YES;
+}
+
+- (BOOL)applyAnimationLACTPercent:(double)percent {
+    if (![NSThread isMainThread] || ![ROBAnimationPlayback shared].isRunning || serialFileDescriptor_base < 0 || !isfinite(percent) || fabs(percent)>100) return NO;
+    self.animationLACTActive = YES;
+    self.animationOutputUntil = NSProcessInfo.processInfo.systemUptime + 0.5;
+    NSString *command = [NSString stringWithFormat:@"~+0001,+0000,+0001,+0000,+0001,+0000,%+05d",(int)lround(percent*32)];
+    if (percent != 0) [ROBFixedHeadBodyMotionIdentity invalidate];
+    NSData *bytes = [command dataUsingEncoding:NSUTF8StringEncoding];
+    return write(serialFileDescriptor_base, bytes.bytes, bytes.length) == (ssize_t)bytes.length;
+}
+
+- (void)endAnimationOutputs {
+    self.animationOutputUntil = 0;
+    if (self.animationNeckActive) {
+        [self cancelNeckGestureAuthority];
+        // Discard any not-yet-issued staged target. Keep the accepted command
+        // estimates visible; no additional servo movement is sent by Stop.
+        NSMutableDictionary *accepted = [NSMutableDictionary dictionary];
+        if (self.neckPanCommandKnown) accepted[@"maestro.0"] = @(self.commandedNeckPanTarget);
+        if (self.lowerNeckTiltCommandKnown) accepted[@"maestro.1"] = @(self.commandedLowerNeckTiltTarget);
+        if (self.upperNeckTiltCommandKnown) accepted[@"maestro.2"] = @(self.commandedUpperNeckTiltTarget);
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"ROBAnimationMaestroDemand" object:self userInfo:@{@"values":accepted}];
+    }
+    self.animationNeckActive = NO; self.animationNeckPending = NO;
+    BOOL lactWasActive = self.animationLACTActive;
+    self.animationLACTActive = NO;
+    if (lactWasActive && serialFileDescriptor_base >= 0) {
+        [self writeString:@"~+0001,+0000,+0001,+0000,+0001,+0000,+0000" serialFileDescriptor:serialFileDescriptor_base];
+    }
+}
+
 - (BOOL)sendMaestroTarget:(unsigned short)target channel:(unsigned char)channel
 {
     unsigned char command[] = { 0x84, channel, target & 0x7F, (target >> 7) & 0x7F };
@@ -1627,6 +1722,17 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             [weakSelf advanceSafeNeckStartupForGeneration:generation];
         }
     );
+}
+
+- (ROBNeckCommandDisposition)startAutomaticNeckStartup
+{
+    if (![ROBServoControlStore automaticStartupEnabled]) {
+        self.torsoNeckAuthorityRequiresOperatorAction = YES;
+        self.neckCommandSafetyStatus =
+            @"Automatic neck startup disabled in Settings; saved startup values retained. No neck targets sent.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    return [self startSafeNeckStartup];
 }
 
 - (ROBNeckCommandDisposition)startSafeNeckStartup
@@ -2041,6 +2147,18 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     }
 }
 
+- (NSNumber *)upperNeckOperatorDemandTarget
+{
+    @synchronized (self) {
+        if (!self.upperNeckTiltCommandKnown
+            || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff
+            || !self.lastDesiredUpperNeckTargetIsKnown) {
+            return nil;
+        }
+        return @(self.lastDesiredUpperNeckTarget);
+    }
+}
+
 - (NSTimeInterval)neckCommandReadyAtUptime
 {
     @synchronized (self) {
@@ -2060,7 +2178,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 - (BOOL)personTrackingMayUpdateNeck
 {
     @synchronized (self) {
-        if ([ROBArmRoutineCoordinator shared].ownsPhysicalMotion) { return NO; }
+        if ([ROBArmRoutineCoordinator shared].ownsPhysicalMotion || self.animationNeckActive) { return NO; }
         NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
         return self.maestroConnectionValid
             && self.neckCommandStateKnown
@@ -3814,6 +3932,10 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 
 // send a string to the serial port
 - (void) writeString: (NSString *) str serialFileDescriptor:(int)serialFileDescriptor {
+    if (serialFileDescriptor == serialFileDescriptor_base && self.animationLACTActive &&
+        [ROBFixedHeadBodyMotionIdentity baseCommandMayMove:str]) {
+        [[ROBAnimationPlayback shared] stopWithReason:@"Manual base control took over"];
+    }
     if(serialFileDescriptor!=-1) {
         if (serialFileDescriptor == serialFileDescriptor_base &&
             [ROBFixedHeadBodyMotionIdentity baseCommandMayMove:str]) {
@@ -3972,6 +4094,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             speed_forward_reverse:(bool)speed_forward_reverse
                         textInput:(NSString *)textInput
 {
+    if (self.animationLACTActive && NSProcessInfo.processInfo.systemUptime < self.animationOutputUntil) return;
     //0 - 320 limit on touchPadPoint
     //Do we need independent brakes for each tred? or if its on only animate the tred that is asking for commands...
     //Can we make a tred lock pulse pattern to allow the robot to travel slowly downhill
@@ -4133,6 +4256,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
                    lowerTiltOperatorInitiated:(BOOL)lowerTiltOperatorInitiated
 
 {
+    if (operatorInitiated && [ROBAnimationPlayback shared].isRunning) [[ROBAnimationPlayback shared] stopWithReason:@"Manual Maestro control took over"];
     //---
     //7790 max for upperNeckTilt, 4300 min for uppperNeckTilt
     //7675 max for headTilt, 4375 max for the headTilt
@@ -4199,6 +4323,17 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
                               source:source];
     }
 
+    NSMutableDictionary *servoSnapshot = [NSMutableDictionary dictionaryWithDictionary:self.animationMaestroValues ?: @{}];
+    NSDictionary *demand = @{@"maestro.4":@([arm_L_elbow_pan intValue]),@"maestro.5":@([arm_R_elbow_pan intValue]),
+        @"maestro.10":@([arm_R_wrist_tilt intValue]),@"maestro.11":@([arm_R_gripper intValue]),
+        @"maestro.12":@([arm_L_shoulder_pan intValue]),@"maestro.13":@([arm_L_shoulder_tilt intValue]),
+        @"maestro.14":@([arm_L_elbow_tilt intValue]),@"maestro.15":@([arm_L_wrist_pan intValue]),
+        @"maestro.16":@([arm_L_wrist_tilt intValue]),@"maestro.17":@([arm_L_gripper intValue])};
+    for (NSString *key in demand) {
+        if ([demand[key] intValue] >= 4000 && [demand[key] intValue] <= 8000) servoSnapshot[key] = demand[key];
+        else [servoSnapshot removeObjectForKey:key];
+    }
+    self.animationMaestroValues = servoSnapshot;
     [self sendMaestroTarget:[arm_L_elbow_pan intValue] channel:4];
     [self sendMaestroTarget:[arm_R_elbow_pan intValue] channel:5];
 
@@ -4476,7 +4611,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     return NSThread.isMainThread && self.maestroConnectionValid && self.neckCommandStateKnown &&
         isfinite(panDegrees) && fabs(panDegrees) <= 70 && upperTarget >= 5300 && upperTarget <= 7500 &&
         ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &panTarget) &&
-        self.commandedNeckPanTarget == panTarget && self.commandedLowerNeckTiltTarget == 6011 &&
+        self.commandedNeckPanTarget == panTarget &&
+        self.commandedLowerNeckTiltTarget >= configuration.lowerMinimumTarget &&
+        self.commandedLowerNeckTiltTarget <= configuration.lowerMaximumTarget &&
         self.commandedUpperNeckTiltTarget == upperTarget &&
         NSProcessInfo.processInfo.systemUptime >= self.neckCommandReadyAtUptime;
 }
@@ -4496,9 +4633,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     if (now < self.manualNeckOverrideUntil || now < self.gestureNeckAuthorityUntil ||
         now < self.visionNeckAuthorityUntil) { return NO; }
     self.torsoNeckAuthorityRequiresOperatorAction = YES;
-    // The existing staging owns recovery from a non-upright neck. All subsequent
-    // search targets still pass through the normal mechanical envelope/ramp.
-    if (self.commandedLowerNeckTiltTarget != 6011 && ![self prepareNeckForPersonFollow]) { return NO; }
+    // Retain the operator's lower-neck viewpoint, including a forward lean
+    // over the shoulder. Search owns pan/upper only; the existing envelope,
+    // ramps and readiness checks still apply at this actual lower target.
     (void)[self applySafeNeckPanTarget:panTarget lowerTiltTarget:(int)self.commandedLowerNeckTiltTarget
                   desiredUpperTarget:(int)upperTarget includeLower:NO
        allowSupervisedLowerRecovery:NO source:@"Local workspace search"];
@@ -4731,11 +4868,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 
 - (NSString *)ticcmdExecutablePath
 {
-    NSString *configuredPath = [[NSUserDefaults standardUserDefaults]
-        stringForKey:kROBTiccmdExecutablePathDefaultsKey];
-    NSString *selection = configuredPath.length > 0
-        ? configuredPath
-        : @"/Applications/Pololu Tic Stepper Motor Controller.app/Contents/MacOS/ticcmd";
+    NSString *selection = ROBTicCommandConfiguration.executablePath;
     NSString *ticcmdPath = [[selection stringByExpandingTildeInPath] stringByStandardizingPath];
     return [[NSFileManager defaultManager] isExecutableFileAtPath:ticcmdPath]
         ? ticcmdPath
@@ -4837,7 +4970,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 
 - (IBAction)energizeToggle:(id)sender
 {
-    [[ROBTorsoControlCenter shared] stop];
+    [[ROBTorsoControlCenter shared] energize];
 }
 
 - (void)performSSHpassOperation:(NSString *)operation block:(dispatch_block_t)block
@@ -4884,14 +5017,10 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
     NSLog(@"%@", [message stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.amberMasterCoreOutput_R11 != nil) {
-            self.amberMasterCoreOutput_R11.string =
-                [self.amberMasterCoreOutput_R11.string stringByAppendingString:message];
-            [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+            ROBAppendArmConsole(self.amberMasterCoreOutput_R11, message);
         }
         if (self.amberMasterCoreOutput_L10 != nil) {
-            self.amberMasterCoreOutput_L10.string =
-                [self.amberMasterCoreOutput_L10.string stringByAppendingString:message];
-            [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+            ROBAppendArmConsole(self.amberMasterCoreOutput_L10, message);
         }
     });
 }
@@ -4940,23 +5069,19 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
             self.core_R11_isOnline = false;
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
-            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_R11_log encoding:NSUTF8StringEncoding];
+            NSString *finalOutput = @"\n[Core/log stream closed]\n";
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
-                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_R11, finalOutput);
             });
 
         } else {
             // Append the new data to our storage.
             self.core_R11_isOnline = true;
-            [self.receivedData_R11_log appendData:data];
+            ROBAppendBoundedCoreData(self.receivedData_R11_log, data);
             
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
-                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_R11, partialString);
             });
         }
     };
@@ -5009,22 +5134,18 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
             self.core_R11_isOnline = false;
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
-            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_R11_Core encoding:NSUTF8StringEncoding];
+            NSString *finalOutput = @"\n[Core/log stream closed]\n";
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
-                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_R11, finalOutput);
             });
         } else {
             self.core_R11_isOnline = true;
             // Append the new data to our storage.
-            [self.receivedData_R11_Core appendData:data];
+            ROBAppendBoundedCoreData(self.receivedData_R11_Core, data);
             
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
-                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_R11, partialString);
             });
         }
     };
@@ -5209,23 +5330,19 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
             self.core_L10_isOnline = false;
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
-            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_L10_log encoding:NSUTF8StringEncoding];
+            NSString *finalOutput = @"\n[Core/log stream closed]\n";
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
-                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_L10, finalOutput);
             });
 
         } else {
             // Append the new data to our storage.
             self.core_L10_isOnline = true;
-            [self.receivedData_L10_log appendData:data];
+            ROBAppendBoundedCoreData(self.receivedData_L10_log, data);
             
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
-                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_L10, partialString);
             });
         }
     };
@@ -5278,23 +5395,19 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
             self.core_L10_isOnline = false;
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
-            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_L10_Core encoding:NSUTF8StringEncoding];
+            NSString *finalOutput = @"\n[Core/log stream closed]\n";
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
-                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_L10, finalOutput);
             });
 
         } else {
             // Append the new data to our storage.
             self.core_L10_isOnline = true;
-            [self.receivedData_L10_Core appendData:data];
+            ROBAppendBoundedCoreData(self.receivedData_L10_Core, data);
             
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
-                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
-                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+                ROBAppendArmConsole(self.amberMasterCoreOutput_L10, partialString);
             });
         }
     };
@@ -5435,7 +5548,8 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
         NSLog(@"%@: %@", operation, error.localizedDescription ?: output);
         return;
     }
-    // Capture all targets before the controller reviews this one-shot request.
+    // Capture the local operator's targets at the click; later edits cannot
+    // alter an already dispatched command. No voice authorization is needed.
     NSArray<NSString *> *capturedArguments = [arguments copy];
     NSUInteger portIndex = [capturedArguments indexOfObject:@"--port"];
     NSInteger port = portIndex != NSNotFound && portIndex + 1 < capturedArguments.count
@@ -5449,7 +5563,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
         unsigned long long generation = [gateway.connectionSnapshot[@"sessionGeneration"] unsignedLongLongValue];
         NSString *summary = [NSString stringWithFormat:@"Physical %@ arm: %@ (%@). Mode changes can remove torque; clear the workspace and support the arm as needed.",
             physicalArm, operation, [[capturedArguments subarrayWithRange:NSMakeRange(1, capturedArguments.count - 1)] componentsJoinedByString:@" "]];
-        [[ROBControllerArmApproval shared] requestWithOperation:@"manual" arm:physicalArm summary:summary
+        [[ROBControllerArmApproval shared] performLocalPanelArmCommandWithOperation:operation arm:physicalArm summary:summary
             execute:^(void (^done)(NSDictionary *)) {
                 dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
                     NSMutableArray *immediate = [capturedArguments mutableCopy];
@@ -5510,8 +5624,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
                 NSLog(@"%@", message);
                 NSTextView *console = port == 26001 ? self.amberMasterCoreOutput_L10 : self.amberMasterCoreOutput_R11;
                 if (console != nil) {
-                    console.string = [console.string stringByAppendingString:message];
-                    [console scrollRangeToVisible:NSMakeRange(console.string.length, 0)];
+                    ROBAppendArmConsole(console, message);
                 }
             }];
     });
@@ -5914,6 +6027,9 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 //Sent by the controller to authorize autonomous mode or become the masterController input
 - (void) switchToMasterControllerID:(NSString *)controllerID
 {
+    if (![controllerID isEqualToString:@"Recycle Cans"]) {
+        [[ROBRecycleMissionCoordinator shared] stopWithReason:@"Motion control changed to another controller"];
+    }
     if (![self.masterControllerID isEqualToString:controllerID] && self.masterControllerInputWasFresh) {
         [self stopBaseMotionAndDropHeartbeat];
     }

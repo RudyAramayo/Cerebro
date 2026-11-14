@@ -15,6 +15,12 @@ hanging and empty: deactivate at that existing pose, initialize the stationary
 jaws and retain the ordinary startup checks. A raised arm is not silently
 returned to initialize grippers.
 
+Preparation queries the current modes of **both** arms before accepting their
+stationary feedback baselines. A newly authenticated session can already have
+fresh CAN positions while its opposite-arm mode cache is still empty. These
+queries populate read-only state; they do not activate, deactivate, reset or
+move either arm. Inconsistent or stale feedback still prevents preparation.
+
 ## Model and calibration identity
 
 The right model uses its actual URDF mount, `right_joint1` through
@@ -33,6 +39,74 @@ model, mapping, tool, registration and local XYZ region. They preserve the
 historical `can-reach.json` file.
 
 ## Visual checks and changed targets
+
+Complete standing right-arm can tasks now prepare the empty arm before object search.
+Preparation captures workspace geometry, reviews any initial outward retreat,
+and plans a complete connector to the right ready endpoint. It does not require
+a detected can, a bucket opening, or a stationary target. Target acquisition
+starts only after feedback confirms the ready hold, using a new scene from that
+pose. Later cans retain their ordinary fresh search and grasp checks.
+
+The ready endpoint is a planning goal, not a taught-path clearance exemption.
+Table/occupied-space, whole-arm, self-clearance, source identity, current, joint,
+feedback, ownership and Stop checks still apply. A missing or rejected workspace
+map stops preparation before travel; it does not start an object-search retry
+loop. The lift-only experiment still stops after its single reviewed retreat.
+This sequencing change does not establish a measured camera-to-arm transform.
+The separately scoped open-jaw approach experiment keeps its existing sequence.
+
+Task camera enrollment requests the stereo mode recorded in the validated
+full-height pitch evidence when that evidence specifies one unambiguous mode.
+It waits for actual SDK mode readback before freezing the task context; an old
+standard-mode frame cannot satisfy a near-field request. Explicit calibration
+captures retain priority, and ending the arm demand restores the ordinary mode.
+Current-frame projection validation still runs after enrollment.
+
+For the standing local can trial, an unknown-cell rejection during the initial
+empty retreat now starts a bounded neck-only recovery before any arm mode,
+trajectory or jaw command. The diagnostic identifies the actual link and voxel.
+The planner projects the complete cell into candidate camera views, selects a
+distinct view with additional parallax, waits for the normal neck settling
+checks, and appends two advancing synchronized depth exposures. It retains the
+same scene and every original obstacle return, then repeats the complete arm
+review from fresh measured feedback. At most two additional views share a
+30-second deadline and the original scan's 60-second acquisition bound.
+
+This fallback does not run after arm travel, jaw setup, possible possession,
+mode changes, Stop, feedback loss or a source/body/context change. Occupied
+obstacles do not trigger it. Missing depth remains unknown; projecting a cell
+inside the image does not prove visibility through ROB's own hardware. A depth
+hole can therefore remain unresolved after both attempts. The private trial
+recording gets a `coverage-recovery.json` audit with the attempted views,
+before/after cell states and map fingerprints. Capture diagnostics also retain
+bounded same-frame depth statistics for the projected cell region. None of
+these records grants motion or claims camera-to-arm registration.
+The adjacent `coverage-stages.log` records capture phases before and after
+settling, seeding, each append, ROI inspection and freezing, so an aborted
+process can be distinguished from an ordinary rejected observation.
+
+Hardware-free validation uses `Tests/ROBLeftArmCoverageRecoveryRuntimeTests.py`,
+`Tests/ROBWorkspaceBlockerCoverageCaptureRuntimeTests.py` and
+`Scripts/test-workspace-depth-map.sh`. These exercise the actual recovery,
+capture and mapper paths with inert camera/robot seams; they do not establish a
+successful physical grasp.
+
+After an interrupted job, possible possession remains separate from task
+authorization. An actual written user observation that **both grippers are
+empty** may be recorded using the sandbox's private empty-hand observation
+template/import actions. The receipt binds the current app, campaign, exact
+standing state, previous job and a unique expiring observation challenge. It
+accepts the user's observation text and hash, records an immutable object-state
+audit, and leaves the same campaign paused. It does not approve motion, start a
+job, calibrate/open jaws, credit a transfer or replay a waypoint. Fresh feedback,
+scene and complete path review still precede a later Run. A changed job/state,
+replayed or stale observation, non-user source or active manipulation rejects
+the import. This is an operator observation rather than a camera verification.
+An old executing job's effective payload uncertainty is persisted before
+maintenance pause, Stop/revocation, consumption or completion changes the state
+label. A relaunch followed by Quit cannot silently turn that uncertainty into
+an empty-hand claim. A previously recorded actual empty observation remains
+empty across an ordinary paused shutdown.
 
 Before closing, a fresh detector observation and aligned depth must still agree
 with the frozen can. A significant displacement stops closing. The task may

@@ -28,17 +28,19 @@ class KeyboardTreadRampTests(unittest.TestCase):
         self.assertIn("self.treadPressed = YES", self.source)
         self.assertIn("self.treadPressed = NO", self.source)
 
-    def test_motion_uses_a_short_symmetric_ramp(self) -> None:
+    def test_motion_uses_the_selected_time_based_ramp(self) -> None:
         self.assertIn("kROBLocalTreadRampInterval = 0.03", self.source)
-        self.assertIn("kROBLocalTreadRampStep = 20", self.source)
-        self.assertIn("current * target < 0 ? 0 : target", self.source)
+        self.assertIn("advanceToLeft:self.targetLeftTreadCommand", self.source)
+        self.assertIn("mode:ROBTreadMotionRamp.selectedMode now:NSProcessInfo.processInfo.systemUptime", self.source)
         self.assertIn("@selector(updateLocalTreadRamp)", self.source)
+        self.assertIn('property="localTreadSpeedSlider"', self.storyboard)
+        self.assertIn("self.localTreadSpeedSlider.doubleValue / 100", self.source)
+        self.assertNotIn("serialBox speedSliderAction", self.source)
 
     def test_release_brakes_only_after_ramping_to_zero(self) -> None:
         ramp_method = self.source.split("- (void)updateLocalTreadRamp", 1)[1]
         stop_branch = ramp_method.split("- (void)stopLocalTreadsImmediately", 1)[0]
-        self.assertIn("self.currentLeftTreadCommand == 0", stop_branch)
-        self.assertIn("self.currentRightTreadCommand == 0", stop_branch)
+        self.assertIn("self.localTreadRamp.isStopped", stop_branch)
         self.assertIn(
             'sendBaseCommand:@"~+0001,+0000,+0001,+0000,+0000,+0000,+0000"',
             stop_branch,
@@ -48,6 +50,8 @@ class KeyboardTreadRampTests(unittest.TestCase):
         self.assertIn("NSEventMaskKeyDown | NSEventMaskKeyUp", self.source)
         self.assertIn("event.type == NSEventTypeKeyUp", self.source)
         self.assertIn("removeObject:keyCode", self.source)
+        self.assertIn("event.isARepeat) return nil", self.source)
+        self.assertIn("event.keyCode == 53", self.source)
 
 
 if __name__ == "__main__":

@@ -19,14 +19,18 @@ import UniformTypeIdentifiers
         let actions: [Action]
     }
     private static let trials: [Trial] = [
+        Trial(id: "can-pour", title: "Coke can · timed pour", detail: "Rehearse driving toward the fixed table, turning the torso perpendicular to its front edge, then the right-arm grasp, half-remaining pour and supported set-down. Table height comes from paired floor/table depth measurements. The can starts half full with its opening facing the glass. The saved test shows every preparation stage but sends no motor commands; drive clearance and registration remain unverified.", parameters: .none,
+              actions: [Action(title: "Run saved pour test + open ghost", command: "pour:run"), Action(title: "Review complete path in ghost…", command: "ghost:pour"), Action(title: "Play timed pour and return…", command: "ghost:pour-timed")]),
+        Trial(id: "torso-preparation", title: "Grasp-ready for torso test", detail: "Raise both empty arms into grasp-ready holds before a torso test. Each whole arm moves in coordinated segments, with fresh feedback, current monitoring and tread-proxy review. The operator observes external clearance; left ready geometry and camera registration remain unmeasured. No jaw or torso command is included. A private one-use record binds the existing explicit task instruction to this app and current arm context.", parameters: .current,
+              actions: [Action(title: "Export task template…", command: "torso-ready:export"), Action(title: "Prepare both arms from task receipt…", command: "torso-ready:run")]),
         Trial(id: "right-recycling", title: "Recycle can · right arm", detail: "Use ROB's physical right arm (Amber L10). Find an empty upright can, grasp its middle, verify a small lift with fixed-head visual evidence, then carry and gravity-drop above the bucket. Right-arm calibration is separate from left-arm reach tuning. One task approval covers both arms holding at their measured positions and only the right arm travelling.", parameters: .current,
-              actions: [Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Recycle selected cans", command: "right_recycle_cans"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
+              actions: [Action(title: "Grasp nearby can + lift and hold", command: "local-recycling:grasp-hold"), Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Export empty-hand observation template…", command: "local-recycling:empty-observation-export"), Action(title: "Import empty-hand observation…", command: "local-recycling:empty-observation-import"), Action(title: "Recycle selected cans", command: "right_recycle_cans"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
         Trial(id: "fixed-head-registration", title: "Camera-to-arm registration", detail: "Measure a local camera-to-robot transform from current RGB-D robot surfaces. Hold the exact head pose; fit and held-out validation use separate surface patches and later frames. A validated fit records its uncertainty and bounded volume. This test never moves an arm and does not manufacture a motion approval.", parameters: .none,
               actions: [Action(title: "Open fixed-head calibration…", command: "registration:open")]),
         Trial(id: "right-estimated-calibration", title: "Right-arm calibration step", detail: "Review one empty-right-arm two-joint retreat away from the table, then hold. The four-second step is capped at 3 cm of full-model travel. It is an estimated commissioning test, with existing modeled self-proxy overlaps required to improve. It does not close the jaws, recycle a can or claim a general arm calibration. Inspect the physical local clearance and ghost before one spoken or controller approval.", parameters: .none,
               actions: [Action(title: "Capture / preview right calibration step", command: "right_estimated_preview"), Action(title: "Inspect estimated ghost…", command: "ghost:collision"), Action(title: "Run reviewed right calibration step", command: "right_estimated_trial")]),
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
-              actions: [Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Recycle selected cans", command: "left_recycle_cans"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
+              actions: [Action(title: "Run standing can campaign", command: "local-recycling:standing-run"), Action(title: "Import standing campaign…", command: "local-recycling:standing-import"), Action(title: "Export empty-hand observation template…", command: "local-recycling:empty-observation-export"), Action(title: "Import empty-hand observation…", command: "local-recycling:empty-observation-import"), Action(title: "Recycle selected cans", command: "left_recycle_cans"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
         Trial(id: "depth-alignment", title: "Depth alignment", detail: "Adjust the face camera's modeled downward mounting angle and move head-camera depth points horizontally toward ROB. The camera model, live depth view, new workspace scans and object measurements share the pitch correction. Previous scans and previews are cleared when the values change.", parameters: .depthAlignment,
               actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
         Trial(id: "neck-qr-calibration", title: "Neck / QR calibration", detail: "Select a fixed 120 mm table, floor or wall target. Upper-neck checks start from the current view with lower target 6011 and hold pan fixed. Each selected upper target is checked against the QR, including reverse visits. Protractor mode holds each position until you advance. Posture sweeps repeat pan/upper checks at upright, back and forward lower-neck targets. Keep ROB's base and the target fixed. Results remain unverified until independent measurements validate them.", parameters: .none,
@@ -64,8 +68,14 @@ import UniformTypeIdentifiers
     private let collisionInfo = NSTextField(wrappingLabelWithString: "")
     private let localApprovalInfo = NSTextField(wrappingLabelWithString: "")
     private let standingCampaignInfo = NSTextField(wrappingLabelWithString: "")
+    private let sourcePixelSelfReview = NSButton(checkboxWithTitle:"LLM-reviewed self pixels, freshly matched (experimental)",target:nil,action:nil)
+    private let importSourcePixelReview = NSButton(title:"Import experimental pixel template…",target:nil,action:nil)
+    private let nominalModelAssumedSelf = NSButton(checkboxWithTitle: "MODEL-ASSUMED self groups + 14 keyframes (one nominal step)", target:nil, action:nil)
     private let nominalEmptyCommissioningStep = NSButton(checkboxWithTitle: "One slow empty-arm commissioning step", target: nil, action: nil)
     private let oneDegreeEmptyCalibrationStep = NSButton(checkboxWithTitle: "One-degree empty-arm calibration step", target: nil, action: nil)
+    private let approachUnknownAdvisory = NSButton(checkboxWithTitle:"UNKNOWN advisory for open-jaw approach (experimental)",target:nil,action:nil)
+    private let approachCanThenHold = NSButton(checkboxWithTitle:"Approach can then hold (open jaws)",target:nil,action:nil)
+    private let holdAfterInitialEmptyLift = NSButton(checkboxWithTitle: "Hold after initial empty lift", target: nil, action: nil)
     private var collisionRefreshTimer: Timer?
     private let continueCycle = NSButton(title: "Continue", target: nil, action: nil)
     private let save = NSButton(title: "Save test parameters", target: nil, action: nil)
@@ -74,6 +84,7 @@ import UniformTypeIdentifiers
     private var displayedCycleStage = ""
     private var parameterMessage = ""
     private var observingLeftOperation = false
+    private var pourTestProcess: Process?
     private var hasCalibrationFields = false
     private var startSessionButton: NSButton!
     private var endSessionButton: NSButton!
@@ -210,6 +221,16 @@ import UniformTypeIdentifiers
         let title = NSTextField(labelWithString: trial.title); title.font = .boldSystemFont(ofSize: 18)
         detailStack.addArrangedSubview(title)
         addHelp(trial.detail)
+        if trial.id == "can-pour" {
+            addField("pourInitialFill", "Starting can fill (%)", 50, note: "10–90")
+            addField("pourRemainingFraction", "Pour remaining liquid (%)", 50, note: "10–90")
+            addField("pourHold", "Fixed tilt hold (seconds)", 0.35, note: "0–2")
+            addField("pourBaseAdvance", "Ghost tread approach (cm)", 25, note: "0–40; then torso faces table")
+            addField("pourGraspOffset", "Grasp above can center (mm)", 20, note: "−25–25")
+            addField("pourPivotAbove", "Pivot above opening (mm)", 0, note: "0–100; opening must stay inside glass")
+            addField("pourTiltDegrees", "Can tilt (degrees)", 0, note: "0 = fill estimate; otherwise 1–170")
+            addHelp("Inputs, model hashes, joint solutions, timing and collision results are saved for every run. Rehearsal is a recorded fixture, not a live-scene execution grant.")
+        }
         if trial.id == "neck-qr-calibration" {
             qrTarget.removeAllItems()
             qrTarget.addItems(withTitles: ROBNeckQRMeasurement.supportedTargetIDs)
@@ -236,6 +257,7 @@ import UniformTypeIdentifiers
             detailStack.addArrangedSubview(standingCampaignInfo)
             standingCampaignInfo.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
             addHelp("Import this campaign's standing authorization once, then Run. New plans bind fresh robot context without another approval. After Stop, ‘proceed with protections’ starts a new authorization through the local microphone. Connection recovery retries a new plan at most three times. Stop holds the arms; no lowering or old waypoint resumes automatically.")
+            addHelp("Record an actual observation that both grippers are empty; this does not approve or start motion.")
             addField("recyclingCount", "Number of cans", Double(Self.recyclingCount),
                 note: "1–\(ROBRecyclingBatchRequest.maximumCount) · each can is checked again")
             addField("localVisualAllowanceMillimeters", "Assumed visual error (mm)",
@@ -247,6 +269,10 @@ import UniformTypeIdentifiers
             nominalEmptyCommissioningStep.action = #selector(changeNominalEmptyCommissioningStep)
             nominalEmptyCommissioningStep.state = ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled ? .on : .off
             detailStack.addArrangedSubview(nominalEmptyCommissioningStep)
+            nominalModelAssumedSelf.identifier=NSUserInterfaceItemIdentifier("sandbox-nominal-model-assumed-self")
+            nominalModelAssumedSelf.target=self;nominalModelAssumedSelf.action=#selector(changeNominalModelAssumedSelf)
+            nominalModelAssumedSelf.state=ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled ? .on:.off
+            detailStack.addArrangedSubview(nominalModelAssumedSelf)
             addHelp("Commissioning only: one slow outward empty-arm step, then hold. Current robot occupancy is assumed from the model; calibration error and nearby unobserved space remain unverified. No grip, carry, release or automatic return. Zero cans are transferred.")
             oneDegreeEmptyCalibrationStep.identifier = NSUserInterfaceItemIdentifier("sandbox-one-degree-empty-calibration-step")
             oneDegreeEmptyCalibrationStep.target = self
@@ -254,6 +280,33 @@ import UniformTypeIdentifiers
             oneDegreeEmptyCalibrationStep.state = ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
             detailStack.addArrangedSubview(oneDegreeEmptyCalibrationStep)
             addHelp("Actuator/model calibration only: RIGHT J2 −0.02 rad over 4 seconds, at most 2 cm modeled travel, then hold. Collision clearance is unverified; contact predictions are diagnostic only. Contact could push the table or lift ROB. No payload, jaw command, grasp, carry, release, return or chained motion. Zero transfers. Stop and fresh feedback remain required.")
+            #if DEBUG
+            if trial.id == "right-recycling" {
+                sourcePixelSelfReview.identifier=NSUserInterfaceItemIdentifier("sandbox-source-pixel-self-review")
+                sourcePixelSelfReview.target=self;sourcePixelSelfReview.action=#selector(changeSourcePixelSelfReview)
+                sourcePixelSelfReview.state=ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled ? .on:.off
+                detailStack.addArrangedSubview(sourcePixelSelfReview)
+                importSourcePixelReview.identifier=NSUserInterfaceItemIdentifier("sandbox-import-source-pixel-template")
+                importSourcePixelReview.target=self;importSourcePixelReview.action=#selector(importSourcePixelSelfTemplate)
+                detailStack.addArrangedSubview(importSourcePixelReview)
+                addHelp("DEBUG perception assumption only: import a private historical LLM pixel review once; Prepare matches actual next fresh native RAW scan. Table/person/unmasked/mixed groups stay external. Separate exact native receipt required for ONE J2-only empty step +14keyframes; no MODEL-hull fallback, jaws or chaining.")
+                approachCanThenHold.identifier=NSUserInterfaceItemIdentifier("sandbox-approach-can-then-hold")
+                approachCanThenHold.target=self;approachCanThenHold.action=#selector(changeApproachCanThenHold)
+                approachCanThenHold.state=ROBLeftArmTrial.shared.approachCanThenHoldEnabled ? .on:.off
+                detailStack.addArrangedSubview(approachCanThenHold)
+                approachUnknownAdvisory.identifier=NSUserInterfaceItemIdentifier("sandbox-approach-unknown-advisory")
+                approachUnknownAdvisory.target=self;approachUnknownAdvisory.action=#selector(changeApproachUnknownAdvisory)
+                approachUnknownAdvisory.state=ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled ? .on:.off
+                detailStack.addArrangedSubview(approachUnknownAdvisory)
+                addHelp("DEBUG, exact standing open-jaw approach only: unobserved cells stay UNKNOWN and are reported as advisory, never relabeled free or observed. Occupied returns, self-collision, person/Stop, joint/rate/current and fresh-feedback checks remain. Explicit uncertainty acceptance is not measured registration or certified clearance. No grip, payload or carry.")
+                addHelp("DEBUG: find the can, perform ordinary fully checked initial lift and complete approach with open jaws, then hold at observed ready-to-grip alignment. No closing, verification lift, payload, carry, release, automatic recovery or next attempt. ZERO transfers. All occupied/self-collision, person/Stop/joint/rate/current/feedback checks remain; UNKNOWN advisory needs its separate explicit option.")
+                holdAfterInitialEmptyLift.identifier = NSUserInterfaceItemIdentifier("sandbox-hold-after-initial-empty-lift")
+                holdAfterInitialEmptyLift.target = self; holdAfterInitialEmptyLift.action = #selector(changeHoldAfterInitialEmptyLift)
+                holdAfterInitialEmptyLift.state = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled ? .on : .off
+                detailStack.addArrangedSubview(holdAfterInitialEmptyLift)
+            addHelp("DEBUG: lift the EMPTY right arm from measured hanging to the operator-taught recycling ready pose, then hold. The current operator-cleared RIGHT can campaign treats camera obstacle, UNKNOWN and hand/person collision predictions as advisory; raw observations remain unchanged. Keep modeled self collision, joint limits, fresh motor feedback, current-spike hold and Stop. The prepared job shows the exact active policy; no measured registration or certified clearance is implied. Lift-only mode sends no jaw, grasp, carry, release, return or next step. ZERO transfers.")
+            }
+            #endif
             localApprovalInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-local-recycling-approval-scope")
             localApprovalInfo.isSelectable = true
             detailStack.addArrangedSubview(localApprovalInfo)
@@ -414,6 +467,29 @@ import UniformTypeIdentifiers
     @objc private func performTrialAction(_ sender: NSButton) {
         guard selectedTrial.actions.indices.contains(sender.tag) else { return }
         let command = selectedTrial.actions[sender.tag].command
+        if command.hasPrefix("torso-ready:") {
+            guard canEdit, storeParameters() else { return }
+            do {
+                if command == "torso-ready:export" {
+                    let value = try ROBArmRoutineCoordinator.shared.torsoPreparationTemplate()
+                    let panel = NSSavePanel(); panel.nameFieldStringValue = "torso-preparation.json"
+                    panel.allowedContentTypes = [.json]
+                    guard panel.runModal() == .OK, let url = panel.url else { return }
+                    try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .prettyPrinted]).write(to: url, options: .atomic)
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                    parameterMessage = "Task template exported. It does not authorize or move an arm."
+                } else {
+                    let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]; panel.allowsMultipleSelection = false
+                    guard panel.runModal() == .OK, let url = panel.url else { return }
+                    observingLeftOperation = false; parameterMessage = ""
+                    ROBArmRoutineCoordinator.shared.prepareArmsForTorsoTest(receipt: url) { [weak self] result in
+                        self?.parameterMessage = result["detail"] as? String ?? "Preparation ended."
+                        self?.refresh()
+                    }
+                }
+            } catch { parameterMessage = error.localizedDescription }
+            refresh(); return
+        }
         // File controls must remain reachable while the receipt-only request
         // deliberately disables ordinary edits and other trial actions.
         if command == "local-recycling:export" { exportLocalRecyclingApprovalTemplate(); return }
@@ -421,6 +497,19 @@ import UniformTypeIdentifiers
         if command == "local-recycling:prepare" { prepareLocalRecyclingSessionJob(); return }
         if command == "local-recycling:standing-import" { importStandingCanCampaign(); return }
         if command == "local-recycling:standing-run" { runStandingCanCampaign(); return }
+        if command == "local-recycling:grasp-hold" {
+            guard canEdit,selectedTrial.id=="right-recycling",storeParameters(),
+                  let spatial=ROBLocalRecyclingSandboxRouting.spatialAllowanceMeters(fields["localVisualAllowanceMillimeters"].flatMap{Double($0.stringValue)}) else{return}
+            ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters=spatial
+            observingLeftOperation=true;parameterMessage=""
+            ROBLeftArmTrial.shared.performNearbyCanGraspAndHold(target:String(Self.recyclingCount)) { [weak self] result in
+                self?.parameterMessage=result["detail"] as? String ?? "Nearby pickup ended in hold."
+                self?.refresh()
+            }
+            refresh();return
+        }
+        if command == "local-recycling:empty-observation-export" { exportEmptyHandObservationTemplate(); return }
+        if command == "local-recycling:empty-observation-import" { importEmptyHandObservation(); return }
         if command == "belly-qr:open" {
             ROBBellyQRCalibrationWindowController.shared.showWindow(self); return
         }
@@ -435,6 +524,7 @@ import UniformTypeIdentifiers
             protractorPitch.stringValue = ""; refresh(); return
         }
         guard canEdit else { return }
+        if command == "pour:run" { runCanPourTest(); return }
         if selectedTrial.parameters != .none && selectedTrial.parameters != .depthAlignment && !["left_search_workspace", "left_scan_clearance", "right_search_workspace", "right_scan_clearance"].contains(command) && !storeParameters() { return }
         if command == "registration:open" {
             ROBFixedHeadCalibrationWindowController.shared.showWindow(self); return
@@ -493,6 +583,46 @@ import UniformTypeIdentifiers
         } catch { parameterMessage = error.localizedDescription }
         refresh()
     }
+    private var emptyHandObservationFilesEnabled: Bool {
+        canEdit && ["recycling", "right-recycling"].contains(selectedTrial.id)
+            && ROBControllerArmApproval.shared.canImportLocalCanCampaignEmptyObservation
+    }
+    private func exportEmptyHandObservationTemplate() {
+        guard emptyHandObservationFilesEnabled else { return }
+        let panel = NSSavePanel(); panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "rob-empty-hand-observation-template.json"
+        panel.title = "Export empty-hand observation template"
+        panel.message = "Record an actual observation that both grippers are empty; this does not approve or start motion."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard emptyHandObservationFilesEnabled else {
+            parameterMessage = "The campaign or active operation changed while choosing the file. No observation was exported."; refresh(); return
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try ROBControllerArmApproval.shared.exportLocalCanCampaignEmptyObservationTemplate(to: url)
+            parameterMessage = "Exported the private empty-hand observation template. Record the actual observation, then import it. No motion was approved or started."
+        } catch { parameterMessage = error.localizedDescription }
+        refresh()
+    }
+    private func importEmptyHandObservation() {
+        guard emptyHandObservationFilesEnabled else { return }
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.title = "Import empty-hand observation"
+        panel.message = "Record an actual observation that both grippers are empty; this does not approve or start motion."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard emptyHandObservationFilesEnabled else {
+            parameterMessage = "The campaign or active operation changed while choosing the file. No observation was imported."; refresh(); return
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try ROBControllerArmApproval.shared.importLocalCanCampaignEmptyObservation(fromReceiptURL: url)
+            parameterMessage = "Recorded the actual empty-gripper observation. This did not approve, resume or start arm motion."
+        } catch { parameterMessage = error.localizedDescription }
+        refresh()
+    }
     private func runStandingCanCampaign() {
         guard canEdit else { return }
         guard ROBControllerArmApproval.shared.standingLocalCanCampaignActive else {
@@ -503,6 +633,8 @@ import UniformTypeIdentifiers
         }
         nominalEmptyCommissioningStep.state = .off; oneDegreeEmptyCalibrationStep.state = .off
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
+        nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+        sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
         prepareLocalRecyclingSessionJob()
     }
@@ -548,8 +680,21 @@ import UniformTypeIdentifiers
             parameterMessage = "Choose only one empty-arm calibration experiment before preparing its exact receipt."
             refresh(); return
         }
+        let approachHold=selectedTrial.id=="right-recycling" && approachCanThenHold.state == .on
+        guard !approachHold || (holdAfterInitialEmptyLift.state != .on && nominalEmptyCommissioningStep.state != .on && oneDegreeEmptyCalibrationStep.state != .on) else {
+            parameterMessage="Choose approach-and-hold separately from lift-only and calibration options.";refresh();return
+        }
+        ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled=approachHold && approachUnknownAdvisory.state == .on
+        ROBLeftArmTrial.shared.approachCanThenHoldEnabled=approachHold
+        let liftHold = selectedTrial.id == "right-recycling" && holdAfterInitialEmptyLift.state == .on
+        guard !liftHold || (nominalEmptyCommissioningStep.state != .on && oneDegreeEmptyCalibrationStep.state != .on) else {
+            parameterMessage = "Choose only one empty-arm test; the fully checked lift-and-hold option excludes both calibration experiments."; refresh(); return
+        }
+        ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = liftHold
         ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters = spatial
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled = nominalModelAssumedSelf.state == .on && nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled = sourcePixelSelfReview.state == .on && nominalEmptyCommissioningStep.state == .on
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
         parameterMessage = ""; observingLeftOperation = true
         ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: String(Self.recyclingCount)) { [weak self] result in
@@ -564,6 +709,44 @@ import UniformTypeIdentifiers
         }
         refresh()
     }
+    @objc private func importSourcePixelSelfTemplate() {
+        guard canEdit else{return}
+        let panel=NSOpenPanel();panel.canChooseFiles=true;panel.canChooseDirectories=false;panel.allowsMultipleSelection=false
+        panel.allowedFileTypes=["json"];panel.message="Import private experimental LLM source-pixel template (perception only; no movement approval)."
+        guard panel.runModal() == .OK,let url=panel.url else{return}
+        ROBLeftArmTrial.shared.importSourcePixelSelfReview(from:url){[weak self] result in
+            self?.parameterMessage=result["detail"]as?String ?? "Pixel template import ended; no movement authority imported."
+            self?.refresh()
+        }
+    }
+    @objc private func changeSourcePixelSelfReview() {
+        guard canEdit else{return}
+        ROBControllerArmApproval.shared.cancel(reason:"Experimental source-pixel option changed; prepare a new exact job.")
+        if sourcePixelSelfReview.state == .on {
+            nominalEmptyCommissioningStep.state = .on;nominalModelAssumedSelf.state = .off;oneDegreeEmptyCalibrationStep.state = .off;holdAfterInitialEmptyLift.state = .off
+            ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled=true;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+            ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled=false;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled=false
+        }
+        ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=sourcePixelSelfReview.state == .on
+        parameterMessage="Experimental reviewed pixels are NOT registration or movement authority. Prepare freshly matches current source; all external/table/mixed points remain checked."
+        ROBControllerArmApproval.shared.tick();refresh()
+    }
+    @objc private func changeNominalModelAssumedSelf() {
+        guard canEdit else{return}
+        let approval=ROBControllerArmApproval.shared
+        if approval.localRecyclingApprovalState != nil || approval.pendingLocalRecyclingApprovalScope != nil {
+            approval.cancel(reason:"MODEL-ASSUMED self commissioning scope changed; prepare its exact receipt.")
+        }
+        if nominalModelAssumedSelf.state == .on {
+            sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
+            nominalEmptyCommissioningStep.state = .on;oneDegreeEmptyCalibrationStep.state = .off;holdAfterInitialEmptyLift.state = .off
+            ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled=true
+            ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled=false;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled=false
+        }
+        ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=nominalModelAssumedSelf.state == .on
+        parameterMessage="MODEL-ASSUMED self is an explicit property-risk hypothesis, not observed recognition. One RIGHT J2 step +14 keyframes; no jaws or chaining."
+        approval.tick();refresh()
+    }
     @objc private func changeNominalEmptyCommissioningStep() {
         guard canEdit else { return }
         let approval = ROBControllerArmApproval.shared
@@ -571,7 +754,10 @@ import UniformTypeIdentifiers
             approval.cancel(reason: "The one-step commissioning option changed; review a new exact job receipt.")
         }
         ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled = nominalModelAssumedSelf.state == .on && nominalEmptyCommissioningStep.state == .on
+        ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled = sourcePixelSelfReview.state == .on && nominalEmptyCommissioningStep.state == .on
         if nominalEmptyCommissioningStep.state == .on {
+            holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = false
             oneDegreeEmptyCalibrationStep.state = .off
             ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
         }
@@ -588,13 +774,56 @@ import UniformTypeIdentifiers
         }
         ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = oneDegreeEmptyCalibrationStep.state == .on
         if oneDegreeEmptyCalibrationStep.state == .on {
+            holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = false
             nominalEmptyCommissioningStep.state = .off
             ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
+        nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+        sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
         }
         parameterMessage = oneDegreeEmptyCalibrationStep.state == .on
             ? "Next local receipt: one four-second RIGHT J2 −0.02 rad calibration step, then hold; contact clearance is unverified; zero transfers."
             : "One-degree calibration is off; ordinary recycling admission applies."
         approval.tick(); refresh()
+    }
+    @objc private func changeApproachUnknownAdvisory() {
+        guard canEdit else{return}
+        ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled=selectedTrial.id=="right-recycling" && approachCanThenHold.state == .on && approachUnknownAdvisory.state == .on
+        parameterMessage=ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled
+            ? "Next exact standing open-jaw approach: UNKNOWN cells advisory only; occupied/self/person/Stop checks remain. Not certified clearance. ZERO transfers."
+            : "UNKNOWN advisory is off; ordinary unobserved-space checks apply."
+        ROBControllerArmApproval.shared.tick();refresh()
+    }
+    @objc private func changeApproachCanThenHold() {
+        guard canEdit else{return}
+        let enabled=selectedTrial.id=="right-recycling" && approachCanThenHold.state == .on
+        ROBLeftArmTrial.shared.approachCanThenHoldEnabled=enabled
+        if !enabled {approachUnknownAdvisory.state = .off;ROBLeftArmTrial.shared.approachUnknownAdvisoryEnabled=false}
+        if enabled {
+            holdAfterInitialEmptyLift.state = .off;ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled=false
+            nominalEmptyCommissioningStep.state = .off;ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled=false
+            nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+            sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
+            oneDegreeEmptyCalibrationStep.state = .off;ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled=false
+        }
+        parameterMessage=enabled ? "Next exact DEBUG job: complete checked approach, then observed open-jaw hold BEFORE close. ZERO transfers; no automatic next attempt.":"Approach-only hold is off; ordinary recycling behavior applies."
+        ROBControllerArmApproval.shared.tick();refresh()
+    }
+    @objc private func changeHoldAfterInitialEmptyLift() {
+        guard canEdit else { return }
+        ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled = selectedTrial.id == "right-recycling" && holdAfterInitialEmptyLift.state == .on
+        if ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled {
+            nominalEmptyCommissioningStep.state = .off;oneDegreeEmptyCalibrationStep.state = .off
+            ROBLeftArmTrial.shared.nominalEmptyCommissioningStepEnabled = false
+        nominalModelAssumedSelf.state = .off;ROBLeftArmTrial.shared.nominalModelAssumedSelfEnabled=false
+        sourcePixelSelfReview.state = .off;ROBLeftArmTrial.shared.sourcePixelSelfReviewEnabled=false
+            ROBLeftArmTrial.shared.oneDegreeEmptyCalibrationStepEnabled = false
+        }
+        parameterMessage = ROBLeftArmTrial.shared.holdAfterInitialEmptyLiftEnabled
+            ? "Next exact DEBUG job: one fully checked empty lift, then hold; no jaws or can operations, ZERO transfers."
+            : "Initial-lift hold is off; ordinary recycling continues after its checked initial lift."
+        // Changing the exact context invalidates only its old job. A standing
+        // campaign may pause for a fresh plan without revoking its approval.
+        ROBControllerArmApproval.shared.tick();refresh()
     }
     public func controlTextDidChange(_ notification: Notification) {
         guard canEdit, let field = fields["localVisualAllowanceMillimeters"],
@@ -657,6 +886,9 @@ import UniformTypeIdentifiers
         _ = ROBLeftArmTrial.shared.continueOperation(stage: displayedCycleStage); refresh()
     }
     @objc private func showRecording() {
+        if selectedTrial.id == "can-pour" {
+            NSWorkspace.shared.activateFileViewerSelecting([ROBCanPourRehearsal.latestReport]);return
+        }
         if selectedTrial.id == "belly-qr-calibration" {
             ROBBellyQRCalibrationWindowController.shared.showEvidence(); return
         }
@@ -671,6 +903,7 @@ import UniformTypeIdentifiers
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
     @objc private func stop() {
+        if let process=pourTestProcess,process.isRunning {process.terminate()}
         ROBBellyQRCalibrationWindowController.shared.stop()
         ROBFixedHeadCalibrationWindowController.shared.stop()
         ROBNeckQRCalibration.shared.stop()
@@ -680,6 +913,67 @@ import UniformTypeIdentifiers
         _ = ROBAmberGestureExecutor.shared.cancelCurrentGesture(reason: "Stop requested in Testing Sandbox")
         _ = ROBAmberGestureExecutor.shared.requestPriorityHold()
         refresh()
+    }
+
+    private func runCanPourTest() {
+        guard pourTestProcess == nil else {parameterMessage="The saved pour test is already running.";refresh();return}
+        do {
+            window?.makeFirstResponder(nil)
+            guard let resources=Bundle.main.url(forResource:"ShadowPlanner",withExtension:nil) else {throw ROBGhostMotionError.blocked("Ghost planner resources are missing.")}
+            let fill=try value("pourInitialFill",within:10...90)/100
+            let amount=try value("pourRemainingFraction",within:10...90)/100
+            let hold=try value("pourHold",within:0...2)
+            let advance=try value("pourBaseAdvance",within:0...40)/100
+            let offset=try value("pourGraspOffset",within:-25...25)/1000
+            let pivotAbove=try value("pourPivotAbove",within:0...100)/1000
+            let tilt=try value("pourTiltDegrees",within:0...170)
+            guard tilt==0 || tilt>=1 else {throw ROBGhostMotionError.blocked("Use 0 for the fill estimate or a tilt of 1–170 degrees.")}
+            let source=resources.appendingPathComponent("fixtures/coke-pour-scene.json")
+            guard var scene=try JSONSerialization.jsonObject(with:Data(contentsOf:source)) as? [String:Any],var can=scene["can"] as? [String:Any] else {throw ROBGhostMotionError.blocked("Saved pour scene is invalid.")}
+            can["initial_fraction"]=fill;can["fraction_of_remaining_to_pour"]=amount;scene["can"]=can;scene["graspHeightOffset"]=offset
+            var rotation:[String:Any] = ["pivotAboveOpeningMeters":pivotAbove]
+            if tilt>0 {rotation["tiltDegrees"]=tilt}
+            scene["rotation"]=rotation
+            let directory=ROBCanPourRehearsal.directory.appendingPathComponent(UUID().uuidString,isDirectory:true)
+            try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+            let sceneURL=directory.appendingPathComponent("scene.json"),statusURL=directory.appendingPathComponent("baseline.json"),reportURL=directory.appendingPathComponent("report.json")
+            try JSONSerialization.data(withJSONObject:scene,options:[.prettyPrinted,.sortedKeys]).write(to:sceneURL,options:.atomic)
+            try FileManager.default.copyItem(at:resources.appendingPathComponent("fixtures/coke-pour-status.json"),to:statusURL)
+            let python=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/ShadowPlanner/venv/bin/python3")
+            guard FileManager.default.isExecutableFile(atPath:python.path) else {throw ROBGhostMotionError.blocked("The existing ghost-planner Python environment is unavailable.")}
+            let logURL=directory.appendingPathComponent("planner.log")
+            FileManager.default.createFile(atPath:logURL.path,contents:nil)
+            let log=try FileHandle(forWritingTo:logURL)
+            let process=Process();process.executableURL=python
+            process.arguments=["-B",resources.appendingPathComponent("can_pour_scenario.py").path,"--scene",sceneURL.path,"--status",statusURL.path,"--base-advance",String(advance),"--hold-seconds",String(hold),"--output",reportURL.path]
+            process.environment=ProcessInfo.processInfo.environment.merging(["OPENBLAS_NUM_THREADS":"1","VECLIB_MAXIMUM_THREADS":"1"]){_,new in new}
+            process.standardOutput=log;process.standardError=log
+            try process.run();pourTestProcess=process;observingLeftOperation=false
+            parameterMessage="Recomputing saved pour test with full ghost geometry. No motor output.\nRun: \(directory.lastPathComponent)";refresh()
+            DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+                process.waitUntilExit();try? log.close()
+                DispatchQueue.main.async {
+                    guard let self,self.pourTestProcess === process else {return}
+                    self.pourTestProcess=nil
+                    do {
+                        let data=try Data(contentsOf:reportURL)
+                        // Preserve the latest attempt, including a failed IK
+                        // result, so an older passing replay cannot masquerade
+                        // as the result of newly selected parameters.
+                        try data.write(to:ROBCanPourRehearsal.latestReport,options:.atomic)
+                        guard process.terminationStatus==0 else {throw ROBGhostMotionError.blocked("Planner rejected this pivot or path; inspect \(reportURL.path)")}
+                        let model=try ROBGhostRobotModel(directory:resources,physicalSide:"right")
+                        let rehearsal=try ROBCanPourRehearsal(data:data,model:model,timed:false)
+                        self.parameterMessage="Saved pour test finished.\n"+rehearsal.summary+"\nResults: "+directory.path
+                        self.refresh()
+                        NotificationCenter.default.post(name:Notification.Name("ROBShowControllerInputDiagnostics"),object:self,userInfo:["ghostPreset":"pour"])
+                    } catch {self.parameterMessage=error.localizedDescription+"\nResults: "+directory.path;self.refresh()}
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline:.now()+600) { [weak process] in
+                if let process,process.isRunning {process.terminate()}
+            }
+        } catch {parameterMessage=error.localizedDescription;refresh()}
     }
     private func refreshCollisionInfo() {
         let search = ROBWorkspaceSearch.shared, snapshot = search.collisionPreviewSnapshot
@@ -715,6 +1009,7 @@ import UniformTypeIdentifiers
         if !parameterMessage.isEmpty {
             status.stringValue = left.isRunning ? status.stringValue + "\n" + parameterMessage : parameterMessage + "\n" + status.stringValue
         }
+        status.stringValue = ROBLocalRecyclingSandboxRouting.displayStatus(status.stringValue)
         session.stringValue = ROBControllerArmApproval.shared.armSessionDetail
         localApprovalInfo.stringValue = ROBLocalRecyclingSandboxRouting.scopeDescription(
             pending: ROBControllerArmApproval.shared.pendingLocalRecyclingApprovalScope,
@@ -733,8 +1028,19 @@ import UniformTypeIdentifiers
         for field in fields.values { field.isEnabled = canEdit }
         nominalEmptyCommissioningStep.isEnabled = canEdit
         nominalEmptyCommissioningStep.state = left.nominalEmptyCommissioningStepEnabled ? .on : .off
+        nominalModelAssumedSelf.state = left.nominalModelAssumedSelfEnabled ? .on:.off
+        nominalModelAssumedSelf.isEnabled = canEdit && selectedTrial.id=="right-recycling"
+        sourcePixelSelfReview.state=left.sourcePixelSelfReviewEnabled ? .on:.off
+        sourcePixelSelfReview.isEnabled=canEdit && selectedTrial.id=="right-recycling"
+        importSourcePixelReview.isEnabled=canEdit && selectedTrial.id=="right-recycling"
         oneDegreeEmptyCalibrationStep.isEnabled = canEdit
         oneDegreeEmptyCalibrationStep.state = left.oneDegreeEmptyCalibrationStepEnabled ? .on : .off
+        approachUnknownAdvisory.isEnabled=canEdit && selectedTrial.id=="right-recycling" && left.approachCanThenHoldEnabled
+        approachUnknownAdvisory.state=left.approachUnknownAdvisoryEnabled ? .on:.off
+        approachCanThenHold.isEnabled=canEdit && selectedTrial.id=="right-recycling"
+        approachCanThenHold.state=left.approachCanThenHoldEnabled ? .on:.off
+        holdAfterInitialEmptyLift.isEnabled = canEdit && selectedTrial.id == "right-recycling"
+        holdAfterInitialEmptyLift.state = left.holdAfterInitialEmptyLiftEnabled ? .on : .off
         save.isEnabled = canEdit
         for button in actionButtons {
             let command = selectedTrial.actions.indices.contains(button.tag) ? selectedTrial.actions[button.tag].command : ""
@@ -744,7 +1050,9 @@ import UniformTypeIdentifiers
                 && selectedTrial.actions[button.tag].command == "qr:next"
             button.isEnabled = ["local-recycling:export", "local-recycling:import"].contains(command)
                 ? localReceiptFilesEnabled
-                : command == "local-recycling:standing-run" ? canEdit && ROBControllerArmApproval.shared.standingLocalCanCampaignActive
+                : ["local-recycling:empty-observation-export", "local-recycling:empty-observation-import"].contains(command)
+                    ? emptyHandObservationFilesEnabled
+                : ["local-recycling:standing-run","local-recycling:grasp-hold"].contains(command) ? canEdit && ROBControllerArmApproval.shared.standingLocalCanCampaignActive
                 : isQRStop || (isQRNext ? ROBNeckQRCalibration.shared.awaitingProtractor : canEdit)
         }
         qrTarget.isEnabled = canEdit
@@ -760,6 +1068,11 @@ private final class ROBTestingSandboxDocumentView: NSView {
 
 /// Local UI routing only. No text or template produced here authorizes motion.
 enum ROBLocalRecyclingSandboxRouting {
+    static func displayStatus(_ text:String)->String {
+        guard text.contains("Stationary arm guard failed:"),
+              text.contains("Pausing nonactuating search for fresh unchanged feedback; no command admitted.") else {return text}
+        return "Arm feedback was delayed during the stationary scan (limit 0.35 seconds). No arm motion was sent. Details are saved with the trial recording."
+    }
     static func standingDescription(_ value: NSDictionary?) -> String {
         guard let value else { return "Standing can campaign: no active authorization. Import once, or after Stop say ‘proceed with protections’." }
         let state = value["state"] as? String ?? "unavailable"
@@ -767,7 +1080,7 @@ enum ROBLocalRecyclingSandboxRouting {
         let landings = (value["verifiedLandings"] as? NSNumber)?.intValue ?? 0
         let count = (value["targetCanCount"] as? NSNumber)?.intValue ?? (value["canCount"] as? NSNumber)?.intValue ?? 4
         return "Standing can campaign: \(state). Transfers reported \(transfers)/\(count); bucket landings camera-verified \(landings).\n"
-            + (value["detail"] as? String ?? "") + " Stop revokes this authorization."
+            + displayStatus(value["detail"] as? String ?? "") + " Stop revokes this authorization."
     }
     static func activityStatus(trialRunning: Bool, trialStatus: String, approvalPending: Bool,
         approvalStatus: String, localReceiptState: NSDictionary?) -> String? {
@@ -839,6 +1152,12 @@ enum ROBLocalRecyclingSandboxRouting {
         }
         if scope["permitsUnmeasuredVisualCalibrationTrial"] as? Bool == true {
             lines.append(imported == nil ? "Unmeasured visual trial: requested, not yet approved." : "Unmeasured visual trial: explicitly permitted; planner admission is separate.")
+        }
+        if let hash=scope["sourcePixelSelfReviewSHA256"]as?String {
+            lines.append("DEBUG LLM-reviewed source pixels, matched to current RAW scene. Evidence SHA256 "+hash+". Experimental/not registration; no MODEL-hull fallback. Table/person/uncertain/unmasked/mixed groups remain external. One J2-only empty step +14keyframes; exact receipt still required.")
+        }
+        if scope["nominalModelAssumedSelfEnabled"]as?Bool==true {
+            lines.append("MODEL-ASSUMED alignment, NOT observed self. Whole original groups inside noninflated baseline moving-link hulls only; all raw data retained. One J2-only step, 14 timed keyframes, hold. Contact/property risk accepted for this experiment; no normal clearance or transfer credit.")
         }
         if scope["nominalEmptyCommissioningStepEnabled"] as? Bool == true {
             lines.append("Commissioning only: one slow empty-arm outward step, then hold. Current robot occupancy is assumed from the model; calibration and local unknown space unverified. No grip, carry, release or automatic return. Zero transfers.")

@@ -771,14 +771,14 @@ struct ROBLidarWirePoint: Equatable, Sendable {
 ///
 /// All integers and Float32 bit patterns use network byte order. The 68-byte
 /// header is followed by `pointCount` four-byte samples: UInt16 millimeters and
-/// UInt16 angle turns. Map rasters are deliberately not part of this protocol.
+/// UInt16 angle turns. V1 carries scans only; V2 appends one bounded accumulated-map fragment.
 struct ROBLidarScanFrame: Equatable, Sendable {
   static let formatVersion: UInt8 = 1
   static let headerLength = 68
   static let pointStride = 4
   static let minimumPointCount = 8
   static let maximumPointCount = 8_192
-  static let maximumEncodedBytes = headerLength + maximumPointCount * pointStride
+  static let maximumEncodedBytes = headerLength + maximumPointCount * pointStride + 28_000
   static let maximumMessageAgeMilliseconds: UInt64 = 2_000
   static let maximumFutureSkewMilliseconds: UInt64 = 5_000
 
@@ -798,6 +798,7 @@ struct ROBLidarScanFrame: Equatable, Sendable {
   let pitch: Float
   let roll: Float
   let points: [ROBLidarWirePoint]
+    var mapFragment: ROBRoomMapFragment? = nil
 
   func validationError(
     authenticatedDeviceID: UUID,
@@ -850,8 +851,8 @@ struct ROBLidarScanFrame: Equatable, Sendable {
 
     var data = Data(capacity: Self.headerLength + points.count * Self.pointStride)
     data.append(Self.magic)
-    data.append(Self.formatVersion)
-    data.append(0) // flags
+    data.append(mapFragment == nil ? Self.formatVersion : 2)
+    data.append(mapFragment == nil ? 0 : 1) // accumulated map fragment
     Self.append(UInt16(Self.headerLength), to: &data)
     data.append(Self.bytes(for: deviceID))
     Self.append(sequence, to: &data)
@@ -868,6 +869,7 @@ struct ROBLidarScanFrame: Equatable, Sendable {
       Self.append(millimeters, to: &data)
       Self.append(UInt16(rawAngle), to: &data)
     }
+    if let mapFragment { data.append(try mapFragment.encoded()) }
     return data
   }
 
@@ -877,8 +879,8 @@ struct ROBLidarScanFrame: Equatable, Sendable {
     }
     let bytes = [UInt8](data)
     guard Data(bytes[0..<4]) == magic,
-      bytes[4] == formatVersion,
-      bytes[5] == 0,
+      (bytes[4] == formatVersion || bytes[4] == 2),
+      bytes[5] == (bytes[4] == 2 ? 1 : 0),
       Int(readUInt16(bytes, at: 6)) == headerLength,
       let deviceID = uuid(from: bytes[8..<24]) else {
       throw ROBLidarTelemetryEncodingError.invalid("unsupported binary header")
@@ -886,11 +888,11 @@ struct ROBLidarScanFrame: Equatable, Sendable {
     let pointCount = Int(readUInt16(bytes, at: 64))
     guard readUInt16(bytes, at: 66) == 0,
       (minimumPointCount ... maximumPointCount).contains(pointCount),
-      data.count == headerLength + pointCount * pointStride else {
+      (bytes[4] == 2 ? data.count > headerLength + pointCount * pointStride : data.count == headerLength + pointCount * pointStride) else {
       throw ROBLidarTelemetryEncodingError.invalid("length or point count is invalid")
     }
 
-    let frame = ROBLidarScanFrame(
+    var frame = ROBLidarScanFrame(
       deviceID: deviceID,
       sequence: readUInt64(bytes, at: 24),
       sentAtMilliseconds: readUInt64(bytes, at: 32),
@@ -900,13 +902,14 @@ struct ROBLidarScanFrame: Equatable, Sendable {
       yaw: Float(bitPattern: readUInt32(bytes, at: 52)),
       pitch: Float(bitPattern: readUInt32(bytes, at: 56)),
       roll: Float(bitPattern: readUInt32(bytes, at: 60)),
-      points: stride(from: headerLength, to: data.count, by: pointStride).map { offset in
+      points: stride(from: headerLength, to: headerLength + pointCount * pointStride, by: pointStride).map { offset in
         let distance = Float(readUInt16(bytes, at: offset)) / 1_000
         var angle = Float(readUInt16(bytes, at: offset + 2)) * radiansPerAngleUnit
         if angle > .pi { angle -= .pi * 2 }
         return ROBLidarWirePoint(distanceMeters: distance, angleRadians: angle)
       }
     )
+    if bytes[4] == 2 { frame.mapFragment = try ROBRoomMapFragment.decode(Data(data.dropFirst(headerLength + pointCount * pointStride))) }
     let previous = frame.sequence > 0 ? frame.sequence - 1 : 0
     if let error = frame.validationError(
       authenticatedDeviceID: frame.deviceID,

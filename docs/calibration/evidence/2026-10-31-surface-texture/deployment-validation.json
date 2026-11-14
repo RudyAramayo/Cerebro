@@ -1,0 +1,72 @@
+{
+  "checked_at_utc": "2026-10-31T23:07:38.784587+00:00",
+  "surface_source_commit": "43e63bbd4155d73d47d54659258d224b5d3e56ec",
+  "combined_build_cherry_pick": "c9e7e67",
+  "combined_with": "Active can-pour session changes; coordinated install/relaunch by that session",
+  "build": "Cerebro Debug arm64: BUILD SUCCEEDED; automatic installation disabled during build",
+  "code_signature": "codesign --verify --deep --strict passed",
+  "installed_macho": {
+    "Cerebro": {
+      "sha256": "2e2e4372b3cd0247d3bb2194347bde6e384ee85bbda0cb6baa4a65b691bff96d",
+      "matches_build_product": true
+    },
+    "Cerebro.debug.dylib": {
+      "sha256": "c5a4f5e91ede34907c43db1dcdf6d9d8fa25be4ac4db70623c6a39530254d7bb",
+      "matches_build_product": true
+    },
+    "__preview.dylib": {
+      "sha256": "54da47dbd9499a2415ed5610801e3f777d45f9db90000df11342701ab31152cc",
+      "matches_build_product": true
+    }
+  },
+  "running_app_pid": 29844,
+  "runtime_session": "5754DE13-E55F-49DC-8AE1-36AFFC4BA0B3",
+  "running_image_paths_verified": true,
+  "motion_running": false,
+  "arm_state": {
+    "left": {
+      "modes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statuses": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "max_joint_delta_since_before_restart_radians": 0.0
+    },
+    "right": {
+      "modes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statuses": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "max_joint_delta_since_before_restart_radians": 0
+    }
+  },
+  "neck_pose_known": false,
+  "live_accumulation_limitation": "A new neck pose has not been established after the passive restart; no actuator commands were sent to create one. Renderer behavior is verified by native fixtures and recorded RGB-D replay."
+}

@@ -1,0 +1,141 @@
+import Foundation
+
+@main struct AnimationDocumentTests {
+    static func main() throws {
+        var checks = 0
+        func expect(_ value: @autoclosure () -> Bool, _ message: String) { precondition(value(), message); checks += 1 }
+        func rejects(_ message: String, _ block: () throws -> Void) { do { try block(); fatalError(message) } catch { checks += 1 } }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("rob-animation-tests-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var pose = ROBAnimationPose(name: "same name", values: ["arm.right.j2": 0.2])
+        let clip = ROBAnimationClip(pose: pose, transition: 2, hold: 1)
+        pose.values["arm.right.j2"] = 0.7
+        expect(clip.pose.values["arm.right.j2"] == 0.2, "Sequence must own a value snapshot")
+        expect(clip.pose.id != pose.id && clip.id != pose.id, "Every asset and clip gets independent identity")
+        var document = ROBAnimationDocument()
+        document.poses = [pose, .init(name: "same name", values: ["arm.left.j1": -0.2])]
+        document.sequences = [.init(name: "A", clips: [clip])]
+        try document.validate(); checks += 1
+        let originalSecondID = document.poses[1].id
+        document.poses.removeAll { $0.id == pose.id }
+        expect(document.poses.count == 1 && document.poses[0].id == originalSecondID, "Deleting one ID preserves a duplicate name")
+        let baseline = ["arm.right.j2": 0.0, "arm.left.j1": 0.8, "maestro.0": 6500.0]
+        let sampled = ROBAnimationDocument.sample(document.sequences[0], at: 1, baseline: baseline)
+        expect(abs(sampled["arm.right.j2"]!-0.1) < 1e-9, "Smooth midpoint")
+        expect(sampled["arm.left.j1"] == 0.8 && sampled["maestro.0"] == 6500, "Sparse tracks preserve other joints")
+        var second = ROBAnimationClip(pose: .init(name: "neck only", values: ["maestro.0": 7000]), transition: 2)
+        second.easing = .linear
+        document.sequences[0].clips.append(second)
+        let sample2 = ROBAnimationDocument.sample(document.sequences[0], at: 4, baseline: baseline)
+        expect(sample2["arm.right.j2"] == 0.2 && sample2["maestro.0"] == 6750, "Clip carry-forward and intervals")
+        let lact = ROBAnimationSequence(name: "lean", clips: [.init(pose: .init(name: "lean", values: ["lact.speed": 30]), transition: 2)])
+        expect(ROBAnimationDocument.sample(lact, at: 1, baseline: [:])["lact.speed"] == 30, "Timed LACT runs within clip")
+        expect(ROBAnimationDocument.sample(lact, at: 2, baseline: [:])["lact.speed"] == 0, "Timed LACT stops at exact endpoint")
+        var bowPose = ROBAnimationPose(name: "bow", values: ["lact.speed": 40])
+        bowPose.previewLeanDegrees = 12
+        var bow = ROBAnimationSequence(name: "bow", clips: [.init(pose: bowPose, transition: 2), .init(pose: .init(name: "pause", values: ["lact.speed": 0]), transition: 1)])
+        bow.completionGreeting = ROBAnimationGreeting()
+        let bowSample = ROBAnimationDocument.sample(bow, at: 1, baseline: [:])
+        expect(bowSample["preview.bodyLeanDegrees"] == 6 && bowSample["lact.speed"] == 40, "Ghost angle interpolates independently of timed motor percent")
+        expect(ROBAnimationDocument.sample(bow, at: 2.5, baseline: [:])["preview.bodyLeanDegrees"] == 12, "Omitted ghost lean carries forward through a pause")
+        expect(!bow.clips[0].pose.values.keys.contains("preview.bodyLeanDegrees"), "Visual lean never becomes a hardware channel")
+        var bowDocument = ROBAnimationDocument(); bowDocument.sequences = [bow]
+        let decodedBow = try ROBAnimationStore.decode(ROBAnimationStore.encode(bowDocument))
+        expect(decodedBow == bowDocument, "Greeting and visual lean survive JSON")
+        let oldDocument = try ROBAnimationStore.decode(ROBAnimationStore.encode(document))
+        expect(oldDocument.sequences[0].completionGreeting == nil && oldDocument.sequences[0].clips[0].pose.previewLeanDegrees == nil, "Older libraries need no new metadata")
+        expect(oldDocument.sequences[0].armSpeedMultiplier == nil && oldDocument.sequences[0].armSpeed == 1, "Old libraries retain 100% arm speed")
+        var speedSequence = ROBAnimationSequence(name: "speed", clips: [clip], armSpeedMultiplier: 0.5)
+        expect(speedSequence.duration == 5 && speedSequence.clips[0].transition == 2 && speedSequence.clips[0].hold == 1, "50% doubles arm transition without rewriting saved timing or hold")
+        expect(ROBAnimationDocument.sample(speedSequence, at: 2, baseline: baseline)["arm.right.j2"] == 0.1, "Slower ghost reaches its midpoint at the scaled time")
+        speedSequence.armSpeedMultiplier = 2
+        expect(speedSequence.duration == 2 && ROBAnimationDocument.sample(speedSequence, at: 0.5, baseline: baseline)["arm.right.j2"] == 0.1, "200% halves arm transition while preserving the hold")
+        let mixed = ROBAnimationClip(pose: .init(name: "mixed", values: ["arm.right.j2":0.2, "maestro.4":7000, "lact.speed":30]), transition:2)
+        speedSequence.clips = [mixed]; speedSequence.armSpeedMultiplier = 0.5
+        let mixedBaseline = ["arm.right.j2":0.0, "maestro.4":6000.0]
+        let slower = ROBAnimationDocument.sample(speedSequence, at: 2.1, baseline: mixedBaseline)
+        expect(speedSequence.duration == 4 && slower["arm.right.j2"]! < 0.2 && slower["maestro.4"] == 7000 && slower["lact.speed"] == 0, "Slow arms do not extend Maestro transitions or timed LACT")
+        speedSequence.armSpeedMultiplier = 2
+        let faster = ROBAnimationDocument.sample(speedSequence, at: 1, baseline: mixedBaseline)
+        expect(speedSequence.duration == 2 && faster["arm.right.j2"] == 0.2 && faster["maestro.4"] == 6500 && faster["lact.speed"] == 30, "Fast arms hold while other tracks finish on their original schedule")
+        var speedDocument = ROBAnimationDocument(); speedDocument.sequences = [speedSequence]
+        let decodedSpeed = try ROBAnimationStore.decode(ROBAnimationStore.encode(speedDocument))
+        expect(decodedSpeed == speedDocument, "Arm speed round-trips for human and JSON editing")
+        for bad in [0.0, 0.24, 2.01, Double.infinity, Double.nan] {
+            speedDocument.sequences[0].armSpeedMultiplier = bad
+            rejects("Invalid arm speed accepted") { try speedDocument.validate() }
+        }
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let greeting = ROBAnimationGreeting()
+        for (hour, minute, text) in [(4,59,"こんばんは。"),(5,0,"おはようございます。"),(10,59,"おはようございます。"),(11,0,"こんにちは。"),(17,59,"こんにちは。"),(18,0,"こんばんは。"),(23,59,"こんばんは。")] {
+            let date = calendar.date(from: DateComponents(year: 2026, month: 10, day: 29, hour: hour, minute: minute))!
+            expect(greeting.text(at: date, calendar: calendar) == text, "Local greeting boundary \(hour):\(minute)")
+        }
+        let noonUTC = calendar.date(from: DateComponents(year: 2026, month: 10, day: 29, hour: 12))!
+        calendar.timeZone = TimeZone(secondsFromGMT: 9*3600)!
+        expect(greeting.text(at: noonUTC, calendar: calendar) == "こんばんは。", "Greeting follows supplied local timezone, not UTC")
+        bowDocument.sequences[0].completionGreeting?.daytimeHour = 4
+        rejects("Invalid greeting hours accepted") { try bowDocument.validate() }
+        bowDocument.sequences = [bow]; bowDocument.sequences[0].clips[0].pose.previewLeanDegrees = 46
+        rejects("Out-of-model ghost lean accepted") { try bowDocument.validate() }
+        var torsoClip = ROBAnimationClip(pose: .init(name: "circular", values: ["torso.heading": -179]), transition: 2)
+        torsoClip.easing = .linear
+        let torso = ROBAnimationSequence(name: "circular", clips: [torsoClip])
+        expect(ROBAnimationDocument.sample(torso, at: 1, baseline: ["torso.heading":179])["torso.heading"] == 180, "Untethered torso takes shortest circular route")
+        expect(ROBAnimationDocument.sample(torso, at: 1, baseline: ["torso.heading":179,"preview.torsoReference":0])["torso.heading"] == 0, "Debug torso unwinds around tracked reference")
+        var invalid = document
+        invalid.sequences[0].clips[0].transition = -1
+        rejects("Negative timing accepted") { try invalid.validate() }
+        invalid = document; invalid.poses[0].values["maestro.8"] = 6000
+        rejects("Reserved relay accepted") { try invalid.validate() }
+        invalid = document; invalid.poses[0].values["arm.left.j1"] = 80
+        rejects("Legacy slider units accepted as radians") { try invalid.validate() }
+        invalid = document; invalid.poses.append(invalid.poses[0])
+        rejects("Duplicate IDs accepted") { try invalid.validate() }
+        var sword = ROBAnimationPose(name: "Sword", values: ["arm.right.j1": 0.2])
+        sword.previewProp = ROBAnimationPreviewProp()
+        let swordClip = ROBAnimationClip(pose: sword)
+        let propSequence = ROBAnimationSequence(name: "Prop preview", clips: [swordClip, second])
+        expect(ROBAnimationDocument.previewProp(propSequence, at: 0)?.lengthMeters == 0.6, "Reference sword is available at the start")
+        expect(ROBAnimationDocument.previewProp(propSequence, at: swordClip.duration) == nil, "Omitted prop clears at the clip boundary")
+        document.poses.append(sword)
+        let roundtrip = try ROBAnimationStore.decode(ROBAnimationStore.encode(document))
+        expect(roundtrip == document, "Preview prop survives JSON without becoming a motor channel")
+        invalid = document; invalid.poses[invalid.poses.count-1].previewProp?.lengthMeters = -1
+        rejects("Invalid prop dimensions accepted") { try invalid.validate() }
+        let url = root.appendingPathComponent("library.json")
+        let store = ROBAnimationStore(url: url)
+        var initial = document; initial.id = store.document.id; initial.revision = store.document.revision
+        try store.replace(initial, expectedRevision: 0)
+        expect(store.document.revision == 1, "Save increments revision")
+        rejects("Stale edit overwrote library") { try store.replace(initial, expectedRevision: 0) }
+        expect(store.document.revision == 1, "Conflict leaves document unchanged")
+        let reopened = ROBAnimationStore(url: url)
+        expect(reopened.document == store.document, "Round-trip all poses, clips, timings, masks")
+        expect(FileManager.default.fileExists(atPath: url.appendingPathExtension("previous").path), "Previous valid revision preserved")
+        let inbox = root.appendingPathComponent("inbox")
+        try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        var submitted = store.document; submitted.sequences[0].name = "LLM edit"
+        let json = try JSONSerialization.jsonObject(with: ROBAnimationStore.encode(submitted))
+        let request = try JSONSerialization.data(withJSONObject: ["expectedRevision": 1, "document": json])
+        try request.write(to: inbox.appendingPathComponent("edit.json"))
+        expect(store.processInbox().count == 1 && store.document.revision == 2 && store.document.sequences[0].name == "LLM edit", "JSON inbox uses canonical writer")
+        try request.write(to: inbox.appendingPathComponent("stale.json"))
+        _ = store.processInbox()
+        let conflict = try JSONSerialization.jsonObject(with: Data(contentsOf: inbox.appendingPathComponent("stale.result"))) as! [String: Any]
+        expect(conflict["ok"] as? Bool == false && store.document.revision == 2, "Concurrent stale JSON rejected")
+        let legacy = root.appendingPathComponent("old"); try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let old: [String:Any] = ["namedKeyframes": [["name":"ready", "arm_L10_keyframe":true,"arm_L10_servo2":50.0]], "namedSequences":[]]
+        let oldData = try JSONSerialization.data(withJSONObject: old)
+        let oldURL = legacy.appendingPathComponent("old.keyAnim"); try oldData.write(to: oldURL)
+        let migrated = ROBAnimationStore.migrate(directory: legacy)
+        expect(migrated.poses[0].values["arm.right.j2"] == 0.5 && migrated.poses[0].needsReview, "Legacy scaling/physical side explicit and marked for review")
+        let preserved = try Data(contentsOf: oldURL)
+        expect(preserved == oldData, "Migration leaves old files untouched")
+        try Data("broken".utf8).write(to: url)
+        let corrupt = ROBAnimationStore(url: url)
+        expect(!corrupt.canWrite && corrupt.loadError != nil, "Corrupt library cannot be silently overwritten")
+        print("Animation document: \(checks) checks passed")
+    }
+}

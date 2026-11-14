@@ -1,0 +1,28 @@
+{
+  "time": "2026-10-31T13:30:15.927123-07:00",
+  "incident": "User reports right arm started punching its face",
+  "last_arm_stage": "164-edge-can-lift",
+  "requested_translation_m": [
+    -0.015,
+    0,
+    0.1
+  ],
+  "last_native_motion_id": "265FF8D7-F848-40E6-B6FD-D21EF52D2F54",
+  "stop_requested": true,
+  "measured_stop_verified": false,
+  "right_feedback_age_ms_at_stop": 68272.34559133547,
+  "continuation": "All physical operations frozen pending fault diagnosis and current physical state. Do not replay targets, restart cores, enter mode, or reset encoders.",
+  "operator_timing_confirmation": "During the upward lift",
+  "cause_status": "Lift clearance/model assessment failed to match physical result; later neck collision is a separate defect, not the cause of the reported initial strike.",
+  "forensic_target_radians_J1_to_J7": [
+    1.874964566731465,
+    -2.084395102393195,
+    0.41989097667083786,
+    -1.1740391862354909,
+    -0.9428772402032879,
+    1.0885144885372566,
+    1.6725964332604284
+  ],
+  "requested_seconds": 1.7718426745417486,
+  "do_not_execute": true
+}

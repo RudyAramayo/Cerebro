@@ -29,6 +29,21 @@ import CoreImage
     private var outputSequence: UInt64 = 0
     private var stowGeneration = 0
     private var stowingUntil = 0.0
+    private var automaticStartupState = "idle"
+    @nonobjc private let scheduleMountStep: (Double, @escaping () -> Void) -> Void
+    @nonobjc var startupAnimation: ROBLaserStartupAnimation? {
+        guard let data = defaults.data(forKey: ROBLaserStartupAnimation.defaultsKey) else {
+            return defaults.object(forKey: ROBLaserStartupAnimation.defaultsKey) == nil ? ROBLaserStartupAnimation() : nil
+        }
+        guard let value = try? JSONDecoder().decode(ROBLaserStartupAnimation.self, from: data), value.valid else { return nil }
+        return value
+    }
+    @nonobjc func saveStartupAnimation(_ value: ROBLaserStartupAnimation) -> Bool {
+        guard value.valid, let data = try? JSONEncoder().encode(value) else { return false }
+        defaults.set(data, forKey: ROBLaserStartupAnimation.defaultsKey)
+        return true // Takes effect on the next run; never moves hardware here.
+    }
+    private var mountSequenceInProgress: Bool { ["pan", "tilt"].contains(automaticStartupState) }
     private var localPreviewActive = false
     private var laserCaptureActive = false
     private var lastDetail = "Cerebro controls are ready. Remote controllers must enable Tilt/Pan or authorize bubbles."
@@ -41,6 +56,28 @@ import CoreImage
     private let context: CIContext
     private let uptime: () -> Double
     private let defaults: UserDefaults
+    /// Mount clearance is independent of passive arm/gripper startup.
+    /// Only an explicit mount maintenance setting suppresses this sequence.
+    var automaticMountStartupEnabled: Bool {
+        get {
+            guard let value = defaults.object(forKey: "ROBLaserMountAutomaticStartupEnabled") else { return true }
+            return (value as? Bool) ?? false
+        }
+        set { defaults.set(newValue, forKey: "ROBLaserMountAutomaticStartupEnabled") }
+    }
+
+    @nonobjc func mountStartupStatus() -> [String: Any] {
+        ["automatic_startup_enabled": automaticMountStartupEnabled,
+         "startup_in_progress": mountSequenceInProgress,
+         "startup_state": automaticStartupState,
+         "saved_pan": calibration.stowPan, "saved_tilt": calibration.stowTilt,
+         "pan_channel": calibration.panChannel, "tilt_channel": calibration.tiltChannel,
+         "commanded_pan": lastOutputs[calibration.panChannel] as Any? ?? NSNull(),
+         "commanded_tilt": lastOutputs[calibration.tiltChannel] as Any? ?? NSNull(),
+         "relay_off_established": relayOffEstablished,
+         "spin": safety.spin, "blower": safety.blower,
+         "detail": lastDetail]
+    }
     private struct Viewer { var controller: UUID; var sequence: UInt64; var seen: Double }
     private var viewers: [UUID: Viewer] = [:]
     private struct Frame {
@@ -103,7 +140,11 @@ import CoreImage
 
     @nonobjc init(context: CIContext = CIContext(options: [.cacheIntermediates: false]),
                  defaults: UserDefaults = .standard,
-                 uptime: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) {
+                 uptime: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
+                 scheduleMountStep: @escaping (Double, @escaping () -> Void) -> Void = { delay, work in
+                     DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+                 }) {
+        self.scheduleMountStep = scheduleMountStep
         self.context = context
         self.defaults = defaults
         self.uptime = uptime
@@ -164,13 +205,13 @@ import CoreImage
                 lastDetail = "Enable Tilt/Pan on this controller before stowing"
                 sendStatus(to: message.sessionID); return
             }
-            stop(reason: "Tucking laser down, then rotating to the startup side")
+            stop(reason: "Parking laser pan, then tilt")
             stow()
         case .releaseMount: releaseMount()
         case .authorize, .authorizeMount, .authorizeMotors:
             guard !localMotorControl, owner == nil || isOwner(message) else { sendStatus(to: message.sessionID); return }
-            guard now >= stowingUntil else {
-                lastDetail = "Wait for the tuck-and-turn sequence to finish"
+            guard !mountSequenceInProgress, now >= stowingUntil else {
+                lastDetail = "Wait for the pan-first laser sequence to finish"
                 sendStatus(to: message.sessionID); return
             }
             if watchdog.didTrip { stop(reason: "Relay watchdog stopped outputs"); watchdog.reset() }
@@ -220,21 +261,14 @@ import CoreImage
         dispatchPrecondition(condition: .onQueue(.main))
         safety.stop(at: uptime())
         owner = nil; ownerController = nil; mountAuthorized = false; localMotorControl = false
-        aimUsesCalibration = false; stowGeneration += 1
+        aimUsesCalibration = false; cancelPendingStow()
         stowingUntil = 0
         lastDetail = reason; applyOutputs()
     }
     func stow() {
-        stop(reason: "Startup tuck: Tilt 8000, then Pan 4000")
-        stowingUntil = uptime() + 1.5
-        tilt = calibration.stowTilt
-        write(channel: calibration.tiltChannel, value: tilt)
-        let generation = stowGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
-            guard let self, self.stowGeneration == generation else { return }
-            self.pan = self.calibration.stowPan
-            self.write(channel: self.calibration.panChannel, value: self.pan)
-        }
+        stop(reason: "Parking laser pan before tilt")
+        // Explicit stow shares the ordering/interlocks, without the decorative sweep.
+        beginMountSequence(oscillate: false)
     }
     func manualPan(_ pan: Int, tilt: Int) {
         // An intentional action at Cerebro is local operator authorization.
@@ -259,7 +293,7 @@ import CoreImage
     }
     private func applyAim(pan: Int, tilt: Int, calibrated: Bool) {
         guard (4000 ... 8000).contains(pan), (4000 ... 8000).contains(tilt) else { return }
-        stowGeneration += 1
+        cancelPendingStow()
         self.pan = pan; self.tilt = tilt; aimUsesCalibration = calibrated && liveMountOutputs
         write(channel: calibration.panChannel, value: pan)
         write(channel: calibration.tiltChannel, value: tilt)
@@ -519,7 +553,7 @@ import CoreImage
             let now = uptime()
             let off = command.operation == .spinOff || command.operation == .blowerOff
             if !off {
-                guard now >= stowingUntil, enableMotors() else { return }
+                guard !mountSequenceInProgress, now >= stowingUntil, enableMotors() else { return }
                 safety.authorize(at: now)
                 localMotorControl = safety.armed
             }
@@ -537,14 +571,78 @@ import CoreImage
         let blowerOff = serialBox?.applyBubbleTarget(calibration.blowerOff, channel: calibration.blowerChannel) == true
         let spinOff = serialBox?.applyBubbleTarget(calibration.spinOff, channel: calibration.spinChannel) == true
         relayOffEstablished = blowerOff && spinOff
-        _ = serialBox?.applyBubbleTarget(calibration.stowTilt, channel: calibration.tiltChannel)
-        let generation = stowGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
-            guard let self, self.stowGeneration == generation else { return }
-            _ = self.serialBox?.applyBubbleTarget(self.calibration.stowPan, channel: self.calibration.panChannel)
+        if blowerOff { lastOutputs[calibration.blowerChannel] = calibration.blowerOff }
+        if spinOff { lastOutputs[calibration.spinChannel] = calibration.spinOff }
+        if automaticMountStartupEnabled {
+            beginMountSequence(oscillate: true)
+        } else {
+            automaticStartupState = "disabled"
+            lastDetail = "Automatic laser mount startup disabled in Arms and motion settings"
         }
         // Start the restart cooldown when OFF is actually sent, not when the
         // operator later enables motors. Tilt/Pan remains available throughout.
         safety.forceCooldown(at: uptime())
+    }
+
+    private func beginMountSequence(oscillate: Bool) {
+        guard calibration.valid, var animation = startupAnimation, relayOffEstablished else {
+            failAutomaticStartup(); return
+        }
+        animation.oscillate = oscillate && animation.oscillate
+        // Freeze the entire plan so edits cannot change the path halfway through.
+        let targets = animation.panTargets(park: calibration.stowPan)
+        let panChannel = calibration.panChannel, tiltChannel = calibration.tiltChannel
+        let parkedTilt = calibration.stowTilt
+        let generation = stowGeneration
+        automaticStartupState = "pan"
+        stowingUntil = uptime() + Double(targets.count) * animation.panSettleSeconds + animation.tiltSettleSeconds
+        func step(_ index: Int) {
+            guard self.stowGeneration == generation else { return }
+            guard self.serialBox?.bubbleHardwareReady == true, self.relayOffEstablished else {
+                self.failAutomaticStartup(); return
+            }
+            if index < targets.count {
+                guard self.commandStartupMountTarget(targets[index], channel: panChannel) else {
+                    self.failAutomaticStartup(); return
+                }
+                self.pan = targets[index]
+                self.lastDetail = "Laser startup pan phase \(index + 1)/\(targets.count); tilt untouched; timed settling, position unmeasured"
+                self.scheduleMountStep(animation.panSettleSeconds) { step(index + 1) }
+            } else if index == targets.count {
+                // No tilt target (including pulse release) is sent until every pan dwell has elapsed.
+                guard self.commandStartupMountTarget(parkedTilt, channel: tiltChannel) else {
+                    self.failAutomaticStartup(); return
+                }
+                self.tilt = parkedTilt
+                self.automaticStartupState = "tilt"
+                self.lastDetail = "Laser pan sequence sent; parking tilt; physical position unmeasured"
+                self.scheduleMountStep(animation.tiltSettleSeconds) { step(index + 1) }
+            } else {
+                self.automaticStartupState = "complete"
+                self.stowingUntil = 0
+                self.lastDetail = "Laser pan-first sequence and settling intervals complete; physical position unmeasured"
+            }
+        }
+        step(0)
+    }
+
+    private func cancelPendingStow() {
+        stowGeneration += 1
+        if mountSequenceInProgress { automaticStartupState = "cancelled" }
+        stowingUntil = 0
+    }
+
+    private func commandStartupMountTarget(_ target: Int, channel: Int) -> Bool {
+        guard serialBox?.bubbleHardwareReady == true,
+              serialBox?.applyBubbleTarget(target, channel: channel) == true else { return false }
+        lastOutputs[channel] = target
+        return true
+    }
+
+    private func failAutomaticStartup() {
+        stowGeneration += 1
+        automaticStartupState = "failed"
+        stowingUntil = 0
+        lastDetail = "Laser mount startup stopped: invalid animation settings, disconnected Maestro, or rejected OFF/positioning command"
     }
 }

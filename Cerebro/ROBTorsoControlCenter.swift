@@ -4,10 +4,42 @@ import Cocoa
     static let shared = ROBTorsoControlCenter()
     static let changed = Notification.Name("ROBTorsoControlDidChange")
     static let cameraDemandChanged = Notification.Name("ROBTorsoVisionDemandDidChange")
+    static let speedLimitKey = "ROBTorsoMaximumPulseRate"
 
     private(set) var cameraDemandActive = false
     private(set) var usesLiveCamera = false
+    private(set) var usesCountEstimate = false
+    var usesHardware: Bool { usesLiveCamera || usesCountEstimate }
+    @nonobjc private var calibration = ROBTorsoCountCalibration()
+    @nonobjc private var ticPosition: ROBTicVelocityTransport.PositionSample?
+    private var countSequence: UInt64 = 0
+    private var lastPositionRead = 0.0
+    private var referenceRevision = 0
+    private(set) var hasSoftwareBaseReference = false
+    /// Software alignment is explicitly operator observed, then propagated by
+    /// counts. It is never relabelled as camera-measured or a tread encoder.
+    var navigationHeading: Double {
+        guard hasFreshFeedback, usesLiveCamera || (usesCountEstimate && hasSoftwareBaseReference) else { return .nan }
+        return observedHeading
+    }
+    var debugCableMode: Bool { policy.debugCableMode }
+    var cableTravelDegrees: Double { policy.cableTravelDegrees ?? .nan }
+    var canUnwind: Bool { isArmed && debugCableMode && policy.cableReferenceHeading != nil }
+    var countReference: Double { calibration.centerCount }
+    var currentCount: Double { ticPosition.map { Double($0.count) } ?? .nan }
+    var countEstimateDetail: String {
+        let reference = String(format: "Software front %.0f counts", calibration.centerCount)
+        return reference + (hasSoftwareBaseReference
+            ? " • operator-referenced count estimate, not camera-measured alignment"
+            : " • base alignment unconfirmed; physical reference needed")
+    }
+    @nonobjc func heading(forCount count: Double) -> Double { calibration.heading(count: count) }
+    @nonobjc func count(forHeading heading: Double) -> Double { calibration.count(heading: heading) }
+
     private(set) var hardwareReady = false
+    private(set) var powerHoldRequested = false
+    private var powerRequestPending = false
+    private var lastCommandFailure: String?
     private(set) var hardwareDetail = "Rehearsal — no motor output"
     private(set) var visionDetail = "Simulated observation"
     @nonobjc private(set) var policy = ROBTorsoMotionPolicy()
@@ -22,32 +54,55 @@ import Cocoa
     private var motionUntil = 0.0
     private var lastTick = 0.0
     private var lastSent = 0.0
+    private var lastUIPublish = 0.0
+    private var uiPublishPending = false
     private var localLeverHeld = false
+    private enum LocalDemand { case rate(Double), heading(Double) }
+    @nonobjc private var pendingLocalDemand: LocalDemand?
+    private var localDemandDeadline = 0.0
+    private var localControlOwnsTorso = false
+    private var nativePositionTarget: Int32?
     private var arming = false
     private let modelID: String?
     private let referenceID: String?
+    @nonobjc private let armClearance: () -> String?
 
     override convenience init() { self.init(transport: ROBTicVelocityTransport(), vision: ROBMarkerlessVisionService(workerName: "torso_markerless.py")) }
 
     @nonobjc init(transport: ROBTicVelocityTransport, vision: ROBMarkerlessVisionService,
-                 reference: [String: Any]? = nil) {
+                 reference: [String: Any]? = nil,
+                 armClearance: @escaping () -> String? = { ROBArmRoutineCoordinator.shared.torsoRotationBlockReason }) {
         self.transport = transport; self.vision = vision
+        self.armClearance = armClearance
         let path = Bundle.main.url(forResource: "reference", withExtension: "json", subdirectory: "ShadowPlanner")
         let manifest = reference ?? path.flatMap { try? Data(contentsOf: $0) }
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         modelID = manifest?["modelID"] as? String; referenceID = manifest?["referenceID"] as? String
         super.init()
+        let savedSpeed = UserDefaults.standard.double(forKey: Self.speedLimitKey) * 360 / ROBTorsoCountCalibration.countsPerTurn
+        if savedSpeed.isFinite, ROBTorsoMotionPolicy.speedRange.contains(savedSpeed) {
+            policy.maximumSpeed = savedSpeed
+        }
+        policy.debugCableMode = UserDefaults.standard.bool(forKey: "ROBDevelopmentMode")
+        transport.onPosition = { [weak self] sample in self?.acceptCount(sample) }
         transport.onMotionDispatch = { ROBFixedHeadBodyMotionIdentity.invalidate() }
         transport.onState = { [weak self] ready, detail in
             guard let self else { return }
-            let unexpectedLoss = !ready && (self.hardwareReady || self.arming)
+            let unexpectedLoss = !ready && (self.hardwareReady || self.arming || self.powerRequestPending)
             self.hardwareReady = ready
-            self.hardwareDetail = self.usesLiveCamera ? detail : "Rehearsal — no motor output"
+            self.hardwareDetail = self.usesHardware ? detail : "Rehearsal — no motor output"
+            if ready { self.powerRequestPending = false }
             if ready && self.arming {
                 self.arming = false
-                if !self.usesLiveCamera || !self.policy.arm(at: ProcessInfo.processInfo.systemUptime) { self.stop() }
-            } else if self.usesLiveCamera && unexpectedLoss {
-                self.arming = false; self.policy.invalidate(detail)
+                if let reason = self.armClearance() {
+                    self.stop(); self.policy.invalidate(reason)
+                } else if !self.usesHardware || !self.policy.arm(at: ProcessInfo.processInfo.systemUptime) { self.stop() }
+                else { self.advanceLocalDemand() }
+            } else if self.usesHardware && unexpectedLoss {
+                self.arming = false; self.powerRequestPending = false; self.powerHoldRequested = false
+                self.pendingLocalDemand = nil; self.localLeverHeld = false
+                self.lastCommandFailure = detail
+                self.policy.invalidate(detail)
             }
             self.publish()
         }
@@ -71,9 +126,48 @@ import Cocoa
     var targetHeading: Double { policy.targetHeading.map(ROBTorsoMotionPolicy.wrap) ?? .nan }
     var commandedVelocity: Double { policy.velocity }
     var isArmed: Bool { policy.armed }
-    var status: String { arming ? "Checking Tic settings and confirming motor power off at rest…" : policy.status }
+    var status: String {
+        let operation = lastCommandFailure.map { "Last command failed: " + $0 } ?? (powerRequestPending ? "Checking TIC and energizing a zero-speed hold…"
+            : arming ? "Checking Tic settings and preparing the motor…"
+            : pendingLocalDemand != nil ? "Taking manual control…" : policy.status)
+        if usesHardware, let reason = armClearance() { return operation + "\n" + reason }
+        return operation
+    }
     var maximumSpeed: Double { policy.maximumSpeed }
-    var canArm: Bool { !arming && policy.hasFreshObservation(at: ProcessInfo.processInfo.systemUptime) }
+    var maximumPulseRate: Double { policy.maximumSpeed * ROBTorsoCountCalibration.countsPerTurn / 360 }
+    private var hasFreshTicFeedback: Bool {
+        ticPosition.map { (0...0.5).contains(ProcessInfo.processInfo.systemUptime-$0.capturedAt) } == true
+    }
+    var motorPowerDetail: String {
+        guard usesHardware else { return "Rehearsal — no motor output" }
+        guard let sample = ticPosition, hasFreshTicFeedback else { return "Motor power and count: awaiting fresh TIC feedback" }
+        return String(format: "Motor %@ • current count %d • controller speed %+.2f°/s • %@",
+            sample.energized ? "ENERGIZED" : "DE-ENERGIZED", sample.count,
+            -Double(sample.velocity)/10_000*360/ROBTorsoCountCalibration.countsPerTurn, sample.operationState)
+    }
+    var canEnergize: Bool {
+        usesHardware && !arming && !powerRequestPending && !powerHoldRequested && !isArmed &&
+            hasFreshTicFeedback && ticPosition?.velocity == 0 && !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion
+    }
+    var canSetSoftwareReference: Bool {
+        usesCountEstimate && hasFreshTicFeedback && ticPosition?.velocity == 0 && !arming && !powerRequestPending
+    }
+    var compactControlDetail: String {
+        let motion = String(format: "Requested %+.2f°/s", commandedVelocity)
+        return motorPowerDetail + " • " + motion + "\n" + (usesHardware
+            ? (hasFreshTicFeedback ? status : hardwareDetail)
+            : "Rehearsal selected — choose TIC count estimate in Torso Rotation for hardware control.")
+    }
+    private var hasFreshFeedback: Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        return policy.hasFreshObservation(at: now) && (!usesCountEstimate || hasFreshTicFeedback)
+    }
+    var canArm: Bool { !arming && !powerRequestPending && hasFreshFeedback && (!usesHardware || armClearance() == nil) }
+    var isLocalLeverHeld: Bool { localLeverHeld }
+    var canUseLocalControls: Bool {
+        localLeverHeld || pendingLocalDemand != nil || isArmed || canArm
+            || (hasFreshFeedback && ROBArmRoutineCoordinator.shared.ownsPhysicalMotion)
+    }
 
     func showControls(_ sender: Any?) {
         precondition(Thread.isMainThread)
@@ -86,8 +180,13 @@ import Cocoa
 
     func setLiveCamera(_ live: Bool) {
         precondition(Thread.isMainThread)
-        stop(); vision.stop(); usesLiveCamera = live
-        policy.resetObservation(); remoteBaseline = nil
+        stop(); vision.stop(); usesLiveCamera = live; usesCountEstimate = false; ticPosition = nil
+        lastPositionRead = 0
+        hasSoftwareBaseReference = false
+        let speed = policy.maximumSpeed
+        policy = ROBTorsoMotionPolicy(); policy.maximumSpeed = speed
+        policy.debugCableMode = UserDefaults.standard.bool(forKey: "ROBDevelopmentMode")
+        remoteBaseline = nil
         cameraDemandActive = live
         hardwareDetail = live ? "Disarmed — camera confirmation required" : "Rehearsal — no motor output"
         visionDetail = live ? "Acquiring torso and base surfaces from RGB-D cameras" : "Simulated observation"
@@ -97,52 +196,244 @@ import Cocoa
     }
 
     func reobserve() {
-        if usesLiveCamera { setLiveCamera(true) }
+        if usesCountEstimate { startTimer(); transport.readPosition() }
+        else if usesLiveCamera { setLiveCamera(true) }
         else { stop(); policy.resetObservation(); startTimer() }
     }
+
+    /// Native, supervised count control. No hardware index/homing or encoder
+    /// is assumed. This source can never satisfy usesLiveCamera in navigation.
+    func setCountEstimate() {
+        setLiveCamera(false)
+        usesCountEstimate = true
+        hardwareDetail = "Disarmed — software count control"
+        visionDetail = countEstimateDetail
+        // Begin a new tracked segment, never claim existing cable twist is zero.
+        let speed = policy.maximumSpeed
+        policy = ROBTorsoMotionPolicy(); policy.maximumSpeed = speed
+        policy.debugCableMode = UserDefaults.standard.bool(forKey: "ROBDevelopmentMode")
+        transport.readPosition(); startTimer(); publish()
+    }
+
+    /// Operator observation of the physical torso against the tread base.
+    /// Only the host offset changes; no Tic reset, homing, or motion is issued.
+    func setSoftwareReference(_ observedDegrees: Double) {
+        guard observedDegrees.isFinite, (-180...180).contains(observedDegrees) else {
+            stop()
+            policy.invalidate("Enter a finite observed angle between −180° and 180°"); publish(); return
+        }
+        guard canSetSoftwareReference, let sample = ticPosition else {
+            stop()
+            policy.invalidate("Software reference needs fresh TIC feedback at zero speed"); publish(); return
+        }
+        stop()
+        calibration.align(count: Double(sample.count), observedHeading: observedDegrees)
+        hasSoftwareBaseReference = true
+        referenceRevision += 1
+        let speed = policy.maximumSpeed
+        policy = ROBTorsoMotionPolicy(); policy.maximumSpeed = speed
+        policy.debugCableMode = UserDefaults.standard.bool(forKey: "ROBDevelopmentMode")
+        visionDetail = countEstimateDetail + " • operator supplied base reference"
+        publish()
+    }
+
+    func unwindDebugTurn() {
+        guard remoteBaseline == nil, policy.requestUnwind() else { return }
+        localLeverHeld = false; motionUntil = ProcessInfo.processInfo.systemUptime + 600
+        configureNativePositionTarget()
+        publish()
+    }
+
+    @nonobjc private func acceptCount(_ sample: ROBTicVelocityTransport.PositionSample) {
+        guard usesHardware else { return }
+        guard usesCountEstimate else { ticPosition = sample; publish(); return }
+        var stationaryContinuity = false
+        if let previous = ticPosition {
+            let gap = sample.capturedAt-previous.capturedAt
+            let delta = abs(Double(sample.count)-Double(previous.count))*360/ROBTorsoCountCalibration.countsPerTurn
+            if gap > 0.75 || delta > max(8, maximumSpeed*max(0,gap)+4) {
+                let preflight = arming || powerRequestPending
+                stationaryContinuity = gap > 0.75 && !powerHoldRequested && !powerRequestPending &&
+                    (arming || (pendingLocalDemand == nil && remoteBaseline == nil && policy.mode == .hold)) &&
+                    sample.continuesStationaryCounter(after: previous)
+                if !stationaryContinuity && !preflight && (policy.armed || powerHoldRequested) {
+                    lastCommandFailure = String(format: "TIC feedback interrupted (%.0f ms gap, %.2f° count change); stopped", gap*1000, delta)
+                }
+                if !stationaryContinuity { hasSoftwareBaseReference = false }
+                // Preflight owns the USB queue and issues only zero-speed
+                // setup. Rebase from its actual status without cancelling the
+                // setup because an idle poll waited behind it. Only the
+                // separately checked unchanged, power-off counter may retain
+                // its software datum. The new sample must still satisfy the
+                // ordinary freshness gate before preflight can finish.
+                if !preflight { stop() }
+                if !stationaryContinuity { policy.resetObservation() }
+            }
+        }
+        ticPosition = sample; countSequence &+= 1
+        let now = ProcessInfo.processInfo.systemUptime
+        let wasArmed = policy.armed
+        _ = policy.observe(.init(heading: calibration.heading(count: Double(sample.count)),
+            capturedAt: sample.capturedAt, uncertainty: 0.05,
+            stream: "tic-count-estimate-\(referenceRevision)", sequence: countSequence), now: now,
+            continuousStationaryCounter: stationaryContinuity)
+        visionDetail = String(format: "TIC %d • %@\n%@", sample.count,
+            sample.uncertain ? "index/reference unconfirmed" : "controller reference set", countEstimateDetail)
+        if (wasArmed && !policy.armed) || (!policy.armed && hardwareReady && !powerHoldRequested) { stopHardware() }
+        publish()
+    }
+
+    /// Explicit power control can verify the stationary stepper with hanging
+    /// arms. It cannot arm rotation or turn a saved target into motion.
+    func energize() {
+        precondition(Thread.isMainThread)
+        guard canEnergize else {
+            stop()
+            if !usesHardware { policy.invalidate("Choose TIC count estimate or Live camera before energizing") }
+            else { policy.invalidate("Energize requires fresh TIC feedback at zero speed and no active motion") }
+            publish(); return
+        }
+        localLeverHeld = false; remoteBaseline = nil; remoteUntil = 0; motionUntil = 0
+        lastCommandFailure = nil
+        policy.invalidate("Motor hold requested — rotation remains disarmed")
+        powerHoldRequested = true; powerRequestPending = true
+        transport.energize(profile: .init(maximumDegreesPerSecond: policy.maximumSpeed,
+            accelerationDegreesPerSecondSquared: policy.acceleration))
+        startTimer(); publish()
+    }
+
+    func deenergize() { stop() }
 
     func arm() {
         precondition(Thread.isMainThread)
         guard !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion else {
             stop(); policy.invalidate("Arm routine owns body clearance"); publish(); return
         }
+        if usesHardware, let reason = armClearance() {
+            stop(); policy.invalidate(reason); publish(); return
+        }
         startTimer()
         let now = ProcessInfo.processInfo.systemUptime
-        guard !arming, policy.hasFreshObservation(at: now) else {
-            policy.invalidate("Waiting for a fresh, unambiguous camera reference"); publish(); return
+        guard !arming, hasFreshFeedback else {
+            policy.invalidate("Waiting for fresh torso feedback from the selected source"); publish(); return
         }
-        if usesLiveCamera {
-            arming = true
+        if usesHardware {
+            lastCommandFailure = nil
+            arming = true; hardwareReady = false
             transport.arm(profile: .init(maximumDegreesPerSecond: policy.maximumSpeed,
-                                        accelerationDegreesPerSecondSquared: policy.acceleration))
+                                        accelerationDegreesPerSecondSquared: policy.acceleration),
+                          energizedHold: powerHoldRequested)
         } else { _ = policy.arm(at: now) }
         publish()
     }
 
     func stop() {
         precondition(Thread.isMainThread)
+        nativePositionTarget = nil
+        pendingLocalDemand = nil; localDemandDeadline = 0; localControlOwnsTorso = false
         localLeverHeld = false; remoteBaseline = nil; remoteUntil = 0; motionUntil = 0
-        policy.invalidate(usesLiveCamera ? "Stopped — re-arm to move" : "Rehearsal stopped")
+        policy.invalidate(usesHardware ? "Stopped — hold the slider or choose a destination to move" : "Rehearsal stopped")
         stopHardware(retry: true); publish()
     }
 
     private func stopHardware(retry: Bool = false) {
-        if hardwareReady || arming || (retry && usesLiveCamera) { transport.stop() }
-        hardwareReady = false; arming = false
+        if hardwareReady || arming || powerRequestPending || powerHoldRequested || (retry && usesHardware) { transport.stop() }
+        hardwareReady = false; arming = false; powerRequestPending = false; powerHoldRequested = false
     }
 
     func releaseLever() {
+        if case .rate = pendingLocalDemand {
+            // A released drag never becomes a delayed move after USB setup.
+            stop(); return
+        }
+        nativePositionTarget = nil
         localLeverHeld = false
         if remoteBaseline == nil { policy.hold() }
+        publish()
     }
 
     func setLever(_ value: Double, held: Bool) {
         precondition(Thread.isMainThread)
         startTimer()
         guard held else { releaseLever(); return }
-        guard remoteBaseline == nil, policy.armed else { return }
-        localLeverHeld = true
-        policy.requestRate(value); motionUntil = ProcessInfo.processInfo.systemUptime + 60
+        guard value.isFinite else { stop(); return }
+        let rate = min(1, max(-1, value))
+        if !localLeverHeld {
+            beginLocalDemand(.rate(rate)); return
+        }
+        if pendingLocalDemand != nil { pendingLocalDemand = .rate(rate) }
+        else if policy.armed { policy.requestRate(rate) }
+    }
+
+    /// Native destination button: the click authorizes this bounded turn.
+    func takeLocalControlAndTurn(to heading: Double) {
+        guard heading.isFinite else { stop(); return }
+        beginLocalDemand(.heading(heading))
+    }
+
+    var animationPreviewReferenceHeading: Double {
+        guard policy.debugCableMode else { return .nan }
+        return policy.cableReferenceHeading ?? observedHeading
+    }
+
+    @nonobjc func startAnimationTurn(to heading: Double) -> Bool {
+        guard ROBAnimationPlayback.shared.authorizesTorsoHeading(heading), usesHardware else { return false }
+        // The sequence already performed the single local ownership handoff.
+        beginLocalDemand(.heading(heading), announce: false)
+        return pendingLocalDemand != nil || arming || policy.armed
+    }
+    @nonobjc func animationTargetReached(_ heading: Double) -> Bool {
+        guard usesHardware, hasFreshFeedback, !arming, pendingLocalDemand == nil else { return false }
+        guard let resolved = policy.targetHeading,
+              abs(ROBTorsoMotionPolicy.wrap(resolved-heading)) < 0.00001, policy.mode == .hold else { return false }
+        if usesCountEstimate {
+            return currentCount == count(forHeading: resolved).rounded() && ticPosition?.velocity == 0
+        }
+        // Camera arrival uses the controller's uncertainty-aware tolerance.
+        return abs(commandedVelocity) < 0.01
+    }
+
+    @nonobjc private func beginLocalDemand(_ demand: LocalDemand, announce: Bool = true) {
+        precondition(Thread.isMainThread)
+        // Cancel the previous target before handing off other motion owners.
+        // The main controller may synchronously call stop() during this event.
+        stop()
+        if announce { NotificationCenter.default.post(name: Notification.Name("ROBLocalManualControlRequested"), object: self) }
+        pendingLocalDemand = demand
+        localControlOwnsTorso = true
+        if case .rate = demand { localLeverHeld = true }
+        localDemandDeadline = ProcessInfo.processInfo.systemUptime + 2
+        startTimer(); advanceLocalDemand(); publish()
+    }
+
+    private func advanceLocalDemand() {
+        guard let demand = pendingLocalDemand else { return }
+        guard ProcessInfo.processInfo.systemUptime < localDemandDeadline else {
+            stop(); policy.invalidate("Manual takeover timed out; try the control again"); return
+        }
+        if arming { return }
+        guard hasFreshFeedback else {
+            stop(); policy.invalidate("Waiting for fresh torso feedback from the selected source"); return
+        }
+        // Cancellation can finish asynchronously. Wait only for that handoff;
+        // never loosen telemetry ages or replay a released slider request.
+        if ROBArmRoutineCoordinator.shared.ownsPhysicalMotion { return }
+        if !policy.armed {
+            arm()
+            guard policy.armed else {
+                if !arming { pendingLocalDemand = nil; localLeverHeld = false }
+                return
+            }
+        }
+        pendingLocalDemand = nil
+        motionUntil = ProcessInfo.processInfo.systemUptime + 60
+        switch demand {
+        case .rate(let rate):
+            guard localLeverHeld else { stop(); return }
+            policy.requestRate(rate)
+        case .heading(let heading):
+            turnToHeading(heading)
+        }
     }
 
     func turnToHeading(_ heading: Double) {
@@ -150,13 +441,31 @@ import Cocoa
         guard remoteBaseline == nil, policy.armed else { return }
         localLeverHeld = false
         policy.requestHeading(heading); motionUntil = ProcessInfo.processInfo.systemUptime + 60
+        configureNativePositionTarget()
+    }
+
+    private func configureNativePositionTarget() {
+        nativePositionTarget = nil
+        guard usesCountEstimate, let target = policy.targetHeading else { return }
+        let count = calibration.count(heading: target).rounded()
+        guard count.isFinite, (Double(Int32.min)...Double(Int32.max)).contains(count) else {
+            stop(); policy.invalidate("Target count is outside the TIC position range"); return
+        }
+        nativePositionTarget = Int32(count)
     }
 
     func setMaximumSpeed(_ speed: Double) {
-        guard speed.isFinite, (1 ... 20).contains(speed) else { return }
+        guard speed.isFinite, ROBTorsoMotionPolicy.speedRange.contains(speed) else { return }
         // A profile change requires another explicit arm; the Tic limits and
-        // host taper cannot silently disagree during a turn.
-        stop(); policy.maximumSpeed = speed; publish()
+        // host profile cannot silently disagree during a turn.
+        stop(); policy.maximumSpeed = speed
+        UserDefaults.standard.set(maximumPulseRate, forKey: Self.speedLimitKey)
+        publish()
+    }
+
+    func setMaximumPulseRate(_ pulses: Double) {
+        guard pulses.isFinite, (100...ROBTorsoMotionPolicy.maximumPulseRate).contains(pulses) else { return }
+        setMaximumSpeed(pulses * 360 / ROBTorsoCountCalibration.countsPerTurn)
     }
 
     /// Existing normalized VR head demand becomes a circular heading offset
@@ -168,7 +477,7 @@ import Cocoa
             return
         }
         guard usesLiveCamera, hardwareReady, policy.armed,
-              policy.hasFreshObservation(at: ProcessInfo.processInfo.systemUptime), !localLeverHeld else { return }
+              policy.hasFreshObservation(at: ProcessInfo.processInfo.systemUptime), !localControlOwnsTorso else { return }
         if remoteBaseline == nil { remoteBaseline = policy.unwrappedHeading }
         guard let remoteBaseline else { return }
         remoteUntil = ProcessInfo.processInfo.systemUptime + 0.6
@@ -177,9 +486,14 @@ import Cocoa
     }
 
     @objc private func applicationInactive() {
-        // Local mouse/keyboard ownership cannot survive app focus loss. An
-        // authenticated remote demand has its own continuously renewed lease.
-        if remoteBaseline == nil { stop() }
+        // A clicked finite destination owns the whole bounded turn. Returning
+        // to chat must not silently cancel it. Held manual input still loses
+        // ownership on focus loss; remote demand keeps its separate lease.
+        guard remoteBaseline == nil else { return }
+        if case .heading = pendingLocalDemand { return }
+        let finiteTurn = policy.armed && policy.mode == .heading && !localLeverHeld
+            && ProcessInfo.processInfo.systemUptime < motionUntil
+        if !finiteTurn { stop() }
     }
 
     @objc private func applicationTerminating() {
@@ -204,25 +518,64 @@ import Cocoa
     }
 
     @nonobjc func advance(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        // The torso UI timer has its own 500 ms debug allowance. Do not
+        // derive it from arm sample age: the 1200 ms arm budget exceeds this
+        // policy's valid control interval. TIC freshness/watchdog stay separate.
+        policy.maximumControlInterval = ROBArmFeedbackTiming.debugEnabled ? 0.5 : 0.25
+        if usesHardware && (policy.armed || arming), let reason = armClearance() {
+            stop(); policy.invalidate(reason); publish(); return
+        }
+        let debug = UserDefaults.standard.bool(forKey: "ROBDevelopmentMode")
+        if policy.debugCableMode != debug {
+            policy.hold(); policy.debugCableMode = debug
+        }
+        if usesHardware {
+            // Active velocity writes already return full status in the same
+            // transaction. Poll separately only when idle or preparing control.
+            let needsIdlePoll = !hardwareReady || (policy.mode == .hold && !powerHoldRequested)
+            if needsIdlePoll && now-lastPositionRead >= 0.15 { lastPositionRead = now; transport.readPosition() }
+            if usesCountEstimate && !arming && !powerRequestPending && (policy.armed || powerHoldRequested), ticPosition.map({ now-$0.capturedAt > 0.5 }) != false {
+                let detail = String(format: "TIC feedback expired during control (%.0f ms old); stopped", (now-(ticPosition?.capturedAt ?? now))*1000)
+                ROBTicVelocityTransport.trace(detail)
+                stop(); lastCommandFailure = detail; policy.invalidate(detail); publish(); return
+            }
+        }
         let dt = min(0.1, max(0, now - lastTick)); lastTick = now
-        if !usesLiveCamera {
+        if !usesHardware {
             simulatedHeading += policy.velocity * dt
             simulatedSequence &+= 1
             _ = policy.observe(.init(heading: simulatedHeading, capturedAt: now, uncertainty: 0.1,
                                      stream: "explicit-rehearsal", sequence: simulatedSequence), now: now)
         }
+        advanceLocalDemand()
         if remoteBaseline != nil && now > remoteUntil { remoteBaseline = nil; policy.hold() }
         if policy.armed && policy.mode != .hold && now > motionUntil { policy.hold() }
-        let velocity = policy.tick(at: now)
-        if usesLiveCamera {
-            if hardwareReady && !policy.armed { stopHardware() }
+        let wasArmed = policy.armed
+        if !policy.armed || policy.mode != .heading { nativePositionTarget = nil }
+        let directTarget = nativePositionTarget
+        let measuredVelocity = directTarget.flatMap { _ in ticPosition.map {
+            -Double($0.velocity) / 10_000 * 360 / ROBTorsoCountCalibration.countsPerTurn
+        } }
+        let arrived = directTarget.map { target in ticPosition?.count == target && ticPosition?.velocity == 0 } ?? false
+        let velocity = policy.tick(at: now, measuredPositionVelocity: measuredVelocity, positionReached: arrived)
+        if usesHardware {
+            if wasArmed && !policy.armed { stopHardware() }
+            else if hardwareReady && !policy.armed && !powerHoldRequested { stopHardware() }
             else if hardwareReady && now - lastSent >= 0.09 {
                 lastSent = now
                 // Only settled hold requests release power; a brief zero at
                 // direction reversal retains drive until the turn finishes.
-                transport.velocity(velocity, validUntil: min(now + 0.2,
-                    (policy.observation?.capturedAt ?? 0) + policy.maximumObservationAge),
-                    releaseWhenStopped: policy.mode == .hold)
+                let feedbackDeadline = powerHoldRequested && !policy.armed
+                    ? (ticPosition?.capturedAt ?? 0) + 0.5
+                    : (policy.observation?.capturedAt ?? 0) + policy.maximumObservationAge
+                if let directTarget, policy.mode == .heading, policy.armed {
+                    transport.position(directTarget, validUntil: min(now + policy.maximumControlInterval,
+                        (ticPosition?.capturedAt ?? 0) + 0.5, motionUntil))
+                } else {
+                    nativePositionTarget = nil
+                    transport.velocity(velocity, validUntil: min(now + 0.2, feedbackDeadline),
+                        releaseWhenStopped: policy.mode == .hold && !powerHoldRequested)
+                }
             }
         }
         publish()
@@ -257,12 +610,29 @@ import Cocoa
         // registrations at every face/belly frame. On loss, a new source rebases.
         let key = camera + ":" + stream
         if let prior = policy.observation, prior.stream != key, policy.hasFreshObservation(at: now) { return }
+        let wasArmed = policy.armed
         _ = policy.observe(.init(heading: yaw * 180 / .pi, capturedAt: now - age,
                                  uncertainty: sigma * 180 / .pi, stream: key, sequence: sequence), now: now)
         visionDetail = String(format: "%@ camera • yaw uncertainty ±%.1f°", camera, sigma * 180 / .pi)
-        if !policy.armed && hardwareReady { stopHardware() }
+        if (wasArmed && !policy.armed) || (!policy.armed && hardwareReady && !powerHoldRequested) { stopHardware() }
         publish()
     }
 
-    private func publish() { NotificationCenter.default.post(name: Self.changed, object: self) }
+    private func publish() {
+        // Status and power callbacks can arrive together. Keep motor control at
+        // 20 Hz, but coalesce AppKit layout work to at most 10 Hz.
+        let now = ProcessInfo.processInfo.systemUptime
+        let delay = 0.1-(now-lastUIPublish)
+        if delay > 0 {
+            if !uiPublishPending {
+                uiPublishPending = true
+                DispatchQueue.main.asyncAfter(deadline: .now()+delay) { [weak self] in
+                    self?.uiPublishPending = false; self?.publish()
+                }
+            }
+            return
+        }
+        lastUIPublish = now
+        NotificationCenter.default.post(name: Self.changed, object: self)
+    }
 }

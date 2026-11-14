@@ -1,5 +1,45 @@
 # Controller latency diagnostics
 
+The [local CLI](local-control.md) reads telemetry and original camera frames
+without opening these windows. Its quiet profile skips automatic diagnostics,
+and hidden Amber diagnostics stop display work. Arm consoles keep a bounded live
+tail; full controller logs remain on Amber. A passive sampler includes the front
+RGB-D camera and Insta360 decoder in the measured process load.
+
+## Local manual tread acceleration
+
+R.O.B. Controls uses a working 0–100% speed limit (40% on opening) and a
+persistent Gentle / Medium / Aggressive acceleration choice, also available in
+Arms settings. The profiles take 2.4 / 1.2 / 0.6 seconds from zero to full demand;
+at 40%, Gentle takes about 0.96 seconds. These are PWM-demand ramps, not measured
+ground speed. The operator reports breakaway around 30–50% on the current dusty
+floor; actual movement must be observed, especially after a direction change.
+
+Holding a direction ramps up; releasing ramps down. Reversal reaches zero
+before changing sign. Stop treads, Escape, window focus loss and a controller
+timing gap stop the local request immediately. The Arduino deadman remains in
+place. The selected profile applies to the local mouse/keyboard controls;
+remote controller shaping is a separate path.
+
+For room navigation, use RPLidar's native metric occupancy map and its live
+SLAM pose as the planning reference. Satellite overlay scale and north rotation
+only align the display. Cerebro already receives authenticated pose/scan frames;
+the accumulated map raster remains local to RPLidar. The manual buttons above
+are open-loop requests, so their percentage or press duration must not be
+reported as measured displacement. Confirm movement with fresh SLAM pose and
+check RGB-D for obstacles above or below the scan plane.
+
+Torso rotation requires both arms held above the tread envelope, including the
+open-gripper allowance. Fresh measured feedback and the mechanical model are
+checked before and during a turn; a hanging arm must be raised first. A body
+move invalidates the previous camera-to-base scene, so arm continuation needs
+fresh observations. This check does not certify surroundings or payload clearance.
+
+Run `Tests/ROBKeyboardTreadRampStaticTests.py` and the Swift
+`ROBTreadMotionRampFixtureTests` for ramp/control wiring, and
+`Scripts/test-torso-control.sh` plus
+`Scripts/test-ghost-motion.sh torso-arm-clearance` for torso interlocks.
+
 Open **Development → Control Latency…** in Cerebro. Development Mode does not
 need to be enabled. The window is read-only and refreshes four times per second;
 opening it does not move ROB or send test commands. It previews the most recently

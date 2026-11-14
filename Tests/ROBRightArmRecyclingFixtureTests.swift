@@ -61,6 +61,31 @@ import simd
         let otherRegistrationResidual=try ROBLeftCanReachCalibration.load(model:right,can:registeredCan,file:base,depthAlignment:nil)
         precondition(otherRegistrationResidual == .zero)
         let preview=try ROBCanGrabPreview.make(can:can,model:right,baseline:front,side:"right",now:now)
+        // Recorded interrupted entries remain raised. A retry must approach
+        // the can directly instead of adding another corkscrew/lift that
+        // drove J2 toward the observed -120 degree endpoint.
+        let retryCan=ROBWorkspaceLocatedObject(target:.can,position:[0.60,-0.15,0.836],confidence:0.9,
+            capturedAt:now,sequence:18,view:.init(panDegrees:-15,upperTarget:6000))
+        let heldStarts=[
+            [-0.1547616173,-1.7319665749,0.2114848180,-0.8800277338,1.2125947686,1.4962107720,0.4565126825],
+            [-0.3232949732,-1.8265961453,0.5105088062,-0.7015405470,1.5178910338,1.4115350326,1.1749611066],
+            [-0.7665813324,-2.0945314562,0.6010477612,-0.3505657427,1.5431164957,1.1493265832,1.9502690853]
+        ]
+        for held in heldStarts {
+            precondition(!ROBCanRecyclingReadyPose.matches(held,physicalSide:"right"))
+            let retry=try ROBCanGrabPreview.make(can:retryCan,model:right,baseline:right.positions(vendorLeft:held),side:"right",now:now)
+            print("Raised retry diagnostic: clearance",right.torsoTurnVerticalClearance(vendorJoints:held) as Any,
+                "entry steps",retry.dynamicEntryStepCount,"error",retry.graspError,"tilt",retry.gripperTiltDegrees,
+                "entry",right.vendorLeft(retry.dynamicEntryWaypoints.last!));fflush(stdout)
+            precondition(retry.dynamicEntryStepCount==1 && !retry.steps.contains{$0.stage.contains("Corkscrew")})
+            precondition(retry.reachesCan && retry.graspError<=0.012 && retry.gripperTiltDegrees<=5)
+            let entryQ=right.vendorLeft(retry.dynamicEntryWaypoints[0])
+            precondition(entryQ[1]>held[1] && entryQ[1] > -2.09,"Retry repeated the stalled outward J2 demand")
+            print("PASS recorded raised retry: direct coordinated entry, J2",held[1],"to",entryQ[1],"grasp error",retry.graspError)
+        }
+        let hanging=try ROBCanGrabPreview.make(can:can,model:right,baseline:right.positions(vendorLeft:Array(repeating:0,count:7)),side:"right",now:now)
+        precondition(hanging.dynamicEntryStepCount==4 && hanging.steps.contains{$0.stage.contains("Corkscrew")},
+            "A hanging arm incorrectly skipped its lift")
         precondition(preview.side=="right" && !preview.steps.isEmpty)
         for step in preview.steps {for i in 1...7 {precondition(step.pose["left_joint\(i)"]==front["left_joint\(i)"])}}
         let step=ROBLeftGestureProposal.Step(positions:right.recyclingFrontTarget,seconds:1)
@@ -81,8 +106,8 @@ import simd
         let probe=try ROBEstimatedArmCalibrationPlan.make(from:Array(repeating:0,count:7),map:snapshot,model:right,
             generation:generation,cameraGeneration:camera,nowMilliseconds:now)
         print("RIGHT proof build seconds",ProcessInfo.processInfo.systemUptime-proofStarted)
-        precondition(probe.target==[0,-0.039,0,0,0,0,0] && probe.seconds==4)
-        precondition(probe.maximumVertexDisplacementMeters<=0.03 && probe.maximumVertexDisplacementMeters>0.029)
+        precondition(probe.target==[-0.03,-0.03,0,0,0,0,0] && probe.seconds==4)
+        precondition(probe.maximumVertexDisplacementMeters<=0.03 && probe.maximumVertexDisplacementMeters>0.02)
         precondition(probe.mappingID==right.selectedMappingID && probe.steps.count==1 && probe.step.jawAction==nil)
         precondition(!probe.baselineSelfProxyPairs.isEmpty)
         for pair in probe.baselineSelfProxyPairs {
@@ -95,7 +120,7 @@ import simd
                 cameraGeneration:camera,nowMilliseconds:now+1)
             preconditionFailure("An estimated right step chained from its endpoint")
         } catch is ROBGhostMotionError {}
-        print("Right estimated probe: one 4-second EMPTY J2 -0.039 rad step, full-hull travel \(probe.maximumVertexDisplacementMeters*1000) mm, actual convex-hull self-clearance improves, occupied-depth checks retained; endpoint chaining rejected. No physical transport.")
+        print("Right estimated probe: one 4-second EMPTY J1/J2 -0.03 rad retreat, full-hull travel \(probe.maximumVertexDisplacementMeters*1000) mm, actual convex-hull self-clearance improves, occupied-depth checks retained; endpoint chaining rejected. No physical transport.")
         print("Right-arm model: actual right URDF/mount/tool, own reference/mapping, FK/IK, transport bounds, other-arm immobility and side-isolated calibration/replay pass.")
     }
 }

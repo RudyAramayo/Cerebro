@@ -84,12 +84,13 @@ def main() -> None:
         and 'panTarget: 5799, lowerTarget: 6011, upperTarget: 6906'
         in configuration
         and 'sequenceName: "startup", phaseIndex: 3' in configuration
-        and 'panTarget: 5799, lowerTarget: 7014, upperTarget: 7698'
-        in configuration,
-        "The shipped three-phase startup sequence lost its safe reviewed order",
+        and 'phaseName: "Hold upright", cameraPositionName: "upright"'
+        in configuration
+        and 'migrateLegacyAutomaticStartup(phases: phases)' in configuration,
+        "Automatic startup no longer finishes upright or migrates the exact legacy sequence",
     )
     require(
-        "private static let schemaVersion = 3" in configuration
+        "private static let schemaVersion = 4" in configuration
         and "migrateLegacyUprightCameraMountOffset" in configuration
         and '"fully_upright_center"' in configuration
         and '"fully_right"' in configuration

@@ -37,10 +37,12 @@ import AppKit
     let side = NSPopUpButton()
     let referenceError = NSTextField(string:"20")
     let nearFieldDepth = NSButton(checkboxWithTitle:"Near-field body depth",target:nil,action:nil)
+    let fullCameraHeight = NSButton(checkboxWithTitle:"Full camera height (640 × 480)",target:nil,action:nil)
     let holdCameraMode = NSButton(checkboxWithTitle:"Hold camera mode for review",target:nil,action:nil)
     let image = NSImageView()
     let details = NSTextView()
     let captureButton = NSButton(title:"Capture",target:nil,action:nil)
+    let captureOnlyButton = NSButton(title:"Capture RGB-D + IMU only",target:nil,action:nil)
     let importButton = NSButton(title:"Import",target:nil,action:nil)
     let stopButton = NSButton(title:"Stop",target:nil,action:nil)
     init(size:NSSize) {
@@ -52,6 +54,7 @@ import AppKit
     }
     required init?(coder:NSCoder) { fatalError() }
     @objc func captureCurrentView() {}
+    @objc func captureOnly() {}
     @objc func importLandmarks() {}
     @objc func stop() {}
     @objc func showEvidence() {}
@@ -69,6 +72,7 @@ import AppKit
             precondition(form.details.frame.width >= 800)
             precondition(form.side.itemTitles == ["Right arm","Left arm"])
             precondition(form.captureButton.target === form)
+            precondition(form.captureOnlyButton.target === form && form.captureOnlyButton.superview != nil)
             precondition(form.stopButton.target === form)
             precondition(form.nearFieldDepth.state == .off && form.nearFieldDepth.superview != nil)
             precondition(form.holdCameraMode.state == .off && form.holdCameraMode.superview != nil)

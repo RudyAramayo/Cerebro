@@ -65,7 +65,7 @@ class ScanClearance:
     def is_arm(name):
         return name.startswith(("left_", "right_")) and (name.endswith("_Link") or name.endswith("_tool"))
 
-    def check(self, q, padding=0, pairs=None):
+    def check(self, q, padding=0, pairs=None, pair_padding=None):
         p = self.planner
         p.plant.SetPositions(p.context, q)
         poses, boxes = FramePoseVector(), {}
@@ -76,9 +76,13 @@ class ScanClearance:
             boxes[name] = (points.min(axis=1), points.max(axis=1))
         self.graph.get_source_pose_port(self.source).FixValue(self.context, poses)
         query = self.graph.get_query_output_port().Eval(self.context)
-        minimum, nearest = math.inf, None
-        required = self.margin + padding
+        minimum, nearest, minimum_slack = math.inf, None, math.inf
+        limiting_required = self.margin + padding
         for a, b in (self.pairs if pairs is None else pairs):
+            extra = padding if pair_padding is None else pair_padding.get((a, b), padding)
+            if not math.isfinite(extra) or extra < 0:
+                raise ValueError("Invalid swept-clearance padding")
+            required = self.margin + extra
             # Euclidean AABB distance is a lower bound, including for long links.
             separation = np.maximum(0, np.maximum(boxes[a][0] - boxes[b][1], boxes[b][0] - boxes[a][1]))
             if np.linalg.norm(separation) > max(required, .08):
@@ -86,26 +90,31 @@ class ScanClearance:
             distance = float(query.ComputeSignedDistancePairClosestPoints(self.geometry[a], self.geometry[b]).distance)
             if not math.isfinite(distance):
                 raise ValueError("Non-finite collision query")
-            if distance < minimum:
-                minimum, nearest = distance, [a, b]
-        return dict(clear=minimum >= required, distance=None if not math.isfinite(minimum) else minimum,
-                    pair=nearest, required=required)
+            if distance - required < minimum_slack:
+                minimum, nearest, minimum_slack = distance, [a, b], distance - required
+                limiting_required = required
+        return dict(clear=minimum_slack >= 0, distance=None if not math.isfinite(minimum) else minimum,
+                    pair=nearest, required=limiting_required)
 
     def transition(self, before, after):
         moving = set(np.flatnonzero(np.abs(after - before) > 1e-12))
         pairs = [(a, b) for a, b in self.pairs if moving.intersection(set(self.levers[a]) | set(self.levers[b]))]
         # Bound point travel relative to each pair. Shared ancestor motion
         # preserves distance and is excluded from the relative speed bound.
-        travel = max((sum(abs(after[i] - before[i]) * max(self.levers[a].get(i, 0), self.levers[b].get(i, 0))
+        pair_travel = {(a,b): sum(abs(after[i] - before[i]) * max(self.levers[a].get(i, 0), self.levers[b].get(i, 0))
                           for i in moving if not (i in self.levers[a] and i in self.levers[b]))
-                      for a, b in pairs), default=0)
+                      for a, b in pairs}
+        travel = max(pair_travel.values(), default=0)
         count = max(1, math.ceil(travel / (2 * self.sweep_cover)))
         if count > 500:
             return dict(clear=False, distance=None, pair=None, required=self.margin, reason="Sweep budget exceeded")
         nearest = None
         # Include both endpoints; midpoint inflation bounds the unsampled path.
-        for u, padding in [(0, 0), (1, 0)] + [((i + .5) / count, travel / (2 * count)) for i in range(count)]:
-            result = self.check(before + u * (after - before), padding, pairs)
+        for u, midpoint in [(0, False), (1, False)] + [((i + .5) / count, True) for i in range(count)]:
+            # Each pair gets its own unsampled relative-travel bound. Fast
+            # distal motion must not inflate a stationary shoulder/head pair.
+            padding = {pair: value/(2*count) if midpoint else 0 for pair,value in pair_travel.items()}
+            result = self.check(before + u * (after - before), pairs=pairs, pair_padding=padding)
             if not result["clear"]:
                 return result
             if nearest is None or (result["distance"] is not None and result["distance"] < (nearest["distance"] or math.inf)):

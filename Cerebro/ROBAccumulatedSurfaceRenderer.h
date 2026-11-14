@@ -32,8 +32,8 @@ static inline SCNGeometry *ROBSurfacePlaneGeometryWithPhoto(const ROBSurfacePlan
                               ROBDepthFloorScale(plane->v,(plane->originV+y[j])*ROBSurfaceTexelSize)));
             vertices[i*4+j]=(Vertex){(float)p.x,(float)p.y,(float)p.z};
             uv[i*4+j]=photo ? (UV){(float)(((plane->originU+x[j])*ROBSurfaceTexelSize-originU)/spanU),
-                (float)(1-((plane->originV+y[j])*ROBSurfaceTexelSize-originV)/spanV)} :
-                (UV){(float)(x[j]/plane->width),(float)(1-y[j]/plane->height)};
+                (float)(((plane->originV+y[j])*ROBSurfaceTexelSize-originV)/spanV)} :
+                (UV){(float)(x[j]/plane->width),(float)(y[j]/plane->height)};
         }
         uint32_t b=(uint32_t)(i*4);uint32_t t[6]={b,b+1,b+2,b,b+2,b+3};memcpy(triangles+i*6,t,sizeof(t));
     }

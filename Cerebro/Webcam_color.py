@@ -354,7 +354,8 @@ def runtime_stereo_policy(pipeline, stereo, dai, profile_applied, rgb_normalizat
         raise RuntimeError("runtime profile HOST calibrated-translation policies were not confirmed")
     policy = {"schemaVersion": 1, "source": "actual_host_configuration_not_firmware_resolved_strategy",
             "autoCalibrationMode": str(auto_mode), "stereoMode": observed_stereo_configuration(stereo),
-            "stereoDepthProperties": properties}
+            "stereoDepthProperties": properties,
+            "planningDepth": strict_planning_depth_configuration(stereo, dai, properties)}
     if rgb_normalization is not None:
         policy["rgbNormalization"] = observed_rgb_normalization(graph, rgb_normalization, dai)
     return policy
@@ -746,6 +747,76 @@ def configure_stereo_mode(stereo, requested):
         stereo.setExtendedDisparity(True)
     else:
         stereo.setSubpixel(True)
+
+
+def configure_strict_planning_depth(stereo, dai):
+    """Use the shared depth feed as sensor evidence, with no fill/smoothing.
+
+    ROBOTICS enables spatial hole filling, a non-edge-preserving median and
+    decimation. Those are unsuitable as original occupied-return evidence near
+    arm/table occlusion boundaries. Keep LR checking, stereo mode, calibration,
+    alignment, synchronization and IR behavior; the display may look sparser.
+    SDK reference: https://docs.luxonis.com/software-v3/depthai/depthai-components/nodes/stereo_depth
+    """
+    config = stereo.initialConfig
+    config.setLeftRightCheck(True)
+    config.setMedianFilter(dai.MedianFilter.MEDIAN_OFF)
+    config.postProcessing.spatialFilter.enable = False
+    config.postProcessing.spatialFilter.holeFillingRadius = 0
+    config.postProcessing.temporalFilter.enable = False
+    config.postProcessing.holeFilling.enable = False
+    config.postProcessing.adaptiveMedianFilter.enable = False
+    config.postProcessing.decimationFilter.decimationFactor = 1
+    strict_planning_depth_configuration(stereo, dai)
+
+
+def strict_planning_depth_configuration(stereo, dai, host_properties=None):
+    """Fail closed on SDK/serialized HOST drift; not per-pixel validity proof.
+
+    Some SDK fields are platform-specific. Disabling both hole-filling paths
+    also prevents a future platform/preset change silently enabling them. The
+    RVC2 spatial/median/decimation settings are explicitly checked, not inferred
+    from the name of the preset. No confidence raster is resized into RGB:
+    StereoDepth confidence output has different alignment/filtering semantics.
+    """
+    try:
+        config = stereo.initialConfig
+        post = config.postProcessing
+        values = {
+            "leftRightCheckEnabled": config.getLeftRightCheck(),
+            "medianFilter": int(config.getMedianFilter()),
+            "spatialFilterEnabled": post.spatialFilter.enable,
+            "spatialHoleFillingRadius": post.spatialFilter.holeFillingRadius,
+            "temporalFilterEnabled": post.temporalFilter.enable,
+            "holeFillingEnabled": post.holeFilling.enable,
+            "adaptiveMedianFilterEnabled": post.adaptiveMedianFilter.enable,
+            "decimationFactor": post.decimationFilter.decimationFactor,
+        }
+        expected = {"leftRightCheckEnabled": True, "medianFilter": int(dai.MedianFilter.MEDIAN_OFF),
+            "spatialFilterEnabled": False, "spatialHoleFillingRadius": 0, "temporalFilterEnabled": False,
+            "holeFillingEnabled": False, "adaptiveMedianFilterEnabled": False, "decimationFactor": 1}
+        if any(type(values[key]) is not type(value) or values[key] != value for key, value in expected.items()):
+            raise ValueError("SDK planning-depth readback differs from strict no-fill policy")
+        if host_properties is not None:
+            initial = host_properties["initialConfig"]
+            host = initial["postProcessing"]
+            actual = {
+                "leftRightCheckEnabled": initial["algorithmControl"]["enableLeftRightCheck"],
+                "medianFilter": host["median"],
+                "spatialFilterEnabled": host["spatialFilter"]["enable"],
+                "spatialHoleFillingRadius": host["spatialFilter"]["holeFillingRadius"],
+                "temporalFilterEnabled": host["temporalFilter"]["enable"],
+                "holeFillingEnabled": host["holeFilling"]["enable"],
+                "adaptiveMedianFilterEnabled": host["adaptiveMedianFilter"]["enable"],
+                "decimationFactor": host["decimationFilter"]["decimationFactor"],
+            }
+            if any(type(actual[key]) is not type(value) or actual[key] != value for key, value in expected.items()):
+                raise ValueError("serialized HOST planning-depth configuration differs from SDK readback")
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("Strict planning depth was not confirmed: " + str(error)) from error
+    return {"schemaVersion": 1, "kind": "lr_checked_no_fill_no_median_no_decimation",
+        "source": "sdk_initial_config_readback_and_actual_host_configuration_not_per_pixel_validity",
+        "hostConfigurationChecked": host_properties is not None, **values}
 
 
 def observed_stereo_configuration(stereo):
@@ -1953,6 +2024,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 emit("CEREBRO_DEPTHCAM_RECTIFICATION requested=explicit_mesh resolved_strategy_observed=false")
                 stereo.setLeftRightCheck(True)
                 configure_stereo_mode(stereo,stereo_mode)
+                configure_strict_planning_depth(stereo,dai)
                 if runtime_state["attempted"]:
                     stereo.setDisparityToDepthUseSpecTranslation(False)
                     stereo.setRectificationUseSpecTranslation(False)

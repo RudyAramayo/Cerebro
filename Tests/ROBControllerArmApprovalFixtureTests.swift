@@ -12,10 +12,15 @@ final class ROBAmberGatewayClient: NSObject {
     static let shared = ROBAmberGatewayClient()
     var generation: UInt64 = 1
     var ready = true
+    var feedbackFresh = true
+    var ownerBusy = false
     var holds: [String] = []
+    func isReady() -> Bool { ready }
     func connectionSnapshot() -> NSDictionary { ["sessionGeneration": NSNumber(value: generation)] }
     func manualArmControlReadiness(forUDPPort: Int, expectedSessionGeneration: UInt64) -> NSDictionary {
-        ["allowed": ready && expectedSessionGeneration == generation, "reason": "Feedback/session changed"]
+        ["allowed": ready && feedbackFresh && !ownerBusy && expectedSessionGeneration == generation,
+         "waitingForOwner": ready && feedbackFresh && ownerBusy && expectedSessionGeneration == generation,
+         "reason": "Feedback/session/ownership changed"]
     }
     func priorityHold(forArm arm: String) -> UInt64 { holds.append(arm); return 1 }
 }
@@ -44,6 +49,96 @@ final class ROBAmberGatewayClient: NSObject {
         var checks = 0
         func check(_ condition: @autoclosure () -> Bool, _ detail: String) {
             precondition(condition(), detail); checks += 1
+        }
+
+        // Native panel presses are one-command authority. The real broker
+        // cancels the old owner, sends no question and grants no model route.
+        do {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            var announcements = 0, executed = 0, cancelled = 0, takeovers = 0
+            var oldDone: ((NSDictionary) -> Void)?
+            b.announceApproval = { _ in announcements += 1 }
+            b.requestRecycleMissionTask(summary: "Automatic can phase", authorization: { true },
+                execute: { oldDone = $0 }, cancel: { cancelled += 1 }, completion: { _ in })
+            let observer = NotificationCenter.default.addObserver(forName: Notification.Name("ROBLocalManualControlRequested"),
+                object: b, queue: .main) { _ in takeovers += 1 }
+            defer { NotificationCenter.default.removeObserver(observer) }
+            b.performLocalPanelArmCommand(operation: "cmd_position_input", arm: "right", summary: "Local target",
+                execute: { _ in executed += 1 }, cancel: { cancelled += 1 }, completion: { _ in })
+            check(executed == 1 && cancelled == 1 && takeovers == 1 && announcements == 0,
+                "Local input did not immediately replace automatic control without voice")
+            check(!b.manualArmSessionActive && !b.authorizesRightArmTrial("Local target") && !b.authorizesSupervisedArmRoute(),
+                "Local input leaked reusable automatic-route authority")
+            oldDone?(["status": "completed"])
+            b.tick()
+            check(b.isPending && announcements == 0, "Old completion or tick interrupted the local command")
+            gateway.generation += 1; b.tick()
+            check(!b.isPending && cancelled == 2, "Changed gateway did not cancel local execution")
+
+            var result: NSDictionary = [:]
+            gateway.feedbackFresh = false
+            b.performLocalPanelArmCommand(operation: "cmd_position_input", arm: "left", summary: "Stale target",
+                execute: { _ in executed += 1 }, cancel: {}, completion: { result = $0 })
+            check(executed == 1 && result["status"] as? String == "blocked", "Local input bypassed stale feedback")
+            gateway.feedbackFresh = true
+            b.performLocalPanelArmCommand(operation: "restart_stack", arm: "left", summary: "Unknown local action",
+                execute: { _ in executed += 1 }, cancel: {}, completion: { result = $0 })
+            check(executed == 1 && result["status"] as? String == "rejected", "Panel command scope admitted stack maintenance")
+
+            gateway.ownerBusy = true
+            b.performLocalPanelArmCommand(operation: "cmd_position_input", arm: "left", summary: "Handoff target",
+                execute: { done in executed += 1; done(["status": "completed"]) }, cancel: {}, completion: { result = $0 })
+            check(executed == 1 && b.isPending, "Local command ran before the previous owner released")
+            gateway.ownerBusy = false
+            RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+            check(executed == 2 && !b.isPending, "Fresh ownership handoff did not dispatch the captured command")
+            gateway.ownerBusy = true
+            b.performLocalPanelArmCommand(operation: "cmd_position_input", arm: "right", summary: "Cancelled handoff",
+                execute: { _ in executed += 1 }, cancel: {}, completion: { _ in })
+            b.cancel(reason: "Fixture Stop"); gateway.ownerBusy = false
+            RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+            check(executed == 2 && !b.isPending, "Stop allowed a delayed ownership-handoff command")
+
+            for (i, operation) in ["close_gripper", "open_gripper", "calibrate_gripper"].enumerated() {
+                let id = UInt64(900 + i)
+                b.performLocalPanelGatewayCommand(operation: operation, arm: "right", summary: "Local gripper button",
+                    command: { executed += 1; return id }, completion: { result = $0 })
+                check(b.isPending, "Local gripper button did not dispatch immediately")
+                NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                    userInfo: ["commandID": NSNumber(value: id), "accepted": true])
+                check(!b.isPending && result["status"] as? String == "accepted_unverified",
+                    "Gripper acknowledgement was not matched or falsely claimed physical completion")
+            }
+            check(executed == 5 && announcements == 0, "A native gripper button asked for a voice session")
+            b.request(operation: "startup", arm: "both", summary: "Unrelated automatic routine",
+                execute: { _ in executed += 1 }, cancel: {}, completion: { _ in })
+            check(executed == 5 && announcements == 1, "Local press silently authorized an unrelated automatic routine")
+            b.cancel(reason: "Fixture complete")
+        }
+
+        // A real mission Start covers each native can phase once. It never
+        // manufactures voice/peer responses or leaks into unrelated operations.
+        do {
+            let b=broker()
+            var authorized=true,executed=0,announcements=0,cancelled=0
+            var finish:((NSDictionary)->Void)?
+            b.announceApproval={_ in announcements += 1}
+            b.requestRecycleMissionTask(summary:"Mission can to orange bucket",authorization:{authorized},
+                execute:{executed += 1;finish=$0},cancel:{cancelled += 1},completion:{_ in})
+            check(executed==1 && announcements==0,"Mission phase asked for another approval")
+            check(b.authorizesRightArmTrial("Mission can to orange bucket"),"Exact mission phase not authorized")
+            check(!b.authorizesRightArmTrial("Unrelated wave"),"Mission grant escaped exact phase")
+            check(!b.authorizesLeftArmTrial("Mission can to orange bucket"),"Mission grant authorized other arm")
+            b.tick();check(executed==1 && announcements==0,"Tick reissued mission operation")
+            finish?(["status":"completed"])
+            b.requestRecycleMissionTask(summary:"Next freshly observed can",authorization:{authorized},
+                execute:{_ in executed += 1},cancel:{cancelled += 1},completion:{_ in})
+            check(executed==2 && announcements==0,"Same live mission did not cover the next phase")
+            authorized=false;b.tick()
+            check(cancelled==1 && !b.isPending,"Mission stop/disconnect did not revoke active arm phase")
+            b.requestRecycleMissionTask(summary:"Stale phase",authorization:{authorized},
+                execute:{_ in executed += 1},cancel:{},completion:{_ in})
+            check(executed==2,"Expired mission executed another phase")
         }
 
         // No controller, unauthenticated hello, or old client can authorize.
@@ -333,6 +428,161 @@ final class ROBAmberGatewayClient: NSObject {
             check(stopped == 1 && !b.authorizesLeftArmTrial("Deliberate camera search and transfer"), "The complete search task remains bounded to ten minutes")
         }
 
+        // One explicit approval covers native manual controls on both arms.
+        // This permission does not leak into ordinary model/routine requests.
+        do {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            gateway.ready = true; gateway.generation = 400
+            var clock = Date(), prompts = 0, commands: [String] = []
+            b.now = { clock }; b.announceApproval = { _ in prompts += 1 }
+            b.beginManualArmSession { _ in }
+            check(!b.manualArmSessionActive && prompts == 1 && commands.isEmpty, "Opening manual session cannot move or authorize")
+            check(b.receiveSpokenAuthorization("yes, proceed"), "One final spoken approval enables manual controls")
+            check(b.manualArmSessionActive && !b.armSessionActive && b.manualArmSessionDetail.contains("15:00"), "Both-arm manual scope has its own fixed deadline")
+            for arm in ["left", "right"] {
+                for op in ["activate", "position", "deactivate", "cmd_position_mode_v2", "cmd_position_input", "cmd_cartesian_input"] {
+                    b.requestManualArmCommand(operation: op, arm: arm, summary: "Native button \(op) \(arm)",
+                        execute: { done in commands.append(op + arm); done(["status": "accepted_unverified"]) }, cancel: {}, completion: { _ in })
+                }
+            }
+            check(commands.count == 12 && prompts == 1 && b.manualArmSessionActive, "Repeated controls on both arms must reuse one approval")
+            b.requestManualArmCommand(operation: "deactivate", arm: "right", summary: "Fresh-feedback rejection",
+                execute: { done in done(["status": "blocked", "detail": "Transient feedback stale"]) }, cancel: {}, completion: { _ in })
+            check(b.manualArmSessionActive && prompts == 1, "A rejected no-motion button command must not erase the operator's 15-minute permission")
+            var gatewayDispatches = 0
+            b.requestGatewayCommand(operation: "deactivate", arm: "left", summary: "Diagnostics native torque off",
+                command: { gatewayDispatches += 1; return 807 }, completion: { _ in })
+            check(gatewayDispatches == 1 && prompts == 1, "Diagnostics mode buttons must share the manual session")
+            NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                userInfo: ["commandID": NSNumber(value: 807), "accepted": true])
+            check(!b.isPending && b.manualArmSessionActive, "Acknowledged manual mode command keeps the session available")
+            var gripperDispatches = 0
+            for arm in ["left", "right"] {
+                for operation in ["close_gripper", "open_gripper", "close_gripper", "open_gripper"] {
+                    let id = UInt64(900 + gripperDispatches)
+                    var terminal: NSDictionary = [:]
+                    b.requestGatewayCommand(operation: operation, arm: arm, summary: "Native gripper \(operation) \(arm)",
+                        command: { gripperDispatches += 1; return id }, completion: { terminal = $0 })
+                    check(b.isPending && prompts == 1, "Hold/Release must reuse the existing manual approval on either arm")
+                    NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                        userInfo: ["commandID": NSNumber(value: id), "accepted": true])
+                    check(terminal["status"] as? String == "accepted_unverified" && !b.isPending,
+                        "Gripper acknowledgement must remain distinct from measured physical completion")
+                }
+            }
+            check(gripperDispatches == 8 && prompts == 1 && b.manualArmSessionActive,
+                "Repeated bilateral Hold/Release must not consume or extend the manual session")
+            check(b.manualArmSessionDetail.contains("gripper Hold/Release"), "Countdown must disclose the complete manual scope")
+            var rejected: NSDictionary = [:]
+            gateway.feedbackFresh = false
+            b.requestGatewayCommand(operation: "close_gripper", arm: "right", summary: "Stale motor feedback",
+                command: { gripperDispatches += 1; return 999 }, completion: { rejected = $0 })
+            check(rejected["status"] as? String == "blocked" && gripperDispatches == 8 && prompts == 1 && b.manualArmSessionActive,
+                "An authorized gripper still needs fresh feedback; a no-dispatch rejection must not add a prompt")
+            gateway.feedbackFresh = true
+            b.requestGatewayCommand(operation: "open_gripper", arm: "both", summary: "Invalid single-arm selection",
+                command: { gripperDispatches += 1; return 999 }, completion: { rejected = $0 })
+            check(rejected["status"] as? String == "rejected" && gripperDispatches == 8 && prompts == 1,
+                "An invalid physical side must not silently route to the left arm")
+            var ordinaryRan = false
+            b.request(operation: "manual", arm: "right", summary: "Ordinary model request",
+                execute: { _ in ordinaryRan = true }, cancel: {}, completion: { _ in })
+            check(!ordinaryRan && prompts == 2, "Generic model requests cannot inherit manual UI permission")
+            b.cancel(reason: "Fixture Stop")
+            check(!b.manualArmSessionActive, "Stop must revoke manual permission")
+        }
+        for operation in ["zero_position_mode_v2", "cmd_current_mode_v2", "restart_stack", "close_gripper"] {
+            let b = broker(); var ran = false, prompts = 0
+            b.announceApproval = { _ in prompts += 1 }
+            b.beginManualArmSession { _ in }; _ = b.receiveSpokenAuthorization("yes")
+            b.requestManualArmCommand(operation: operation, arm: "left", summary: operation,
+                execute: { _ in ran = true }, cancel: {}, completion: { _ in })
+            check(!ran && prompts == 2, "Unrelated operation cannot inherit manual position/mode scope: \(operation)")
+            b.cancel(reason: "End fixture")
+        }
+        for ending in ["expiry", "connection", "disconnect", "stop"] {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            gateway.ready = true; gateway.generation = 500
+            var clock = Date(), cancelled = 0, prompts = 0
+            b.now = { clock }; b.announceApproval = { _ in prompts += 1 }
+            b.beginManualArmSession { _ in }; _ = b.receiveSpokenAuthorization("yes proceed")
+            clock.addTimeInterval(899)
+            check(b.manualArmSessionActive, "Manual control remains available through 899 seconds")
+            // Wire constructors use the wall clock, independently of the broker
+            // clock seam. Restore it before constructing the next wire request.
+            clock.addTimeInterval(-899)
+            var delayed: ((NSDictionary) -> Void)?
+            b.requestManualArmCommand(operation: "cmd_position_input", arm: "right", summary: "Delayed manual target",
+                execute: { delayed = $0 }, cancel: { cancelled += 1 }, completion: { _ in })
+            check(delayed != nil && prompts == 1, "Manual command must reuse the active scope")
+            if ending == "expiry" { clock.addTimeInterval(901) }
+            if ending == "connection" { gateway.generation += 1 }
+            if ending == "disconnect" { gateway.ready = false }
+            if ending == "stop" { b.cancel(reason: "Operator Stop") }
+            b.tick()
+            check(!b.manualArmSessionActive && !b.isPending && cancelled == 1, "\(ending) must end pending manual execution without extending the deadline")
+            delayed?(["status": "completed"])
+            check(!b.manualArmSessionActive, "Late acknowledgement cannot restore an ended manual session")
+            gateway.ready = true
+        }
+        do {
+            let b = broker(); var prompts = 0, commands = 0
+            b.announceApproval = { _ in prompts += 1 }
+            b.requestManualArmCommand(operation: "cmd_deactivate_mode_v2", arm: "right", summary: "First torso button",
+                execute: { done in commands += 1; done(["status": "completed"]) }, cancel: {}, completion: { _ in })
+            check(prompts == 1 && commands == 0, "First manual button requests the complete session")
+            _ = b.receiveSpokenAuthorization("yes proceed")
+            check(prompts == 1 && commands == 1 && b.manualArmSessionActive, "First manual button executes after one approval, not two")
+            b.cancel(reason: "End fixture")
+        }
+
+        // A gripper can be the first native manual action. It starts the full
+        // session once; calibration and automatic requests stay separate.
+        for operation in ["close_gripper", "open_gripper"] {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            gateway.ready = true; gateway.feedbackFresh = true; gateway.generation = 600
+            var prompts = 0, commands = 0, requests: [ROBRobotActionMessage] = []
+            b.announceApproval = { _ in prompts += 1 }
+            b.send = { message, _, _ in if message.kind == .actionRequest { requests.append(message) }; return true }
+            _ = b.receive(hello, device: device, session: session)
+            b.requestGatewayCommand(operation: operation, arm: "right", summary: "First native gripper button",
+                command: { commands += 1; return 1001 }, completion: { _ in })
+            check(commands == 0 && prompts == 1 && requests.count == 1,
+                "A first Hold/Release click must request one complete manual session before dispatch")
+            check((requests[0].arguments["summary"] as? String)?.contains("gripper Hold/Release") == true,
+                "Controller must see the gripper scope before approving the manual session")
+            _ = b.receive(reply(requests[0]), device: device, session: session)
+            check(commands == 1 && prompts == 1 && b.manualArmSessionActive,
+                "Controller approval must dispatch the first gripper action without a second question")
+            NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                userInfo: ["commandID": NSNumber(value: 1001), "accepted": false, "error": "Fixture rejected command"])
+            check(b.manualArmSessionActive && !b.isPending, "Rejected gripper acknowledgement must retain the active manual session")
+            b.requestGatewayCommand(operation: "calibrate_gripper", arm: "right", summary: "Full-travel calibration",
+                command: { commands += 1; return 1002 }, completion: { _ in })
+            check(commands == 1 && prompts == 2, "Full-travel calibration must retain its separate approval")
+            b.cancel(reason: "End fixture")
+        }
+        for ending in ["expiry", "connection", "disconnect", "stop"] {
+            let b = broker(), gateway = ROBAmberGatewayClient.shared
+            gateway.ready = true; gateway.generation = 700
+            var clock = Date(), commands = 0, prompts = 0
+            b.now = { clock }; b.announceApproval = { _ in prompts += 1 }
+            b.beginManualArmSession { _ in }; _ = b.receiveSpokenAuthorization("yes proceed")
+            b.requestGatewayCommand(operation: "open_gripper", arm: "right", summary: "Pending gripper release",
+                command: { commands += 1; return 1101 }, completion: { _ in })
+            check(commands == 1 && prompts == 1 && b.isPending, "Gripper must enter the existing manual session")
+            if ending == "expiry" { clock.addTimeInterval(901) }
+            if ending == "connection" { gateway.generation += 1 }
+            if ending == "disconnect" { gateway.ready = false }
+            if ending == "stop" { b.cancel(reason: "Operator Stop") }
+            b.tick()
+            NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: gateway,
+                userInfo: ["commandID": NSNumber(value: 1101), "accepted": true])
+            check(!b.manualArmSessionActive && !b.isPending && commands == 1,
+                "\(ending) must revoke gripper session without retrying or restoring a late command")
+            gateway.ready = true
+        }
+
         // A local imported receipt is a distinct lane, never a microphone or
         // controller impersonation. All texts here are synthetic fixture data.
         let localDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("local-recycling-approval-" + UUID().uuidString)
@@ -346,6 +596,44 @@ final class ROBAmberGatewayClient: NSObject {
         func hash(_ text: String) -> String {
             SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
         }
+        #if DEBUG
+        do {
+            let previous = UserDefaults.standard.object(forKey: "ROBDevelopmentMode")
+            UserDefaults.standard.set(true, forKey: "ROBDevelopmentMode")
+            defer {
+                if let previous { UserDefaults.standard.set(previous, forKey: "ROBDevelopmentMode") }
+                else { UserDefaults.standard.removeObject(forKey: "ROBDevelopmentMode") }
+            }
+            let b = localBroker(), context = "synthetic-both-arm-context", revision = "fixture-ready-v1"
+            func torsoReceipt(_ change: (inout [String: Any]) -> Void = { _ in }) throws -> URL {
+                var value = b.torsoPreparationTemplate(context: context, readyPoseRevision: revision)
+                let messages = ["Synthetic instruction to prepare both empty arms.", "Synthetic observed clear sweep."]
+                value["sourceMessages"] = messages; value["sourceMessageSHA256"] = messages.map(hash)
+                value["bothArmsEmpty"] = true; value["operatorObservesClearLift"] = true
+                change(&value)
+                let url = localDirectory.appendingPathComponent(UUID().uuidString + ".json")
+                try JSONSerialization.data(withJSONObject: value).write(to: url)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                return url
+            }
+            for change: (inout [String: Any]) -> Void in [
+                { $0["context"] = "changed pose" }, { $0["appSessionID"] = UUID().uuidString },
+                { $0["bothArmsEmpty"] = false }, { $0["operatorObservesClearLift"] = false },
+                { $0["jawCommands"] = true }, { $0["torsoCommands"] = true },
+                { $0["readyPoseRevision"] = "different target" }, { $0["sourceMessageSHA256"] = [] },
+                { $0["issuedAtMilliseconds"] = 0.0 }
+            ] {
+                let url = try torsoReceipt(change)
+                do { _ = try b.consumeTorsoPreparationReceipt(url, context: context, readyPoseRevision: revision); check(false, "Changed preparation receipt admitted") }
+                catch { check(true, "Changed preparation receipt rejected") }
+            }
+            let url = try torsoReceipt()
+            _ = try b.consumeTorsoPreparationReceipt(url, context: context, readyPoseRevision: revision)
+            check(!b.isPending && !b.armSessionActive && !b.manualArmSessionActive, "Preparation must not create a general session")
+            do { _ = try b.consumeTorsoPreparationReceipt(url, context: context, readyPoseRevision: revision); check(false, "Preparation receipt replayed") }
+            catch { check(true, "One-use preparation receipt rejected replay") }
+        }
+        #endif
         func receipt(_ b: ROBControllerArmApproval, mutate: (inout [String: Any]) -> Void = { _ in }) throws -> URL {
             var value = b.localRecyclingReceiptTemplate! as! [String: Any]
             value["sourceMessage"] = "Synthetic explicit user instruction for this isolated four-can fixture."
@@ -412,6 +700,8 @@ final class ROBAmberGatewayClient: NSObject {
                 execute: { executed += 1; done = $0 }, cancel: {}, completion: { _ in })
             check(b.pendingLocalRecyclingApprovalScope?["nominalEmptyCommissioningStepEnabled"] as? Bool == true,
                 "The exact one-step flag must be visible in the immutable prepared scope")
+            check(b.pendingLocalRecyclingApprovalScope?["nominalModelAssumedSelfEnabled"]==nil,"OFF scope serialization must omit the new optional flag")
+            check(b.pendingLocalRecyclingApprovalScope?["sourcePixelSelfReviewSHA256"]==nil,"OFF scope serialization must omit optional source-pixel evidence")
             check(!b.receiveSpokenAuthorization("yes proceed") && executed == 0,
                 "Speech cannot enable or grant the one-step receipt-only experiment")
             let changed = try receipt(b) { value in
@@ -433,6 +723,82 @@ final class ROBAmberGatewayClient: NSObject {
             check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: summary, arm: "right") &&
                 b.localRecyclingApprovalState == nil, "Finishing the one-step experiment cannot retain a reusable motion grant")
         }
+        do {
+            let b=localBroker();var executed=0
+            let summary="ONE model-assumed EMPTY RIGHT J2 nominal step with14keyframes; not observed self"
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:summary,
+                contextIdentity:{"inert-model-assumed-context"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                nominalEmptyCommissioningStepEnabled:true,nominalModelAssumedSelfEnabled:true,
+                execute:{_ in executed+=1},cancel:{},completion:{_ in})
+            check(b.pendingLocalRecyclingApprovalScope?["nominalModelAssumedSelfEnabled"]as?Bool==true,"New model hypothesis flag must be explicit in immutable receipt")
+            let changed=try receipt(b){value in var scope=value["scope"]as![String:Any];scope.removeValue(forKey:"nominalModelAssumedSelfEnabled");value["scope"]=scope}
+            expectReceiptRejection(b,changed,"Legacy nominal receipt cannot authorize model-assumed source-group admission")
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt(b))
+            check(executed==1 && b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",modelAssumedSelfEnabled:true),"Exact native model-assumed flag admits only its dedicated experiment")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right"),"New assumption permission must not alias legacy nominal OFF binding")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"left",modelAssumedSelfEnabled:true),"Model assumption cannot cross physical side")
+            b.cancel(reason:"fixture Stop")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",modelAssumedSelfEnabled:true),"Stop revokes model-assumed commissioning")
+        }
+        for (side,nominal,oneDegree) in [("left",true,false),("right",false,false),("right",true,true)] {
+            let b=localBroker();var rejected=false
+            b.requestRecyclingWorkspaceTask(command:side+"_recycle_cans",arm:side,canCount:4,summary:"inert invalid model assumption",
+                contextIdentity:{"inert"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                nominalEmptyCommissioningStepEnabled:nominal,nominalModelAssumedSelfEnabled:true,oneDegreeEmptyCalibrationStepEnabled:oneDegree,
+                execute:{_ in},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            check(rejected && b.pendingLocalRecyclingApprovalScope==nil,"Model assumption requires RIGHT+nominal and excludes other calibration modes")
+        }
+        do {
+            let b=localBroker();var executed=0,rejected=false
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:"DEBUG open-jaw approach then hold before close",
+                contextIdentity:{"inert-approach-context"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                approachCanThenHoldEnabled:true,execute:{_ in executed+=1},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            #if DEBUG
+            check(b.pendingLocalRecyclingApprovalScope?["approachCanThenHoldEnabled"]as?Bool==true,"Approach hold must be explicit immutable receipt scope")
+            let wrong=try receipt(b){value in var scope=value["scope"]as![String:Any];scope.removeValue(forKey:"approachCanThenHoldEnabled");value["scope"]=scope}
+            expectReceiptRejection(b,wrong,"Ordinary receipt cannot authorize approach-only scope")
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt(b))
+            check(executed==1 && b.activeLocalRecyclingApprovalEvidence?["approachCanThenHoldEnabled"]as?Bool==true,"Exact approach receipt starts once and preserves scope")
+            b.cancel(reason:"fixture Stop")
+            #else
+            check(rejected && executed==0 && b.pendingLocalRecyclingApprovalScope==nil,"Approach-only mode is DEBUG-only")
+            #endif
+        }
+        do {
+            let b=localBroker();var executed=0,rejected=false
+            let summary="DEBUG LLM reviewed source pixels freshly matched; ONE EMPTY J2 step only"
+            let evidence=String(repeating:"a",count:64)
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:summary,
+                contextIdentity:{"inert-current-pixel-context"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                nominalEmptyCommissioningStepEnabled:true,sourcePixelSelfReviewSHA256:evidence,
+                execute:{_ in executed+=1},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            #if DEBUG
+            check(!rejected && executed==0,"Pixel evidence requests a new receipt, never starts motion")
+            check(b.pendingLocalRecyclingApprovalScope?["sourcePixelSelfReviewSHA256"]as?String==evidence,"Current native pixel view hash must be visible in exact scope")
+            let changed=try receipt(b){value in var scope=value["scope"]as![String:Any];scope.removeValue(forKey:"sourcePixelSelfReviewSHA256");value["scope"]=scope}
+            expectReceiptRejection(b,changed,"Historical/default nominal receipt cannot grant reviewed source pixels")
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt(b))
+            check(executed==1 && b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",sourcePixelSelfReviewSHA256:evidence),"Exact fresh private receipt binds current native pixel evidence")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right"),"Pixel assumption cannot alias OFF nominal grant")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",sourcePixelSelfReviewSHA256:String(repeating:"b",count:64)),"Changed pixel evidence requires new receipt")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",modelAssumedSelfEnabled:true,sourcePixelSelfReviewSHA256:evidence),"Pixel evidence cannot enable MODEL hull fallback")
+            b.cancel(reason:"fixture Stop")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary:summary,arm:"right",sourcePixelSelfReviewSHA256:evidence),"Stop revokes pixel commissioning receipt")
+            #else
+            check(rejected && executed==0 && b.pendingLocalRecyclingApprovalScope==nil,"Source-pixel commissioning must reject in nonDEBUG builds")
+            #endif
+        }
+        #if DEBUG
+        for (side,nominal,modelAssumed,receiptOnly,hash) in [("left",true,false,true,String(repeating:"a",count:64)),
+            ("right",false,false,true,String(repeating:"a",count:64)),("right",true,true,true,String(repeating:"a",count:64)),
+            ("right",true,false,false,String(repeating:"a",count:64)),("right",true,false,true,"bad")] {
+            let b=localBroker();var rejected=false
+            b.requestRecyclingWorkspaceTask(command:side+"_recycle_cans",arm:side,canCount:4,summary:"inert invalid source-pixel scope",contextIdentity:{"inert"},
+                receiptOnly:receiptOnly,permitsUnmeasuredVisualCalibrationTrial:true,nominalEmptyCommissioningStepEnabled:nominal,
+                nominalModelAssumedSelfEnabled:modelAssumed,sourcePixelSelfReviewSHA256:hash,execute:{_ in},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            check(rejected && b.pendingLocalRecyclingApprovalScope==nil,"Pixel commissioning requires RIGHT/nominal/private/validhash and NO MODEL fallback")
+        }
+        #endif
         for (receiptOnly, visualTrial) in [(false, true), (true, false)] {
             let b = localBroker(); var executed = 0, rejected = false
             b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,
@@ -639,6 +1005,35 @@ final class ROBAmberGatewayClient: NSObject {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             return file
         }
+        for approach in [false,true] {
+            let b=localBroker();var rejected=false
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:"Inert UNKNOWN advisory without standing source",
+                contextIdentity:{"inert"},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                approachCanThenHoldEnabled:approach,approachUnknownAdvisoryEnabled:true,
+                execute:{_ in check(false,"Missing standing UNKNOWN scope executed")},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            check(rejected && !b.isPending,"UNKNOWN advisory needs both approach-only and standing typed source")
+        }
+        do {
+            let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-unknown-approach")
+            try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            var executed=0,rejected=false,context="unknown-approach-A"
+            let summary="DEBUG EMPTY open-jaw approach; unknown recorded advisory, occupied/self/person/Stop strict"
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,summary:summary,
+                contextIdentity:{context},receiptOnly:true,permitsUnmeasuredVisualCalibrationTrial:true,
+                approachCanThenHoldEnabled:true,approachUnknownAdvisoryEnabled:true,
+                execute:{_ in executed+=1},cancel:{},completion:{rejected=$0["status"]as?String=="rejected"})
+            #if DEBUG
+            check(executed==1 && b.activeLocalRecyclingApprovalEvidence?["approachUnknownAdvisoryEnabled"]as?Bool==true,
+                "Exact standing DEBUG subset carries immutable UNKNOWN advisory evidence")
+            check(b.activeLocalRecyclingApprovalEvidence?["standingCampaignID"] != nil,"UNKNOWN subset retains original standing lineage")
+            check(b.authorizesRightArmTrial(summary),"Fresh exact open-jaw UNKNOWN subset authorizes existing route gates")
+            context="unknown-approach-B"
+            check(!b.authorizesRightArmTrial(summary),"Changed UNKNOWN context invalidates the frozen job")
+            #else
+            check(rejected && executed==0,"UNKNOWN approach subset must remain DEBUG-only")
+            #endif
+            b.cancel(reason:"fixture Stop")
+        }
         do {
             let b=localBroker();b.standingCanCampaignDirectory=localDirectory.appendingPathComponent("standing-positive")
             let input=try standingFile(b);var executions=0,prompts=0,stops=0,context:String?="fresh-source-A"
@@ -651,6 +1046,7 @@ final class ROBAmberGatewayClient: NSObject {
                     execute:{executions+=1;done=$0},cancel:{stops+=1},completion:{_ in})
             }
             run(b,"First fresh ordinary can plan")
+            check(b.activeLocalRecyclingApprovalEvidence?["approachUnknownAdvisoryEnabled"]==nil,"OFF remains absent from legacy scope serialization")
             let firstID=b.activeLocalRecyclingApprovalEvidence?["receiptID"] as?String
             check(executions==1 && prompts==0 && firstID != nil && b.authorizesRightArmTrial("First fresh ordinary can plan"),
                 "Standing campaign binds a fresh exact ordinary can plan without another voice/file approval")
@@ -972,6 +1368,235 @@ final class ROBAmberGatewayClient: NSObject {
             b.cancel(reason: "Fixture cleanup")
         }
 
+        // These exact words are synthetic object-state fixture input, not a
+        // microphone callback or another arm-motion approval.
+        func uncertainObjectStateBroker(_ label:String)throws->ROBControllerArmApproval {
+            let old=localBroker();old.standingCanCampaignDirectory=localDirectory.appendingPathComponent("empty-observation-"+label)
+            try old.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(old))
+            old.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,
+                summary:"Synthetic old job with uncertain contents",contextIdentity:{"old-job-context"},receiptOnly:true,
+                permitsUnmeasuredVisualCalibrationTrial:true,execute:{_ in},cancel:{},completion:{_ in})
+            try old.recordLocalCanCampaignTransferProgress(1,bucketLandingVerified:true)
+            try old.markLocalCanCampaignPossiblePayloadHeld()
+            let stateURL=old.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            value["recoveryAttempts"]=2
+            // Reproduce the crash guard's old-executing OR even when its
+            // explicit payload flag was still false before the interruption.
+            if label=="positive" {value["possiblePayloadHeld"]=false}
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:stateURL)
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=old.standingCanCampaignDirectory
+            return restarted
+        }
+        func emptyObservationFile(_ b:ROBControllerArmApproval,mutate:(inout[String:Any])->Void={_ in})throws->URL {
+            let file=localDirectory.appendingPathComponent(UUID().uuidString+"-empty-observation.json")
+            try b.exportLocalCanCampaignEmptyObservationTemplate(to:file)
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:file))as![String:Any]
+            value["sourceMessage"]="Both grippers are empty";value["sourceMessageSHA256"]=hash("Both grippers are empty")
+            mutate(&value)
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:file)
+            return file
+        }
+        do {
+            let b=try uncertainObjectStateBroker("positive"),stateURL=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            let before=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            let campaign=before["campaignID"]as!String,authorizationURL=b.standingCanCampaignDirectory.appendingPathComponent("authorization-"+campaign+".json")
+            let authorization=try Data(contentsOf:authorizationURL),holds=ROBAmberGatewayClient.shared.holds
+            var commands=0,prompts=0
+            b.send={_,_,_ in commands+=1;return true};b.announceApproval={_ in prompts+=1}
+            check(b.canImportLocalCanCampaignEmptyObservation && b.standingCanCampaignMayHoldPayload,
+                "Previous-app execution remains uncertain until actual object-state evidence")
+            let file=try emptyObservationFile(b)
+            check(b.standingCanCampaignMayHoldPayload && !b.isPending,"Export alone cleared contents or started work")
+            try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:file)
+            let after=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            let mutable:Set<String>=["possiblePayloadHeld","state","detail"]
+            let beforePreserved=before.filter{!mutable.contains($0.key)},afterPreserved=after.filter{!mutable.contains($0.key)}
+            let beforeBytes=try JSONSerialization.data(withJSONObject:beforePreserved,options:.sortedKeys)
+            let afterBytes=try JSONSerialization.data(withJSONObject:afterPreserved,options:.sortedKeys)
+            check(beforeBytes==afterBytes,
+                "EMPTY fact changed campaign authorization, transfer counts, attempts or job history")
+            check(after["state"]as?String=="paused" && after["possiblePayloadHeld"]as?Bool==false &&
+                !b.standingCanCampaignMayHoldPayload && !b.canImportLocalCanCampaignEmptyObservation,
+                "Previous executing-state uncertainty reasserted after the explicit EMPTY fact")
+            check(!b.isPending && b.standingLocalCanCampaignActive && commands==0 && prompts==0 &&
+                ROBAmberGatewayClient.shared.holds==holds && !b.authorizesRightArmTrial("invented"),
+                "Object-state import created motion authority, spoke approval or issued a command")
+            let retainedAuthorization=try Data(contentsOf:authorizationURL)
+            check(retainedAuthorization==authorization &&
+                !FileManager.default.fileExists(atPath:b.standingCanCampaignDirectory.appendingPathComponent("terminal-"+campaign+".json").path),
+                "Object-state evidence rewrote authorization or terminal history")
+            let receipt=try JSONSerialization.jsonObject(with:Data(contentsOf:file))as![String:Any]
+            let auditURL=b.localRecyclingApprovalAuditDirectory.appendingPathComponent("empty-observation-"+(receipt["observationID"]as!String)+".json")
+            let audit=try JSONSerialization.jsonObject(with:Data(contentsOf:auditURL))as![String:Any]
+            check(audit["source"]as?String=="explicit_user_observation" && audit["sourceMessage"]as?String=="Both grippers are empty" &&
+                audit["motionAuthority"]as?Bool==false && audit["taskStarted"]as?Bool==false && audit["previousPossiblePayloadHeld"]as?Bool==true,
+                "Object-state audit lost truthful source or claimed task authority")
+            let permissions=try FileManager.default.attributesOfItem(atPath:auditURL.path)[.posixPermissions]as?NSNumber
+            check(permissions?.intValue==0o600,"Object-state audit is not private0600")
+            do {try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:file);check(false,"Object observation replay imported")}
+            catch {check(!b.isPending && !b.standingCanCampaignMayHoldPayload,"Replay changed EMPTY fact or started a task")}
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(!restarted.standingCanCampaignMayHoldPayload && restarted.standingLocalCanCampaignActive && !restarted.isPending,
+                "Recorded EMPTY fact did not survive relaunch independently of motion authority")
+            do {try restarted.importLocalCanCampaignEmptyObservation(fromReceiptURL:file);check(false,"Prior-app observation replay imported")}
+            catch {check(!restarted.isPending,"Prior-app replay started a task")}
+        }
+        for invalid in ["stale","future","app","campaign","authorization","state_hash","last_job","last_job_app","nonce",
+            "mic_source","model_source","message","hash","observation","scope","extra","nonce_expired","permissions","symlink","state_changed","pending","current_executing","revoked","consumed","audit_failure"] {
+            let b=try uncertainObjectStateBroker(invalid),stateURL=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var clock=b.now();b.now={clock}
+            let file=try emptyObservationFile(b){value in
+                switch invalid {
+                case "stale":value["issuedAtMilliseconds"]=clock.timeIntervalSince1970*1000-600_001
+                case "future":value["issuedAtMilliseconds"]=clock.timeIntervalSince1970*1000+1
+                case "app":value["appSessionID"]=UUID().uuidString
+                case "campaign":value["campaignID"]=UUID().uuidString
+                case "authorization":value["authorizationSHA256"]=String(repeating:"0",count:64)
+                case "state_hash":value["standingStateSHA256"]=String(repeating:"0",count:64)
+                case "last_job":value["lastJobID"]="other-job"
+                case "last_job_app":value["lastJobAppSessionID"]=UUID().uuidString
+                case "nonce":value["observationID"]=UUID().uuidString
+                case "mic_source":value["source"]="final_clean_local_microphone"
+                case "model_source":value["source"]="model_output"
+                case "message":value["sourceMessage"]="yes proceed";value["sourceMessageSHA256"]=hash("yes proceed")
+                case "hash":value["sourceMessageSHA256"]=String(repeating:"0",count:64)
+                case "observation":value["observation"]="left_gripper_empty"
+                case "scope":var scope=value["scope"]as![String:Any];scope["armTravel"]=true;value["scope"]=scope
+                case "extra":value["newAuthority"]=true
+                default:break
+                }
+            }
+            var input=file
+            if invalid=="nonce_expired" {clock.addTimeInterval(601)}
+            if invalid=="permissions" {try FileManager.default.setAttributes([.posixPermissions:0o644],ofItemAtPath:file.path)}
+            if invalid=="symlink" {
+                input=localDirectory.appendingPathComponent(UUID().uuidString+"-observation-link.json")
+                try FileManager.default.createSymbolicLink(at:input,withDestinationURL:file)
+            }
+            if invalid=="state_changed" || invalid=="current_executing" {
+                var value=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+                if invalid=="state_changed" {value["recoveryAttempts"]=1}
+                else {value["lastJobAppSessionID"]=b.localRecyclingApprovalSessionID}
+                try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:stateURL)
+            }
+            if invalid=="pending" {b.request(operation:"manual",arm:"right",summary:"Synthetic pending task",execute:{_ in check(false,"Pending observation test executed")},cancel:{},completion:{_ in})}
+            if invalid=="revoked" {b.cancel(reason:"Synthetic Stop before importing the fact")}
+            if invalid=="consumed" {
+                var value=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+                value["state"]="consumed";value["completedTransfers"]=4
+                try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:stateURL)
+            }
+            if invalid=="audit_failure" {
+                let blocker=localDirectory.appendingPathComponent(UUID().uuidString+"-audit-is-file")
+                try Data("not-a-directory".utf8).write(to:blocker);b.localRecyclingApprovalAuditDirectory=blocker
+            }
+            let before=try Data(contentsOf:stateURL),holds=ROBAmberGatewayClient.shared.holds
+            do {try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:input);check(false,"Invalid object-state receipt accepted: "+invalid)}
+            catch {
+                let retained=try Data(contentsOf:stateURL)
+                check(retained==before && b.standingCanCampaignMayHoldPayload && ROBAmberGatewayClient.shared.holds==holds,
+                    "Rejected observation changed contents/evidence or issued a command: "+invalid)
+            }
+        }
+        for state in ["active","paused","recovering"] {
+            let b=try uncertainObjectStateBroker("eligible-"+state),url=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            value["state"]=state;try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:url)
+            check(b.canImportLocalCanCampaignEmptyObservation,"Eligible uncertain nonexecuting state lacked the object-state observation path")
+            try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:emptyObservationFile(b))
+            check(!b.standingCanCampaignMayHoldPayload && !b.isPending && b.standingLocalCanCampaignState?["state"]as?String=="paused",
+                "Object-state observation resumed a nonexecuting campaign")
+        }
+        do {
+            let b=try uncertainObjectStateBroker("intervening-operation"),file=try emptyObservationFile(b)
+            var done:((NSDictionary)->Void)?
+            b.request(operation:"manual",arm:"right",summary:"Synthetic intervening operation",execute:{done=$0},cancel:{},completion:{_ in})
+            check(b.receiveSpokenAuthorization("yes proceed") && done != nil,"Synthetic intervening operation did not start")
+            done?(["status":"completed"])
+            check(!b.isPending,"Synthetic intervening operation did not finish")
+            do {try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:file);check(false,"An old object observation crossed an intervening arm operation")}
+            catch {check(b.standingCanCampaignMayHoldPayload && !b.isPending,"Old object fact changed uncertainty after another operation")}
+        }
+        do {
+            let b=localBroker();try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            var restarts=0
+            check(b.scheduleStandingLocalCanCampaignRecovery(reason:.transportLost,restart:{restarts+=1}),"Synthetic recovery did not queue")
+            let url=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            value["possiblePayloadHeld"]=true;try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:url)
+            try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:emptyObservationFile(b))
+            RunLoop.current.run(until:Date().addingTimeInterval(1.1))
+            check(restarts==0 && !b.isPending && !b.standingCanCampaignMayHoldPayload &&
+                (b.standingLocalCanCampaignState?["recoveryAttempts"]as?NSNumber)?.intValue==1,
+                "Import started queued recovery or reset its attempt count")
+        }
+
+        // Permission-state changes must materialize uncertainty inferred from
+        // an old app's executing job before removing that inference condition.
+        for transition in ["pause","revoke"] {
+            let b=try uncertainObjectStateBroker("old-executing-"+transition)
+            let stateURL=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            value["possiblePayloadHeld"]=false
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:stateURL)
+            check(b.standingCanCampaignMayHoldPayload,"Old executing job lost its implicit payload uncertainty")
+            if transition=="pause" {b.pauseStandingLocalCanCampaign(reason:"Synthetic maintenance quit")}
+            else {b.cancel(reason:"Synthetic Stop after crash")}
+            let saved=try JSONSerialization.jsonObject(with:Data(contentsOf:stateURL))as![String:Any]
+            check(saved["possiblePayloadHeld"]as?Bool==true && saved["state"]as?String==(transition=="pause" ? "paused":"revoked") &&
+                b.standingCanCampaignMayHoldPayload,"Permission transition silently cleared old-executing uncertainty: "+transition)
+            check(saved["lastJobID"]as?String==value["lastJobID"]as?String &&
+                saved["lastJobAppSessionID"]as?String==value["lastJobAppSessionID"]as?String &&
+                (saved["completedTransfers"]as?NSNumber)?.intValue==1 && (saved["recoveryAttempts"]as?NSNumber)?.intValue==2,
+                "Materializing object uncertainty changed the job history or counts")
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(restarted.standingCanCampaignMayHoldPayload,"Another restart silently cleared materialized object uncertainty")
+        }
+        do {
+            let b=localBroker();try b.importLocalCanCampaignAuthorization(fromReceiptURL:standingFile(b))
+            var done:((NSDictionary)->Void)?
+            b.requestRecyclingWorkspaceTask(command:"right_recycle_cans",arm:"right",canCount:4,
+                summary:"Synthetic completion-transition fixture",contextIdentity:{"current"},receiptOnly:true,
+                permitsUnmeasuredVisualCalibrationTrial:true,execute:{done=$0},cancel:{},completion:{_ in})
+            let url=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            // Inject a saved old-app record and completed counter only into
+            // this socket-free fixture to exercise the private consume path.
+            value["lastJobAppSessionID"]=UUID().uuidString;value["possiblePayloadHeld"]=false;value["completedTransfers"]=4
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:url)
+            done?(["status":"not_found","arm_motion_sent":false,"reach_sent":false])
+            let saved=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            check(saved["state"]as?String=="consumed" && saved["possiblePayloadHeld"]as?Bool==true &&
+                b.standingCanCampaignMayHoldPayload && !b.standingLocalCanCampaignActive && !b.isPending,
+                "Consuming permission erased old-executing payload uncertainty")
+        }
+        do {
+            let b=try uncertainObjectStateBroker("confirmed-empty-maintenance")
+            try b.importLocalCanCampaignEmptyObservation(fromReceiptURL:emptyObservationFile(b))
+            b.pauseStandingLocalCanCampaign(reason:"Synthetic maintenance after actual EMPTY evidence")
+            check(!b.standingCanCampaignMayHoldPayload && b.standingLocalCanCampaignState?["possiblePayloadHeld"]as?Bool==false,
+                "Maintenance turned a supported EMPTY fact into payload uncertainty")
+            b.cancel(reason:"Synthetic Stop after actual EMPTY evidence")
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(!restarted.standingCanCampaignMayHoldPayload,"Revoking known EMPTY permission fabricated a payload")
+        }
+        do {
+            let b=try uncertainObjectStateBroker("failed-maintenance-save")
+            let url=b.standingCanCampaignDirectory.appendingPathComponent("active-campaign.json")
+            var value=try JSONSerialization.jsonObject(with:Data(contentsOf:url))as![String:Any]
+            value["possiblePayloadHeld"]=false;try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:url)
+            try FileManager.default.setAttributes([.posixPermissions:0o500],ofItemAtPath:b.standingCanCampaignDirectory.path)
+            b.pauseStandingLocalCanCampaign(reason:"Synthetic maintenance with unwritable storage")
+            try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:b.standingCanCampaignDirectory.path)
+            check(b.standingCanCampaignMayHoldPayload,"A failed maintenance save exposed automatic EMPTY setup")
+            let restarted=localBroker();restarted.standingCanCampaignDirectory=b.standingCanCampaignDirectory
+            check(restarted.standingCanCampaignMayHoldPayload,"A failed pause lost uncertainty after another crash/restart")
+            b.cancel(reason:"Synthetic Stop after maintenance I/O failure")
+            check(b.standingCanCampaignMayHoldPayload && !b.standingLocalCanCampaignActive,
+                "Fallback revocation after I/O failure erased uncertainty")
+        }
+
         // Global typed Stop is authenticated independently of a task/card ID.
         // The notification consumer owns physical both-arm hold; this broker can
         // truthfully report only that Stop was requested and authority revoked.
@@ -1070,6 +1695,167 @@ final class ROBAmberGatewayClient: NSObject {
             check(restarts == 0 && notifications == 1, "Typed Stop cancels queued recovery without commanding a return")
             check(b.receive(controllerStop(), device: device, session: session) && notifications == 2,
                 "A distinct fresh operator Stop remains available after the previous job ended")
+        }
+        // New table relay is a distinct native written-user lane. No receipt,
+        // source or arm scope from the older can campaign can authorize it.
+        let relayCamera=UUID()
+        func relayContextValue(camera:UUID?=nil,error:Double=0.035)->ROBTableRelayContext {
+            .init(rightModelID:String(repeating:"c",count:64),rightReferenceID:String(repeating:"d",count:64),rightMappingID:String(repeating:"a",count:64),
+                leftModelID:String(repeating:"c",count:64),leftReferenceID:String(repeating:"d",count:64),leftMappingID:String(repeating:"b",count:64),
+                geometryID:String(repeating:"e",count:64),cameraGeneration:camera ?? relayCamera,bodyMotionIdentity:"synthetic stationary body",
+                gatewayGeneration:7,runtimeCalibrationIdentity:String(repeating:"f",count:64),stereoPolicySHA256:String(repeating:"1",count:64),
+                physicalProjectionIdentity:String(repeating:"2",count:64),assumedSpatialErrorMeters:error)
+        }
+        var relayContext:ROBTableRelayContext?=relayContextValue()
+        func relayFeedback(right:Double=0,left:Double=0,age:Double=1,rightMode:Int=2,leftMode:Int=2,
+            generation:UInt64=7,sequence:UInt64=100,rightStationary:Bool=true,leftStationary:Bool=true,leftAge:Double?=nil)->ROBTableRelayPhaseFeedback {
+            .init(gatewayGeneration:generation,rightPositions:[right,0,0,0,0,0,0],leftPositions:[left,0,0,0,0,0,0],
+                rightModes:Array(repeating:rightMode,count:7),leftModes:Array(repeating:leftMode,count:7),
+                rightTelemetrySequence:sequence,leftTelemetrySequence:sequence,rightStationary:rightStationary,leftStationary:leftStationary,
+                rightMotorAgeMilliseconds:age,leftMotorAgeMilliseconds:leftAge ?? age,rightGripperAgeMilliseconds:age,leftGripperAgeMilliseconds:leftAge ?? age)
+        }
+        func relayEmpty(_ b:ROBControllerArmApproval,source:String="audited_user_declared_empty_plus_no_acquisition_history",
+            acquisition:Int=0,declaredAt:Double?=nil)->ROBTableRelayInitialEmptyEvidence {
+            .init(source:source,declarationMessageSHA256:hash("Synthetic actual user fact: both grippers are empty"),
+                declarationAuditSHA256:hash("Synthetic private declaration audit"),taskHistorySHA256:hash("Synthetic empty startup and bounded empty motion only"),
+                declaredAtMilliseconds:declaredAt ?? b.now().timeIntervalSince1970*1000-1000,appSessionID:b.localRecyclingApprovalSessionID,
+                rightDeclaredEmpty:true,leftDeclaredEmpty:true,rightAcquisitionCommandsSinceDeclaration:acquisition,
+                leftAcquisitionCommandsSinceDeclaration:0,anyUncertainAcquisitionAcknowledgement:false,globalMayHoldPayload:false)
+        }
+        func relayReceipt(_ b:ROBControllerArmApproval,mutate:(inout[String:Any])->Void={_ in})throws->URL {
+            var value=b.pendingTableRelayReceiptTemplate as! [String:Any]
+            let source="Synthetic actual written user instruction: RIGHT picks up cans, places on a shared table; LEFT puts them in the orange bucket."
+            let additional="Synthetic explicit instruction: both arms permitted one at a time, stationary torso and treads, protected visual trial."
+            value["sourceMessage"]=source;value["sourceMessageSHA256"]=hash(source)
+            value["additionalUserInstruction"]=additional;value["additionalUserInstructionSHA256"]=hash(additional)
+            mutate(&value)
+            let url=localDirectory.appendingPathComponent(UUID().uuidString+"-table-relay.json")
+            try JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]).write(to:url)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+            return url
+        }
+        func relayRequest(_ b:ROBControllerArmApproval,count:Int=1,execute:@escaping(@escaping(NSDictionary)->Void)->Void={_ in}) {
+            b.requestTableRelayWorkspaceTask(canCount:count,summary:"Synthetic exact RIGHT-table-LEFT-bucket relay",
+                currentContext:{relayContext},execute:execute,cancel:{},completion:{_ in})
+        }
+        func relayReject(_ label:String,_ operation:()throws->Void) {
+            do {try operation();check(false,label)}catch {check(true,label)}
+        }
+        do {
+            let b=localBroker();var executed=0
+            relayRequest(b,execute:{_ in executed+=1})
+            check(b.isPending && b.pendingTableRelayReceiptTemplate != nil && executed==0,"Relay starts only from its native file receipt")
+            check(!b.receiveSpokenAuthorization("yes proceed"),"Spoken single-arm acknowledgement cannot import a relay receipt")
+            let invalids:[(String,(inout[String:Any])->Void)]=[
+                ("legacy version",{$0["schemaVersion"]=2}),
+                ("fake microphone",{$0["source"]="final_clean_local_microphone"}),
+                ("wrong pending job",{$0["pendingID"]=UUID().uuidString}),
+                ("wrong count",{v in var s=v["scope"]as![String:Any];s["canCount"]=2;v["scope"]=s}),
+                ("wrong route",{v in var s=v["scope"]as![String:Any];s["route"]=["right_pickup","orange_bucket"];v["scope"]=s}),
+                ("simultaneous arms",{v in var s=v["scope"]as![String:Any];s["oneMovingArmAtATime"]=false;v["scope"]=s}),
+                ("source hash",{$0["sourceMessageSHA256"]=hash("different")})]
+            for (label,mutate) in invalids {relayReject(label){try b.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(b,mutate:mutate))}}
+            let receipt=try relayReceipt(b)
+            relayReject("Legacy importer cannot accept relay"){try b.importLocalRecyclingSessionApproval(fromReceiptURL:receipt)}
+            try b.importLocalTableRelayApproval(fromReceiptURL:receipt)
+            check(executed==1 && b.tableRelayMayHoldPayload,"Relay import persists initial object uncertainty before execution")
+            check(!b.authorizesRightArmTrial("Synthetic exact RIGHT-table-LEFT-bucket relay") &&
+                !b.authorizesLeftArmTrial("Synthetic exact RIGHT-table-LEFT-bucket relay"),"Relay must not widen legacy arm grants")
+            relayReject("Bare empty evidence not accepted"){try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b,source:"arbitrary_hash"),feedback:relayFeedback())}
+            relayReject("Acquisition history not empty"){try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b,acquisition:1),feedback:relayFeedback())}
+            relayReject("Initial stale opposite arm"){try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b),feedback:relayFeedback(age:251))}
+            try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b),feedback:relayFeedback(rightMode:0,leftMode:0))
+            check(!b.tableRelayMayHoldPayload && b.activeTableRelayLedger?["supportStage"]as?String=="initial_empty_ASSUMED_declared_task_history",
+                "Audited declared-empty/no-acquisition chain works without a new prompt or measured-possession claim")
+            var feedback:ROBTableRelayPhaseFeedback?=relayFeedback()
+            let id=UUID(),proposal=hash("Synthetic immutable RIGHT pickup proposal")
+            relayReject("Wrong first phase"){try b.bindTableRelayPhaseProposal(phase:"left_pickup",physicalArm:"left",proposalID:id,proposalSHA256:proposal,feedback:{feedback})}
+            relayReject("Wrong physical side"){try b.bindTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"left",proposalID:id,proposalSHA256:proposal,feedback:{feedback})}
+            try b.bindTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal,feedback:{feedback})
+            check(b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Exact relay phase/proposal is live")
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:hash("changed")),"Changed proposal hash rejected")
+            relayReject("Second simultaneous binding"){try b.bindTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:UUID(),proposalSHA256:hash("second"),feedback:{feedback})}
+            feedback=relayFeedback(right:0.1)
+            check(b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Moving-arm q may advance within independently checked proposal")
+            feedback=relayFeedback(left:0.01)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Idle physical LEFT movement invalidates RIGHT proposal")
+            feedback=relayFeedback(leftStationary:false)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Nonselected arm must be independently stationary")
+            feedback=relayFeedback(age:251)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Both-arm motor/gripper freshness is mandatory")
+            feedback=relayFeedback(leftAge:251)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Fresh moving RIGHT cannot mask stale stationary LEFT feedback")
+            feedback=relayFeedback(rightMode:0)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Moving arm mode must remain position mode")
+            feedback=relayFeedback(generation:8)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Changed gateway invalidates proposal")
+            feedback=relayFeedback(sequence:99)
+            check(!b.authorizesTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal),"Feedback sequences cannot rewind")
+            feedback=relayFeedback()
+            try b.markTableRelayPossiblePayloadHeld(physicalArm:"right")
+            check(b.tableRelayMayHoldPayload && b.activeTableRelayLedger?["rightPossiblePayloadHeld"]as?Bool==true,"Possible RIGHT acquisition is durable before grip ack")
+            relayReject("No repeated grip in same phase"){try b.markTableRelayPossiblePayloadHeld(physicalArm:"right")}
+            try b.endTableRelayPhaseProposal(proposalID:id,proposalSHA256:proposal)
+            relayReject("No proposal replay"){try b.bindTableRelayPhaseProposal(phase:"right_pickup",physicalArm:"right",proposalID:id,proposalSHA256:proposal,feedback:{feedback})}
+            try b.recordTableRelayPhaseCompletion(phase:"right_pickup",evidenceSHA256:hash("actual native positive visual grasp"),feedback:relayFeedback())
+            check(b.activeTableRelayLedger?["phase"]as?String=="right_place_shared_table","Positive RIGHT grasp advances only to table placement")
+            b.cancel(reason:"Synthetic Stop during possible RIGHT carry")
+            check(!b.isPending && b.tableRelayMayHoldPayload && b.activeTableRelayLedger?["state"]as?String=="revoked","Stop revokes authority but preserves per-arm payload uncertainty")
+            let restarted=localBroker();restarted.localRecyclingApprovalAuditDirectory=b.localRecyclingApprovalAuditDirectory
+            check(restarted.tableRelayMayHoldPayload && restarted.activeTableRelayLedger==nil,"Restart reloads uncertainty, never relay authority")
+            relayRequest(restarted)
+            try restarted.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(restarted))
+            relayReject("Old empty declaration cannot erase possible acquisition"){try restarted.recordTableRelayInitialEmptyEvidence(relayEmpty(restarted),feedback:relayFeedback())}
+            try restarted.recordTableRelayInitialEmptyEvidence(relayEmpty(restarted,source:"fresh_audited_user_declared_empty",
+                declaredAt:restarted.now().timeIntervalSince1970*1000),feedback:relayFeedback())
+            check(!restarted.tableRelayMayHoldPayload,"A newer actual declared-empty fact can resolve prior uncertain acquisition")
+            restarted.cancel(reason:"Synthetic fixture stop")
+        }
+        do {
+            let b=localBroker();var done:((NSDictionary)->Void)?;var completion:NSDictionary=[:]
+            b.requestTableRelayWorkspaceTask(canCount:1,summary:"Synthetic complete native relay",currentContext:{relayContext},execute:{done=$0},cancel:{},completion:{completion=$0})
+            try b.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(b))
+            try b.recordTableRelayInitialEmptyEvidence(relayEmpty(b),feedback:relayFeedback())
+            let phases=["right_pickup","right_place_shared_table","right_retreat","left_pickup","left_place_bucket","left_retreat"]
+            for (i,phase) in phases.enumerated() {
+                let side=phase.hasPrefix("right_") ? "right":"left",id=UUID(),proposal=hash("synthetic phase \(i)")
+                relayReject("Phase cannot complete without a consumed native proposal"){try b.recordTableRelayPhaseCompletion(phase:phase,evidenceSHA256:hash("unbound"),feedback:relayFeedback())}
+                try b.bindTableRelayPhaseProposal(phase:phase,physicalArm:side,proposalID:id,proposalSHA256:proposal,feedback:{relayFeedback()})
+                if phase.hasSuffix("pickup") {try b.markTableRelayPossiblePayloadHeld(physicalArm:side)}
+                try b.endTableRelayPhaseProposal(proposalID:id,proposalSHA256:proposal)
+                try b.recordTableRelayPhaseCompletion(phase:phase,evidenceSHA256:hash("synthetic positive native result \(i)"),feedback:relayFeedback(),bucketLandingVerified:phase=="left_place_bucket")
+                if phase=="right_place_shared_table" {check(b.activeTableRelayLedger?["completedTransfers"]as?Int==0,"Table placement is not a recycled-can count")}
+            }
+            check(b.activeTableRelayLedger?["completedTransfers"]as?Int==1 && b.activeTableRelayLedger?["verifiedBucketLandings"]as?Int==1 && !b.tableRelayMayHoldPayload,
+                "Only final ordered bucket release/retreat completes the relay")
+            done?(["status":"completed"])
+            check(!b.isPending && completion["status"]as?String=="completed" && b.activeTableRelayLedger?["state"]as?String=="consumed","Complete relay consumes its grant")
+        }
+        do {
+            let b=localBroker();relayRequest(b)
+            let receipt=try relayReceipt(b);let original=try JSONSerialization.jsonObject(with:Data(contentsOf:receipt))as![String:Any]
+            try b.importLocalTableRelayApproval(fromReceiptURL:receipt);b.cancel(reason:"Synthetic cancellation")
+            relayRequest(b)
+            let replay=try relayReceipt(b){$0["receiptID"]=original["receiptID"]}
+            relayReject("Consumed/revoked receipt ID tombstone rejects fresh-pending replay"){try b.importLocalTableRelayApproval(fromReceiptURL:replay)}
+            b.cancel(reason:"Synthetic cleanup")
+        }
+        do {
+            let b=localBroker();var stopped=0
+            var clock=Date();b.now={clock}
+            b.requestTableRelayWorkspaceTask(canCount:1,summary:"Synthetic context-bound relay",currentContext:{relayContext},execute:{_ in},cancel:{stopped+=1},completion:{_ in})
+            try b.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(b))
+            relayContext=relayContextValue(camera:UUID());b.tick()
+            check(!b.isPending && stopped==1,"Camera/body/model/gateway stable context change revokes active relay")
+            relayContext=relayContextValue()
+            relayRequest(b);try b.importLocalTableRelayApproval(fromReceiptURL:relayReceipt(b));clock.addTimeInterval(601);b.tick()
+            check(!b.isPending,"Relay retains bounded600second execution")
+        }
+        do {
+            for count in [0,9] {let b=localBroker();relayRequest(b,count:count);check(!b.isPending,"Relay count remains exact1...8")}
+            relayContext=relayContextValue(error:0.04)
+            let b=localBroker();relayRequest(b);check(!b.isPending,"Relay35mm assumption cannot silently change")
+            relayContext=relayContextValue()
         }
         print("Controller/spoken arm approval and session reuse: \(checks) checks passed; no hardware access")
     }

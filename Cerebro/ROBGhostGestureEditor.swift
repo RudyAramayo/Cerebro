@@ -31,6 +31,9 @@ import simd
     @nonobjc private var saved: [ROBGhostGesture] = []
     @nonobjc private var proposal: ROBLeftGestureProposal?
     @nonobjc private var canPreview: ROBCanGrabPreview?
+    @nonobjc private var pourPreview: ROBCanPourRehearsal?
+    @nonobjc private var pourGhostBaseTransform=matrix_identity_double4x4
+    @nonobjc private let pourCan = SCNNode()
     @nonobjc private var collisionPreview: ROBLeftGestureProposal?
     @nonobjc private var displayedCan: ROBWorkspaceLocatedObject?
     private var lastCanInfoUpdate = 0.0
@@ -53,6 +56,7 @@ import simd
     private var playing = false
     private var animationStarted = 0.0
     private var lastOriginalUpdate = 0.0
+    private var lastIdleDisplayUpdate = 0.0
     private var timer: Timer?
     private let presets = NSPopUpButton()
     private let name = NSTextField(string: "My gesture")
@@ -69,15 +73,82 @@ import simd
     private let identity = NSTextField(wrappingLabelWithString: "")
     private let timeline = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let clock = NSTextField(labelWithString: "0.0 s")
+    private let playButton = NSButton(title:"Play ×4",target:nil,action:nil)
+    private var playbackRate: Double { pourPreview?.timed == true ? 1:4 }
     private let executeButton = NSButton(title: "Request execution of reviewed path", target: nil, action: nil)
     private let currentPlot = ROBGhostCurrentPlot()
     @nonobjc private var record: [ROBGhostRecordingSample] = []
+
+    private var animationOutputActive = false
+    private var animationPropNode: SCNNode?
+    private var animationPropIdentity = ""
+    @nonobjc private var animationModels: [String: ROBGhostRobotModel] = [:]
+
+    @objc private func animationPreviewChanged(_ notification: Notification) {
+        guard let values = notification.userInfo?["values"] as? [String: Double], let model,
+              let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else { return }
+        if !animationOutputActive { invalidateReview(); playing = false; proposal = nil; canPreview = nil }
+        animationOutputActive = true
+        var positions = model.reference
+        for side in ["right", "left"] {
+            if animationModels[side] == nil { animationModels[side] = try? ROBGhostRobotModel(directory: directory, physicalSide: side) }
+            guard let armModel = animationModels[side] else { continue }
+            var vendor = armModel.vendorLeft(armModel.reference)
+            for j in 1...7 { if let value = values["arm.\(side).j\(j)"] { vendor[j-1] = value } }
+            let converted = armModel.positions(vendorLeft: vendor)
+            for j in 1...7 { positions["\(side)_joint\(j)"] = converted["\(side)_joint\(j)"] }
+        }
+        if let heading = values["torso.heading"] { positions["torso_yaw"] = heading * .pi / 180 }
+        if let lean = values["preview.bodyLeanDegrees"], lean.isFinite, (0...45).contains(lean) {
+            positions["body_lean"] = lean * .pi / 180
+        }
+        // Display mounting prior only. Uncalibrated generic Maestro and timed
+        // LACT commands remain in the timeline; ghost lean is separate intent.
+        let panCenter = values["preview.neckPanCenter"] ?? 6000
+        let panScale = values["preview.neckPanTargetsPerDegree"] ?? 33.3333333333
+        if let pan = values["maestro.0"], let lower = values["maestro.1"], let upper = values["maestro.2"], panScale != 0,
+           let estimate = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: (pan-panCenter) / panScale * .pi / 180,
+                lowerTarget: Int(lower), upperTarget: Int(upper), known: true),
+           let head = model.headPositions(pan: estimate.panRadians, lowerPitch: estimate.lowerPitch, upperPitch: estimate.upperPitch) {
+            positions.merge(head) { _, new in new }
+        }
+        ghost = positions; updateGhost(positions, updateFields: false)
+        updateAnimationProp(notification.userInfo?["previewProp"] as? [String: Any])
+        executeButton.isEnabled = false
+        let title = notification.userInfo?["title"] as? String ?? "Animation"
+        let time = notification.userInfo?["time"] as? Double ?? 0
+        status.stringValue = String(format: "Animation Studio · %@ · %.2f s\nGhost output only. Arm/head mappings are display priors. LACT is timed; no lean-angle feedback. Unmapped Maestro tracks are shown in the timeline.", title, time)
+        if values["preview.bodyLeanDegrees"] != nil { status.stringValue += " Body lean is the author's illustration, not measured travel." }
+    }
+
+    private func updateAnimationProp(_ prop: [String: Any]?) {
+        guard prop?["kind"] as? String == "sword", let side = prop?["arm"] as? String,
+              ["left", "right"].contains(side), let length = prop?["lengthMeters"] as? Double,
+              length.isFinite, (0.05...2).contains(length), let tool = ghostNodes[side + "_tool"] else {
+            animationPropNode?.removeFromParentNode(); animationPropNode = nil; animationPropIdentity = ""; return
+        }
+        let key = "\(side):\(length)"
+        if key == animationPropIdentity { animationPropNode?.simdTransform = tool.simdTransform; return }
+        animationPropNode?.removeFromParentNode()
+        let root = SCNNode(); root.name = "Animation reference sword · \(side) · \(length) m"
+        let material = SCNMaterial(); material.diffuse.contents = NSColor.systemCyan
+        material.lightingModel = .constant; material.transparency = 0.7
+        material.readsFromDepthBuffer = true; material.writesToDepthBuffer = false
+        let blade = SCNNode(geometry: SCNBox(width: 0.028, height: 0.006, length: CGFloat(length), chamferRadius: 0.002))
+        blade.position.z = CGFloat(length / 2); blade.geometry?.materials = [material]
+        let guardNode = SCNNode(geometry: SCNBox(width: 0.14, height: 0.012, length: 0.015, chamferRadius: 0.003))
+        guardNode.geometry?.materials = [material]
+        root.addChildNode(blade); root.addChildNode(guardNode)
+        root.simdTransform = tool.simdTransform; robotPresentationRoot.addChildNode(root)
+        animationPropNode = root; animationPropIdentity = key
+    }
 
     init(sceneView: SCNView, originalRobot: SCNNode) {
         scene = sceneView.scene!; capturedRobot = originalRobot; self.sceneView = sceneView
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(depthAlignmentDidChange),
             name: Notification.Name("ROBWorkspaceDepthAlignmentDidChange"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(animationPreviewChanged(_:)), name: ROBAnimationStudio.previewChanged, object: nil)
         buildPanel()
         do {
             guard let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
@@ -129,7 +200,9 @@ import simd
                data.count <= 2_000_000, let values = try? JSONDecoder().decode([ROBGhostGesture].self, from: data) {
                 saved = Array(values.prefix(40))
             }
-            reloadPresets(); selectPreset()
+            reloadPresets(); presets.selectItem(at:2)
+            canArm.selectItem(at:model.physicalSide == "right" ? 1:0)
+            resetGhostToCurrentPose()
         } catch { status.stringValue = error.localizedDescription; executeButton.isEnabled = false }
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
     }
@@ -153,6 +226,11 @@ import simd
     }
 
     func setHeadCommandEstimate(_ estimate: ROBHeadCameraPoseEstimator?) {
+        if let old=acceptedHeadTargets, let estimate,
+           old.panRadians==estimate.panRadians, old.lowerPitch==estimate.lowerPitch,
+           old.upperPitch==estimate.upperPitch, old.lowerTarget==estimate.lowerTarget,
+           old.upperTarget==estimate.upperTarget { return }
+        if acceptedHeadTargets == nil, estimate == nil { return }
         acceptedHeadTargets = estimate
         setHeadCommand(pan: estimate?.panRadians ?? 0, lowerPitch: estimate?.lowerPitch ?? 0,
             upperPitch: estimate?.upperPitch ?? 0, known: estimate != nil)
@@ -211,6 +289,10 @@ import simd
     }
 
     private func updateHeadInfo() {
+        if pourPreview != nil {
+            headInfo.stringValue="Saved fixture head · floor-anchored world\nLive neck gauge and mesh display lift disabled"
+            return
+        }
         let lift=model.map{ROBNeckRGBPoseDisplay.robotModelDisplayLiftMeters(model:$0)} ?? 0
         let modelLabel=lift==0 ? "":String(format:"\nRobot display %+.2f in · presentation only",lift/0.0254)
         guard let pitch = headOpticalPitchRadians else {
@@ -286,12 +368,28 @@ import simd
         return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
     }
 
+    /// Same display gauge and scale as the depth overlay. Neither the gauge
+    /// nor the reference lidar mount is measured sensor registration.
+    func roomBaseToSceneTransform() -> [NSNumber] {
+        guard model != nil else { return [] }
+        let basis = simd_double4x4(columns: (SIMD4<Double>(modelBasis.columns.0), SIMD4<Double>(modelBasis.columns.1),
+            SIMD4<Double>(modelBasis.columns.2), SIMD4<Double>(modelBasis.columns.3)))
+        let transform = basis * (fittedHeadPose()?.modelToDisplay ?? matrix_identity_double4x4)
+        return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
+    }
+
+    func roomLidarToBaseTransform() -> [NSNumber] {
+        guard let model, let transform = model.frames(model.reference)["rplidar_link"] else { return [] }
+        return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
+    }
+
     @nonobjc private func renderPositions(_ positions: [String: Double], preview: Bool) -> [String: Double] {
+        if pourPreview != nil { return positions }
         var result = positions
         for (joint, value) in headEstimate ?? [:] {
             // Live estimates are render-only: saved poses and execution hashes
             // keep their original values; an explicit ghost neck edit wins.
-            if !preview || positions[joint] == model?.reference[joint] { result[joint] = value }
+            if !preview || (!animationOutputActive && positions[joint] == model?.reference[joint]) { result[joint] = value }
         }
         return result
     }
@@ -303,6 +401,7 @@ import simd
     }
 
     func reviewPresetNamed(_ name: String) {
+        if name == "pour" || name == "pour-timed" { showPourRehearsal(timed:name == "pour-timed"); return }
         if name == "can" { findAndPreviewCan(); return }
         if name == "collision" { showLatestCollisionReview(); return }
         presets.selectItem(at: name == "wave" ? 1 : 0)
@@ -310,11 +409,116 @@ import simd
         timeline.doubleValue = 0; play()
     }
 
+    @nonobjc private func showPourRehearsal(timed: Bool) {
+        guard let model else {return}
+        do {
+            let preview=try ROBCanPourRehearsal(data:Data(contentsOf:ROBCanPourRehearsal.latestReport),model:model,timed:timed)
+            invalidateReview();animationOutputActive=false;updateAnimationProp(nil);pourPreview=preview
+            displayedRGBProfileID=ROBNeckRGBPoseDisplay.configurationIdentity(model:model) ?? fittedHeadPose()?.profileID
+            displayedCan=nil;canArm.selectItem(at:1)
+            updateOriginal(preview.baseline)
+            updateHeadInfo()
+            referenceInfo.stringValue="Saved test baseline · both arms and head from recorded input. No live pose or motion claim."
+            let canMaterial=SCNMaterial();canMaterial.diffuse.contents=NSColor.systemRed;canMaterial.transparency=0.7
+            pourCan.geometry=SCNCylinder(radius:CGFloat(preview.canRadius),height:CGFloat(preview.canHeight))
+            pourCan.geometry?.materials=[canMaterial];pourCan.name="Pour test can · rigid grasp transform"
+            pourCan.childNodes.forEach { $0.removeFromParentNode() }
+            let spout=SCNNode(geometry:SCNSphere(radius:0.006))
+            let spoutMaterial=SCNMaterial();spoutMaterial.diffuse.contents=NSColor.white;spoutMaterial.lightingModel = .constant
+            spout.geometry?.materials=[spoutMaterial];spout.name="Opening lip · fixed to can"
+            spout.position=SCNVector3(preview.canSpoutRadius,preview.canHeight/2,0)
+            pourCan.addChildNode(spout)
+            canMotionOverlay.addChildNode(pourCan)
+            let pivotNode=SCNNode(geometry:SCNSphere(radius:0.005))
+            let pivotMaterial=SCNMaterial();pivotMaterial.diffuse.contents=NSColor.systemCyan;pivotMaterial.lightingModel = .constant
+            pivotNode.geometry?.materials=[pivotMaterial];pivotNode.name="Selected fixed rotation point"
+            pivotNode.simdPosition=SIMD3<Float>(preview.pivotAnchor);canMotionOverlay.addChildNode(pivotNode)
+            let axisEnds=[preview.pivotAnchor-preview.pivotAxis*0.08,preview.pivotAnchor+preview.pivotAxis*0.08]
+            let axisGeometry=SCNGeometry(sources:[SCNGeometrySource(vertices:axisEnds.map {SCNVector3($0.x,$0.y,$0.z)})],
+                elements:[SCNGeometryElement(indices:[UInt32(0),UInt32(1)],primitiveType:.line)])
+            axisGeometry.materials=[pivotMaterial];let axisNode=SCNNode(geometry:axisGeometry)
+            axisNode.name="Fixed object rotation axis";canMotionOverlay.addChildNode(axisNode)
+            let cupMaterial=SCNMaterial();cupMaterial.diffuse.contents=NSColor.systemGreen;cupMaterial.transparency=0.3
+            let cup=SCNNode(geometry:SCNCylinder(radius:CGFloat(preview.cupRadius),height:CGFloat(preview.cupHeight)))
+            cup.geometry?.materials=[cupMaterial];cup.name="Pour test glass"
+            var cupPose=simd_double4x4(simd_quatd(angle:.pi/2,axis:[1,0,0]))
+            cupPose.columns.3=SIMD4(preview.cupCenter.x,preview.cupCenter.y,preview.cupCenter.z-preview.cupHeight/2,1)
+            cup.simdTransform=floatMatrix(preview.sceneTransform*cupPose);canMotionOverlay.addChildNode(cup)
+            let count=preview.tableOutline.count
+            let vertices=[preview.tableZ-0.06,preview.tableZ].flatMap { z in
+                preview.tableOutline.map {SCNVector3($0.x,$0.y,z)}
+            }
+            var triangles:[UInt32]=[]
+            for i in 1..<(count-1) {
+                triangles += [0,UInt32(i+1),UInt32(i),UInt32(count),UInt32(count+i),UInt32(count+i+1)]
+            }
+            for i in 0..<count {
+                let j=(i+1)%count
+                triangles += [UInt32(i),UInt32(j),UInt32(count+j),UInt32(i),UInt32(count+j),UInt32(count+i)]
+            }
+            let table=SCNNode(geometry:SCNGeometry(sources:[SCNGeometrySource(vertices:vertices)],
+                elements:[SCNGeometryElement(indices:triangles,primitiveType:.triangles)]))
+            let tableMaterial=SCNMaterial();tableMaterial.diffuse.contents=NSColor.brown;tableMaterial.transparency=0.2
+            tableMaterial.isDoubleSided=true
+            table.geometry?.materials=[tableMaterial];table.name="Horizontal observed table patch · unseen extent unknown"
+            table.simdTransform=floatMatrix(preview.sceneTransform);canMotionOverlay.addChildNode(table)
+            let points=preview.frames.map { frame -> SCNVector3 in
+                let pose=preview.payloadPose(positions:frame.positions,worldFromRobot:frame.worldFromRobot,
+                    detachedPose:frame.canPose,attached:frame.attached,model:model)
+                let lip=pose*SIMD4<Double>(preview.canSpoutRadius,0,preview.canHeight/2,1)
+                return SCNVector3(lip.x,lip.y,lip.z)
+            }
+            let path=SCNGeometry(sources:[SCNGeometrySource(vertices:points)],elements:[SCNGeometryElement(indices:(0..<(points.count-1)).flatMap{[UInt32($0),UInt32($0+1)]},primitiveType:.line)])
+            let pathMaterial=SCNMaterial();pathMaterial.diffuse.contents=NSColor.systemYellow;pathMaterial.lightingModel = .constant
+            path.materials=[pathMaterial];let lipPath=SCNNode(geometry:path)
+            lipPath.name="Actual opening path from joint FK";canMotionOverlay.addChildNode(lipPath)
+            let basePoints=preview.frames.map { SCNVector3($0.worldFromRobot.columns.3.x,$0.worldFromRobot.columns.3.y,0.008) }
+            let basePath=SCNGeometry(sources:[SCNGeometrySource(vertices:basePoints)],elements:[SCNGeometryElement(indices:(0..<(basePoints.count-1)).flatMap{[UInt32($0),UInt32($0+1)]},primitiveType:.line)])
+            let baseMaterial=SCNMaterial();baseMaterial.diffuse.contents=NSColor.cyan;baseMaterial.lightingModel = .constant
+            basePath.materials=[baseMaterial];let baseRoute=SCNNode(geometry:basePath)
+            baseRoute.name="Ghost tread approach · corridor unverified";canMotionOverlay.addChildNode(baseRoute)
+            name.stringValue="Coke can · timed pour test"
+            poseCount.stringValue="\(preview.frames.count) saved \(timed ? "timed samples":"review poses")"
+            timeline.minValue=0;timeline.maxValue=preview.duration;timeline.doubleValue=0
+            playButton.title=timed ? "Play real time":"Play pose sequence"
+            identity.stringValue=preview.summary
+            executeButton.isEnabled=false;executeButton.title="Pour rehearsal only · execution unavailable"
+            canInfo.stringValue=String(format:"Saved scene · observed tabletop %.1f cm above floor.\nVisible patch only; horizontal registration, left slide and base route unverified.",preview.tableHeightAboveFloor*100)
+            renderTime(0)
+            if timed { play() }
+        } catch {status.stringValue="Run Coke can · timed pour in Testing Sandbox first.\n"+error.localizedDescription}
+    }
+    @nonobjc private func floatMatrix(_ value:simd_double4x4)->simd_float4x4 {
+        simd_float4x4(columns:(SIMD4<Float>(value.columns.0),SIMD4<Float>(value.columns.1),SIMD4<Float>(value.columns.2),SIMD4<Float>(value.columns.3)))
+    }
+    @nonobjc private func renderPourTime(_ time:Double,preview:ROBCanPourRehearsal) {
+        guard let model else {return}
+        let index=preview.frames.lastIndex(where:{$0.time<=time}) ?? 0
+        let a=preview.frames[index],b=preview.frames[min(index+1,preview.frames.count-1)]
+        let u=b.time>a.time ? max(0,min(1,(time-a.time)/(b.time-a.time))):0
+        var positions=a.positions
+        for (key,value) in b.positions {positions[key]=a.positions[key,default:value]+(value-a.positions[key,default:value])*u}
+        var robotPose=simd_double4x4(simd_slerp(simd_quatd(a.worldFromRobot),simd_quatd(b.worldFromRobot),u))
+        robotPose.columns.3=a.worldFromRobot.columns.3+(b.worldFromRobot.columns.3-a.worldFromRobot.columns.3)*u
+        // Move the ghost robot through the fixed world. Moving the table by
+        // -advance hides the required tread step and misrepresents the scene.
+        pourGhostBaseTransform=robotPose
+        updateGhost(positions,updateFields:false)
+        let rotation=simd_slerp(simd_quatd(a.canPose),simd_quatd(b.canPose),u)
+        var pose=simd_double4x4(rotation);pose.columns.3=a.canPose.columns.3+(b.canPose.columns.3-a.canPose.columns.3)*u
+        pose=preview.payloadPose(positions:positions,worldFromRobot:robotPose,detachedPose:pose,
+            attached:a.attached,model:model)
+        pourCan.simdTransform=floatMatrix(pose*simd_double4x4(simd_quatd(angle:.pi/2,axis:[1,0,0])))
+        clock.stringValue=preview.timed ? String(format:"%.2f s",time):"Pose \(index+1)/\(preview.frames.count)"
+        status.stringValue="\(a.stage) · GHOST TEST ONLY\n\(a.detail)\n"+preview.summary
+        executeButton.isEnabled=false
+    }
+
     private func button(_ title: String, _ selector: Selector) -> NSButton { NSButton(title: title, target: self, action: selector) }
     private func row(_ views: [NSView]) -> NSStackView { let value = NSStackView(views: views); value.spacing = 7; return value }
     private func buildPanel() {
         let title = NSTextField(labelWithString: "Ghost gestures"); title.font = .boldSystemFont(ofSize: 19)
-        let help = NSTextField(wrappingLabelWithString: "Robot: measured left arm and accepted neck command estimates. Blue: proposed motion. Preview and save every named joint; execution currently supports supervised left-arm gestures. Other joints remain reference estimates.")
+        let help = NSTextField(wrappingLabelWithString: "Robot: selected arm's fresh encoder pose and accepted neck command estimates. Other joints remain reference estimates. Blue: a preview or an edit; it is not an executable path until reviewed. Built-in handoff and wave gestures apply to the left arm only.")
         help.textColor = .secondaryLabelColor
         headInfo.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         headInfo.identifier = NSUserInterfaceItemIdentifier("ghost-head-command")
@@ -341,7 +545,8 @@ import simd
         timeline.identifier = NSUserInterfaceItemIdentifier("ghost-timeline")
         executeButton.target = self; executeButton.action = #selector(executeReviewed)
         executeButton.identifier = NSUserInterfaceItemIdentifier("ghost-execute")
-        let preview = row([button("Review path", #selector(review)), button("Play ×4", #selector(play)), clock])
+        playButton.target=self;playButton.action=#selector(play)
+        let preview = row([button("Review path", #selector(review)), playButton, clock])
         let stop = button("Stop + hold", #selector(stop)); stop.bezelColor = .systemRed
         collisionMapVisible.state = .on; collisionPathVisible.state = .on
         for toggle in [collisionMapVisible, collisionPathVisible] {
@@ -358,7 +563,7 @@ import simd
         currentHelp.textColor = .secondaryLabelColor
         currentPlot.heightAnchor.constraint(equalToConstant: 75).isActive = true
         let stack = NSStackView(views: [title, help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, angleText, xyzLabels, targets, nudgeRow,
-            row([canArm, button("Find Coke can + ghost grab", #selector(findAndPreviewCan))]), canInfo,
+            row([canArm, button("Scan front table + ghost grab", #selector(findAndPreviewCan))]), canInfo,
             collisionControls, inspectCollision, collisionInfo,
             button("Teach can → bucket task", #selector(newTabletopTask)), posesRow, poseCount, preview, timeline, identity, executeButton,
             row([stop, button("Review stopped return", #selector(recover))]),
@@ -394,36 +599,36 @@ import simd
         // The selected side determines both encoder mapping and live baseline;
         // changing the preview selector never changes actuator ownership.
         self.model = model
+        resetGhostToCurrentPose()
         clearCanVisuals()
         displayedCan = nil
-        canInfo.stringValue = "Finding a fresh RGB-D can target…"
-        status.stringValue = "Neck-camera search, then ghost rehearsal. Arms and jaws stay unchanged."
+        canInfo.stringValue = "Scanning the immediate right, center and left of the table…"
+        status.stringValue = "Complete both sides, compare fresh cans, then preview the nearest reachable grasp."
         let request = UUID(); canRequestID = request
-        ROBArmRoutineCoordinator.shared.performCommand("left_search_workspace", target: "can") { [weak self] result in
+        ROBArmRoutineCoordinator.shared.performCommand("\(side)_search_workspace", target: "front_table_can") { [weak self] result in
             guard let self, self.canRequestID == request else { return }
-            guard let can = ROBWorkspaceSearch.shared.locatedObjects[.can] else {
-                self.canInfo.stringValue = "Can target: no confirmed RGB-D position"
-                self.status.stringValue = result["detail"] as? String ?? "The can was not localized."
+            guard result["status"] as? String == "accepted_unverified",
+                  let report = result["workspace_search"] as? NSDictionary,
+                  report["front_table_survey"] as? Bool == true,
+                  let map = ROBWorkspaceSearch.shared.collisionSnapshot else {
+                self.resetGhostToCurrentPose()
+                self.canInfo.stringValue = "Can target: no current RGB-D survey"
+                self.status.stringValue = result["detail"] as? String ?? "The table survey did not complete."
                 return
             }
             let baseline = self.freshBaseline().map { model.positions(vendorLeft: $0.q) } ?? model.reference
-            let projectionIdentity=ROBWorkspaceSearch.shared.collisionSnapshot?.estimatedCameraProjectionIdentity ?? ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
-            self.status.stringValue = "Can measured. Computing the ghost reach…"
+            self.status.stringValue = "Comparing measured cans by distance from the \(side) arm and calculating ghost grasps…"
             self.canPlanTask = Task { @MainActor [weak self] in
-                do {
-                    let preview = try await Task.detached(priority: .userInitiated) {
-                        try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: side,
-                            reachOffset:side == "left" ? ROBLeftCanReachCalibration.load(model:model,can:can,
-                                estimatedCameraProjectionIdentity:projectionIdentity) : .zero)
-                    }.value
-                    guard let self, !Task.isCancelled, self.canRequestID == request else { return }
-                    self.showCanPreview(preview)
-                    self.play()
-                    if let message = preview.helpRequest { ROBWorkspaceSearch.shared.announce?(message) }
-                } catch {
-                    guard let self, self.canRequestID == request else { return }
-                    self.status.stringValue = error.localizedDescription
+                let selection = await ROBWorkspaceSearch.shared.nearestReachableCan(model: model, baseline: baseline, map: map)
+                guard let self, !Task.isCancelled, self.canRequestID == request else { return }
+                guard let preview = selection.preview else {
+                    self.resetGhostToCurrentPose()
+                    self.canInfo.stringValue = "Can target: no confirmed reachable can in this survey"
+                    self.status.stringValue = selection.diagnostics.compactMap { $0["detail"] as? String ?? $0["status"] as? String }.joined(separator: "\n")
+                    return
                 }
+                self.showCanPreview(preview)
+                self.play()
             }
         }
     }
@@ -645,15 +850,21 @@ import simd
         carriedCan.isHidden = !stage.hasPrefix("Lift")
         if !carriedCan.isHidden, let model, let grasp = preview.steps.first(where: { $0.stage == "Grasp pose" }),
            let start = model.frames(grasp.pose)[preview.side + "_tool"], let current = model.frames(pose)[preview.side + "_tool"] {
-            let delta = current.columns.3 - start.columns.3
-            carriedCan.simdPosition = SIMD3<Float>(preview.can.point + SIMD3(delta.x, delta.y, delta.z))
+            // Carry the full rigid pose, including rotation about the grasp.
+            // Translation-only rendering falsely leaves a tilted can upright.
+            var canAtGrasp = simd_double4x4(simd_quatd(angle: .pi / 2, axis: [1, 0, 0]))
+            canAtGrasp.columns.3 = SIMD4(preview.can.point.x, preview.can.point.y, preview.can.point.z, 1)
+            let carriedPose = current * simd_inverse(start) * canAtGrasp
+            carriedCan.simdTransform = simd_float4x4(columns: (
+                SIMD4<Float>(carriedPose.columns.0), SIMD4<Float>(carriedPose.columns.1),
+                SIMD4<Float>(carriedPose.columns.2), SIMD4<Float>(carriedPose.columns.3)))
         }
         refreshCanInfo()
         status.stringValue = "\(stage) · GHOST ONLY\n" + (preview.reachesCan
             ? String(format: "Grasp model error %.1f mm; gripper tilt %.1f° from horizontal. Jaw closure/retention simulated; tool mounting and table clearance unverified.", preview.graspError * 1000, preview.gripperTiltDegrees)
             : String(format: "Hand gap %.1f cm; gripper tilt %.1f° from horizontal. No grasp or lift is claimed.", preview.graspError * 100, preview.gripperTiltDegrees))
         if let message = preview.helpRequest {
-            status.stringValue += "\n" + message + " Then use Find Coke can + ghost grab to check again."
+            status.stringValue += "\n" + message + " Then use Scan front table + ghost grab to check again."
         }
     }
 
@@ -661,8 +872,10 @@ import simd
         guard let can = displayedCan else { canInfo.stringValue = "Can target: not measured"; return }
         let point = can.point
         let age = max(0, (Date().timeIntervalSince1970 * 1000 - can.capturedAt) / 1000)
+        let estimatedShape = can.sections?.shapePriorEvidence != nil
         canInfo.stringValue = String(format: "Coke can · X %.3f / Y %.3f / Z %.3f m\nLast seen %.0f s ago", point.x, point.y, point.z, age) +
-            (age > 60 ? " · historical target; rescan" : " · RGB-D position")
+            (age > 60 ? " · historical target; rescan" : estimatedShape ? " · estimated can position" : " · RGB-D position") +
+            (estimatedShape ? "\nTable depth + assumed 120 × 66 mm upright can · ghost only" : "")
     }
     private func clearCanVisuals() {
         canOverlay.childNodes.forEach{$0.removeFromParentNode()}
@@ -816,13 +1029,26 @@ import simd
     private func freshBaseline() -> (q: [Double], generation: UInt64)? {
         let gateway = ROBAmberGatewayClient.shared
         let gatewayArm = model?.physicalSide == "right" ? "left" : "right"
-        guard gateway.isReady(), let sample = gateway.telemetry(forArm: gatewayArm), sample.effectiveSampleAgeMilliseconds <= 250,
+        guard gateway.isReady(), let sample = gateway.telemetry(forArm: gatewayArm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
               let generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value,
               generation > 0 else { return nil }
         return (sample.positionsRadians.map(\.doubleValue), generation)
     }
+    /// No startup/default gesture is a pickup proposal. Clear stale edits when
+    /// searching so a failed search cannot leave an unrelated blue arm pose.
+    private func resetGhostToCurrentPose() {
+        guard let model else {return}
+        ghost=freshBaseline().map {model.positions(vendorLeft:$0.q)} ?? model.reference
+        updateOriginal(ghost);updateGhost(ghost)
+        poses=[];timeline.doubleValue=0;timeline.maxValue=1
+        poseCount.stringValue="No pickup path"
+        identity.stringValue="Current pose only · no pickup path"
+        executeButton.isEnabled=false
+    }
     private func invalidateReview() {
+        pourPreview=nil
+        playButton.title="Play ×4"
         canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil; collisionPreview = nil
         collisionPathOverlay.childNodes.forEach { $0.removeFromParentNode() }
         canMotionOverlay.childNodes.forEach { $0.removeFromParentNode() }
@@ -838,10 +1064,17 @@ import simd
         executeButton.isEnabled = false; identity.stringValue = "Unreviewed edits · no hardware output"
     }
     @objc private func selectPreset() {
+        animationOutputActive = false
+        updateAnimationProp(nil)
         guard let model else { return }
         invalidateReview(); poses = []
         tabletopEditing = false
         let index = presets.indexOfSelectedItem
+        if model.physicalSide == "right",index == 0 || index == 1 {
+            resetGhostToCurrentPose()
+            status.stringValue="Handoff and wave presets are left-arm gestures. Right arm remains at its current displayed pose; find a can for a right-arm preview."
+            return
+        }
         if index >= 3, saved.indices.contains(index - 3) {
             let value = saved[index - 3]; poses = value.poses; name.stringValue = value.name
             tabletopEditing = value.kind == "tabletop"
@@ -851,9 +1084,9 @@ import simd
         } else if index == 1 {
             name.stringValue = "Above-shoulder wave"; ghost = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveRestIndex)!)
         } else {
-            name.stringValue = "My gesture"; ghost = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+            name.stringValue = "My gesture"; ghost = freshBaseline().map {model.positions(vendorLeft:$0.q)} ?? model.reference
         }
-        joints.selectItem(withTitle: index == 1 ? "left_joint2" : "left_joint6")
+        joints.selectItem(withTitle:model.armJointPrefix+(index == 1 ? "2":"6"))
         poseCount.stringValue = "\(poses.count) custom poses"; selectJoint(); updateGhost(ghost); review()
     }
     @objc private func selectJoint() {
@@ -932,6 +1165,7 @@ import simd
         reloadPresets(); presets.selectItem(at: saved.count + 2); review()
     }
     @objc private func review() {
+        if let pourPreview {renderPourTime(timeline.doubleValue,preview:pourPreview);return}
         guard !ROBLeftArmTrial.shared.isRunning, let model else { return }
         invalidateReview()
         let fresh = freshBaseline(); liveBaseline = fresh != nil
@@ -964,6 +1198,17 @@ import simd
         renderTime(0)
     }
     @objc private func executeReviewed() {
+        guard pourPreview == nil else {status.stringValue="Saved pour tests never authorize motor output.";return}
+        if let preview=canPreview,preview.side=="right",preview.reachesCan {
+            guard !ROBLeftArmTrial.shared.isRunning else{return}
+            playing=false;executeButton.isEnabled=false;setPreviewFrozen(true)
+            status.stringValue="Reobserving the reviewed can, then native grasp and short lift under the standing authorization. End in hold."
+            ROBLeftArmTrial.shared.performPreviewedCanGrasp(preview.can) { [weak self] result in
+                self?.setPreviewFrozen(false)
+                self?.status.stringValue=result["detail"]as?String ?? "Grasp-and-hold ended"
+            }
+            return
+        }
         guard let proposal, let model, liveBaseline, !replayingRecording else { return }
         // Keep the reviewed path fixed while the measured scene stays live.
         playing = false
@@ -989,14 +1234,15 @@ import simd
         status.stringValue = "Stop + hold requested. A stopped custom path needs a newly reviewed return."
     }
     @objc private func play() {
-        guard canPreview != nil || collisionPreview != nil || proposal != nil || !record.isEmpty else { return }
+        guard pourPreview != nil || canPreview != nil || collisionPreview != nil || proposal != nil || !record.isEmpty else { return }
         if timeline.doubleValue >= timeline.maxValue - 0.001 { timeline.doubleValue = 0 }
-        playing = true; animationStarted = ProcessInfo.processInfo.systemUptime - timeline.doubleValue / 4
+        playing = true; animationStarted = ProcessInfo.processInfo.systemUptime - timeline.doubleValue / playbackRate
     }
     @objc private func scrub() { playing = false; renderTime(timeline.doubleValue) }
     private func renderTime(_ time: Double) {
         guard let model else { return }
         clock.stringValue = String(format: "%.1f s", time)
+        if let pourPreview {renderPourTime(time,preview:pourPreview);return}
         if let collisionPreview { renderCollisionTime(time, proposal: collisionPreview); return }
         if let canPreview { renderCanTime(time, preview: canPreview); return }
         if replayingRecording, !record.isEmpty {
@@ -1029,7 +1275,10 @@ import simd
     private func updateNodes(_ nodes: [String: SCNNode], positions: [String: Double]) {
         guard let model else { return }
         var frames = model.frames(positions)
-        let fitted=fittedHeadPose()
+        let animationGhost = animationOutputActive && nodes.values.contains { $0.name?.hasPrefix("Blue ghost ") == true }
+        // A live fitted head pose is anchored to the observed torso. It must
+        // not pin the preview head in space when its proposed parent rotates.
+        let fitted = animationGhost || pourPreview != nil ? nil : fittedHeadPose()
         if let fitted,["neck_pan","lower_neck","upper_neck"].allSatisfy({positions[$0]==headEstimate?[$0]}) {
             frames.merge(fitted.headFrames){_,new in new}
             if let hardware=fitted.hardwareFrames {frames.merge(hardware){_,new in new}}
@@ -1041,7 +1290,7 @@ import simd
                 frames["oak_link"]=fitted.provisionalCameraToModel * simd_inverse(simd_inverse(oak)*glass)
             }
         }
-        if let belly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) {frames.merge(belly){_,new in new}}
+        if pourPreview == nil, let belly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) {frames.merge(belly){_,new in new}}
         let optical = frames["oak_optical_frame"]
         let alignment = ROBWorkspaceDepthAlignment.snapshot()
         var changes: [(SCNNode, simd_float4x4)] = []
@@ -1054,10 +1303,15 @@ import simd
                 if mount.eulerAngles.y != tilt {mount.eulerAngles.y=tilt}
             }
             if var transform = frames[link] {
+                // Include base travel BEFORE visibility compares each ghost
+                // frame with the original. Unchanged joints still translate.
+                if pourPreview != nil,node.name?.hasPrefix("Blue ghost ")==true {
+                    transform=pourGhostBaseTransform*transform
+                }
                 // Rotate the face-camera housing about its optical origin.
                 // Cloud translation is not a physical camera-mount movement;
                 // the neck and panoramic camera keep their original frames.
-                if fitted == nil,link == "oak_link", let optical, let alignment {
+                if fitted == nil,pourPreview == nil,link == "oak_link", let optical, let alignment {
                     transform = alignment.applyingPitch(to: optical) * simd_inverse(optical) * transform
                 }
                 let value = simd_float4x4(columns: (SIMD4<Float>(transform.columns.0), SIMD4<Float>(transform.columns.1),
@@ -1102,13 +1356,19 @@ import simd
     }
     private func tick() {
         guard let model else { return }
+        // Idle diagnostics need current evidence, not 30 repeated profile-file
+        // reads and SceneKit-lock acquisitions per second. Ghost playback
+        // retains its animation cadence; sensor/control watchdogs are separate.
+        let now = ProcessInfo.processInfo.systemUptime
+        if !playing, now-lastIdleDisplayUpdate<0.2 { return }
+        lastIdleDisplayUpdate=now
         refreshInteractionStage()
         let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
         if let sceneView {
             if sceneView.isHidden { sceneView.isHidden = false }
             if !sceneView.rendersContinuously { sceneView.rendersContinuously = true }
             if !sceneView.isPlaying { sceneView.isPlaying = true }
-            let framesPerSecond = busy ? 15 : 30
+            let framesPerSecond = busy || !playing ? 15 : 30
             if sceneView.preferredFramesPerSecond != framesPerSecond { sceneView.preferredFramesPerSecond = framesPerSecond }
         }
         for view in [presets, joints, angle, name] as [NSControl] where view.isEnabled == busy { view.isEnabled = !busy }
@@ -1126,34 +1386,41 @@ import simd
             updateNodes(ghostNodes,positions:renderPositions(ghostDisplayPositions,preview:true))
             updateHeadInfo()
         }
-        let gauge=fitted?.modelToDisplay ?? matrix_identity_double4x4
+        let gauge=pourPreview == nil ? (fitted?.modelToDisplay ?? matrix_identity_double4x4):matrix_identity_double4x4
         let displayGauge=simd_float4x4(columns:(SIMD4<Float>(gauge.columns.0),SIMD4<Float>(gauge.columns.1),SIMD4<Float>(gauge.columns.2),SIMD4<Float>(gauge.columns.3)))
-        let base = capturedRobot.presentation.simdWorldTransform * modelBasis * displayGauge
+        let worldAnchor=pourPreview == nil ? capturedRobot.presentation.simdWorldTransform:matrix_identity_float4x4
+        let base = worldAnchor * modelBasis * displayGauge
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
-        let presentation=ROBNeckRGBPoseDisplay.robotModelPresentationTransform(model:model,modelToDisplay:gauge)
+        // Frozen fixtures use the model's floor frame. The live mesh-only
+        // presentation lift must not raise their measured environment.
+        let presentation=pourPreview == nil ? ROBNeckRGBPoseDisplay.robotModelPresentationTransform(model:model,modelToDisplay:gauge):matrix_identity_double4x4
         let meshOffset=simd_float4x4(columns:(SIMD4<Float>(presentation.columns.0),SIMD4<Float>(presentation.columns.1),
             SIMD4<Float>(presentation.columns.2),SIMD4<Float>(presentation.columns.3)))
         if robotPresentationRoot.simdTransform != meshOffset {robotPresentationRoot.simdTransform=meshOffset}
-        let now = ProcessInfo.processInfo.systemUptime
-        if now - lastCanInfoUpdate >= 1 {
+        if pourPreview == nil, now - lastCanInfoUpdate >= 1 {
             lastCanInfoUpdate = now; refreshCanInfo(); refreshCollisionScene(force: false)
         }
-        if !replayingRecording, now - lastOriginalUpdate > 0.2 {
+        if pourPreview == nil, !replayingRecording, now - lastOriginalUpdate > 0.2 {
             lastOriginalUpdate = now
             let baseline = freshBaseline()
             updateOriginal(baseline.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
-            referenceInfo.stringValue = (baseline == nil ? "Left: scan reference; fresh encoders unavailable."
-                : "Left: fresh encoders with upright mapping prior.") +
+            referenceInfo.stringValue = (baseline == nil ? "\(model.physicalSide.capitalized): scan reference; fresh encoders unavailable."
+                : "\(model.physicalSide.capitalized): fresh encoders with upright mapping prior.") +
                 (headEstimate == nil ? " Head: reference; command estimate unavailable." : " Head: accepted neck command estimate.") +
                 " Other joints: scan reference."
         }
-        if let proposal, let fresh = freshBaseline(), !busy, !ROBControllerArmApproval.shared.isPending, !replayingRecording {
+        if animationOutputActive { playing = false; executeButton.isEnabled = false; return }
+        executeButton.title=pourPreview != nil ? "Pour rehearsal only · execution unavailable" : canPreview == nil ? "Request execution of reviewed path" : "Grasp can + lift and hold"
+        if let preview=canPreview,!busy,!ROBControllerArmApproval.shared.isPending,!replayingRecording {
+            executeButton.isEnabled=preview.side=="right" && preview.reachesCan && freshBaseline() != nil &&
+                ROBControllerArmApproval.shared.standingLocalCanCampaignActive
+        } else if let proposal, let fresh = freshBaseline(), !busy, !ROBControllerArmApproval.shared.isPending, !replayingRecording {
             executeButton.isEnabled = liveBaseline && fresh.generation == proposal.sessionGeneration
                 && ROBArmRoutinePlan.near(fresh.q, proposal.baseline, tolerance: 0.015)
         } else { executeButton.isEnabled = false }
         if busy, status.stringValue != ROBLeftArmTrial.shared.status { status.stringValue = ROBLeftArmTrial.shared.status }
         if playing {
-            let time = min(timeline.maxValue, (now - animationStarted) * 4)
+            let time = min(timeline.maxValue, (now - animationStarted) * playbackRate)
             timeline.doubleValue = time; renderTime(time)
             if time >= timeline.maxValue { playing = false }
         }

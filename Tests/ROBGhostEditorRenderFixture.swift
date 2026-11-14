@@ -7,6 +7,9 @@ private extension SCNNode {
     }
 }
 
+final class ROBAnimationStudio {
+    static let previewChanged = Notification.Name("ROBAnimationPreviewChanged")
+}
 // Deliberately no transport, arm driver, credential or real approval broker.
 final class ROBAmberGatewayClient {
     static let shared = ROBAmberGatewayClient()
@@ -31,17 +34,20 @@ final class ROBAmberGatewayTunnel {
 final class ROBControllerArmApproval {
     static let shared = ROBControllerArmApproval()
     let isPending = false
+    let standingLocalCanCampaignActive = false
     func cancel(reason: String) {}
 }
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     let isRunning = false
     var searchRequests = 0
+    var searchCommands:[String]=[]
     func cancel(reason: String) {}
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
-        precondition(command == "left_search_workspace", "Ghost can search attempted a motion command")
-        precondition(target == "can", "Ghost can preview waited for unrelated bucket search")
+        precondition(["left_search_workspace","right_search_workspace"].contains(command), "Ghost can search attempted a motion command")
+        precondition(target == "front_table_can", "Ghost can preview left the front-table camera survey")
         searchRequests += 1
+        searchCommands.append(command)
         completion(["detail":"Fixture camera only"])
     }
 }
@@ -52,6 +58,10 @@ final class ROBWorkspaceSearch {
     private(set) var collisionPreviewSnapshot: ROBWorkspaceCollisionSnapshot?
     var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
         didSet { if let collisionSnapshot { collisionPreviewSnapshot = collisionSnapshot } }
+    }
+    @MainActor func nearestReachableCan(model: ROBGhostRobotModel, baseline: [String:Double],
+        map: ROBWorkspaceCollisionSnapshot) async -> (preview: ROBCanGrabPreview?, diagnostics: [[String:Any]]) {
+        (nil, [["detail":"No measured can in the isolated render fixture"]])
     }
 }
 final class ROBAmberGestureExecutor {
@@ -75,6 +85,9 @@ final class ROBLeftArmTrial {
     }
     func perform(proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel, completion: @escaping (NSDictionary) -> Void) {
         preconditionFailure("A preview or editing action attempted physical execution")
+    }
+    func performPreviewedCanGrasp(_ can: ROBWorkspaceLocatedObject, completion: @escaping (NSDictionary) -> Void) {
+        preconditionFailure("A render fixture attempted a physical can grasp")
     }
     func recoveryProposal(model: ROBGhostRobotModel) throws -> ROBLeftGestureProposal {
         throw ROBGhostMotionError.blocked("No hardware in this fixture")
@@ -374,7 +387,7 @@ final class GhostFixtureSnapshotView: NSView {
         assertAcceptedHead(6011, 6306, pan: .pi / 12)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let controls = descendants(editor.panelView)
-        let findCan = controls.compactMap { $0 as? NSButton }.first { $0.title == "Find Coke can + ghost grab" }!
+        let findCan = controls.compactMap { $0 as? NSButton }.first { $0.title == "Scan front table + ghost grab" }!
         NSApp.sendAction(findCan.action!, to: findCan.target, from: findCan)
         precondition(ROBArmRoutineCoordinator.shared.searchRequests == 1,
             "Ghost preview did not enter the existing neck-only coordinator lane")
@@ -676,6 +689,64 @@ final class GhostFixtureSnapshotView: NSView {
             "Physical-right initialization read R11 rather than L10")
         let rightExecute=descendants(rightEditor.panelView).first{$0.identifier?.rawValue=="ghost-execute"} as! NSButton
         precondition(!rightExecute.isEnabled,"Live-shaped fixture data must not create actuator authority")
+        func assertRightGhostAtMeasuredPose() {
+            for link in ["right_two_Link","right_four_Link","right_tool"] {
+                let actual=rightScene.rootNode.fixtureDescendants.first{$0.name=="Blue ghost \(link)"}!
+                let expected=rightScene.rootNode.fixtureDescendants.first{$0.name=="Original URDF \(link)"}!
+                precondition(actual.simdTransform==expected.simdTransform && actual.isHidden,
+                    "Startup, rejected left preset or failed search left an unrelated right-arm ghost")
+            }
+        }
+        assertRightGhostAtMeasuredPose()
+        rightEditor.reviewPresetNamed("center")
+        assertRightGhostAtMeasuredPose()
+        rightEditor.reviewPresetNamed("wave")
+        assertRightGhostAtMeasuredPose()
+        ROBWorkspaceSearch.shared.locatedObjects=[:]
+        rightEditor.reviewPresetNamed("can")
+        precondition(ROBArmRoutineCoordinator.shared.searchCommands.last=="right_search_workspace")
+        assertRightGhostAtMeasuredPose()
+        precondition(!rightExecute.isEnabled)
+        let animationLinks = ["right_tool", "left_tool", "torso_link"]
+        let beforeAnimation = animationLinks.map { link in rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform }
+        let originalAnimation = animationLinks.map { link in rightScene.rootNode.fixtureDescendants.first { $0.name == "Original URDF \(link)" }!.simdTransform }
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["arm.right.j1": 0.2, "arm.left.j1": -0.2, "torso.heading": 30.0, "lact.speed": 25.0], "title": "Both arms + torso", "time": 1.0])
+        for (index, link) in animationLinks.enumerated() {
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform != beforeAnimation[index])
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Original URDF \(link)" }!.simdTransform == originalAnimation[index])
+        }
+        precondition(!rightExecute.isEnabled, "Animation output must not enable old ghost execution")
+        print("Animation output: both arms and torso update the blue ghost, originals unchanged, no actuator authority")
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["arm.right.j2": -0.4], "previewProp": ["kind": "sword", "arm": "right", "lengthMeters": 0.6]])
+        let sword = rightScene.rootNode.fixtureDescendants.first { $0.name?.hasPrefix("Animation reference sword") == true }!
+        let swordTool = rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost right_tool" }!
+        precondition(sword.simdTransform == swordTool.simdTransform && !sword.isHidden)
+        precondition(abs((sword.childNodes[0].geometry as! SCNBox).length-0.6) < 1e-9)
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["arm.right.j2": -0.6], "previewProp": ["kind": "sword", "arm": "right", "lengthMeters": 0.6]])
+        precondition(sword.simdTransform == swordTool.simdTransform && !rightExecute.isEnabled, "Reference sword follows the hand without actuator authority")
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: ["values": ["arm.right.j2": -0.6]])
+        precondition(sword.parent == nil, "A new gesture must clear the previous prop")
+        print("Animation sword: 60 cm reference, hand attachment, live movement and removal passed; no jaw output")
+        let leanLinks = ["right_tool", "left_tool", "torso_link", "oak_link"]
+        let originalsBeforeLean = leanLinks.map { link in rightScene.rootNode.fixtureDescendants.first { $0.name == "Original URDF \(link)" }!.simdTransform }
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["preview.bodyLeanDegrees":0.0, "lact.speed":40.0]])
+        let beforeLean = leanLinks.map { link in rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform }
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: [
+            "values": ["preview.bodyLeanDegrees":12.0, "lact.speed":0.0]])
+        for (index, link) in leanLinks.enumerated() {
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform != beforeLean[index], "Both hands, torso and head follow illustrative body lean")
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Original URDF \(link)" }!.simdTransform == originalsBeforeLean[index], "Ghost lean must not rewrite measured evidence")
+        }
+        precondition(!rightExecute.isEnabled, "Illustrative lean cannot authorize hardware")
+        NotificationCenter.default.post(name: ROBAnimationStudio.previewChanged, object: nil, userInfo: ["values": ["lact.speed":40.0]])
+        for (index, link) in leanLinks.enumerated() {
+            precondition(rightScene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost \(link)" }!.simdTransform == beforeLean[index], "Timed motor demand alone must not invent an angle")
+        }
+        print("Animation bow: independent illustrative lean moves the full ghost hierarchy, never measured evidence or hardware")
         rightEditor.invalidate();gateway.ready=false;gateway.samples=[:]
         trial.physicalSide="left";trial.collisionReviewProposal=historical
         editor.reviewPresetNamed("collision")

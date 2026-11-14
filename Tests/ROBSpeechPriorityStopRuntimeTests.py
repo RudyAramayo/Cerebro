@@ -65,7 +65,7 @@ __MATCHER__
 @end
 @interface ROBSpeechBox:NSObject
 @property id<ROBSpeechDelegate> delegate;
-@property BOOL isSpeaking,isShuttingDown,hologramRecordingOwnsMicrophone,localPriorityStopConsumed,recognitionContainsSpeechOutput;
+@property BOOL isSpeaking,isShuttingDown,hologramRecordingOwnsMicrophone,localPriorityStopConsumed,recognitionContainsSpeechOutput,assistantStatusInputSuppressed;
 @property NSUInteger recognitionGeneration,localPriorityStopRecognitionGeneration,acknowledgements,speechCancellations;
 @property Request *speechRequest;
 @property NSTimer *debounceSpeechInputTimer;
@@ -102,6 +102,17 @@ __SPEECH_METHODS__
 @implementation ROBArmRoutineCoordinator
 + (instancetype)shared{static id value;return value?: (value=[self new]);}
 - (void)cancelWithReason:(NSString *)reason{self.cancellations+=1;}
+@end
+@interface ROBAnimationPlayback:ROBArmRoutineCoordinator
+- (void)stopWithReason:(NSString *)reason;
+@end
+@implementation ROBAnimationPlayback
++ (instancetype)shared{static id value;return value?: (value=[self new]);}
+- (void)stopWithReason:(NSString *)reason{self.cancellations+=1;}
+@end
+@interface ROBRecycleMissionCoordinator:ROBAnimationPlayback @end
+@implementation ROBRecycleMissionCoordinator
++ (instancetype)shared{static id value;return value?: (value=[self new]);}
 @end
 @interface ROBControllerArmApproval:NSObject
 @property NSUInteger approvals,restartCalls;

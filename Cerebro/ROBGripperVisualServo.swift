@@ -39,7 +39,7 @@ enum ROBGripperVisualServo {
         var alignmentTolerancePixels=3.0
         var maximumIterations=6
         var minimumFingerLengthPixels=8
-        var maximumFrameAgeMilliseconds=750.0
+        var maximumFrameAgeMilliseconds=ROBVisionFrameAgeBudget.limit(normal:750)
     }
     struct JawObservation:Codable,Equatable,Sendable {
         let centerPixels:[Double]
@@ -110,7 +110,7 @@ enum ROBGripperVisualServo {
                   [frame.fx,frame.fy,frame.cx,frame.cy,frame.capturedAtMilliseconds,frame.jointCapturedAtMilliseconds,nowMilliseconds].allSatisfy(\.isFinite),
                   frame.fx>0,frame.fy>0,!frame.scopeIdentity.isEmpty,frame.sequence>0,frame.poseHeldDuringCapture,
                   (0...configuration.maximumFrameAgeMilliseconds).contains(nowMilliseconds-frame.capturedAtMilliseconds),
-                  (0...700).contains(nowMilliseconds-frame.jointCapturedAtMilliseconds),
+                  (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(nowMilliseconds-frame.jointCapturedAtMilliseconds),
                   abs(frame.capturedAtMilliseconds-frame.jointCapturedAtMilliseconds)<=150,frame.jointPositions.count==7,
                   configuration.jointBounds.count==7,zip(frame.jointPositions,configuration.jointBounds).allSatisfy({$0.isFinite && $1.contains($0)}),
                   !configuration.correctingJointIndices.isEmpty,Set(configuration.correctingJointIndices).count==configuration.correctingJointIndices.count,
@@ -119,7 +119,7 @@ enum ROBGripperVisualServo {
                   configuration.maximumImageCorrectionPixels.isFinite,(0.1...6).contains(configuration.maximumImageCorrectionPixels),
                   configuration.alignmentTolerancePixels.isFinite,(0.1...6).contains(configuration.alignmentTolerancePixels),
                   (1...6).contains(configuration.maximumIterations), (4...100).contains(configuration.minimumFingerLengthPixels),
-                  configuration.maximumFrameAgeMilliseconds.isFinite,(1...750).contains(configuration.maximumFrameAgeMilliseconds),
+                  configuration.maximumFrameAgeMilliseconds.isFinite,(1...ROBVisionFrameAgeBudget.limit(normal:750)).contains(configuration.maximumFrameAgeMilliseconds),
                   target.boxNormalized.count==4,target.boxNormalized.allSatisfy({$0.isFinite && (0...1).contains($0)}),
                   target.boxNormalized[2]>target.boxNormalized[0],target.boxNormalized[3]>target.boxNormalized[1],!target.id.isEmpty else {
                 return answer("unavailable","Fresh matched image/depth, actual held joint feedback, valid target and bounded configuration are required.")

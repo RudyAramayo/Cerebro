@@ -99,6 +99,10 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @property (readonly, assign) NSInteger commandedNeckPanTarget;
 @property (readonly, assign) NSInteger commandedLowerNeckTiltTarget;
 @property (readonly, assign) NSInteger commandedUpperNeckTiltTarget;
+/// Latest accepted upper-camera demand before optional lower-neck leveling.
+/// Manual controls must use this rather than feeding compensated output back
+/// into the gateway. Nil means no active, known demand in the current session.
+@property (readonly, nullable, copy) NSNumber *upperNeckOperatorDemandTarget;
 @property (readonly, assign, getter=isNeckPanCommandKnown) BOOL neckPanCommandKnown;
 @property (readonly, assign, getter=isLowerNeckTiltCommandKnown) BOOL lowerNeckTiltCommandKnown;
 @property (readonly, assign, getter=isUpperNeckTiltCommandKnown) BOOL upperNeckTiltCommandKnown;
@@ -310,6 +314,14 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 - (void)applyVisionGrippersActive:(BOOL)active leftClosed:(BOOL)leftClosed rightClosed:(BOOL)rightClosed;
 - (void)applyVisionTorsoActive:(BOOL)active rotation:(float)rotation;
 - (void)switchToMasterControllerID:(NSString *)controllerID;
+/// Animation Studio uses these only during explicit local sequence playback.
+@property (readonly) BOOL animationMaestroReady;
+@property (readonly) BOOL animationLACTReady;
+@property (readonly) BOOL animationNeckReady;
+- (NSDictionary<NSString *, NSNumber *> *)animationMaestroSnapshot;
+- (BOOL)applyAnimationMaestroValues:(NSDictionary<NSString *, NSNumber *> *)values;
+- (BOOL)applyAnimationLACTPercent:(double)percent;
+- (void)endAnimationOutputs;
 - (void)stopBaseMotionAndDropHeartbeat;
 
 - (IBAction)controllerPassthrough:(CGPoint)touchPadPointL

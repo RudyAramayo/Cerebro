@@ -40,13 +40,16 @@ selectors = [
     "refreshPersonTrackingUprightTransitionAtTime:", "neckCommandReadyAtUptime",
     "personTrackingMayUpdateNeck", "personTrackingCorrectionReadyAtUptime",
     "requestPersonTrackingPanTarget:", "requestOperatorNeckPosePanTarget:",
-    "applySafeNeckPanTarget:", "startSafeNeckStartup",
+    "applySafeNeckPanTarget:", "startAutomaticNeckStartup", "startSafeNeckStartup",
     "advanceSafeNeckStartupForGeneration:", "cancelSafeNeckStartup",
+    "prepareNeckForWorkspaceSearchWithPanDegrees:", "isNeckReadyForWorkspaceSearchWithPanDegrees:",
     "prepareNeckForPersonFollow", "prepareNeckForArmInspection",
     "prepareNeckForArmInspectionWithPanDegrees:", "isNeckReadyForArmInspectionWithPanDegrees:",
     "prepareNeckForArmInteraction", "isNeckReadyForArmInteraction",
     "stageNeckForArmViewWithPanDegrees:", "isNeckReadyForArmViewWithPanDegrees:",
-    "torso_controllerPassthrough_head_pan:",
+    "torso_controllerPassthrough_head_pan:", "animationMaestroSnapshot", "applyAnimationMaestroValues:",
+    "animationNeckReady", "endAnimationOutputs", "cancelNeckGestureAuthority", "upperNeckOperatorDemandTarget",
+
 ]
 methods = [method(selector) for selector in selectors]
 production = "\n".join(methods)
@@ -72,6 +75,8 @@ harness = r'''
 #include <float.h>
 
 static double fixtureNow = 100;
+static BOOL fixtureAutomaticStartupEnabled = YES;
+static BOOL fixtureIncidentSafetyConfiguration = NO;
 typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
     ROBNeckCommandDispositionRejected,
     ROBNeckCommandDispositionAppliedCommand,
@@ -91,6 +96,15 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
     return coordinator;
 }
 @end
+@interface ROBAnimationPlayback : NSObject
+@property BOOL isRunning;
++ (instancetype)shared;
+- (void)stopWithReason:(NSString *)reason;
+@end
+@implementation ROBAnimationPlayback
++ (instancetype)shared { static ROBAnimationPlayback *value; if (!value) value = [self new]; return value; }
+- (void)stopWithReason:(NSString *)reason { self.isRunning = NO; }
+@end
 @class ROBServoCameraPosition;
 @interface ROBServoSequencePhase : NSObject
 @property NSInteger phaseIndex, panTarget, lowerTarget, upperTarget;
@@ -100,10 +114,12 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @end
 @interface ROBServoControlStore : NSObject
 + (instancetype)shared;
++ (BOOL)automaticStartupEnabled;
 - (ROBServoSequencePhase *)startupPhaseAtIndex:(NSInteger)index;
 @end
 @implementation ROBServoControlStore
 + (instancetype)shared { return [self new]; }
++ (BOOL)automaticStartupEnabled { return fixtureAutomaticStartupEnabled; }
 - (ROBServoSequencePhase *)startupPhaseAtIndex:(NSInteger)index {
     ROBServoSequencePhase *phase = [ROBServoSequencePhase new];
     phase.phaseIndex = index + 1;
@@ -114,24 +130,42 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 }
 @end
 
-@interface NeckFixture : NSObject
+@interface NeckFixture : NSObject { int serialFileDescriptor_base; }
 /* PROPERTIES */
 @property(strong) NSMutableArray<NSData *> *writes;
 @property NSInteger failWriteNumber, attempts;
 @property double scheduledAt;
 /* DECLARATIONS */
 - (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length;
+- (void)writeString:(NSString *)value serialFileDescriptor:(int)fd;
 - (ROBNeckSafetyConfig)loadNeckSafetyConfiguration;
 - (void)scheduleSafeNeckStartupAdvanceForGeneration:(NSUInteger)generation atTime:(double)time;
 @end
 @implementation NeckFixture
+- (void)writeString:(NSString *)value serialFileDescriptor:(int)fd { assert(NO && "No base output expected in neck fixture"); }
 - (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length {
     self.attempts++;
     if (self.failWriteNumber == self.attempts) return NO;
     [self.writes addObject:[NSData dataWithBytes:bytes length:length]];
     return YES;
 }
-- (ROBNeckSafetyConfig)loadNeckSafetyConfiguration { return ROBNeckSafetyDefaultConfig(); }
+- (ROBNeckSafetyConfig)loadNeckSafetyConfiguration {
+    ROBNeckSafetyConfig config = ROBNeckSafetyDefaultConfig();
+    if (fixtureIncidentSafetyConfiguration) {
+        config.lowerMinimumTarget = 4375;
+        config.lowerFullPanLowTarget = 5300;
+        config.lowerFullPanHighTarget = 6822;
+        config.lowerForwardRestrictedTarget = 6823;
+        config.lowerMaximumTarget = 7675;
+        config.upperMinimumTarget = 4300;
+        config.upperMaximumTarget = 7790;
+        config.forwardPanMinimumDegrees = -15;
+        config.forwardPanMaximumDegrees = 2.1;
+        config.upperCounterRotationGain = -1;
+        config.cameraLevelingEnabled = false;
+    }
+    return config;
+}
 - (void)scheduleSafeNeckStartupAdvanceForGeneration:(NSUInteger)generation atTime:(double)time {
     self.scheduledAt = time;
 }
@@ -190,6 +224,30 @@ static void render(NeckFixture *box, int pan, int lower, int upper, BOOL manual)
 }
 
 int main(void) { @autoreleasepool {
+    // Exercise the actual automatic-connect gate with a byte recorder. An
+    // explicit neck service setting emits no pulses and retains the operator
+    // takeover guard; a stale periodic UI render cannot activate the neck.
+    NeckFixture *automatic = unknownNeck();
+    fixtureAutomaticStartupEnabled = NO;
+    assert([automatic startAutomaticNeckStartup] == ROBNeckCommandDispositionRejected);
+    assert(automatic.writes.count == 0 && !automatic.safeNeckStartupInProgress);
+    assert(automatic.torsoNeckAuthorityRequiresOperatorAction);
+    render(automatic, 5799, 7014, 7698, NO);
+    assert(neckPackets(automatic).count == 0);
+    fixtureAutomaticStartupEnabled = YES;
+    automatic.maestroConnectionValid = NO;
+    assert([automatic startAutomaticNeckStartup] == ROBNeckCommandDispositionRejected);
+    assert(neckPackets(automatic).count == 0);
+    automatic.maestroConnectionValid = YES;
+    assert([automatic startAutomaticNeckStartup] == ROBNeckCommandDispositionAppliedCommand);
+    assert(automatic.commandedNeckPanTarget == 0);
+    assert(automatic.commandedLowerNeckTiltTarget == 6011);
+    assert(automatic.commandedUpperNeckTiltTarget == 6906);
+    [automatic cancelSafeNeckStartup];
+    NSUInteger cancelledCount = automatic.writes.count;
+    fixtureNow += 100;
+    [automatic advanceSafeNeckStartupForGeneration:automatic.safeNeckStartupGeneration];
+    assert(automatic.writes.count == cancelledCount);
     // Inspection survives the stale torso slider renderer throughout both
     // camera ramps; explicit manual intervention retains its normal priority.
     NeckFixture *inspection = activeNeck();
@@ -251,9 +309,13 @@ int main(void) { @autoreleasepool {
     assert(![inspection prepareNeckForArmInteraction]);
 
     // Each startup phase reaches the wire once despite passive renders and
-    // face detections throughout the staged movement.
-    NeckFixture *box = unknownNeck();
-    assert([box startSafeNeckStartup] == ROBNeckCommandDispositionAppliedCommand);
+    // face detections throughout the staged movement, with both the factory
+    // limits and the incident's saved safety configuration.
+    NeckFixture *box;
+    for (int savedConfig = 0; savedConfig < 2; savedConfig++) {
+    fixtureIncidentSafetyConfiguration = savedConfig;
+    box = unknownNeck();
+    assert([box startAutomaticNeckStartup] == ROBNeckCommandDispositionAppliedCommand);
     assert(neckPackets(box).count == 2);
     for (int phase = 0; phase < 3; phase++) {
         NSUInteger before = neckPackets(box).count;
@@ -272,6 +334,8 @@ int main(void) { @autoreleasepool {
                                                @[@0, @5799], @[@1, @7014, @7698]]]));
     for (int i = 0; i < 100; i++) render(box, 5799, 7014, 7698, NO);
     assert(neckPackets(box).count == 4);
+    }
+    fixtureIncidentSafetyConfiguration = NO;
 
     // A pan-only correction emits one packet. 100 competing observations and
     // stale UI renders during its ramp cannot reverse it or restart its clock.
@@ -531,6 +595,54 @@ int main(void) { @autoreleasepool {
     NSUInteger offCount = neckPackets(box).count;
     render(box, 0, 0, 0, NO);
     assert(neckPackets(box).count == offCount);
+    // Workspace search retains an explicitly selected forward lower-neck pose.
+    // Pan and upper commands still use production output/ramp/envelope gates.
+    for (NSNumber *lower in @[@6411, @6819]) {
+        NeckFixture *scan = activeNeck();
+        scan.neckSafetyCalibrationConfirmed = NO;
+        scan.commandedLowerNeckTiltTarget = lower.intValue;
+        scan.panEnvelopeLowerTarget = lower.intValue;
+        ROBNeckSafetyConfig config = [scan neckSafetyConfiguration];
+        int32_t center = 0;
+        assert(ROBNeckSafetyPanDegreesToTarget(&config, 0, &center));
+        scan.commandedNeckPanTarget = center;
+        scan.commandedNeckPanDegrees = 0;
+        for (int tick=0; tick<10; tick++) {
+            [scan prepareNeckForWorkspaceSearchWithPanDegrees:0 upperTarget:6100];
+            settle(scan);
+        }
+        assert([scan isNeckReadyForWorkspaceSearchWithPanDegrees:0 upperTarget:6100]);
+        assert(scan.commandedLowerNeckTiltTarget == lower.intValue);
+        for (NSArray *packet in neckPackets(scan)) assert([packet[0] intValue] != 1);
+        NSUInteger count = neckPackets(scan).count;
+        scan.manualNeckOverrideUntil = fixtureNow + 10;
+        assert(![scan prepareNeckForWorkspaceSearchWithPanDegrees:0 upperTarget:6200]);
+        assert(neckPackets(scan).count == count);
+        scan.manualNeckOverrideUntil = 0;
+        assert(![scan prepareNeckForWorkspaceSearchWithPanDegrees:90 upperTarget:6100]);
+        assert(scan.commandedLowerNeckTiltTarget == lower.intValue);
+        scan.lowerNeckTiltCommandKnown = NO;
+        assert(![scan isNeckReadyForWorkspaceSearchWithPanDegrees:0 upperTarget:6100]);
+        assert(![scan prepareNeckForWorkspaceSearchWithPanDegrees:0 upperTarget:6100]);
+    }
+    box = activeNeck();
+    [ROBAnimationPlayback shared].isRunning = YES;
+    assert([box applyAnimationMaestroValues:@{@"maestro.4":@6200}]);
+    NSUInteger animationWrites = box.writes.count;
+    assert(![box applyAnimationMaestroValues:@{@"maestro.8":@6000}]);
+    assert(box.writes.count == animationWrites);
+    assert([box applyAnimationMaestroValues:@{@"maestro.0":@6000}]);
+    assert(box.animationNeckActive);
+    [box endAnimationOutputs];
+    assert(!box.animationNeckActive && box.torsoNeckAuthorityRequiresOperatorAction);
+    assert(!box.personTrackingMayUpdateNeck);
+    box.neckPanCommandKnown = NO;
+    assert([box animationMaestroSnapshot][@"maestro.0"] == nil);
+    box.lowerNeckTiltCommandKnown = NO;
+    assert(![box applyAnimationMaestroValues:@{@"maestro.0":@6000}]);
+    [ROBAnimationPlayback shared].isRunning = NO;
+    assert(![box applyAnimationMaestroValues:@{@"maestro.4":@6300}]);
+    puts("Animation Maestro gateway: reserved channels rejected, native run required, neck Stop discards future staging");
     puts("ROB neck output runtime fixtures passed: startup, pacing, deduplication, ownership, recovery, near-upright wide-pan pairs, forward-overlook endpoint/staging, tightening, unconfirmed automatic holds, OFF");
 } }
 '''

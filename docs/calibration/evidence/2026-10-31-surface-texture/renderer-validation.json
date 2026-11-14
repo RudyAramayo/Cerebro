@@ -1,0 +1,59 @@
+{
+  "artifact_sha256": {
+    "before_render": "6fc3e13350b5357a24763e5cfd4fd6d79f408a843b0db0cfc746dc90b167f649",
+    "corrected_render": "c1e6e1872023ac7fb349fdfae6c7c170da02eb05d4a6f6b04eb9ccae26a48b8d",
+    "source_depth": "6c8af8f738606940e068570b0f0de22202a4ad571809e054f1c2c3428bf0715e",
+    "source_rgb": "9fbf34990103c39305ebcdf15b31c6a5fb831a33a838d3567dfa34e0ff410d89"
+  },
+  "fallback_checks": {
+    "invalid_depth_keeps_prior_observed_colour": true,
+    "later_valid_rgb_fills_photo_holes": true,
+    "missing_rgb_preserves_measured_red_blue": true,
+    "verified_photographic_texels_not_overwritten": true
+  },
+  "oblique_check": {
+    "new_plane_distance_check_accepts_photo": true,
+    "normal_depth_noise_m": 0.006,
+    "old_optical_z_check_rejected_photo": true,
+    "plane_angle_degrees": 80
+  },
+  "qr_alignment": {
+    "consecutive_atlas_decodes": 11,
+    "corrected_center_error_pixels": 0.0,
+    "keyframe_hash_stable_with_exposure_changes": true,
+    "previous_center_error_pixels": 129.201,
+    "previous_render_pixels": [
+      105.2,
+      245.2
+    ],
+    "synthetic_source_pixels": [
+      106.0,
+      116.0
+    ]
+  },
+  "recorded_replay": {
+    "after_gray_fallback_pixels": 0,
+    "after_mean_absolute_rgb_error_8bit": 29.024,
+    "before_gray_fallback_pixels": 143918,
+    "before_mean_absolute_rgb_error_8bit": 69.453,
+    "input": "one stationary tabletop capture repeated six times to isolate rendering",
+    "limitation": "Incomplete/noisy plane coverage still prevents a complete readable QR texture in this capture; no claim of complete scene reconstruction or physical calibration",
+    "native_detected_qr": [
+      "ROB:FLOOR:R01"
+    ],
+    "reconstructed_qr": [],
+    "render_size": [
+      640,
+      400
+    ]
+  },
+  "scope": "Native SceneKit renderer fixtures and a repeated recorded RGB-D snapshot; no actuator commands or calibration changes",
+  "validation": {
+    "expected_before_regression_failures": [
+      "off-centre QR position",
+      "optical-Z rejection of oblique plane"
+    ],
+    "photographic_fixture": "passed",
+    "production_renderer_integration_fixture": "passed"
+  }
+}

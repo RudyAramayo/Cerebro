@@ -361,9 +361,10 @@ def check_lower_clearance_threshold(
     require(
         "ROBNeckSafetyUprightLowerTarget" in torso_source
         and "ROBNeckSafetyUprightUpperTarget" in torso_source
-        and "ROBNeckSafetyDefaultForwardPanTarget" in torso_source
-        and "ROBNeckSafetyDefaultLowerTarget" in torso_source
-        and "ROBNeckSafetyDefaultUpperTarget" in torso_source
+        and "startupPhaseAtIndex:2" in torso_source
+        and "rest.panTarget" in torso_source
+        and "rest.lowerTarget" in torso_source
+        and "rest.upperTarget" in torso_source
         and 'doubleValue="5798.9583333333339"' in storyboard
         and 'doubleValue="7014"' in storyboard
         and 'id="Bud-rf-B0V"' in storyboard
@@ -378,8 +379,21 @@ def check_single_physical_neck_gateway(serial_source: str) -> None:
         serial_source, "applySafeNeckPanTarget:"
     )
     all_calls = maestro_send_calls(serial_source)
+    animation_start, animation_end = objective_c_method_span(
+        serial_source, "applyAnimationMaestroValues:"
+    )
+    animation_source = compact(serial_source[animation_start:animation_end])
     for position, channel, message in all_calls:
         if gateway_start <= position < gateway_end:
+            continue
+        # This existing accessory loop is short-circuited before channels 0–2.
+        # The runtime byte-recorder fixture also verifies its neck path. Keep
+        # the exact guard and allowlist requirement; arbitrary dynamic writes
+        # elsewhere still fail this check.
+        if (animation_start <= position < animation_end and channel is None
+                and compact(message) == "[self sendMaestroTarget:(unsigned short)values[key].integerValue channel:(unsigned char)channel]"
+                and compact(serial_source[max(animation_start, position - 70):position]).endswith("if (channel > 2 && !")
+                and "[allowed containsObject:key]" in animation_source):
             continue
         require(
             channel is not None,
@@ -596,12 +610,12 @@ def check_safe_startup_sequence(
         and servo_action.count(
             "self.headUpperNeckTilt_enabled.state = NSControlStateValueOff;"
         ) == 1
-        and "self.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;"
+        and "self.headPan.integerValue = rest.panTarget;"
             in servo_action
-        and "self.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;"
+        and "self.headTilt.integerValue = rest.lowerTarget;"
             in servo_action
         and "self.headUpperNeckTilt.integerValue = "
-            "ROBNeckSafetyDefaultUpperTarget;" in servo_action
+            "rest.upperTarget;" in servo_action
         and "[serialBox startSafeNeckStartup]" in servo_action
         and "[serialBox cancelSafeNeckStartup]" in servo_action,
         "A deliberate neck action no longer starts/cancels the safe recovery sequence",

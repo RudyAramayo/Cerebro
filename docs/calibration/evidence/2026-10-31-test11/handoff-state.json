@@ -1,0 +1,87 @@
+{
+  "observed_at_approx": "2026-10-31T14:01:00-07:00",
+  "operation": "status (read only)",
+  "no_actuation": true,
+  "session_changed_since_test": true,
+  "motion_running": false,
+  "mission_active": false,
+  "mission_phase": "paused",
+  "passive_hardware_startup": true,
+  "quiet_diagnostics": true,
+  "neck_known": false,
+  "torso": {
+    "count": null,
+    "detail": "Rehearsal stopped",
+    "front_count": 92,
+    "hardware_selected": false,
+    "has_software_reference": false,
+    "heading_degrees": null,
+    "pulse_ceiling": 2000
+  },
+  "arms": {
+    "left": {
+      "age_ms": 30.927095666291656,
+      "gripper_age_ms": 31.95918131387304,
+      "modes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statuses": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "q_radians": [
+        0.000136353847812057,
+        -0.003681553890925539,
+        0.000409061543436171,
+        0.004363323129985824,
+        0.011862784759648958,
+        -0.005863215455918451,
+        -0.000545415391248228
+      ]
+    },
+    "right": {
+      "age_ms": 32.31716733226293,
+      "gripper_age_ms": 32.06601065652953,
+      "modes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "statuses": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "q_radians": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "interpretation": "Both report inactive with fresh feedback. This supersedes the earlier left-held telemetry snapshot; no new camera inspection proves actual pose or power. Do not infer hanging or encoder calibration from zeros.",
+  "installed_executable_sha256": "88acdf289308dac7ed7a65ea831f4a8920afea9fe8cdbda4ab6434ca588a35e9"
+}

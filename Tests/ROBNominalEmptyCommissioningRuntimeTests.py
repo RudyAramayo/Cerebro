@@ -66,6 +66,7 @@ private struct NominalMap:ROBWorkspaceCollisionMap {
   rejected("fresh start") {try decoded.validateContext(map:map,model:model,generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,
    nowMilliseconds:1000,trial:trial(map),measuredAtMilliseconds:1000,measuredBaseline:drift,nominalEmptyCommissioningEnabled:true,emptyStateEvidenceSource:proof.emptyStateEvidenceSource)}
   var json=try JSONSerialization.jsonObject(with:JSONEncoder().encode(decoded)) as! [String:Any]
+  precondition(json["modelAssumedSelfAudit"]==nil,"OFF serialization must omit the new optional audit")
   json["originalOccupiedBoundsSHA256"]=String(repeating:"0",count:64)
   let tampered=try JSONDecoder().decode(ROBWorkspaceNominalEmptyCommissioningRetreat.self,from:JSONSerialization.data(withJSONObject:json))
   rejected("geometry, raw returns") {try tampered.validate(map:map,model:model,generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,

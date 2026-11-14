@@ -22,5 +22,8 @@
 - (IBAction)showWakeUpCalibration:(id)sender;
 - (IBAction)showTestingSandbox:(id)sender;
 - (IBAction)showServoControl:(id)sender;
+- (IBAction)showTorsoServoControls:(id)sender;
+- (IBAction)showBaseControls:(id)sender;
+- (IBAction)showTorsoRotation:(id)sender;
 
 @end

@@ -22,6 +22,7 @@ final class ROBLeftArmTrial {
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     var isRunning = false
+    func approvedTorsoPreparationTarget(arm: String, index: Int, duration: Double, generation: UInt64) -> [Double]? { nil }
 }
 enum ROBArmSide {
     case left, right
@@ -49,3 +50,15 @@ final class ROBGripperStartupCalibration {
     static let shared = ROBGripperStartupCalibration()
     func gatewayBecameReady() {}
 }
+
+// Animation Studio cannot acquire authority in unrelated protocol fixtures.
+final class ROBAnimationPlayback {
+    static let shared = ROBAnimationPlayback()
+    var step: (values: [Double], seconds: Double)?
+    var expectedGeneration: UInt64 = 0
+    var expectedArm = "left"
+    func approvedStep(arm: String, generation: UInt64) -> (values: [Double], seconds: Double)? {
+        arm == expectedArm && generation == expectedGeneration ? step : nil
+    }
+}
+enum ROBArmTargetExecutionContext { static let maximumAverageSpeedRadiansPerSecond = 0.20 }

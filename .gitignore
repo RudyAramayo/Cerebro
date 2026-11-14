@@ -3,6 +3,7 @@ build/
 DerivedData/
 *.moved-aside
 *.xcuserstate
+xcuserdata/
 .DS_Store
 
 # Swift Package Manager (SPM)

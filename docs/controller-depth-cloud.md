@@ -3,6 +3,57 @@
 The controller input scene projects aligned RGB-D points through the camera's
 accepted neck command estimates. It does not assume that the head is level.
 
+## Room map and laser layers
+
+Open **Development → Open Controller Input Scene…**. The **Room + depth**
+panel controls the accumulated floor map, live laser hits and camera depth
+independently. **Room view** fits the map; **Robot view** returns to the working
+view. Amber cells are occupied, blue cells are free at laser height, and gray
+cells are unknown. Cyan points show current returns at the model's scanner
+height. RGB-D retains tabletop, overhang and object heights above that plane.
+A blue cell never deletes a depth obstacle or asserts whole-body clearance.
+The decorative grid/floor is hidden while the live map is visible, so it cannot
+intersect or reflect a room layer placed with the provisional display gauge.
+
+`ROBRoomSpatialStore` shares authenticated telemetry and complete map assembly
+with Recycle Cans, including while no mission or diagnostics window is open.
+The scene stays robot-centred; measured SLAM transforms the room around it.
+Tread demands only highlight the treads and no longer integrate a fictional
+robot displacement. SDK origin, resolution, signed occupancy and CCW yaw are
+used directly. The satellite display, GPS and TIC counts do not affect this view.
+The raster uses one texture (at most one million cells), built on a utility
+queue with one pending job; laser geometry is replaced only on a new scan.
+With the room layer enabled, idle scene/HUD maintenance runs at 5 Hz and
+camera-cloud publication at 4 Hz (2 Hz during trials). Idle drawing runs at
+15 fps; ghost playback retains 30 fps. This bounds diagnostic work separately
+from capture, perception, motor feedback and Stop. Unchanged head commands do
+not repeatedly rebuild the head-information labels or reread their profile.
+
+Scan/pose age and map age are shown separately. Hits disappear after 750 ms;
+the map disappears after 15 seconds or whenever pose is stale. A new publisher,
+publisher restart or map epoch discards the old raster. Late fragments cannot
+roll back a complete revision. Stationary depth history and pending projections
+are discarded after cumulative measured displacement over 25 mm, yaw/tilt over
+0.02 radians, a map-frame change, or a SLAM telemetry gap. These are **display
+invalidation thresholds**, never movement limits or new motion approval checks.
+Fresh depth is then reacquired at the current pose.
+
+This is a layered diagnostic fusion view. It uses the same model basis, scale
+and provisional display gauge as the existing depth view; the lidar mount comes
+from `rplidar_link`. The panel identifies sensor alignment as estimated. It
+does not create measured extrinsic calibration, register accumulated depth
+across a moving base, turn a 2D raster into a 3D obstacle volume, or supply a
+new swept-volume mission planner. Mission admission still uses its independent
+map, live lidar and RGB-D checks, and manipulation uses its existing depth/path
+review. Whole-body 3D planning needs registered, time-aligned depth coverage.
+
+Run `bash Scripts/test-room-spatial.sh` for metric/yaw/mount-height alignment,
+SDK occupancy signs and row orientation, expiry/replay/reset/restart cases,
+cumulative manual realignment, and production SceneKit layers retaining a
+tabletop over lidar-free cells. The fixture has no robot/network adapters.
+
+## Camera projection and history
+
 - The normal robot's head follows accepted neck command estimates. The untouched
   blue head follows the same pose; explicit ghost neck edits change only its
   preview, not the normal model or the cloud's camera transform.
@@ -93,7 +144,7 @@ accepted neck command estimates. It does not assume that the head is level.
 - Deprojection uses the aligned frame's `fx`, `fy`, `cx` and `cy` when valid.
   Missing calibration retains the previous 69° FOV estimate and is labeled
   **estimated intrinsics** in the scene HUD.
-- Display work is capped at 30 scene frames/second and eight cloud submissions
+- Display work is capped at 30 scene frames/second and four cloud submissions
   per second per camera. Unchanged mesh transforms do not start transactions;
   requesting execution captures an embedded snapshot and hides the live 3D view
   until the operation ends. Once the neck has settled during camera preparation,

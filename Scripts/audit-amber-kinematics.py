@@ -10,7 +10,8 @@ import xml.etree.ElementTree as ET
 def audit(root: Path) -> dict:
     report = {
         "scope": "Files under the supplied Amber root; this is not proof of what a running core loaded.",
-        "units": {"translation": "meters", "rotation": "radians"},
+        "units": {"translation": "meters", "rotation": "radians",
+                  "launch_dynamics": "Not declared by launch.json; inspect the selected core's conversion before comparing with URDF limits."},
         "arms": [],
     }
     for folder in ("L-10", "R-11"):
@@ -53,6 +54,15 @@ def audit(root: Path) -> dict:
             "lcm_prefix": config["LCM_Interface"]["Prefix"],
             "robot_direction": config["Robot"]["Rotation_Direction"],
             "solver_direction": solver["Rotation_Direction"], "chain": chain,
+            "model_links": [link.attrib["name"] for link in robot.findall("link")],
+            "collision_geometry_counts": {link.attrib["name"]: len(link.findall("collision"))
+                                          for link in robot.findall("link")},
+            # These are independent of URDF <limit>; reporting both avoids
+            # implying that changing a model edits the trajectory generator.
+            "launch_dynamics": {key: config["Robot"].get(key) for key in
+                                ("Robot_DOF", "Control_Frequency", "Max_Velocity",
+                                 "Max_Acceleration", "Max_Jerk", "Gear_Ratio")},
+            "solver_ignore_ruckig": solver.get("IgnoreRuckig"),
         })
     return report
 

@@ -22,11 +22,24 @@ enum ROBNeckRGBPoseDisplay {
         let bellyFloorDisplayReferenceID: String?
         let usesPhotoHardwareOpticalOrigin: Bool
         let operatorPanCalibrationDescription: String?
+        let frozenOpticalPitchRefinementRadians:Double?
         /// An opt-in estimated origin, not registration. Keep the pinned RGB
         /// rotation while drawing/projecting from the measured hardware glass.
-        var provisionalCameraToModel: simd_double4x4 {
+        var unrefinedProvisionalCameraToModel: simd_double4x4 {
             guard usesPhotoHardwareOpticalOrigin,let glass=hardwareFrames?["rgb_glass_frame"] else{return cameraToModel}
-            var result=cameraToModel;result.columns.3=glass.columns.3;return result
+            var result=cameraToModel;result.columns.3=glass.columns.3
+            return result
+        }
+        var provisionalCameraToModel: simd_double4x4 {
+            var result=unrefinedProvisionalCameraToModel
+            guard usesPhotoHardwareOpticalOrigin,hardwareFrames?["rgb_glass_frame"] != nil else{return result}
+            if let angle=frozenOpticalPitchRefinementRadians {
+                // Post-optical-X: image-right and the optical origin stay
+                // exactly unchanged. This is an estimated mounting refinement.
+                let y=result.columns.1,z=result.columns.2,c=cos(angle),s=sin(angle)
+                result.columns.1=c*y+s*z;result.columns.2 = -s*y+c*z
+            }
+            return result
         }
         var displayCameraToModel: simd_double4x4 { modelToDisplay * provisionalCameraToModel }
         var depthCloudCameraToModel: simd_double4x4 {
@@ -90,6 +103,52 @@ enum ROBNeckRGBPoseDisplay {
         let bellyFloorDisplayReference:BellyFloorDisplayReference?
         let usePhotoHardwareOpticalOrigin:Bool?
         let operatorPanCalibration:OperatorPanCalibration?
+        let estimatedGravityPitchRefinement:GravityPitchReference?
+        /// DEBUG DEMO parameter reuse only; original capture provenance stays immutable.
+        let demoPortableGravityPitchPrior:Bool?
+    }
+    private struct GravityPitchReference:Decodable {
+        let evidencePath:String,evidenceSHA256:String
+    }
+    private struct GravityPitchEvidence:Decodable {
+        struct Capture:Decodable {let role:String,captureInputPath:String,captureInputSHA256:String}
+        let schemaVersion:Int,kind:String,method:String
+        let modelID:String,referenceID:String,geometryID:String,mappingID:String
+        let oldEstimatedCameraProjectionIdentity:String,bodyMotionIdentity:String
+        let activeCameraGeneration:String,cameraRole:String,actualDeviceMXID:String
+        let runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
+        let deltaRadians:Double?
+        let referenceUpperTarget:Int?,interceptRadians:Double?,slopeRadiansPerRawUnit:Double?
+        let bodyGravityReferenceModel:[Double]?,referenceLowerTarget:Int?
+        let registrationVerified:Bool,armMotionAuthority:Bool,rawDepthCorrected:Bool
+        let modelBaseUpAssumed:Bool,opticalOriginPriorUnchanged:Bool,imageRightHeadingPriorUnchanged:Bool
+        let captures:[Capture]
+    }
+    private struct PinnedGravitySource {
+        let path:String,size:Int,modified:Date,fileNumber:UInt64
+        init(_ path:String)throws {
+            let a=try FileManager.default.attributesOfItem(atPath:path)
+            guard a[.type]as?FileAttributeType == .typeRegular,let size=a[.size]as?NSNumber,
+                  let modified=a[.modificationDate]as?Date,let number=a[.systemFileNumber]as?NSNumber else {throw Failure.invalid}
+            self.path=path;self.size=size.intValue;self.modified=modified;fileNumber=number.uint64Value
+        }
+        var unchanged:Bool {
+            guard let a=try?PinnedGravitySource(path) else{return false}
+            return size==a.size && modified==a.modified && fileNumber==a.fileNumber
+        }
+    }
+    private struct GravityPitch {
+        let reference:GravityPitchReference,deltaRadians:Double,bodyMotionIdentity:String
+        let referenceUpperTarget:Int?,slopeRadiansPerRawUnit:Double
+        let cameraGeneration:UUID,runtimeCalibrationIdentity:String,cameraServiceSourceSHA256:String
+        let actualDeviceMXID:String,imuSensor:String,imuToRGBRotation:[Double],intrinsicsIdentities:Set<String>
+        let fullHeightStereoModes:Set<String>
+        let bodyGravityReferenceModel:SIMD3<Double>,referenceLowerTarget:Int?
+        let sources:[PinnedGravitySource]
+        func angle(upperTarget:Int)->Double {
+            guard let referenceUpperTarget else{return deltaRadians}
+            return deltaRadians+slopeRadiansPerRawUnit*Double(upperTarget-referenceUpperTarget)
+        }
     }
     /// A measured operator angle and a provisional forward reference refine
     /// the estimated pan mapping. They never authorize a servo command.
@@ -148,6 +207,8 @@ enum ROBNeckRGBPoseDisplay {
         let usePhotoHardwareOpticalOrigin:Bool
         let estimatedCameraProjectionIdentity:String?
         let operatorPanCalibration:OperatorPanCalibration?
+        let gravityPitch:GravityPitch?
+        let demoPortableGravityPitchPrior:Bool
     }
     private static let lock=NSLock()
     private static var cachedKey=""
@@ -178,6 +239,204 @@ enum ROBNeckRGBPoseDisplay {
               e.observationSource=="operator_observed_physical_pan_angle",
               !e.registrationVerified,!e.armMotionAuthority else {throw Failure.invalid}
         return bytes
+    }
+    private static func gravityPitchEvidence(_ reference:GravityPitchReference,model:ROBGhostRobotModel,
+        parameters:[String:Double],operatorPan:OperatorPanCalibration?,oldProjectionIdentity:String,
+        demoPortableGravityPitchPrior:Bool=false)throws->GravityPitch {
+        let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
+        guard bytes.count<100_000 else{throw Failure.invalid}
+        let e=try JSONDecoder().decode(GravityPitchEvidence.self,from:bytes)
+        let bodyReference=e.method=="affine_training_upper_with_body_gravity_reference_v1"
+        let affine=bodyReference || e.method=="affine_training_upper_post_optical_x_preserve_origin_image_right_v1"
+        let up:SIMD3<Double>
+        if bodyReference {
+            guard !demoPortableGravityPitchPrior,!e.modelBaseUpAssumed,
+                  let v=e.bodyGravityReferenceModel,v.count==3,v.allSatisfy(\.isFinite),
+                  let lower=e.referenceLowerTarget,(3000...10000).contains(lower) else {throw Failure.invalid}
+            up=SIMD3(v[0],v[1],v[2])
+            guard abs(simd_length(up)-1)<=1e-9,up.z>=cos(5 * Double.pi/180) else {throw Failure.invalid}
+        }else {
+            guard e.bodyGravityReferenceModel==nil,e.referenceLowerTarget==nil,e.modelBaseUpAssumed else {throw Failure.invalid}
+            up=SIMD3(0,0,1)
+        }
+        if affine {
+            guard e.deltaRadians==nil,let upper=e.referenceUpperTarget,(3000...10000).contains(upper),
+                  let a=e.interceptRadians,a.isFinite,let b=e.slopeRadiansPerRawUnit,b.isFinite,
+                  [3000,10000].allSatisfy({abs(a+b*Double($0-upper))<=20 * .pi/180}) else{throw Failure.invalid}
+        } else {
+            guard e.method=="mean_training_post_optical_x_preserve_origin_image_right_v1",
+                  let delta=e.deltaRadians,delta.isFinite,abs(delta)<=20 * .pi/180,
+                  e.referenceUpperTarget==nil,e.interceptRadians==nil,e.slopeRadiansPerRawUnit==nil else{throw Failure.invalid}
+        }
+        func hash(_ x:String)->Bool{x.count==64 && x.allSatisfy(\.isHexDigit)}
+        guard e.schemaVersion==1,e.kind=="estimated_stationary_imu_optical_x_pitch_refinement",
+              e.modelID==model.modelID,e.referenceID==model.referenceID,e.geometryID==model.geometryID,
+              e.oldEstimatedCameraProjectionIdentity==oldProjectionIdentity,
+              (demoPortableGravityPitchPrior || e.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity),UUID(uuidString:e.bodyMotionIdentity) != nil,
+              let activeGeneration=UUID(uuidString:e.activeCameraGeneration),e.cameraRole=="face",
+              !e.actualDeviceMXID.isEmpty,e.actualDeviceMXID.count<=128,
+              hash(e.runtimeCalibrationIdentity),hash(e.cameraServiceSourceSHA256),
+              !e.registrationVerified,!e.armMotionAuthority,!e.rawDepthCorrected,
+              e.opticalOriginPriorUnchanged,e.imageRightHeadingPriorUnchanged,
+              (4...16).contains(e.captures.count),Set(e.captures.map(\.captureInputPath)).count==e.captures.count,
+              let torso=model.frames(model.reference)["torso_link"] else{throw Failure.invalid}
+        // The capture UI's selected arm mapping is source provenance, not a
+        // camera mounting parameter. Resolve either actual legal arm model;
+        // never reflect arm FK or rewrite the captured mapping to the caller.
+        let sourceModel:ROBGhostRobotModel
+        if e.mappingID==model.selectedMappingID {sourceModel=model}
+        else {
+            let other=try ROBGhostRobotModel(directory:model.directory,physicalSide:model.physicalSide=="left" ? "right":"left")
+            guard e.mappingID==other.selectedMappingID,other.modelID==model.modelID,
+                  other.referenceID==model.referenceID,other.geometryID==model.geometryID,
+                  other.reference==model.reference else{throw Failure.invalid}
+            let a=model.frames(model.reference),b=other.frames(other.reference)
+            guard ["torso_link","neck_pan_link","lower_neck_link","upper_neck_link","oak_link","oak_optical_frame","insta360_link"].allSatisfy({
+                a[$0] != nil && a[$0]==b[$0]
+            }) else{throw Failure.invalid}
+            sourceModel=other
+        }
+        struct Row {let role:String,pose:String,panTarget:Int,upperTarget:Int,requiredPitch:Double,gravity:SIMD3<Double>,camera:simd_double4x4}
+        var rows:[Row]=[],sources:[PinnedGravitySource]=[],totalRawBytes=0,heldGenerationSeen=false
+        var commonSensor:String?,commonIMURotation:[Double]?,intrinsicsIdentities=Set<String>(),fullHeightStereoModes=Set<String>()
+        func numbers(_ x:Any?,count:Int)throws->[Double] {
+            guard let v=x as?[Double],v.count==count,v.allSatisfy(\.isFinite) else{throw Failure.invalid};return v
+        }
+        func runtimeMatches(_ r:[String:Any])->Bool {
+            guard r["schemaVersion"]as?Int==1,r["actualDeviceMXID"]as?String==e.actualDeviceMXID,r["cameraRole"]as?String=="face",
+                  let sdk=r["sdkVersion"]as?String,!sdk.isEmpty,sdk.count<=128,
+                  let factory=r["factoryEEPROMSHA256"]as?String,hash(factory),
+                  let effective=r["effectiveRuntimeCalibrationSHA256"]as?String,hash(effective),
+                  let policy=r["stereoPolicySHA256"]as?String,hash(policy),r.keys.contains("candidateSHA256"),r.keys.contains("profileSHA256") else{return false}
+            let candidate=r["candidateSHA256"]as?String,profile=r["profileSHA256"]as?String
+            guard (candidate==nil)==(profile==nil),candidate.map(hash) ?? true,profile.map(hash) ?? true else{return false}
+            return sha(Data(["runtime-camera-calibration-v1",e.actualDeviceMXID,"face",sdk,factory,effective,policy,
+                candidate ?? "-",profile ?? "-"].joined(separator:"\n").utf8))==e.runtimeCalibrationIdentity
+        }
+        for capture in e.captures {
+            guard ["training","held_out"].contains(capture.role),capture.captureInputPath.hasPrefix("/") else{throw Failure.invalid}
+            let input=try read(capture.captureInputPath,sha:capture.captureInputSHA256)
+            guard input.count<=2_000_000,let document=try JSONSerialization.jsonObject(with:input)as?[String:Any],
+                  document["schemaVersion"]as?Int==1,document["cameraRole"]as?String=="face",
+                  let scopeJSON=document["scope"]as?[String:Any],let frames=document["frames"]as?[[String:Any]],(3...8).contains(frames.count) else{throw Failure.invalid}
+            let scope=try JSONDecoder().decode(ROBFixedHeadRegistrationScope.self,from:JSONSerialization.data(withJSONObject:scopeJSON))
+            try scope.validate();intrinsicsIdentities.insert(scope.intrinsicsIdentity)
+            guard scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==e.mappingID,
+                  scope.displayCorrectionIdentity.hasSuffix(":body:"+e.bodyMotionIdentity),
+                  e.referenceLowerTarget.map({$0==scope.lowerTarget}) ?? true else{throw Failure.invalid}
+            let sourceChain=try chain(model:sourceModel,parameters:parameters,panTarget:scope.panTarget,
+                lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget)
+            let currentChain=try chain(model:model,parameters:parameters,panTarget:scope.panTarget,
+                lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget)
+            guard sourceChain.camera==currentChain.camera,sourceChain.frames==currentChain.frames else{throw Failure.invalid}
+            var camera=torso * sourceChain.camera
+            if let pan=operatorPan,scope.panTarget != pan.forwardTarget {
+                let angle=Double(scope.panTarget-pan.forwardTarget)*Double.pi/6000*(pan.scale-parameters["panScale"]!)
+                let pivot=SIMD3<Double>(-0.0207044288303,0,0.355408962871)
+                camera=torso*translated(pivot)*rotated(SIMD3(0,0,angle))*translated(-pivot)*simd_inverse(torso)*camera
+            }
+            let root=URL(fileURLWithPath:capture.captureInputPath).deletingLastPathComponent().standardizedFileURL
+            sources.append(try PinnedGravitySource(capture.captureInputPath))
+            var directions:[SIMD3<Double>]=[],priorSequence:UInt64=0,priorTime=0.0,seenDepth=Set<String>(),seenIMU=Set<UInt64>()
+            for (index,frame) in frames.enumerated() {
+                guard let seq=frame["sequence"]as?UInt64,seq>priorSequence,
+                      let time=frame["capturedAtMilliseconds"]as?Double,time.isFinite,time>priorTime,
+                      frame["cameraGeneration"]as?String==scope.cameraGeneration.uuidString,
+                      frame["runtimeCalibrationIdentity"]as?String==e.runtimeCalibrationIdentity,
+                      frame["cameraServiceSourceSHA256"]as?String==e.cameraServiceSourceSHA256,
+                      let runtime=frame["runtimeCalibration"]as?[String:Any],runtimeMatches(runtime),
+                      frame["rgbOutputUndistorted"]as?Bool==true,
+                      let geometry=frame["depthRGBGeometryCorrespondence"]as?[String:Any],geometry["status"]as?String=="matched",
+                      let w=frame["width"]as?Int,let h=frame["height"]as?Int,(16...1920).contains(w),(16...1080).contains(h),
+                      let depthPath=frame["depthPath"]as?String,depthPath=="frame-\(index).depth-u16le",
+                      let depthSHA=frame["captureSHA256"]as?String,seenDepth.insert(depthSHA).inserted,
+                      let imu=frame["imu"]as?[String:Any],imu["stationary"]as?Bool==true,
+                      imu["axes"]as?String=="sensor_native",imu["gravity_source"]as?String=="stationary_accelerometer_mean",
+                      let sensor=imu["sensor"]as?String,!sensor.isEmpty,sensor.count<=128,
+                      let count=imu["sample_count"]as?Int,(10...1000).contains(count),
+                      let window=imu["window_milliseconds"]as?Double,window.isFinite,(100...1000).contains(window),
+                      let age=imu["age_milliseconds"]as?Double,age.isFinite,(0...100).contains(age),
+                      let latest=imu["latest_timestamp_ns"]as?UInt64,latest>0,seenIMU.insert(latest).inserted,
+                      let timestamp=imu["reference_timestamp_ns"]as?UInt64,timestamp>=latest,
+                      abs(Double(timestamp-latest)/1e6-age)<=0.02 else{throw Failure.invalid}
+                let depthURL=root.appendingPathComponent(depthPath),depth=try read(depthURL.path,sha:depthSHA)
+                if w==640,h==480,let mode=frame["stereoMode"]as?String,["standard","near_field"].contains(mode),
+                   frame["stereoModeSource"]as?String=="sdk_initial_config_readback" {
+                    fullHeightStereoModes.insert(mode)
+                }
+                totalRawBytes+=depth.count
+                guard depth.count==w*h*2,totalRawBytes<=64_000_000 else{throw Failure.invalid}
+                sources.append(try PinnedGravitySource(depthURL.path))
+                let gravity=try numbers(imu["gravity_mps2"],count:3),std=try numbers(imu["gravity_std_mps2"],count:3)
+                let gyro=try numbers(imu["gyro_rad_s"],count:3),r=try numbers(imu["imu_to_rgb_rotation"],count:9)
+                let rotation=simd_double3x3(columns:(SIMD3(r[0],r[3],r[6]),SIMD3(r[1],r[4],r[7]),SIMD3(r[2],r[5],r[8])))
+                let g=SIMD3(gravity[0],gravity[1],gravity[2]),omega=SIMD3(gyro[0],gyro[1],gyro[2])
+                guard (7...12).contains(simd_length(g)),std.allSatisfy({(0...0.1).contains($0)}),simd_length(omega)<=0.03,
+                      abs(simd_determinant(rotation)-1)<=1e-6,
+                      (0..<3).allSatisfy({i in (0..<3).allSatisfy({j in abs(simd_dot(rotation[i],rotation[j])-(i==j ? 1:0))<=1e-6})}),
+                      commonSensor.map({$0==sensor}) ?? true,commonIMURotation.map({$0==r}) ?? true else{throw Failure.invalid}
+                commonSensor=sensor;commonIMURotation=r;directions.append(simd_normalize(rotation*g));priorSequence=seq;priorTime=time
+            }
+            let sum=directions.reduce(SIMD3<Double>.zero,+)
+            guard simd_length(sum)>=Double(directions.count)*0.99 else{throw Failure.invalid}
+            let g=simd_normalize(sum)
+            guard directions.allSatisfy({acos(min(1,max(-1,simd_dot($0,g))))<=Double.pi/180}) else{throw Failure.invalid}
+            let sourceUp=simd_transpose(camera)*SIMD4(up,0)
+            let s=SIMD3(sourceUp.x,sourceUp.y,sourceUp.z)
+            guard hypot(g.y,g.z)>0.1,hypot(s.y,s.z)>0.1 else{throw Failure.invalid}
+            let angle=atan2(s.z*g.y-s.y*g.z,s.y*g.y+s.z*g.z)
+            rows.append(Row(role:capture.role,pose:"\(scope.panTarget):\(scope.lowerTarget):\(scope.upperTarget)",panTarget:scope.panTarget,upperTarget:scope.upperTarget,
+                requiredPitch:angle,gravity:g,camera:camera))
+            if capture.role=="held_out",scope.cameraGeneration==activeGeneration {heldGenerationSeen=true}
+        }
+        let training=rows.filter{$0.role=="training"},held=rows.filter{$0.role=="held_out"},poses=Set(training.map(\.pose))
+        guard training.count>=3,poses.count==training.count,!held.isEmpty,Set(held.map(\.pose)).count==held.count,
+              held.allSatisfy({!poses.contains($0.pose)}),heldGenerationSeen else{throw Failure.invalid}
+        let intercept:Double,slope:Double
+        if affine {
+            let upper=e.referenceUpperTarget!,low=training.map(\.upperTarget).min()!,high=training.map(\.upperTarget).max()!
+            guard high-low>=500,(low...high).contains(upper) else{throw Failure.invalid}
+            let xs=training.map{Double($0.upperTarget-upper)},ys=training.map(\.requiredPitch)
+            let meanX=xs.reduce(0,+)/Double(xs.count),meanY=ys.reduce(0,+)/Double(ys.count)
+            let variance=xs.reduce(0){$0+($1-meanX)*($1-meanX)}
+            guard variance.isFinite,variance>0 else{throw Failure.invalid}
+            let fittedSlope=zip(xs,ys).reduce(0){$0+($1.0-meanX)*($1.1-meanY)}/variance
+            let fittedIntercept=meanY-fittedSlope*meanX
+            guard fittedSlope.isFinite,fittedIntercept.isFinite,abs(fittedSlope-e.slopeRadiansPerRawUnit!)<=1e-12,
+                  abs(fittedIntercept-e.interceptRadians!)<=1e-9 else{throw Failure.invalid}
+            intercept=e.interceptRadians!;slope=e.slopeRadiansPerRawUnit!
+        } else {
+            let mean=training.map(\.requiredPitch).reduce(0,+)/Double(training.count)
+            guard abs(mean-e.deltaRadians!)<=1e-9 else{throw Failure.invalid}
+            intercept=e.deltaRadians!;slope=0
+        }
+        guard rows.allSatisfy({row in
+            let delta=intercept+slope*Double(row.upperTarget-(e.referenceUpperTarget ?? row.upperTarget))
+            let correction=rotated(SIMD3(delta,0,0))
+            let projected=row.camera*correction*SIMD4(row.gravity,0)
+            return acos(min(1,max(-1,simd_dot(SIMD3(projected.x,projected.y,projected.z),up))))<=Double.pi/180
+        }) else{throw Failure.invalid}
+        if bodyReference {
+            // Estimate the common body gravity direction from TRAINING only.
+            // Wide pan coverage separates body tilt from optical pitch; two
+            // independent held-out neck poses still have to pass above.
+            guard held.count>=2,
+                  training.map(\.panTarget).max()!-training.map(\.panTarget).min()!>=1500 else{throw Failure.invalid}
+            let sum=training.reduce(SIMD3<Double>.zero){result,row in
+                let angle=intercept+slope*Double(row.upperTarget-e.referenceUpperTarget!)
+                let p=row.camera*rotated(SIMD3(angle,0,0))*SIMD4(row.gravity,0)
+                return result+SIMD3(p.x,p.y,p.z)
+            }
+            guard simd_length(sum)>Double(training.count)*0.99,
+                  simd_distance(simd_normalize(sum),up)<=1e-9 else{throw Failure.invalid}
+        }
+        return GravityPitch(reference:reference,deltaRadians:intercept,bodyMotionIdentity:e.bodyMotionIdentity,
+            referenceUpperTarget:e.referenceUpperTarget,slopeRadiansPerRawUnit:slope,
+            cameraGeneration:activeGeneration,runtimeCalibrationIdentity:e.runtimeCalibrationIdentity,
+            cameraServiceSourceSHA256:e.cameraServiceSourceSHA256,actualDeviceMXID:e.actualDeviceMXID,
+            imuSensor:commonSensor!,imuToRGBRotation:commonIMURotation!,intrinsicsIdentities:intrinsicsIdentities,
+            fullHeightStereoModes:fullHeightStereoModes,bodyGravityReferenceModel:up,
+            referenceLowerTarget:e.referenceLowerTarget,sources:sources)
     }
     private static func bellyFloorEvidence(_ reference:BellyFloorDisplayReference)throws->(Data,SIMD3<Double>) {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
@@ -224,7 +483,7 @@ enum ROBNeckRGBPoseDisplay {
     private static func profile(model:ROBGhostRobotModel)->Profile? {
         lock.lock();defer{lock.unlock()}
         guard let bytes=try? Data(contentsOf:activationURL),bytes.count<100_000 else {cachedKey="";cachedProfile=nil;return nil}
-        let key=sha(bytes)+model.modelID+model.referenceID+model.geometryID
+        let key=sha(bytes)+model.modelID+model.referenceID+model.geometryID+model.selectedMappingID
         if key==cachedKey,cachedProfile != nil {
             // Unlike appearance settings, an operator anchor is physical
             // projection provenance. Do not retain it after its pinned file
@@ -233,11 +492,22 @@ enum ROBNeckRGBPoseDisplay {
                (try? read(pan.evidencePath,sha:pan.evidenceSHA256)) == nil {
                 cachedKey="";cachedProfile=nil;return nil
             }
+            if let pitch=cachedProfile?.gravityPitch,
+               ((cachedProfile?.demoPortableGravityPitchPrior != true && pitch.bodyMotionIdentity != ROBFixedHeadBodyMotionIdentity.currentIdentity) ||
+                (try?read(pitch.reference.evidencePath,sha:pitch.reference.evidenceSHA256)) == nil ||
+                !pitch.sources.allSatisfy(\.unchanged)) {
+                cachedKey="";cachedProfile=nil;return nil
+            }
             return cachedProfile
         }
         cachedKey=key;cachedProfile=nil
         do {
             let a=try JSONDecoder().decode(Activation.self,from:bytes)
+            let portable=a.demoPortableGravityPitchPrior==true
+            #if !DEBUG
+            guard !portable else{throw Failure.invalid}
+            #endif
+            guard !portable || (a.usePhotoHardwareOpticalOrigin==true && a.estimatedGravityPitchRefinement != nil) else{throw Failure.invalid}
             guard a.schemaVersion==1,a.kind=="provisional_rgb_neck_display",a.modelID==model.modelID,
                   a.referenceID==model.referenceID,a.geometryID==model.geometryID else {throw Failure.invalid}
             guard a.headMount?.valid ?? true else {throw Failure.invalid}
@@ -313,12 +583,37 @@ enum ROBNeckRGBPoseDisplay {
                 }
                 estimatedIdentity=sha(try JSONSerialization.data(withJSONObject:physical,options:[.sortedKeys]))
             }else{estimatedIdentity=nil}
+            let gravityPitch:GravityPitch?
+            let finalEstimatedIdentity:String?
+            if let reference=a.estimatedGravityPitchRefinement {
+                guard a.usePhotoHardwareOpticalOrigin==true,let old=estimatedIdentity else{throw Failure.invalid}
+                gravityPitch=try gravityPitchEvidence(reference,model:model,parameters:p,operatorPan:a.operatorPanCalibration,oldProjectionIdentity:old,
+                    demoPortableGravityPitchPrior:portable)
+                var identity:[String:Any]=["kind":"estimated_post_optical_x_pitch_v1",
+                    "oldEstimatedCameraProjectionIdentity":old,"evidenceSHA256":reference.evidenceSHA256,
+                    "deltaRadians":gravityPitch!.deltaRadians,"bodyMotionIdentity":gravityPitch!.bodyMotionIdentity,
+                    "activeCameraGeneration":gravityPitch!.cameraGeneration.uuidString,
+                    "runtimeCalibrationIdentity":gravityPitch!.runtimeCalibrationIdentity,
+                    "cameraServiceSourceSHA256":gravityPitch!.cameraServiceSourceSHA256]
+                if let upper=gravityPitch!.referenceUpperTarget {
+                    identity["kind"]="estimated_affine_upper_post_optical_x_pitch_v1"
+                    identity["referenceUpperTarget"]=upper;identity["slopeRadiansPerRawUnit"]=gravityPitch!.slopeRadiansPerRawUnit
+                }
+                if let lower=gravityPitch!.referenceLowerTarget {
+                    identity["kind"]="estimated_affine_upper_with_body_gravity_reference_v1"
+                    identity["referenceLowerTarget"]=lower
+                    let up=gravityPitch!.bodyGravityReferenceModel
+                    identity["bodyGravityReferenceModel"]=[up.x,up.y,up.z]
+                }
+                if portable {identity["demoPortableGravityPitchPrior"]="immutable_pitch_parameter_prior_current_frame_validation_v1"}
+                finalEstimatedIdentity=sha(try JSONSerialization.data(withJSONObject:identity,options:[.sortedKeys]))
+            }else{gravityPitch=nil;finalEstimatedIdentity=estimatedIdentity}
             cachedProfile=Profile(id:sha(bytes+fitData+referenceData+(bellyEvidence?.0 ?? Data())+(panEvidence ?? Data())),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
                 robotModelDisplayLiftMeters:modelLift,
                 hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees,
                 bellyFloorNormalOptical:bellyEvidence?.1,bellyFloorDisplayReferenceID:a.bellyFloorDisplayReference?.evidenceSHA256,
-                usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:estimatedIdentity,
-                operatorPanCalibration:a.operatorPanCalibration)
+                usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:finalEstimatedIdentity,
+                operatorPanCalibration:a.operatorPanCalibration,gravityPitch:gravityPitch,demoPortableGravityPitchPrior:portable)
         } catch {cachedProfile=nil}
         return cachedProfile
     }
@@ -336,6 +631,122 @@ enum ROBNeckRGBPoseDisplay {
     static func configurationIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.id}
     static func operatorPanCalibrationDescription(model:ROBGhostRobotModel)->String? {profile(model:model)?.operatorPanCalibration?.shortDescription}
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.estimatedCameraProjectionIdentity}
+    /// Reproduce the source used by the pinned, validated pitch evidence.
+    /// Acquisition configuration is not acceptance of a new frame or pose.
+    static func preferredFullHeightTaskStereoMode(model:ROBGhostRobotModel)->String? {
+        guard let modes=profile(model:model)?.gravityPitch?.fullHeightStereoModes,modes.count==1 else{return nil}
+        return modes.first
+    }
+    /// A frame-free pose cannot attest to the live camera source. Actual-frame
+    /// consumers call this in addition to their held-pose and source gates.
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,cameraGeneration:UUID,
+        runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?)->Bool {
+        guard let value=profile(model:model) else{return !gravityPitchRefinementRequested}
+        guard let pitch=value.gravityPitch else{return true}
+        return pitch.cameraGeneration==cameraGeneration && pitch.runtimeCalibrationIdentity==runtimeCalibrationIdentity &&
+            pitch.cameraServiceSourceSHA256==cameraServiceSourceSHA256 && pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity
+    }
+    /// Immutable values from ONE actual RGB-D frame and its recorded neck scope.
+    /// Calibration evidence retains its original generation; this is fresh source
+    /// validation, never a generation rebind or a registration certificate.
+    struct ActualFrameSource {
+        let cameraGeneration:UUID,actualDeviceMXID:String?,runtimeCalibrationIdentity:String?,cameraServiceSourceSHA256:String?
+        let scope:ROBFixedHeadRegistrationScope
+        let inertialJSON:Data?
+    }
+    static func estimatedProjectionAcceptsSource(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->Bool {
+        estimatedProjectionSourceFailure(model:model,actualFrame:actualFrame)==nil
+    }
+    struct EstimatedProjectionSourceFailure:LocalizedError {
+        let reason:String
+        let retryAfterSettling:Bool
+        var errorDescription:String? {"Camera projection rejected: \(reason). No arm travel was sent by this scan."}
+    }
+    /// Keep the acceptance predicate and diagnostic in one place. A physical
+    /// source/geometry mismatch cannot be repaired by retrying every scan view.
+    static func estimatedProjectionSourceFailure(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->EstimatedProjectionSourceFailure? {
+        func reject(_ reason:String,transient:Bool=false)->EstimatedProjectionSourceFailure {
+            .init(reason:reason,retryAfterSettling:transient)
+        }
+        guard let value=profile(model:model) else {
+            return gravityPitchRefinementRequested ? reject("requested gravity-pitch profile or its pinned evidence is invalid"):nil
+        }
+        guard let pitch=value.gravityPitch else{return nil}
+        let scope=actualFrame.scope
+        guard pitch.referenceLowerTarget.map({$0==scope.lowerTarget}) ?? true else {
+            return reject("lower-neck pose differs from the body-gravity calibration")
+        }
+        guard (try? scope.validate()) != nil else{return reject("invalid frame scope")}
+        guard scope.cameraGeneration==actualFrame.cameraGeneration else{return reject("frame and scope camera generations differ")}
+        guard scope.modelID==model.modelID,scope.geometryID==model.geometryID,scope.mappingID==model.selectedMappingID else {
+            return reject("frame scope does not match the selected robot model and arm mapping")
+        }
+        guard value.demoPortableGravityPitchPrior || pitch.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,
+              scope.displayCorrectionIdentity.hasSuffix(":body:"+ROBFixedHeadBodyMotionIdentity.currentIdentity) else {
+            return reject("body-motion identity differs from the camera scope or profile")
+        }
+        guard actualFrame.actualDeviceMXID==pitch.actualDeviceMXID else{return reject("camera device differs from the pinned profile")}
+        guard actualFrame.runtimeCalibrationIdentity==pitch.runtimeCalibrationIdentity else{return reject("runtime camera calibration differs from the pinned profile")}
+        guard actualFrame.cameraServiceSourceSHA256==pitch.cameraServiceSourceSHA256 else{return reject("camera service source differs from the pinned profile")}
+        guard pitch.intrinsicsIdentities.contains(scope.intrinsicsIdentity) else {
+            return reject("RGB-D intrinsics \(scope.intrinsicsIdentity) are outside the pinned profile; expected \(pitch.intrinsicsIdentities.sorted().joined(separator:", "))")
+        }
+        guard let bytes=actualFrame.inertialJSON,bytes.count<16_000,
+              let imu=(try?JSONSerialization.jsonObject(with:bytes))as?[String:Any],
+              imu["sensor"]as?String==pitch.imuSensor,
+              imu["axes"]as?String=="sensor_native",imu["gravity_source"]as?String=="stationary_accelerometer_mean",
+              let r=imu["imu_to_rgb_rotation"]as?[Double],r==pitch.imuToRGBRotation else {
+            return reject("missing or incompatible IMU source/axes/rotation")
+        }
+        guard imu["stationary"]as?Bool==true,
+              let count=imu["sample_count"]as?Int,(20...1000).contains(count),
+              let window=imu["window_milliseconds"]as?Double,window.isFinite,(300...1000).contains(window),
+              let age=imu["age_milliseconds"]as?Double,age.isFinite,(0...100).contains(age),
+              let latest=imu["latest_timestamp_ns"]as?UInt64,latest>0,
+              let reference=imu["reference_timestamp_ns"]as?UInt64,reference>=latest,
+              abs(Double(reference-latest)/1e6-age)<=0.02 else{return reject("IMU is not fresh and settled",transient:true)}
+        func vector(_ key:String)->[Double]? {
+            guard let a=imu[key]as?[Double],a.count==3,a.allSatisfy(\.isFinite) else{return nil};return a
+        }
+        guard let gravity=vector("gravity_mps2"),let std=vector("gravity_std_mps2"),let gyro=vector("gyro_rad_s"),
+              std.allSatisfy({(0...0.1).contains($0)}) else{return reject("IMU vectors are invalid or unsettled",transient:true)}
+        guard let camera=provisionalCameraToModel(model:model,panTarget:scope.panTarget,lowerTarget:scope.lowerTarget,upperTarget:scope.upperTarget) else {
+            return reject("no projection for raw neck P\(scope.panTarget) L\(scope.lowerTarget) U\(scope.upperTarget)")
+        }
+        let g=SIMD3(gravity[0],gravity[1],gravity[2]),omega=SIMD3(gyro[0],gyro[1],gyro[2])
+        guard (7...12).contains(simd_length(g)),simd_length(omega)<=0.03 else{return reject("IMU gravity magnitude or angular speed is unsettled",transient:true)}
+        let rotation=simd_double3x3(columns:(SIMD3(r[0],r[3],r[6]),SIMD3(r[1],r[4],r[7]),SIMD3(r[2],r[5],r[8])))
+        let projected=camera*SIMD4(simd_normalize(rotation*g),0)
+        // Same accelerometer sign and full 3D residual used by the evidence loader.
+        let residual=acos(min(1,max(-1,simd_dot(SIMD3(projected.x,projected.y,projected.z),pitch.bodyGravityReferenceModel))))
+        guard residual<=Double.pi/180 else {
+            return reject(String(format:"gravity direction disagrees by %.3f degrees (limit 1.000) at raw neck P%d L%d U%d",residual*180/Double.pi,scope.panTarget,scope.lowerTarget,scope.upperTarget))
+        }
+        return nil
+    }
+    /// Read-only audit of a validated current use. Original body/generation and
+    /// evidence hashes are never rebound. This pitch-only model prior cannot
+    /// validate yaw, optical origin, metric depth or camera-to-arm registration.
+    struct GravityPitchUseSessionAudit:Codable {
+        let kind:String,sourceEvidenceSHA256:String,sourceOriginalBodyIdentity:String
+        let sourceOriginalCameraGeneration:UUID,currentBodyIdentity:String,currentCameraGeneration:UUID
+        let demoPortableGravityPitchPrior:Bool
+        let registrationVerified:Bool,armMotionAuthority:Bool,originalEvidenceRebound:Bool
+    }
+    static func gravityPitchUseSessionAudit(model:ROBGhostRobotModel,actualFrame:ActualFrameSource)->GravityPitchUseSessionAudit? {
+        guard estimatedProjectionAcceptsSource(model:model,actualFrame:actualFrame),
+              let value=profile(model:model),let pitch=value.gravityPitch else{return nil}
+        return .init(kind:"estimated_pitch_model_prior_current_frame_use_v1",sourceEvidenceSHA256:pitch.reference.evidenceSHA256,
+            sourceOriginalBodyIdentity:pitch.bodyMotionIdentity,sourceOriginalCameraGeneration:pitch.cameraGeneration,
+            currentBodyIdentity:ROBFixedHeadBodyMotionIdentity.currentIdentity,currentCameraGeneration:actualFrame.cameraGeneration,
+            demoPortableGravityPitchPrior:value.demoPortableGravityPitchPrior,registrationVerified:false,armMotionAuthority:false,originalEvidenceRebound:false)
+    }
+    private static var gravityPitchRefinementRequested:Bool {
+        guard FileManager.default.fileExists(atPath:activationURL.path) else{return false}
+        guard let data=try?Data(contentsOf:activationURL),data.count<100_000,
+              let value=try?JSONSerialization.jsonObject(with:data)as?[String:Any] else{return true}
+        return value["estimatedGravityPitchRefinement"] != nil || value["demoPortableGravityPitchPrior"]as?Bool==true
+    }
     static func robotModelDisplayLiftMeters(model:ROBGhostRobotModel)->Double {profile(model:model)?.robotModelDisplayLiftMeters ?? 0}
     /// Child-group presentation only. Conjugate display-up through the common
     /// gauge so mesh lift stays vertical without translating camera rays or
@@ -485,7 +896,8 @@ enum ROBNeckRGBPoseDisplay {
             bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees,
             bellyFloorDisplayReferenceID:profile.bellyFloorDisplayReferenceID,
             usesPhotoHardwareOpticalOrigin:profile.usePhotoHardwareOpticalOrigin,
-            operatorPanCalibrationDescription:profile.operatorPanCalibration?.shortDescription)
+            operatorPanCalibrationDescription:profile.operatorPanCalibration?.shortDescription,
+            frozenOpticalPitchRefinementRadians:profile.gravityPitch?.angle(upperTarget:upperTarget))
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget)?.cameraToModel

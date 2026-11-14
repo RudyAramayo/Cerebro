@@ -71,10 +71,22 @@ all observed source sizes, appended/dropped frame counts, and writer status.
 This distinction matters: if hardware cannot provide the requested source
 size, an encoded 4K frame must not be mistaken for 4K source detail.
 
-Both modes refuse to start below 2 GB of free disk space. The panel remains a
-live recording indicator; closing it does not stop recording.
+Both modes refuse to start below 2 GB of free disk space. While recording, the
+coordinator checks available storage at most once per second and stops both
+recordings below a 1 GiB reserve. JSON Lines write failures are caught and
+latched using the throwing FileHandle API; they stop recording and publish the
+error instead of aborting Cerebro. A stopped training session is marked
+`interrupted` for a recording failure. Motor controls and existing arm holds
+are independent of this recording stop. The panel remains a live recording
+indicator; closing it does not stop recording.
 
 ## Validation
+
+`Scripts/test-recording-io.sh` compiles the production JSON Lines writer and
+checks valid multiline JSON roundtrips plus a real OS write failure. The
+failure must be reported without an Objective-C exception, must remain latched,
+and must leave existing evidence unchanged.
+
 
 The layout smoke test opens the native control window with a fake inactive
 recorder, verifies that both sections retain usable heights, checks that rows

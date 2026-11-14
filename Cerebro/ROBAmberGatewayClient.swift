@@ -707,6 +707,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         "gripper_state", "gripper_calibrate", "gripper_control",
     ]
     private var gripperCommandsAvailable = false
+    private var existingDeviceGripperControlAvailable = false
     private static let jointBoundsRadians = ROBArmJointLimits.radians
     private let queue = DispatchQueue(label: "com.orbitusrobotics.amber-gateway")
     private var connection: NWConnection?
@@ -874,6 +875,59 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         }
     }
 
+    /// Native Animation Studio owns a frozen local sequence and supplies only
+    /// its current segment. Draft/JSON/preview values cannot call this route.
+    @nonobjc private(set) var animationStepRejection: String?
+
+    /// Read-only paired preflight. Dispatch repeats this check; a first arm
+    /// must not move when the other already has an invalid segment.
+    @nonobjc func localAnimationStepRejection(arm: String, expectedSessionGeneration: UInt64) -> String? {
+        let side = arm == "left" ? "Right" : "Left"
+        guard Thread.isMainThread else { return "Animation dispatch requires the main controller thread." }
+        guard let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration) else {
+            return "\(side) arm animation ownership, segment or session changed; holding."
+        }
+        guard let sample = telemetry(forArm: arm) else { return "\(side) arm animation feedback is unavailable; holding." }
+        let motorAge = sample.effectiveSampleAgeMilliseconds, gripperAge = sample.effectiveGripperFeedbackAgeMilliseconds
+        guard motorAge <= ROBArmFeedbackTiming.maximumAgeMilliseconds, gripperAge <= ROBArmFeedbackTiming.maximumAgeMilliseconds else {
+            return String(format: "%@ arm animation feedback expired at dispatch (motors %.0f ms, gripper %.0f ms; limit %.0f ms).", side, motorAge, gripperAge, ROBArmFeedbackTiming.maximumAgeMilliseconds)
+        }
+        let positions = sample.positionsRadians.map(\.doubleValue), modes = modes(forArm: arm)
+        guard positions.count == 7, positions.allSatisfy(\.isFinite), sample.statuses.count == 7,
+              sample.statuses.allSatisfy({ $0.intValue == 2 }), modes.count == 7, modes.allSatisfy({ $0.intValue == 2 }) else {
+            return "\(side) arm animation requires seven valid positions and seven joints in position hold."
+        }
+        guard step.values.count == 7, zip(step.values, Self.jointBoundsRadians).allSatisfy({ $0.isFinite && $1.contains($0) }),
+              step.seconds.isFinite, (ROBArmRoutinePlan.minimumLeasedTrajectorySeconds ... 10).contains(step.seconds) else {
+            return "\(side) arm animation segment exceeds joint or duration bounds."
+        }
+        for (joint, pair) in zip(step.values, positions).enumerated() {
+            let needed = abs(pair.0-pair.1) / ROBArmAnimationTiming.maximumAverageSpeedRadiansPerSecond
+            if needed > step.seconds {
+                return String(format: "%@ arm J%d animation segment needs %.3f s from measured feedback; scheduled %.3f s (limit %.2f rad/s).", side, joint+1, needed, step.seconds, ROBArmAnimationTiming.maximumAverageSpeedRadiansPerSecond)
+            }
+        }
+        return queue.sync {
+            guard state == .ready, ["left", "right"].contains(arm), expectedSessionGeneration > 0,
+                  authenticatedSessionGeneration == expectedSessionGeneration, startupGripperOwner == nil,
+                  nextCommandID <= UInt64(UInt32.max) else {
+                return "\(side) arm animation gateway connection, session or ownership changed."
+            }
+            return nil
+        }
+    }
+
+    @nonobjc func sendLocalAnimationStep(arm: String, expectedSessionGeneration: UInt64) -> UInt64 {
+        guard Thread.isMainThread else { return 0 }
+        animationStepRejection = localAnimationStepRejection(arm: arm, expectedSessionGeneration: expectedSessionGeneration)
+        guard animationStepRejection == nil,
+              let step = ROBAnimationPlayback.shared.approvedStep(arm: arm, generation: expectedSessionGeneration) else { return 0 }
+        let id = sendVendorLeasedTrajectory(arm: arm, positionsRadians: step.values.map(NSNumber.init(value:)),
+            duration: step.seconds, leaseMilliseconds: 1500, expectedSessionGeneration: expectedSessionGeneration)
+        if id == 0 { animationStepRejection = "Animation gateway connection, session or bounds changed during dispatch; holding." }
+        return id
+    }
+
     /// Fixed hanging/front corridors only. The left trial alone may use its
     /// supervised front-only J3/J5 extension. No caller-supplied raw joint
     /// vectors, no model-reference promotion, and no replay across reconnects.
@@ -886,8 +940,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
               ["left", "right"].contains(arm),
               let target = leftTrial ? ROBLeftArmInteractionPlan.target(index: index)
                 : ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right"),
-              let sample = telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250,
-              sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+              let sample = telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               leftTrial ? ROBLeftArmInteractionPlan.allowsDirectMove(from: sample.positionsRadians.map(\.doubleValue), to: index)
                 : ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right")
                     .map({ abs($0 - Double(index)) <= 1.05 }) == true,
@@ -899,6 +953,36 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         return sendVendorLeasedTrajectory(arm: arm, positionsRadians: target.map(NSNumber.init(value:)),
             duration: duration, leaseMilliseconds: 1500,
             expectedSessionGeneration: expectedSessionGeneration)
+    }
+
+    /// No caller-supplied joint vector: consume only the coordinator's current,
+    /// reviewed step of the one-use operator-observed preparation.
+    @nonobjc private(set) var torsoPreparationRejection: String?
+    @nonobjc func sendTorsoPreparationStep(arm: String, index: Int, duration: Double,
+                                         expectedSessionGeneration: UInt64) -> UInt64 {
+        guard Thread.isMainThread else { return 0 }
+        torsoPreparationRejection = nil
+        func reject(_ reason: String) -> UInt64 { torsoPreparationRejection = reason; return 0 }
+        guard let sample = telemetry(forArm: arm),
+              sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds else {
+            return reject("Fresh motor/gripper feedback is required at grasp-ready dispatch.")
+        }
+        guard sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }),
+              modes(forArm: arm).count == 7, modes(forArm: arm).allSatisfy({ $0.intValue == 2 }) else {
+            return reject("The arm is not uniformly holding in position mode at grasp-ready dispatch.")
+        }
+        guard let target = ROBArmRoutineCoordinator.shared.approvedTorsoPreparationTarget(arm: arm, index: index,
+                duration: duration, generation: expectedSessionGeneration) else {
+            return reject("The reviewed grasp-ready step or measured start changed before dispatch.")
+        }
+        guard let minimum = ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
+              duration.isFinite, duration >= minimum - 0.05, duration <= 5 else {
+            return reject("Grasp-ready segment timing does not cover its current measured start.")
+        }
+        let id = sendVendorLeasedTrajectory(arm: arm, positionsRadians: target.map(NSNumber.init(value:)),
+            duration: duration, leaseMilliseconds: 1500, expectedSessionGeneration: expectedSessionGeneration)
+        return id == 0 ? reject("Gateway connection, ownership or trajectory bounds changed at grasp-ready dispatch.") : id
     }
 
     @discardableResult public func queryMode(forArm arm: String) -> UInt64 {
@@ -913,8 +997,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         guard Thread.isMainThread,
               let target = ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index,
                 seconds: duration, generation: expectedSessionGeneration),
-              let sample = telemetry(forArm: selectedArm), sample.effectiveSampleAgeMilliseconds <= 250,
-              sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+              let sample = telemetry(forArm: selectedArm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }),
               modes(forArm: selectedArm).count == 7, modes(forArm: selectedArm).allSatisfy({ $0.intValue == 2 }),
               let minimum = ROBLeftArmInteractionPlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
@@ -928,7 +1012,18 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     }
 
     @discardableResult public func enterPositionMode(forArm arm: String) -> UInt64 {
-        sendArmCommand(type: "position_mode", arm: arm)
+        // Re-entering ACTIVE -> POSITION briefly releases torque on Amber.
+        // A reconnect empties the app cache, not the physical holding mode.
+        let known = modes(forArm: arm)
+        let sample = telemetry(forArm: arm)
+        let measuredHold = sample.map {
+            $0.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds
+                && $0.statuses.count == 7 && $0.statuses.allSatisfy { $0.intValue == 2 }
+        } ?? false
+        if (known.count == 7 && known.allSatisfy { $0.intValue == 2 }) || measuredHold {
+            return queryMode(forArm: arm)
+        }
+        return sendArmCommand(type: "position_mode", arm: arm)
     }
 
     @discardableResult public func holdCurrentPosition(forArm arm: String) -> UInt64 {
@@ -1016,8 +1111,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         ["left", "right"].allSatisfy { arm in
             guard let sample = arm == "left" ? leftTelemetry : rightTelemetry else { return false }
             let modes = arm == "left" ? leftModes : rightModes
-            return sample.effectiveSampleAgeMilliseconds <= 250
-                && sample.effectiveGripperFeedbackAgeMilliseconds <= 250
+            return sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds
+                && sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds
                 && sample.positionsRadians.count == 7
                 && sample.positionsRadians.allSatisfy { $0.doubleValue.isFinite && abs($0.doubleValue) <= ROBArmRoutinePlan.tolerance }
                 && sample.statuses.count == 7 && sample.statuses.allSatisfy { $0.intValue == 0 }
@@ -1035,6 +1130,16 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         sendGripperCommand(
             type: "gripper_control", arm: arm, action: action, force: force
         )
+    }
+
+    /// Explicit local-panel attempt using the device's current state. Does
+    /// not run calibration or promote unknown calibration to accepted.
+    @discardableResult public func controlGripperUsingExistingDeviceState(
+        forArm arm: String, action: String, holdIntensity: Int = 2
+    ) -> UInt64 {
+        guard (1...2).contains(holdIntensity) else { return 0 }
+        return sendGripperCommand(type: "gripper_control_existing", arm: arm,
+            action: action, force: action == "hold" ? holdIntensity : 10)
     }
 
     /// Queue-consistent snapshots for motion validation and rendering. The
@@ -1087,17 +1192,16 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             let arm = port == 26001 ? "left" : port == 26002 ? "right" : ""
             let telemetry = arm == "left" ? leftTelemetry : arm == "right" ? rightTelemetry : nil
             let reason: String?
+            var waitingForOwner = false
             if arm.isEmpty {
                 reason = "Unknown Amber arm port"
-            } else if let side = ROBArmSide(amberGatewayArm: arm), ROBAmberArmMotionArbiter.shared.isReserved(side) {
-                reason = "A supervised arm routine owns this arm; use Stop + hold before manual motion"
             } else if state != .ready || !exclusiveControllerSession || authenticatedSessionGeneration == 0 {
                 reason = "Connect Amber Diagnostics before sending manual arm commands"
             } else if expectedSessionGeneration != 0 && expectedSessionGeneration != authenticatedSessionGeneration {
                 reason = "Gateway session changed; the delayed manual command was discarded"
             } else if telemetry?.jointFeedbackAgeMilliseconds.count != 7 {
                 reason = "Per-motor CAN feedback is unavailable; update the Amber gateway"
-            } else if telemetry!.effectiveSampleAgeMilliseconds > 250 {
+            } else if telemetry!.effectiveSampleAgeMilliseconds > ROBArmFeedbackTiming.maximumAgeMilliseconds {
                 let sample = telemetry!
                 let localAge = max(0, ProcessInfo.processInfo.systemUptime - sample.receivedAtUptime) * 1_000
                 let canAge = sample.jointFeedbackAgeMilliseconds.map(\.doubleValue).max() ?? .infinity
@@ -1107,12 +1211,15 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 reason = "Arm feedback is missing or stale; motion blocked. "
                     + "At gateway: controller \(age(sample.controllerSampleAgeMilliseconds)), "
                     + "oldest joint CAN \(age(canAge)); local time since receipt \(age(localAge))."
-            } else if telemetry!.effectiveGripperFeedbackAgeMilliseconds > 250 {
+            } else if telemetry!.effectiveGripperFeedbackAgeMilliseconds > ROBArmFeedbackTiming.maximumAgeMilliseconds {
                 reason = "Gripper CAN feedback is missing or stale; check the arm connection"
+            } else if let side = ROBArmSide(amberGatewayArm: arm), ROBAmberArmMotionArbiter.shared.isReserved(side) {
+                waitingForOwner = true
+                reason = "Waiting for the automatic arm routine to release control"
             } else {
                 reason = nil
             }
-            return ["allowed": reason == nil, "reason": reason ?? "",
+            return ["allowed": reason == nil, "reason": reason ?? "", "waitingForOwner": waitingForOwner,
                     "sessionGeneration": NSNumber(value: authenticatedSessionGeneration)] as NSDictionary
         }
     }
@@ -1185,11 +1292,11 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                     && message.calibrationState == Self.gripperCalibrationAcceptedUnverified
                     && message.action == nil
                     && message.force == nil
-            case "gripper_control":
+            case "gripper_control", "gripper_control_existing":
                 operationFieldsAreValid = message.amberResponse == 1
                     && message.calibrationCommandAccepted == nil
                     && message.completionVerified == false
-                    && message.calibrationState == Self.gripperCalibrationAcceptedUnverified
+                    && (operation == "gripper_control_existing" || message.calibrationState == Self.gripperCalibrationAcceptedUnverified)
                     && message.action == pending?.action
                     && message.force == pending?.force
             default:
@@ -1223,7 +1330,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                     ?? Self.gripperCalibrationRequired
                 snapshot.calibrationVerified = false
                 snapshot.feedbackAvailable = false
-                if operation == "gripper_control" {
+                if ["gripper_control", "gripper_control_existing"].contains(operation) {
                     snapshot.lastAction = message.action
                     snapshot.lastForce = message.force
                 } else if snapshot.calibrationState == Self.gripperCalibrationRequired {
@@ -1233,7 +1340,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 switch operation {
                 case "gripper_calibrate":
                     snapshot.detail = "Calibration dispatch accepted; physical completion is unverified"
-                case "gripper_control":
+                case "gripper_control", "gripper_control_existing":
                     snapshot.detail = "Gripper dispatch accepted; position, force, and completion are unverified"
                 default:
                     snapshot.detail = snapshot.calibrationState
@@ -1328,13 +1435,21 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             switch type {
             case "gripper_state", "gripper_calibrate":
                 guard action == nil, force == nil else { return 0 }
-            case "gripper_control":
+            case "gripper_control", "gripper_control_existing":
                 guard let action,
                       Self.gripperActions.contains(action),
                       let force,
                       Self.gripperForceRange.contains(force),
-                      current.calibrationState == Self.gripperCalibrationAcceptedUnverified
+                      type == "gripper_control_existing" || current.calibrationState == Self.gripperCalibrationAcceptedUnverified
                 else { return 0 }
+                if type == "gripper_control_existing" {
+                    guard existingDeviceGripperControlAvailable,
+                          (action == "hold" ? (1...2).contains(force) : force == 10),
+                          let sample = arm == "left" ? leftTelemetry : rightTelemetry,
+                          sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                          sample.effectiveGripperFeedbackAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
+                          sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }) else { return 0 }
+                }
             default:
                 return 0
             }
@@ -1363,7 +1478,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 updated.lastAction = nil
                 updated.lastForce = nil
                 updated.detail = "Calibration dispatch is awaiting acknowledgement"
-            case "gripper_control":
+            case "gripper_control", "gripper_control_existing":
                 updated.detail = "Gripper \(action ?? "action") dispatch is awaiting acknowledgement"
             default:
                 updated.detail = "Gripper state query is awaiting acknowledgement"
@@ -1386,6 +1501,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         var dictionary: [String: Any] = [
             "arm": arm,
             "commandsAvailable": gripperCommandsAvailable,
+            "existingDeviceControlAvailable": existingDeviceGripperControlAvailable,
             "calibrationState": snapshot.calibrationState,
             "calibrationVerified": snapshot.calibrationVerified,
             "feedbackAvailable": snapshot.feedbackAvailable,
@@ -1481,6 +1597,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             gripperCommandsAvailable = Self.requiredGripperCommands.isSubset(
                 of: Set(message.supportedCommands ?? [])
             )
+            existingDeviceGripperControlAvailable = message.supportedCommands?.contains("gripper_control_existing") == true
             authenticatedSessionGeneration &+= 1
             if authenticatedSessionGeneration == 0 {
                 authenticatedSessionGeneration = 1
@@ -1494,6 +1611,13 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 ? "Amber gateway ready"
                 : "Amber gateway ready — gripper commands unavailable; gateway update required")
             startHeartbeat()
+            let readyGeneration = authenticatedSessionGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isReady(),
+                      (self.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == readyGeneration else { return }
+                _ = self.queryMode(forArm: "left")
+                _ = self.queryMode(forArm: "right")
+            }
             if self === Self.shared {
                 DispatchQueue.main.async {
                     ROBGripperStartupCalibration.shared.gatewayBecameReady()
@@ -1691,6 +1815,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         leftTargetPositionsRadians = []
         rightTargetPositionsRadians = []
         gripperCommandsAvailable = false
+        existingDeviceGripperControlAvailable = false
         startupGripperOwner = nil
         resetGripperStates(
             detail: "Gateway session unavailable; calibration acceptance reset (\(detail))"

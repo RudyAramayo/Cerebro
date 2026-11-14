@@ -8,6 +8,7 @@ import sys
 import tempfile
 
 import numpy as np
+from ROBMainCameraHeadlessStaticTests import braced_declaration
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "Scripts"))
@@ -54,7 +55,9 @@ for invalid in [np.full((4, 3), np.nan), np.zeros((4, 3)), np.zeros((3, 3))]:
 
 ghost = (ROOT / "Cerebro/ROBGhostMotionPlan.swift").read_text()
 collision = (ROOT / "Cerebro/ROBWorkspaceCollisionPlan.swift").read_text()
-model = ghost[ghost.index("final class ROBGhostRobotModel {"):ghost.index("struct ROBGhostGesture:")]
+model = braced_declaration(ghost, "final class ROBGhostRobotModel {")
+joint_bounds = braced_declaration(collision, "    static func jointBounds(model:")
+jaw_allowance = next(line for line in collision.splitlines() if "static let openJawAdditionalMarginMeters =" in line)
 hulls = collision[collision.index("struct ROBEstimatedConvexHull {"):collision.index("/// Original retained source-return bounds")]
 fixture = r'''
 import Foundation
@@ -67,6 +70,10 @@ enum ROBGhostMotionError:LocalizedError {
 // These corridor-only dependencies are unused by the actual FK/hull checks.
 enum ROBLeftArmInteractionPlan {static let frontIndex=0;static func target(index:Int)->[Double]?{Array(repeating:0,count:7)}}
 enum ROBLeftGestureCompiler {static let frontBounds=[ClosedRange<Double>](repeating:-3.1...3.1,count:7)}
+enum ROBWorkspaceCollisionPlan {
+__JOINT_BOUNDS__
+__JAW_ALLOWANCE__
+}
 __MODEL__
 __HULLS__
 @main enum Main {
@@ -96,7 +103,7 @@ __HULLS__
   print("Surface envelope PASS: original rejected, repaired strict hull accepted, all78 original vertices contained, both q0 conflicts retained; no hardware")
  }
 }
-'''.replace("__MODEL__", model).replace("__HULLS__", hulls)
+'''.replace("__MODEL__", model).replace("__HULLS__", hulls).replace("__JOINT_BOUNDS__", joint_bounds).replace("__JAW_ALLOWANCE__", jaw_allowance)
 
 with tempfile.TemporaryDirectory(prefix="rob-surface-envelope-", dir="/private/tmp") as directory:
     path = Path(directory)

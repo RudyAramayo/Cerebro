@@ -18,10 +18,10 @@ enum ROBArmRoutinePlan {
     static let minimumLeasedTrajectorySeconds = 0.65
     /// Short segments retain the old longest-segment timing scale. The cubic
     /// bound is conservative command timing, not measured acceleration or jerk.
-    static func duration(from: [Double], to: [Double]) -> Double? {
+    static func duration(from: [Double], to: [Double], padding: Double = 0) -> Double? {
         guard from.count == 7, to.count == 7,
-              (from + to).allSatisfy(\.isFinite) else { return nil }
-        let delta = zip(from, to).map { abs($0 - $1) }.max() ?? 0
+              (from + to).allSatisfy(\.isFinite), padding.isFinite, padding >= 0 else { return nil }
+        let delta = (zip(from, to).map { abs($0 - $1) }.max() ?? 0) + padding
         return max(0.8, delta / maximumAverageSpeed, 4 * pow(delta / 0.3, 1.0 / 3.0))
     }
     static let rightWaypoints: [[Double]] = [

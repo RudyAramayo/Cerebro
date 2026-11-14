@@ -79,6 +79,35 @@ commands or a claimed successful grasp/delivery.
 
 ## Spoken and controller operations
 
+### Direct manual panel control
+
+Native **Amber Arm Diagnostics** and **Torso Servo Controls** buttons take
+manual control immediately without asking “Can I move my arms?”. The local
+operator's click authorizes its captured arm mode, joint/Cartesian target or
+gripper command. **Take manual control** stops automatic motion and requests
+hold without sending a new movement; it is optional because each command also
+performs that takeover. **Stop + hold** cancels pending manual work and automatic
+motion. Neither button lowers the arms or opens a gripper.
+
+The handoff cancels automatic owners before dispatch. Each command remains
+bound to the current gateway session and checks original motor/gripper feedback
+ages and ownership. Ownership cleanup can wait up to two seconds; a feedback
+loss rejects the command instead of queuing it for reconnection. Stop cancels
+the wait and delayed SDK dispatch. Targets and gripper intensity are captured
+at the click, so later edits cannot change an in-flight command.
+
+Hold/Release uses the selected bounded intensity (2–20) and current-session
+calibration acceptance. Calibrate is also a direct local command. Support the
+arm before removing torque, clear the jaw travel before calibration or Hold,
+and support any payload before Release. An acknowledgement does not verify
+physical motion, grasp force or completion. Lost acknowledgements expire and
+are reported as unverified outcomes.
+
+Local commands never manufacture voice/controller replies or create a reusable
+automatic-motion grant. The older controller-authorized manual session API,
+the separate left-arm rehearsal session, and controller-stack recovery retain
+their existing scopes; autonomous/model requests cannot inherit a local click.
+
 The droid does not open an arm activation, deactivation, gripper, gesture or
 CAN/core recovery confirmation dialog. Enable **Action Approvals** on the paired
 controller. Its existing panel shows the immutable operation summary and
@@ -157,9 +186,9 @@ cycle. It does not automatically release a possibly held object. The cycle
 records currents throughout, including its waits. Intensity 2 retained the Coke
 can in the recorded test, but is not a calibrated force or a measured grasp.
 
-Diagnostics and legacy Torso controls use the same controller approval service.
-Arm side, targets, selected gesture and gripper intensity are captured before
-review. Gateway session and hardware interlocks are checked again on acceptance.
+Diagnostics and legacy Torso controls use the broker's explicit local-panel
+entry points. Arm side, targets and gripper intensity are captured at the click;
+gateway session and hardware interlocks are checked again at dispatch.
 The LIVE Startup Test button uses the existing controller-owned startup lane.
 The local Gemini debug checkbox no longer bypasses controller approval.
 An authenticated Vision controller's fresh gripper intent with both grip buttons

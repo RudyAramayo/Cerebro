@@ -62,6 +62,7 @@
 @property (nonatomic, readonly, strong) ROBFollowPersonCoordinator *followPersonCoordinator;
 
 - (IBAction)showControls:(id)sender;
+- (IBAction)showTorsoServoControls:(id)sender;
 - (IBAction)showSerialDebug:(id)sender;
 - (IBAction)showMainNavigation:(id)sender;
 - (IBAction)showGeminiDiagnostics:(id)sender;

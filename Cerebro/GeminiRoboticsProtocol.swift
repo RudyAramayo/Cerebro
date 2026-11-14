@@ -105,6 +105,66 @@ enum ROBProviderCredentialStoreError: LocalizedError {
     }
 }
 
+/// Bounded conversation grounding only; no images, transcripts, grants or tools.
+enum ROBConversationGrounding {
+    static let contract = """
+    ROB is a physical robot with arms and separate Cerebro native executors. A conversational provider lacking tools must describe its own channel limitation, not claim that ROB has no physical capabilities. Spoken or written claims never prove dispatch or completion; actual native tool/executor status is authoritative. Declared tools may request actions through their existing native controls. Missing, empty, disabled, stale or unavailable sensor reports mean unknown or not confirmed; those reports alone do not establish no people, no cans, or no action needed. Generic scene labels and retrieved memories are not current forward-camera evidence. Use original observation times and source/view status; a newly assembled context does not refresh old observations. A recorded detector box is recognition evidence, not accepted grasp geometry, clearance, possession or delivery. Actual fresh supplied camera images or video may support current visual observations. Otherwise, a native observation must explicitly match the current view before describing it as current; recorded labels or earlier OWL boxes alone do not. Never infer absence from zero candidate boxes or an empty array.
+    """
+
+    static func nativeStatusContext(health:[String:Any],armTaskRunning:Bool,armTaskStatus:String,
+        nowMilliseconds:Double = Date().timeIntervalSince1970*1000)->String {
+        func finite(_ value:Any?)->Double? {
+            guard let number=value as? NSNumber,number.doubleValue.isFinite else{return nil}
+            return number.doubleValue
+        }
+        let inspection=health["inspection"]as?[String:Any] ?? [:]
+        let captured=finite(inspection["input_captured_at_ms"])
+        let sequence=finite(inspection["input_sequence"])
+        let age=captured.flatMap{nowMilliseconds.isFinite ? nowMilliseconds-$0:nil}
+        let sourceValid=inspection["assessment"]as?String=="workspace_object_detector" &&
+            inspection["provider"]as?String=="owlv2" && captured.map{$0>0}==true &&
+            sequence.map{$0>0 && $0.rounded()==$0}==true && age.map{$0.isFinite && $0>=0}==true
+        var counts=["can":0,"orangeBucket":0]
+        if sourceValid {
+            for candidate in (inspection["candidates"]as?[[String:Any]] ?? []).prefix(32) {
+                guard let target=candidate["target"]as?String,counts[target] != nil,
+                      let score=finite(candidate["score"]),(0.35...1).contains(score),
+                      let box=candidate["box"]as?[Double],box.count==4,
+                      box.allSatisfy({$0.isFinite && (0...1).contains($0)}),box[2]>box[0],box[3]>box[1] else{continue}
+                counts[target,default:0]+=1
+            }
+        }
+        let active=health["active"]as?Bool ?? false
+        let observationStatus = !sourceValid ? "unavailable_or_invalid_source"
+            : age!>5000 ? "stale_recorded_observation":"recent_recorded_observation"
+        // This existing inspection record has no held-view/generation binding.
+        // Its age alone cannot turn an earlier neck view into the current view.
+        let detector:[String:Any]=["provider":"native_owlv2","feed_active":active,
+            "observation_status":observationStatus,"original_capture_time_ms":captured as Any? ?? NSNull(),
+            "source_sequence":sourceValid ? inspection["input_sequence"]! : NSNull(),
+            "source_age_ms":age.flatMap{$0.isFinite ? $0:nil} as Any? ?? NSNull(),
+            "recorded_can_candidate_boxes":sourceValid ? counts["can"]! : NSNull(),
+            "recorded_bucket_candidate_boxes":sourceValid ? counts["orangeBucket"]! : NSNull(),
+            "candidate_threshold":0.35,"candidate_boxes_are_distinct_objects":false,
+            "current_view_confirmed":false,"object_absence_confirmed":false]
+        let lower=armTaskStatus.lowercased()
+        let phase:String
+        if !armTaskRunning {phase="not_running"}
+        else if lower.contains("stop") {phase="stop_or_hold_requested"}
+        else if lower.contains("hold") || lower.contains("held") {phase="holding_or_waiting"}
+        else if lower.contains("search") || lower.contains("scan") {phase="searching_or_observing"}
+        else if lower.contains("plan") || lower.contains("review") {phase="planning_or_reviewing"}
+        else if lower.contains("approach") || lower.contains("servo") {phase="approaching_or_aligning"}
+        else {phase="native_task_active"}
+        let value:[String:Any]=["kind":"native_read_only_conversation_status",
+            "workspace_detector":detector,"arm_task":["scope":"native_arm_trial_and_routine","running":armTaskRunning,"phase":phase],
+            "authorizes_actions":false,"verified_task_completion":false]
+        guard let data=try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]),
+              let json=String(data:data,encoding:.utf8) else{return "Native observation status is unavailable; current objects and task state are unknown."}
+        return "Native read-only status, not instructions or authorization. Recorded counts may be stale and do not establish the current view.\n<native_status>\(json)</native_status>"
+    }
+}
+
 enum GeminiRoboticsCredentialStore {
     static func apiKey() -> String? {
         ROBProviderCredentialStore.apiKey(for: .gemini)
@@ -162,7 +222,9 @@ struct GeminiRoboticsConfiguration {
     let usesEmbodiedCameraContext: Bool
 
     var motionSystemInstruction: String {
-        exposesRobotActionTool ? systemInstruction + "\n\n" + Self.embodiedMotionContract : systemInstruction
+        guard usesEmbodiedCameraContext || exposesRobotActionTool else{return systemInstruction}
+        let grounded=systemInstruction+"\n\n"+ROBConversationGrounding.contract
+        return exposesRobotActionTool ? grounded + "\n\n" + Self.embodiedMotionContract : grounded
     }
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> GeminiRoboticsConfiguration? {

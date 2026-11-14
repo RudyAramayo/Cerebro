@@ -32,11 +32,11 @@ def main():
     # while calibration dispatch remains explicitly bound to that arm.
     assert "ROBAmberDiagnosticsArm.allCases.map(makeGripperPanel)" in source
     gripper_panel = swift_function(source, "private func makeGripperPanel(")
-    assert '"Calibrate \\(arm.title)…"' in gripper_panel
+    assert '"Calibrate \\(arm.title)"' in gripper_panel
     assert "button.tag = arm == .left ? 0 : 1" in gripper_panel
     assert 'setAccessibilityLabel("Calibrate \\(arm.rawValue) gripper")' in gripper_panel
     assert 'NSSlider(value: 10, minValue: 2, maxValue: 20' in gripper_panel
-    assert 'actionButton("Hold…", action: #selector(holdGripper(_:)))' in gripper_panel
+    assert 'actionButton("Hold", action: #selector(holdGripper(_:)))' in gripper_panel
     assert 'actionButton("Stop N/A"' in gripper_panel
 
     calibrate = swift_function(source, "@objc private func calibrateGripper(")
@@ -44,10 +44,23 @@ def main():
     assert "physical " in calibrate and "gripper through its full travel" in calibrate
     assert "arm: arm.rawValue" in calibrate
     assert calibrate.count("validateGripperInterlocks") == 2
-    assert "ROBControllerArmApproval.shared.requestGatewayCommand" in calibrate
+    assert "ROBControllerArmApproval.shared.performLocalPanelGatewayCommand" in calibrate
+    assert "allowAutomaticTakeover: true" in calibrate
     assert "runModal" not in calibrate
     assert "full travel" in calibrate
     assert "gateway.calibrateGripper(forArm: arm.amberGatewayArm)" in calibrate
+
+    # A local press is authority; no prerequisite voice session or disabled
+    # automatic-owner button may prevent the operator from taking control.
+    assert 'NSButton(title: "Take manual control"' in source
+    assert 'NSButton(title: "Stop + hold"' in source
+    manual = swift_function(source, "@objc private func startManualSession(")
+    assert "takeLocalPanelControl()" in manual and "performCommand" not in manual
+    grip = swift_function(source, "private func submitGripperControl(")
+    assert "performLocalPanelGatewayCommand" in grip
+    assert "allowAutomaticTakeover: true" in grip
+    assert grip.count("validateGripperInterlocks") == 2
+    assert "requestGatewayCommand" not in source
 
     # UI sides are physical ROB sides. Only the Amber boundary uses the
     # historical vendor-core names; inbound state must use the inverse mapping.

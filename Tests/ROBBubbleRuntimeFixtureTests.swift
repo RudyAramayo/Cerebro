@@ -9,9 +9,10 @@ import AVFoundation
     var commandedLowerNeckTiltTarget = 6000
     var commandedUpperNeckTiltTarget = 6000
     var writes: [[Int]] = []
+    var failedChannels: Set<Int> = []
     func stopBubbleRelaysForWatchdog() { }
     func applyBubbleTarget(_ target: Int, channel: Int) -> Bool {
-        writes.append([channel, target]); return bubbleHardwareReady
+        writes.append([channel, target]); return bubbleHardwareReady && !failedChannels.contains(channel)
     }
 }
 extension Notification.Name {
@@ -97,9 +98,132 @@ struct CameraFrameSet {
         precondition(box.writes == [[6, 0], [7, 0]], "Explicit OFF must still release servo pulses in dry run")
 
         var now = ProcessInfo.processInfo.systemUptime
-        let live = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults, uptime: { now })
-        let hardware = ROBSerialBox(); live.serialBox = hardware
-        live.maestroReconnected()
+        final class Scheduler {
+            var pending: [(Double, () -> Void)] = []
+            func next() { let work = pending.removeFirst(); precondition(work.0 >= 0.75); work.1() }
+            func drain() { var count = 0; while !pending.isEmpty { next(); count += 1; precondition(count < 100) } }
+        }
+        func mountFixture() -> (ROBBubbleRuntime, ROBSerialBox, Scheduler) {
+            let clock = Scheduler()
+            let runtime = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults,
+                uptime: { now }, scheduleMountStep: { clock.pending.append(($0, $1)) })
+            let box = ROBSerialBox(); runtime.serialBox = box
+            return (runtime, box, clock)
+        }
+        defaults.set(true, forKey: "ROBPassiveHardwareStartup")
+        let (passive, passiveHardware, clock) = mountFixture()
+        precondition(passive.automaticMountStartupEnabled)
+        passive.maestroReconnected()
+        precondition(passiveHardware.writes == [[9, 4000], [8, 4000], [7, 6000]])
+        for target in [7000, 5000, 7000, 5000, 4000] {
+            precondition(passive.mountStartupStatus()["startup_in_progress"] as? Bool == true)
+            clock.next()
+            precondition(passiveHardware.writes.last == [7, target])
+            precondition(!passiveHardware.writes.contains { $0[0] == 6 }, "Tilt must remain untouched until final pan settles")
+        }
+        clock.next()
+        precondition(passiveHardware.writes.last == [6, 8000])
+        precondition(passive.mountStartupStatus()["startup_state"] as? String == "tilt")
+        clock.next()
+        precondition(passive.mountStartupStatus()["startup_state"] as? String == "complete")
+        precondition(!passive.snapshot().armed && !passive.liveOutputs && !passive.liveMountOutputs)
+        precondition(clock.pending.isEmpty)
+        let savedCalibration = defaults.data(forKey: "ROBBubbleCalibration.v1")
+        var custom = ROBBubbleCalibration(); custom.stowTilt = 7810; custom.stowPan = 4210
+        let customData = try JSONEncoder().encode(custom)
+        defaults.set(customData, forKey: "ROBBubbleCalibration.v1")
+        let (saved, savedBox, savedClock) = mountFixture()
+        saved.maestroReconnected()
+        var animation = ROBLaserStartupAnimation(); animation.oscillate = false
+        precondition(saved.saveStartupAnimation(animation))
+        savedClock.drain()
+        precondition(savedBox.writes == [[9, 4000], [8, 4000], [7, 6000], [7, 7000], [7, 5000], [7, 7000], [7, 5000], [7, 4210], [6, 7810]], "In-flight configuration must stay frozen")
+        precondition(defaults.data(forKey: "ROBBubbleCalibration.v1") == customData)
+        let (direct, directBox, directClock) = mountFixture()
+        direct.maestroReconnected(); directClock.drain()
+        precondition(directBox.writes == [[9, 4000], [8, 4000], [7, 4210], [6, 7810]])
+        animation.oscillate = true; animation.cycles = 3; animation.frontRightPan = 6800
+        precondition(saved.saveStartupAnimation(animation))
+        let (configured, configuredBox, configuredClock) = mountFixture()
+        configured.maestroReconnected(); configuredClock.drain()
+        precondition(configuredBox.writes.filter { $0 == [7, 6800] }.count == 3)
+        animation.panSettleSeconds = .nan
+        precondition(!saved.saveStartupAnimation(animation))
+        defaults.set(Data("bad".utf8), forKey: ROBLaserStartupAnimation.defaultsKey)
+        let (invalid, invalidBox, invalidClock) = mountFixture()
+        invalid.maestroReconnected(); invalidClock.drain()
+        precondition(invalidBox.writes == [[9, 4000], [8, 4000]])
+        precondition(invalid.mountStartupStatus()["startup_state"] as? String == "failed")
+        defaults.removeObject(forKey: ROBLaserStartupAnimation.defaultsKey)
+        for phase in 0...6 {
+            let (stopped, stoppedBox, stoppedClock) = mountFixture()
+            stopped.maestroReconnected()
+            for _ in 0..<phase { stoppedClock.next() }
+            stopped.stop(reason: "fixture stop")
+            let before = stoppedBox.writes; stoppedClock.drain()
+            precondition(stoppedBox.writes == before)
+            precondition(stopped.mountStartupStatus()["startup_state"] as? String == "cancelled")
+        }
+        for action in 0...2 {
+            let (cancelled, cancelledBox, cancelledClock) = mountFixture()
+            cancelled.maestroReconnected()
+            if action == 0 { cancelled.releaseMount() }
+            if action == 1 { cancelled.manualPan(6100, tilt: 5900) }
+            if action == 2 { NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: nil) }
+            let before = cancelledBox.writes; cancelledClock.drain()
+            precondition(cancelledBox.writes == before)
+        }
+        for channel in [6, 7, 8, 9] {
+            let (failed, failedBox, failedClock) = mountFixture()
+            failedBox.failedChannels = [channel]; failed.maestroReconnected(); failedClock.drain()
+            precondition(failed.mountStartupStatus()["startup_state"] as? String == "failed")
+            if channel != 6 { precondition(!failedBox.writes.contains { $0[0] == 6 }) }
+            precondition(failed.mountStartupStatus()[channel == 6 ? "commanded_tilt" : "commanded_pan"] is NSNull)
+        }
+        let (delayed, delayedBox, delayedClock) = mountFixture()
+        delayed.maestroReconnected()
+        now += 120 // An overdue main-queue callback is not completion.
+        delayed.localCommand(.init(.spinOn))
+        delayed.receive(.init(controllerID: UUID(), sessionID: UUID(), sequence: 1,
+                             command: .init(.authorizeMount)))
+        precondition(!delayed.snapshot().armed && delayed.snapshot().mountAuthorized != true)
+        precondition(!delayedBox.writes.contains([8, 8000]))
+        delayed.stop(reason: "test completed"); delayedClock.drain()
+        let (lateFailure, lateBox, lateClock) = mountFixture()
+        lateFailure.maestroReconnected()
+        for _ in 0..<4 { lateClock.next() }
+        lateBox.failedChannels = [7] // Fail the final park, after the sweeps succeeded.
+        lateClock.drain()
+        precondition(!lateBox.writes.contains { $0[0] == 6 })
+        precondition(lateFailure.mountStartupStatus()["startup_state"] as? String == "failed")
+        let (sleeping, sleepingBox, sleepingClock) = mountFixture()
+        sleeping.maestroReconnected()
+        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
+        let beforeSleep = sleepingBox.writes; sleepingClock.drain()
+        precondition(sleepingBox.writes == beforeSleep)
+        let (disconnected, disconnectedBox, disconnectedClock) = mountFixture()
+        disconnected.maestroReconnected(); disconnectedBox.bubbleHardwareReady = false; disconnectedClock.drain()
+        precondition(!disconnectedBox.writes.contains { $0[0] == 6 })
+        precondition(disconnected.mountStartupStatus()["startup_state"] as? String == "failed")
+        let (reconnected, reconnectedBox, reconnectedClock) = mountFixture()
+        reconnected.maestroReconnected(); reconnected.maestroReconnected(); reconnectedClock.drain()
+        precondition(reconnectedBox.writes.filter { $0[0] == 6 } == [[6, 7810]])
+        let beforeSetting = savedBox.writes
+        saved.automaticMountStartupEnabled = false
+        precondition(savedBox.writes == beforeSetting)
+        for setting: Any in [false, "invalid"] {
+            defaults.set(setting, forKey: "ROBLaserMountAutomaticStartupEnabled")
+            let (disabled, disabledBox, disabledClock) = mountFixture()
+            disabled.maestroReconnected(); disabledClock.drain()
+            precondition(disabledBox.writes == [[9, 4000], [8, 4000]])
+        }
+        defaults.removeObject(forKey: "ROBLaserMountAutomaticStartupEnabled")
+        defaults.set(savedCalibration, forKey: "ROBBubbleCalibration.v1")
+        defaults.set(false, forKey: "ROBPassiveHardwareStartup")
+        let (live, hardware, liveClock) = mountFixture()
+        live.maestroReconnected(); liveClock.drain()
+        live.localCommand(.init(.stow)); precondition(hardware.writes.last == [7, 4000])
+        liveClock.drain(); precondition(hardware.writes.last == [6, 8000])
         now += 2
         var sequence: UInt64 = 0
         func liveRequest(_ operation: ROBBubbleOperation, pan: Int? = nil, tilt: Int? = nil) {

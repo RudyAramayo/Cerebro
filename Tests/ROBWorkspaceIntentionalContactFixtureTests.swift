@@ -43,6 +43,7 @@ private struct ContactMap:ROBWorkspaceCollisionMap {
         catch {if let expected {precondition(error.localizedDescription.contains(expected),error.localizedDescription)}}
     }
     static func main() throws {
+        setbuf(stdout,nil)
         let root=URL(fileURLWithPath:CommandLine.arguments[1])
         let model=try ROBGhostRobotModel(directory:root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         let q=model.recyclingFrontTarget
@@ -150,8 +151,104 @@ private struct ContactMap:ROBWorkspaceCollisionMap {
         // Legacy complete-contact archives still encode numeric release and
         // omit the new optional flag, preserving their exact fingerprint.
         let legacyJSON=try JSONSerialization.jsonObject(with:JSONEncoder().encode(contact)) as! [String:Any]
-        precondition(legacyJSON["releaseStepIndex"] as? Int == 2 && legacyJSON["terminalGraspHold"] == nil)
+        precondition(legacyJSON["releaseStepIndex"] as? Int == 2 && legacyJSON["gripStepIndex"] as? Int == 1 &&
+            legacyJSON["terminalGraspHold"] == nil && legacyJSON["verifiedAttachment"] == nil)
         print("Terminal grasp hold: explicit local trial only, nil release, final verification lift, immutable roundtrip; ordinary/connector/imported authority and carry/release substitutions rejected")
+
+        let attachment=ROBWorkspaceVerifiedAttachedCan(nativePhaseID:UUID(),nativeVisualEvidenceSHA256:hash,
+            sourceContactFingerprint:contact.fingerprint,sourceCylinderFingerprint:contact.sourceCylinderFingerprint,
+            sourceMapFingerprint:map.fingerprint,payloadFingerprint:payload.fingerprint,
+            bodyMotionIdentity:"fixture body",sessionGeneration:42,verificationFirstSequence:12,verificationLastSequence:15,
+            verificationCapturedAtMilliseconds:1000,fixedViewIdentity:hash,targetIdentity:"isolated measured can12",
+            baseline:q,baselineTelemetrySequence:900,baselineCapturedAtMilliseconds:1000)
+        func attached(_ native:ROBWorkspaceVerifiedAttachedCan=attachment,_ source:ContactMap=map)->ROBWorkspaceIntentionalContact {
+            .init(measurementID:payload.measurementID,observationSequence:12,capturedAtMilliseconds:1000,
+                sceneID:source.sceneID,cameraGeneration:source.cameraGeneration,mapFingerprint:source.fingerprint,
+                modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,toolLink:model.toolLink,
+                topCenterMeters:contact.topCenterMeters,bottomCenterMeters:contact.bottomCenterMeters,diameterMeters:contact.diameterMeters,
+                firstContactStepIndex:0,gripStepIndex:nil,releaseStepIndex:1,stepCount:3,verifiedAttachment:native)
+        }
+        func changedAttachment(_ key:String,_ value:Any)throws->ROBWorkspaceVerifiedAttachedCan {
+            var object=try JSONSerialization.jsonObject(with:JSONEncoder().encode(attachment)) as! [String:Any]
+            object[key]=value
+            return try JSONDecoder().decode(ROBWorkspaceVerifiedAttachedCan.self,from:JSONSerialization.data(withJSONObject:object))
+        }
+        func attachmentForSource(_ source:ContactMap)throws->ROBWorkspaceVerifiedAttachedCan {
+            let original=proof(source)
+            var object=try JSONSerialization.jsonObject(with:JSONEncoder().encode(attachment)) as! [String:Any]
+            object["sourceContactFingerprint"]=original.fingerprint
+            object["sourceMapFingerprint"]=source.fingerprint
+            object["sourceCylinderFingerprint"]=original.sourceCylinderFingerprint
+            return try JSONDecoder().decode(ROBWorkspaceVerifiedAttachedCan.self,from:JSONSerialization.data(withJSONObject:object))
+        }
+        let attachedContact=attached()
+        precondition(attachedContact.matchesSourceContact(contact))
+        // Move away from the original occupied can location before release.
+        // Its original returns remain present and MUST block an empty tool
+        // that stays there after the contact phase has ended.
+        var admittedCarry:[ROBLeftGestureProposal.Step]?
+        for joint in [0,1,3] where admittedCarry==nil {
+            for delta in [0.35,-0.35] where admittedCarry==nil {
+                var goal=q;goal[joint]+=delta
+                let candidate:[ROBLeftGestureProposal.Step]=[.init(positions:goal,seconds:2,stage:"Carry attached can"),
+                    .init(positions:goal,seconds:0.7,jawAction:.release,stage:"Stationary release"),
+                    .init(positions:goal,seconds:0.7,stage:"Empty held endpoint")]
+                if (try?ROBWorkspaceCollisionPlan.review(baseline:q,steps:candidate,map:map,model:model,generation:42,
+                    sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:1000,payload:payload,
+                    intentionalContact:attachedContact,carryingAtStart:true)) != nil {admittedCarry=candidate}
+            }
+        }
+        guard let carrySteps=admittedCarry else {preconditionFailure("No inert full-proof attached-can route was admitted")}
+        let carryGoal=carrySteps[0].positions
+        func carryReview(_ selected:[ROBLeftGestureProposal.Step]=carrySteps,_ target:ROBWorkspaceIntentionalContact=attachedContact,
+            _ source:ContactMap=map,carrying:Bool?=true,index:Int?=nil,box:ROBWorkspaceCarriedObject=payload,
+            baseline:[Double]=q)throws->ROBWorkspaceCollisionPlan {
+            try .review(baseline:baseline,steps:selected,map:source,model:model,generation:42,sceneID:source.sceneID,
+                cameraGeneration:source.cameraGeneration,nowMilliseconds:1000,payload:box,intentionalContact:target,
+                contactStepIndex:index,carryingAtStart:carrying)
+        }
+        let carried=try carryReview()
+        precondition(carried.carryingAtStart==true && carried.intentionalContact?.gripStepIndex==nil &&
+            carried.intentionalContact?.verifiedAttachment==attachment && carried.checkedPoseCount>0)
+        let carriedDecoded=try JSONDecoder().decode(ROBWorkspaceCollisionPlan.self,from:JSONEncoder().encode(carried))
+        precondition(carriedDecoded==carried)
+        try carriedDecoded.validate(map:map,model:model,generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:1001)
+        _=try carryReview([carrySteps[0]],index:0)
+        _=try carryReview([carrySteps[1]],index:1,baseline:carryGoal)
+        _=try carryReview([carrySteps[2]],carrying:false,index:2,baseline:carryGoal)
+        rejected("explicit carrying") {_=try carryReview([carrySteps[0]],carrying:false,index:0)}
+        rejected("start carrying") {_=try carryReview(carrying:nil)}
+        rejected("prepare or grip") {_=try carryReview(steps)}
+        rejected("payload") {_=try carryReview(box:.init(measurementID:payload.measurementID,centerInToolMeters:[0,0,0],halfExtentsMeters:[0.08,0.08,0.08]))}
+        rejected("exact scene") {_=try carryReview(carrySteps,attached(),table)}
+        rejected("source map") {_=try carryReview(carrySteps,attached(try changedAttachment("sourceMapFingerprint",String(repeating:"0",count:64))))}
+        rejected("exact scene") {_=try carryReview(carrySteps,attached(try changedAttachment("nativeVisualEvidenceSHA256","invalid")))}
+        rejected("source map") {_=try carryReview(carrySteps,attached(try changedAttachment("verificationCapturedAtMilliseconds",1001.0)))}
+        rejected("held baseline") {_=try carryReview(carrySteps,attached(try changedAttachment("baseline",Array(repeating:0.0,count:7))))}
+        rejected("explicit carrying-at-start") {
+            _=try ROBWorkspaceCollisionPlan.make(from:q,to:q,map:map,model:model,generation:42,sceneID:map.sceneID,
+                cameraGeneration:map.cameraGeneration,nowMilliseconds:1000,payload:payload,intentionalContact:attached(),contactStepIndex:0)
+        }
+        rejected("obstacle") {_=try carryReview(carrySteps,attached(try attachmentForSource(table),table),table)}
+        rejected("unobserved") {_=try carryReview(carrySteps,attached(try attachmentForSource(unknown),unknown),unknown)}
+        var otherBody=map
+        otherBody.visualCalibrationScope = .init(bodyMotionIdentity:"another body",bodyContextIsCurrent:true,
+            estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,observedFrameCount:2)
+        rejected("source map") {_=try carryReview(carrySteps,attached(),otherBody)}
+        var fakeGrip=try JSONSerialization.jsonObject(with:JSONEncoder().encode(attached())) as! [String:Any]
+        fakeGrip["gripStepIndex"]=0
+        let decodedFakeGrip=try JSONDecoder().decode(ROBWorkspaceIntentionalContact.self,from:JSONSerialization.data(withJSONObject:fakeGrip))
+        precondition(!decodedFakeGrip.valid)
+        for (key,value) in [("topCenterMeters",[axis.x+0.10,axis.y,axis.z+0.06] as Any),
+                            ("bottomCenterMeters",[axis.x+0.10,axis.y,axis.z-0.06] as Any),
+                            ("diameterMeters",0.080 as Any),("radialFitUncertaintyMeters",0.001 as Any)] {
+            var object=try JSONSerialization.jsonObject(with:JSONEncoder().encode(attachedContact)) as! [String:Any]
+            object[key]=value
+            let tampered=try JSONDecoder().decode(ROBWorkspaceIntentionalContact.self,from:JSONSerialization.data(withJSONObject:object))
+            precondition(!tampered.valid && !tampered.matchesSourceContact(contact),"Changed original can cylinder retained attachment scope")
+            rejected("exact scene") {_=try carryReview(carrySteps,tampered)}
+        }
+        print("Attached-can contact: explicit carrying start, immutable native-phase/evidence/source/payload/held-baseline binding, one release and exact original cylinder; prepare/regrip, missing carrying state, altered source/evidence/payload, unknown and shared-table returns rejected; pure proof supplies no native authority")
 
         // An occupied return on another articulated link stays blocked even if
         // a malformed task chooses that location as its claimed can cylinder.

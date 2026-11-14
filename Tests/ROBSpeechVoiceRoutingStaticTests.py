@@ -56,7 +56,11 @@ def main():
 
     # Every active utterance path—including sentence-paced stage delivery—must
     # pass through the same per-text router.
-    assert SPEECH_SOURCE.count("utterance.voice = [self voiceForText:") == 3
+    assert SPEECH_SOURCE.count("utterance.voice = [self voiceForText:") == 4
+    greeting = objective_c_method(SPEECH_SOURCE, "sayAnimationGreeting:", implementation_start)
+    assert "voiceForText:text" in greeting
+    assert "dispatch_async" not in greeting, "Stop must not race a deferred greeting enqueue"
+    assert "utteranceCompletions" in greeting and "enqueueSpeechUtterance:" in greeting
 
     for popup in (
         "englishVoicePopup",

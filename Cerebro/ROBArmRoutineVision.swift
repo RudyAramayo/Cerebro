@@ -3,6 +3,55 @@ import AVFoundation
 import Vision
 import simd
 
+/// Native image observations, not a statement that a motion corridor is clear.
+/// Coordinates use the original normalized RGB raster with its origin at top left.
+struct ROBArmHumanObservationEvidence {
+    enum Kind { case hand, person }
+    struct Rect {
+        let xMin:Double,yMin:Double,xMax:Double,yMax:Double
+        var isValid:Bool {
+            [xMin,yMin,xMax,yMax].allSatisfy { $0.isFinite && (0...1).contains($0) }
+                && xMin<xMax && yMin<yMax
+        }
+    }
+    struct Region {
+        let kind:Kind,confidence:Double,normalizedTopLeft:Rect,upperBodyOnly:Bool
+    }
+    struct Point { let x:Double,y:Double,confidence:Double }
+    let sequence:UInt64,capturedAtMilliseconds:Double,cameraGeneration:UUID
+    let width:Int,height:Int
+    let handRequestSucceeded:Bool,personRequestSucceeded:Bool
+    let handObservationCount:Int?,personObservationCount:Int?
+    let hasUnlocalizedRelevantObservation:Bool
+    let unavailableReason:String?
+    let regions:[Region]
+
+    var localizationSucceeded:Bool {
+        guard handRequestSucceeded,personRequestSucceeded,!hasUnlocalizedRelevantObservation,
+              unavailableReason==nil,sequence>0,capturedAtMilliseconds.isFinite,
+              (1...8192).contains(width),(1...8192).contains(height),
+              let handObservationCount,let personObservationCount,
+              (0..<6).contains(handObservationCount),(0..<32).contains(personObservationCount),
+              regions.count<=38 else {return false}
+        return regions.allSatisfy { $0.confidence.isFinite && (0...1).contains($0.confidence)
+            && $0.normalizedTopLeft.isValid }
+    }
+
+    /// Hand pose observations have no rectangle. Use all 21 actual recognized
+    /// joints and add an image-space envelope; incomplete relevant hands hold.
+    static func handBounds(points:[Point])->Rect? {
+        guard points.count==21,points.allSatisfy({$0.x.isFinite && $0.y.isFinite
+            && (0...1).contains($0.x) && (0...1).contains($0.y)
+            && $0.confidence.isFinite && (0.1...1).contains($0.confidence)}) else {return nil}
+        let minX=points.map(\.x).min()!,maxX=points.map(\.x).max()!
+        let minY=points.map(\.y).min()!,maxY=points.map(\.y).max()!
+        guard maxX>minX,maxY>minY else {return nil}
+        let padX=max(0.04,(maxX-minX)*0.5),padY=max(0.04,(maxY-minY)*0.5)
+        return .init(xMin:max(0,minX-padX),yMin:max(0,1-maxY-padY),
+            xMax:min(1,maxX+padX),yMax:min(1,1-minY+padY))
+    }
+}
+
 /// Capture provenance is independent of whether a perception consumer is on.
 /// Restarting an inspection must not erase a completed scene preview, while a
 /// real stream/source/calibration restart must invalidate its coordinate frame.
@@ -68,7 +117,7 @@ struct ROBWorkspaceFrameEnrollment {
     private(set) var sequence: UInt64 = 0
     private(set) var capturedAtMilliseconds: Double?
     func decision(sequence candidate:UInt64,capturedAtMilliseconds captured:Double,nowMilliseconds now:Double)->Decision {
-        guard candidate>0,captured.isFinite,now.isFinite,(0...700).contains(now-captured) else {return .invalid}
+        guard candidate>0,captured.isFinite,now.isFinite,(0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(now-captured) else {return .invalid}
         if candidate==sequence,capturedAtMilliseconds==captured {return .alreadyEnrolled}
         guard candidate>sequence,capturedAtMilliseconds.map({captured>$0}) ?? true else {return .invalid}
         return .fresh
@@ -100,12 +149,21 @@ final class ROBArmRoutineVision {
     private var processingMilliseconds: Double = 0
     private var frames: [String: Frame] = [:]
     private var lastInspection: [String: Any] = [:]
+    private var lastSettlingDiagnostics: [String: Any] = [:]
     private let collisionRegistrationProbe = ROBMarkerlessVisionService()
     private var collisionProbeActive = false
     private var collisionProbeObservation: [String: Any] = [:]
 
     var cameraGeneration: UUID { lock.lock(); defer { lock.unlock() }; return captureIdentity.generation }
     var fullHeightTaskObservationRequested: Bool { lock.lock(); defer { lock.unlock() }; return observedJawFullHeightDemand }
+    private var observedJawTaskStereoMode: String?
+    var taskObservationStereoMode: String? { lock.lock(); defer { lock.unlock() }; return observedJawTaskStereoMode }
+    func taskObservationFrameMatchesRequest(_ frame:Frame)->Bool {
+        lock.lock();defer {lock.unlock()}
+        guard frame.depth?.width==640,frame.depth?.height==480 else{return false}
+        guard let mode=observedJawTaskStereoMode else{return true}
+        return frame.intrinsics?.stereoMode==mode && frame.intrinsics?.stereoModeSource=="sdk_initial_config_readback"
+    }
 
     /// A user-applied head-depth correction changes every projected coordinate.
     /// Drop in-flight inference and enroll fresh frames in a new generation.
@@ -113,7 +171,7 @@ final class ROBArmRoutineVision {
         lock.lock(); defer { lock.unlock() }
         captureIdentity = ROBVisionCaptureIdentity()
         epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
-        lastInspection = [:]; inputNotes = [:]
+        lastInspection = [:]; lastSettlingDiagnostics=[:]; inputNotes = [:]
         lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
     }
 
@@ -124,7 +182,7 @@ final class ROBArmRoutineVision {
         if runtimeContextEnrolled && expectedRuntimeCalibrationIdentity != identity {
             captureIdentity = ROBVisionCaptureIdentity()
             epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
-            lastInspection = [:]; inputNotes = [:]
+            lastInspection = [:]; lastSettlingDiagnostics=[:]; inputNotes = [:]
             lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
         }
         runtimeContextEnrolled = true; expectedRuntimeCalibrationIdentity = identity
@@ -143,25 +201,86 @@ final class ROBArmRoutineVision {
         var pointing: ROBWorkspacePointingHint? = nil
         var nearestPerson: (x: Double, y: Double, distance: Double)? = nil
         var cameraGeneration: UUID = UUID()
+        var humanObservations:ROBArmHumanObservationEvidence? = nil
+    }
+
+    /// A native, nonserializable adapter result for one actual image and frozen
+    /// EMPTY-arm route. It grants no arm authority and changes no Frame value.
+    struct HumanClearance {
+        let assessment:ROBWorkspaceHumanProximity.Assessment
+        let routeIdentity:String
+        fileprivate let sequence:UInt64,capturedAt:Double,generation:UUID,scope:String
+        fileprivate let width:Int,height:Int,k:[Double],service:String?,runtime:String?
+        fileprivate init(assessment:ROBWorkspaceHumanProximity.Assessment,routeIdentity:String,frame:Frame,scope:String) {
+            self.assessment=assessment;self.routeIdentity=routeIdentity
+            sequence=frame.sequence;capturedAt=frame.capturedAt;generation=frame.cameraGeneration;self.scope=scope
+            width=frame.depth!.width;height=frame.depth!.height
+            let source=frame.intrinsics!;k=[source.fx,source.fy,source.cx,source.cy]
+            service=source.cameraServiceSourceSHA256;runtime=source.runtimeCalibration?.identity
+        }
+        func matches(frame:Frame,scopeIdentity:String)->Bool {
+            guard assessment.clear,scope==scopeIdentity,sequence==frame.sequence,capturedAt==frame.capturedAt,
+                  generation==frame.cameraGeneration,let depth=frame.depth,let source=frame.intrinsics,
+                  let observations=frame.humanObservations,observations.localizationSucceeded,
+                  observations.sequence==sequence,observations.capturedAtMilliseconds==capturedAt,
+                  observations.cameraGeneration==generation,observations.width==width,observations.height==height else {return false}
+            return width==depth.width && height==depth.height && k==[source.fx,source.fy,source.cx,source.cy]
+                && service==source.cameraServiceSourceSHA256 && runtime==source.runtimeCalibration?.identity
+        }
+    }
+
+    func makeHumanClearance(frame:Frame,scopeIdentity:String,model:ROBGhostRobotModel,baseline:[Double],
+        route:[[Double]],cameraToRobot:simd_double4x4,spatialErrorMeters:Double=0.05) throws ->HumanClearance {
+        guard isFresh(frame),frame.cameraGeneration==cameraGeneration,!scopeIdentity.isEmpty,
+              scopeIdentity.utf8.count<=8192,let depth=frame.depth,let k=frame.intrinsics,
+              k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,
+              k.depthRGBGeometryCorrespondence?.status=="matched",let observed=frame.humanObservations,
+              observed.sequence==frame.sequence,observed.capturedAtMilliseconds==frame.capturedAt,
+              observed.cameraGeneration==frame.cameraGeneration,observed.width==depth.width,observed.height==depth.height,
+              observed.localizationSucceeded,baseline.count==7,baseline.allSatisfy(\.isFinite),
+              !route.isEmpty,route.count<=80,route.allSatisfy({$0.count==7 && $0.allSatisfy(\.isFinite)}) else {
+            throw ROBVisualGraspVerifier.Unavailable.evidence("Current localized hand/person observations and a frozen empty-arm route are required.")
+        }
+        let regions=observed.regions.compactMap { region -> [Double]? in
+            guard region.confidence >= (region.kind == .hand ? 0.3:0.4) else {return nil}
+            let r=region.normalizedTopLeft
+            if region.kind == .person && region.upperBodyOnly {
+                // Unobserved legs are not declared absent. Conservatively cover
+                // down to the image edge and widen the upper-body observation.
+                let pad=max(0.08,(r.xMax-r.xMin)*0.5)
+                return [max(0,r.xMin-pad),max(0,r.yMin-0.04),min(1,r.xMax+pad),1]
+            }
+            return [r.xMin,r.yMin,r.xMax,r.yMax]
+        }
+        let assessment=ROBWorkspaceHumanProximity.assess(model:model,baseline:baseline,route:route,
+            cameraToRobot:cameraToRobot,width:depth.width,height:depth.height,fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,
+            humanRegions:regions,localizationSucceeded:observed.localizationSucceeded,spatialErrorMeters:spatialErrorMeters)
+        guard assessment.clear else {throw ROBVisualGraspVerifier.Unavailable.evidence(assessment.reason)}
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        let identityPrefix=Data([model.modelID,model.geometryID,model.selectedMappingID].joined(separator:"|").utf8)
+        let routeIdentity=ROBGhostRobotModel.hash(identityPrefix+(try encoder.encode([baseline]+route)))
+        return HumanClearance(assessment:assessment,routeIdentity:routeIdentity,frame:frame,scope:scopeIdentity)
     }
 
     func setActive(_ value: Bool, teaching: Bool = false) {
         lock.lock(); defer { lock.unlock() }
         active = value; self.teaching = teaching; epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]; inputNotes = [:]
-        if !value {observedJawFullHeightDemand=false}
+        if !value {observedJawFullHeightDemand=false;observedJawTaskStereoMode=nil}
         lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
+        lastSettlingDiagnostics=[:]
         if value { lastInspection = [:] }
     }
 
     /// A standing task may enroll its camera before freezing a fresh job.
     /// Keeping an already-active consumer intact avoids erasing valid frames
     /// or invalidating in-flight inspection merely because Run was requested.
-    func ensureActiveForTaskObservation() {
+    func ensureActiveForTaskObservation(stereoMode:String? = nil) {
         lock.lock(); defer { lock.unlock() }
         observedJawFullHeightDemand=true
+        observedJawTaskStereoMode=stereoMode.flatMap{["standard","near_field"].contains($0) ? $0:nil}
         guard !active else {return}
         active=true;teaching=false;epoch=UUID();frames=[:];busy=[];lastOffer=[:];inputNotes=[:]
-        lastIncomingCapture=nil;lastIncomingSequence=0;processingMilliseconds=0;lastInspection=[:]
+        lastIncomingCapture=nil;lastIncomingSequence=0;processingMilliseconds=0;lastInspection=[:];lastSettlingDiagnostics=[:]
     }
 
     func offer(_ frame: CameraFrameSet, role: CameraRole) {
@@ -183,14 +302,16 @@ final class ROBArmRoutineVision {
         if identityUpdate == .changed {
             // Capture identity changes also cancel any pending analysis answer.
             epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
+            lastSettlingDiagnostics=[:]
         }
         if active {
             lastIncomingCapture = frame.capturedAtMilliseconds.flatMap { $0.isFinite ? $0 : nil }
             lastIncomingSequence = frame.sequence
         }
-        guard active, !busy.contains(key), now - (lastOffer[key] ?? 0) >= 0.2 else { lock.unlock(); return }
+        guard ROBVisionFrameAgeBudget.acceptsAnalysisOpportunity(active:active,busy:busy.contains(key),
+            elapsedSeconds:now-(lastOffer[key] ?? 0)) else { lock.unlock(); return }
         // Only admitted work spends the sampling interval. A stale or invalid
-        // input must not suppress the next fresh RGB-D frame for another 200 ms.
+        // input must not suppress the next fresh RGB-D frame for another 100 ms.
         guard frame.source == .depthAIService, let depth = frame.alignedDepth else {
             inputNotes[key] = "synchronized depth is unavailable"; lock.unlock(); return
         }
@@ -198,7 +319,7 @@ final class ROBArmRoutineVision {
             inputNotes[key] = "capture time is unavailable"; lock.unlock(); return
         }
         let age = Date().timeIntervalSince1970 * 1000 - captured
-        guard (0 ... 400).contains(age) else {
+        guard ROBVisionFrameAgeBudget.acceptsIngress(ageMilliseconds:age) else {
             inputNotes[key] = "incoming frame is \(String(format: "%.0f", age)) ms old"; lock.unlock(); return
         }
         guard let pixels = CMSampleBufferGetImageBuffer(frame.rgbSampleBuffer) else {
@@ -226,8 +347,10 @@ final class ROBArmRoutineVision {
             var pointing: ROBWorkspacePointingHint?
             var nearestPerson: (x: Double, y: Double, distance: Double)?
             var clear = false
+            var humanRequestsSucceeded=false
             do {
                 try VNImageRequestHandler(cvPixelBuffer: pixels).perform(needsBody ? [hands, people, body] : [hands, people])
+                humanRequestsSucceeded=true
                 if needsBody, let observations = body.results, observations.count == 1,
                    let points = try? observations[0].recognizedPoints(.all) {
                     let names: [VNHumanBodyPoseObservation.JointName] = [.leftShoulder, .rightShoulder, .leftHip, .rightHip, .leftWrist, .rightWrist]
@@ -289,6 +412,9 @@ final class ROBArmRoutineVision {
                     if pointing == nil || hint.distanceMeters < pointing!.distanceMeters { pointing = hint }
                 }
             } catch { clear = false }
+            let humanObservations=Self.makeHumanObservations(hands:hands.results,people:people.results,
+                requestSucceeded:humanRequestsSucceeded,sequence:frame.sequence,capturedAt:captured,
+                cameraGeneration:captureGeneration,width:CVPixelBufferGetWidth(pixels),height:CVPixelBufferGetHeight(pixels))
             var valid = 0, total = 0
             for y in stride(from: 0, to: depth.height, by: 12) {
                 for x in stride(from: 0, to: depth.width, by: 12) {
@@ -313,12 +439,52 @@ final class ROBArmRoutineVision {
                 self.context.render(small, toBitmap: bytes.baseAddress!, rowBytes: 64 * 4,
                     bounds: CGRect(x: 0, y: 0, width: 64, height: 48), format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
             }
+            let publicationAge=Date().timeIntervalSince1970*1000-captured
+            guard ROBVisionFrameAgeBudget.acceptsPublication(ageMilliseconds:publicationAge) else {
+                self.inputNotes[key]="analysis exposure is \(String(format:"%.0f",publicationAge)) ms old; not published"
+                return
+            }
             self.frames[key] = Frame(image: CIImage(cgImage: immutable), capturedAt: captured,
                                      sequence: frame.sequence, handsClear: clear,
                                      depthCoverage: Double(valid) / Double(max(1, total)), thumbnail: thumbnail,
                                      demonstration: demonstration, depth: depth, intrinsics: frame.intrinsics,
-                                     pointing: pointing, nearestPerson: nearestPerson, cameraGeneration: captureGeneration)
+                                     pointing: pointing, nearestPerson: nearestPerson, cameraGeneration: captureGeneration,
+                                     humanObservations:humanObservations)
         }
+    }
+
+    private static func makeHumanObservations(hands:[VNHumanHandPoseObservation]?,people:[VNHumanObservation]?,
+        requestSucceeded:Bool,sequence:UInt64,capturedAt:Double,cameraGeneration:UUID,width:Int,height:Int)
+        ->ROBArmHumanObservationEvidence {
+        var regions:[ROBArmHumanObservationEvidence.Region]=[],unlocalized=false
+        var reason:String? = requestSucceeded ? nil:"vision_request_failed"
+        if requestSucceeded && (hands==nil || people==nil) {reason="vision_results_unavailable"}
+        if let hands,hands.count>=6 {reason="hand_observation_limit"}
+        if let people,people.count>=32 {reason="person_observation_limit"}
+        if requestSucceeded {
+            for hand in (hands ?? []).prefix(6) {
+                let confidence=Double(hand.confidence)
+                guard confidence.isFinite,(0...1).contains(confidence) else {unlocalized=true;continue}
+                guard let points=try? hand.recognizedPoints(.all),
+                      let bounds=ROBArmHumanObservationEvidence.handBounds(points:points.values.map {
+                          .init(x:Double($0.location.x),y:Double($0.location.y),confidence:Double($0.confidence))
+                      }) else {if confidence>=0.3 {unlocalized=true};continue}
+                regions.append(.init(kind:.hand,confidence:confidence,normalizedTopLeft:bounds,upperBodyOnly:false))
+            }
+            for person in (people ?? []).prefix(32) {
+                let confidence=Double(person.confidence),box=person.boundingBox
+                guard confidence.isFinite,(0...1).contains(confidence) else {unlocalized=true;continue}
+                let bounds=ROBArmHumanObservationEvidence.Rect(xMin:Double(box.minX),yMin:Double(1-box.maxY),
+                    xMax:Double(box.maxX),yMax:Double(1-box.minY))
+                guard bounds.isValid else {if confidence>=0.4 {unlocalized=true};continue}
+                regions.append(.init(kind:.person,confidence:confidence,normalizedTopLeft:bounds,upperBodyOnly:true))
+            }
+        }
+        return .init(sequence:sequence,capturedAtMilliseconds:capturedAt,cameraGeneration:cameraGeneration,
+            width:width,height:height,handRequestSucceeded:requestSucceeded && hands != nil,
+            personRequestSucceeded:requestSucceeded && people != nil,
+            handObservationCount:hands?.count,personObservationCount:people?.count,
+            hasUnlocalizedRelevantObservation:unlocalized,unavailableReason:reason,regions:regions)
     }
 
     func snapshot() -> [String: Frame] {
@@ -334,17 +500,21 @@ final class ROBArmRoutineVision {
         jointPositions: [Double], jointCapturedAtMilliseconds: Double,
         poseHeldDuringCapture: Bool,
         openingCommandAtMilliseconds: Double? = nil,
-        nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000) throws -> ROBGripperVisualServo.Frame {
+        nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000,
+        humanClearance:HumanClearance? = nil,
+        cameraCollisionAdvisoryTrial:ROBWorkspaceVisualCalibrationTrial? = nil) throws -> ROBGripperVisualServo.Frame {
         guard nowMilliseconds.isFinite, frame.capturedAt.isFinite,
-              (0...700).contains(nowMilliseconds-frame.capturedAt), frame.sequence>0,
-              frame.cameraGeneration==cameraGeneration, frame.handsClear,
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(nowMilliseconds-frame.capturedAt), frame.sequence>0,
+              frame.cameraGeneration==cameraGeneration,
+              (frame.handsClear || humanClearance?.matches(frame:frame,scopeIdentity:scopeIdentity)==true ||
+               (cameraCollisionAdvisoryTrial?.usesOperatorClearedCameraCollisionAdvisory==true && cameraCollisionAdvisoryTrial?.cameraGeneration==frame.cameraGeneration)),
               !scopeIdentity.isEmpty, scopeIdentity.utf8.count<=8192,
               poseHeldDuringCapture, jointPositions.count==7,
               jointPositions.allSatisfy(\.isFinite), jointCapturedAtMilliseconds.isFinite,
-              openingCommandAtMilliseconds.map({$0.isFinite && (0...30_000).contains(nowMilliseconds-$0)}) ?? true,
+              openingCommandAtMilliseconds.map({$0.isFinite && $0<=nowMilliseconds}) ?? true,
               // Exposure-matched historical feedback is distinct from live
               // dispatch feedback, which the executor checks independently.
-              (0...700).contains(nowMilliseconds-jointCapturedAtMilliseconds),
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(nowMilliseconds-jointCapturedAtMilliseconds),
               abs(frame.capturedAt-jointCapturedAtMilliseconds)<=150,
               let depth=frame.depth, let k=frame.intrinsics,
               depth.width>0, depth.height>0,
@@ -353,7 +523,15 @@ final class ROBArmRoutineVision {
               k.depthRGBGeometryCorrespondence?.status=="matched",
               let source=context.createCGImage(frame.image,from:frame.image.extent),
               source.width==depth.width, source.height==depth.height else {
-            throw ROBVisualGraspVerifier.Unavailable.evidence("Observed-jaw tracking needs current native aligned RGB-D, a held scope and synchronized measured joint feedback.")
+            let openingAge=openingCommandAtMilliseconds.map{String(nowMilliseconds-$0)} ?? "none"
+            throw ROBVisualGraspVerifier.Unavailable.evidence("Observed-jaw tracking needs current native aligned RGB-D, a held scope and synchronized measured joint feedback. Camera age \(nowMilliseconds-frame.capturedAt) ms; joint age \(nowMilliseconds-jointCapturedAtMilliseconds) ms; exposure/joint difference \(abs(frame.capturedAt-jointCapturedAtMilliseconds)) ms; opening-event age \(openingAge) ms.")
+        }
+        // The entry can take longer than the opening-event window. Expire
+        // that optional identity cue without invalidating otherwise fresh
+        // images. Actual symmetric opening still needs a recent request
+        // between its held before/after images in the jaw controller.
+        let recentOpeningCommand=openingCommandAtMilliseconds.flatMap {
+            (0...30_000).contains(nowMilliseconds-$0) ? $0:nil
         }
         let width=min(320,source.width)
         let height=max(1,Int((Double(source.height)*Double(width)/Double(source.width)).rounded()))
@@ -386,7 +564,7 @@ final class ROBArmRoutineVision {
             fx:k.fx*sx,fy:k.fy*sy,cx:(k.cx+0.5)*sx-0.5,cy:(k.cy+0.5)*sy-0.5,
             sequence:frame.sequence,capturedAtMilliseconds:frame.capturedAt,scopeIdentity:scopeIdentity,
             jointPositions:jointPositions,jointCapturedAtMilliseconds:jointCapturedAtMilliseconds,
-            poseHeldDuringCapture:poseHeldDuringCapture,openingCommandAtMilliseconds:openingCommandAtMilliseconds)
+            poseHeldDuringCapture:poseHeldDuringCapture,openingCommandAtMilliseconds:recentOpeningCommand)
     }
 
     /// Lightweight offline grasp evidence. Does not run a detector, move the
@@ -455,7 +633,7 @@ final class ROBArmRoutineVision {
         return ["face"].map { key in
             let name = key == "face" ? "Forward camera" : "Belly camera"
             guard let frame = frames[key] else { return "\(name): \(inputNotes[key] ?? "no frames received")" }
-            return "\(name): \(Int(now - frame.capturedAt)) ms old, \(Int(frame.depthCoverage * 100))% usable depth, analysis \(Int(processingMilliseconds)) ms"
+            return "\(name): \(Int(now - frame.capturedAt)) ms old (limit \(Int(ROBVisionFrameAgeBudget.maximumAgeMilliseconds)) ms), \(Int(frame.depthCoverage * 100))% usable depth, analysis \(Int(processingMilliseconds)) ms"
         }.joined(separator: "; ")
     }
 
@@ -468,13 +646,13 @@ final class ROBArmRoutineVision {
         return ["active": active, "input_sequence": NSNumber(value: lastIncomingSequence),
                 "input_age_ms": lastIncomingCapture.map { now - $0 } ?? -1,
                 "analysis_age_ms": frame.map { now - $0.capturedAt } ?? -1,
-                "analysis_ms": processingMilliseconds, "depth_coverage": frame?.depthCoverage ?? 0,
+                "analysis_ms": processingMilliseconds, "camera_max_age_ms": ROBVisionFrameAgeBudget.maximumAgeMilliseconds, "depth_coverage": frame?.depthCoverage ?? 0,
                 "hands_clear": frame?.handsClear ?? false, "note": inputNotes["face"] ?? "No frames received",
-                "inspection": lastInspection]
+                "inspection": lastInspection,"settling":lastSettlingDiagnostics]
     }
 
     private func isFresh(_ frame: Frame) -> Bool {
-        (0 ... 700).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt)
+        (0 ... ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt)
             && frame.depthCoverage >= 0.25
     }
 
@@ -483,7 +661,7 @@ final class ROBArmRoutineVision {
     /// consistency tests; missing pixels never create free space. Ordinary
     /// inspection, human clearance and motion keep their25% coverage gate.
     private func isDepthMappingEligible(_ frame:Frame)->Bool {
-        guard frame.capturedAt.isFinite,(0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+        guard frame.capturedAt.isFinite,(0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
               frame.sequence>0,frame.cameraGeneration==cameraGeneration,
               frame.depthCoverage.isFinite,frame.depthCoverage>0,frame.depthCoverage<=1,
               let depth=frame.depth,depth.width>0,depth.height>0,
@@ -500,6 +678,17 @@ final class ROBArmRoutineVision {
     /// Depth-only settled capture: no LLM/object inference and no arm command.
     func settledDepthFrame(deadlineUptime:Double?=nil) async throws -> Frame {
         try await settledInspectionFrame(epoch: inspectionEpoch(), requireStaticScene: true,deadlineUptime:deadlineUptime,depthMappingOnly:true)
+    }
+
+    /// Passive map acquisition only. Actual same-exposure inertial evidence
+    /// may establish a held camera; it grants no arm or person clearance.
+    /// Without that evidence, retain the existing static three-frame path.
+    @MainActor func settledPassiveMappingFrame(deadlineUptime:Double?=nil,
+        check:@MainActor () throws ->Void) async throws ->Frame {
+        try check();try Task.checkCancellation()
+        return try await settledInspectionFrame(epoch:inspectionEpoch(),requireStaticScene:true,
+            deadlineUptime:deadlineUptime,depthMappingOnly:true,allowStationaryIMUPassiveFrame:true,
+            passiveMappingCheck:check)
     }
 
     @MainActor func beginCollisionRegistrationProbe() {
@@ -540,6 +729,12 @@ final class ROBArmRoutineVision {
         lock.lock(); lastInspection = details; lock.unlock()
     }
 
+    private func recordSettlingDiagnostics(_ details:[String:Any],epoch token:UUID) {
+        lock.lock();defer{lock.unlock()}
+        guard epoch==token else{return}
+        lastSettlingDiagnostics=details
+    }
+
     // Preserve the existing veto exactly. This is not a clearance classifier;
     // no brightness compensation, image registration or relaxed threshold can
     // hide an object or viewpoint change from the semantic freshness check.
@@ -549,8 +744,55 @@ final class ROBArmRoutineVision {
         return Double(changed) / Double(before.count)
     }
 
+    /// Diagnostic facts only. Admission still comes exclusively from the
+    /// existing isFresh/isDepthMappingEligible call in the settling loop.
+    private static func settledFrameDiagnostics(_ frame:Frame?,eligible:Bool,depthMappingOnly:Bool,
+        notBefore:Double,nowMilliseconds:Double,currentGeneration:UUID)->(facts:[String:Any],failed:[String]) {
+        guard let frame else {return ( ["frame_present":false,"eligible":false], ["no_analyzed_frame"] )}
+        func number(_ value:Double)->Any {value.isFinite ? value as Any:NSNull()}
+        let age=nowMilliseconds-frame.capturedAt
+        let dimensionsValid=frame.depth.map{$0.width>0 && $0.height>0} ?? false
+        let intrinsicsValid=frame.depth.flatMap {depth in frame.intrinsics.map{$0.isValid(forWidth:depth.width,height:depth.height)}} ?? false
+        var failed:[String]=[]
+        if !frame.capturedAt.isFinite {failed.append("nonfinite_capture_time")}
+        else {
+            if age<0 {failed.append("future_exposure")}
+            if age>ROBVisionFrameAgeBudget.maximumAgeMilliseconds {failed.append("exposure_older_than_\(Int(ROBVisionFrameAgeBudget.maximumAgeMilliseconds))ms")}
+            if frame.capturedAt<notBefore {failed.append("captured_before_acquisition")}
+        }
+        if depthMappingOnly {
+            if frame.sequence==0 {failed.append("zero_sequence")}
+            if frame.cameraGeneration != currentGeneration {failed.append("camera_generation_mismatch")}
+            if !frame.depthCoverage.isFinite || frame.depthCoverage>1 {failed.append("invalid_depth_coverage")}
+            else if frame.depthCoverage<=0 {failed.append("no_sparse_depth")}
+            if frame.depth==nil {failed.append("missing_depth")}
+            else if !dimensionsValid {failed.append("invalid_depth_dimensions")}
+            if frame.intrinsics==nil {failed.append("missing_intrinsics")}
+            else if !intrinsicsValid {failed.append("invalid_intrinsics")}
+        } else if !(frame.depthCoverage>=0.25) {
+            failed.append("ordinary_depth_coverage_below_25_percent")
+        }
+        if !eligible && failed.isEmpty {failed.append("eligibility_rejected_without_classified_condition")}
+        let imu=frame.intrinsics?.inertial
+        return (["frame_present":true,"eligible":eligible,"sequence":NSNumber(value:frame.sequence),
+            "capture_age_ms":number(age),"capture_time_ms":number(frame.capturedAt),
+            "captured_after_acquisition":frame.capturedAt>=notBefore,
+            "frame_camera_generation":frame.cameraGeneration.uuidString,
+            "current_camera_generation":currentGeneration.uuidString,
+            "depth_coverage":number(frame.depthCoverage),"depth_present":frame.depth != nil,
+            "depth_dimensions_valid":dimensionsValid,"intrinsics_present":frame.intrinsics != nil,
+            "intrinsics_valid_for_depth_dimensions":intrinsicsValid,
+            "imu_present":imu != nil,"imu_valid":imu?.isValid ?? false,"imu_stationary":imu?.stationary ?? false,
+            "imu_window_ms":imu.map{number($0.windowMilliseconds)} ?? NSNull(),
+            "imu_sample_count":imu.map{$0.sampleCount as Any} ?? NSNull(),
+            "imu_age_ms":imu.map{number($0.ageMilliseconds)} ?? NSNull()],failed)
+    }
+
+    @MainActor private static func passiveMappingNoopCheck()throws {}
+
     private func settledInspectionFrame(epoch token: UUID, requireStaticScene: Bool = true,deadlineUptime:Double?=nil,
-        depthMappingOnly:Bool=false) async throws -> Frame {
+        depthMappingOnly:Bool=false,allowStationaryIMUPassiveFrame:Bool=false,
+        passiveMappingCheck:@MainActor () throws ->Void = ROBArmRoutineVision.passiveMappingNoopCheck) async throws -> Frame {
         // Called only when the coordinator has stopped motion and the GPU is
         // ready. A previously captured frame may still depict the neck/arms
         // settling, even though the latest commanded pose is now stationary.
@@ -558,30 +800,94 @@ final class ROBArmRoutineVision {
         let deadline = min(ProcessInfo.processInfo.systemUptime+3,deadlineUptime ?? .infinity)
         var anchor: Frame?, previous: Frame?
         var distinctSamples = 0
+        var pollCount=0,duplicatePolls=0,acceptedDistinctFrames=0,gapResets=0,staticResets=0
+        var maximumCaptureGapMilliseconds=0.0
+        var conditionPollCounts:[String:Int]=[:],latestFrameFacts:[String:Any]=[:]
         while ProcessInfo.processInfo.systemUptime < deadline {
             try Task.checkCancellation()
-            if let frame = try inspectionFrame(epoch: token),
-               (depthMappingOnly ? isDepthMappingEligible(frame):isFresh(frame)),frame.capturedAt >= notBefore {
+            if allowStationaryIMUPassiveFrame,depthMappingOnly {try await passiveMappingCheck()}
+            let candidate=try inspectionFrame(epoch:token)
+            let eligible=candidate.map{depthMappingOnly ? isDepthMappingEligible($0):isFresh($0)} ?? false
+            let diagnostics=Self.settledFrameDiagnostics(candidate,eligible:eligible,depthMappingOnly:depthMappingOnly,
+                notBefore:notBefore,nowMilliseconds:Date().timeIntervalSince1970*1000,currentGeneration:cameraGeneration)
+            pollCount+=1;latestFrameFacts=diagnostics.facts
+            for condition in diagnostics.failed {conditionPollCounts[condition,default:0]+=1}
+            if allowStationaryIMUPassiveFrame,depthMappingOnly {
+                if let imu=candidate?.intrinsics?.inertial {
+                    if !imu.isValid {conditionPollCounts["single_frame_imu_invalid",default:0]+=1}
+                    if !imu.stationary {conditionPollCounts["single_frame_imu_not_stationary",default:0]+=1}
+                    if imu.windowMilliseconds<300 {conditionPollCounts["single_frame_imu_window_below_300ms",default:0]+=1}
+                    if imu.sampleCount<20 {conditionPollCounts["single_frame_imu_samples_below_20",default:0]+=1}
+                } else {conditionPollCounts["single_frame_imu_unavailable",default:0]+=1}
+            }
+            if let frame = candidate,eligible,frame.capturedAt >= notBefore {
+                // Passive attention/mapping sends no arm command and grants no human
+                // clearance. Its actual same-exposure stationary IMU window
+                // can establish a held view without requiring three costly
+                // hand/person analyses less than700ms apart. Ordinary static
+                // captures and motion inspections retain their existing path;
+                // passive mapping retains that path as its no-IMU fallback.
+                if allowStationaryIMUPassiveFrame,depthMappingOnly,
+                   let imu=frame.intrinsics?.inertial,imu.isValid,imu.stationary,
+                   imu.windowMilliseconds>=300,imu.sampleCount>=20 {
+                    recordSettlingDiagnostics(["schema_version":1,"status":"accepted",
+                        "method":"stationary_imu_single_actual_post_call_frame","depth_mapping_only":true,
+                        "static_scene_required":false,"three_frame_fallback_requires_static_scene":requireStaticScene,
+                        "recorded_at_ms":Date().timeIntervalSince1970*1000,
+                        "latest_frame":diagnostics.facts,"poll_count":pollCount,"capture_time_refreshed":false,
+                        "motion_authority":false,"human_clearance_granted":false],epoch:token)
+                    return frame
+                }
                 if let previous, frame.sequence < previous.sequence || frame.capturedAt < previous.capturedAt {
                     throw ROBArmRoutineError.blocked("The camera stream restarted during inspection.")
                 }
                 if previous?.sequence != frame.sequence {
+                    acceptedDistinctFrames+=1
                     guard let difference = Self.sceneChangeFraction(anchor?.thumbnail ?? frame.thumbnail, frame.thumbnail) else {
                         throw ROBArmRoutineError.blocked("The inspected camera view is unavailable.")
                     }
+                    if let previous {
+                        let gap=frame.capturedAt-previous.capturedAt
+                        maximumCaptureGapMilliseconds=max(maximumCaptureGapMilliseconds,gap)
+                        if gap>ROBVisionFrameAgeBudget.maximumAgeMilliseconds {gapResets+=1}
+                    }
+                    if requireStaticScene && difference>=0.025 {staticResets+=1}
                     if anchor == nil || (requireStaticScene && difference >= 0.025) ||
-                        previous.map({ frame.capturedAt - $0.capturedAt > 700 }) == true {
+                        previous.map({ frame.capturedAt - $0.capturedAt > ROBVisionFrameAgeBudget.maximumAgeMilliseconds }) == true {
                         anchor = frame; distinctSamples = 0
                     }
                     distinctSamples += 1
                     previous = frame
                     if let anchor, distinctSamples >= 3, frame.capturedAt - anchor.capturedAt >= 300 {
+                        recordSettlingDiagnostics(["schema_version":1,"status":"accepted",
+                            "method":"three_distinct_actual_exposures","depth_mapping_only":depthMappingOnly,
+                            "static_scene_required":requireStaticScene,"recorded_at_ms":Date().timeIntervalSince1970*1000,
+                            "latest_frame":diagnostics.facts,"distinct_samples_since_anchor":distinctSamples,
+                            "capture_span_since_anchor_ms":frame.capturedAt-anchor.capturedAt,
+                            "capture_gap_resets":gapResets,"static_scene_resets":staticResets,"capture_time_refreshed":false],epoch:token)
                         return frame
                     }
-                }
+                } else {duplicatePolls+=1}
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+        let span=anchor.flatMap{a in previous.map{$0.capturedAt-a.capturedAt}} ?? 0
+        var diagnostics:[String:Any]=["schema_version":1,"kind":"settled_capture_timeout_diagnostics_only","status":"timeout",
+            "depth_mapping_only":depthMappingOnly,"static_scene_required":requireStaticScene,
+            "stationary_imu_passive_frame_allowed":allowStationaryIMUPassiveFrame,
+            "poll_count":pollCount,"failed_condition_poll_counts":conditionPollCounts,
+            "accepted_distinct_frames":acceptedDistinctFrames,"distinct_samples_since_anchor":distinctSamples,
+            "capture_span_since_anchor_ms":span.isFinite ? span as Any:NSNull(),"duplicate_polls":duplicatePolls,
+            "capture_gap_resets":gapResets,"static_scene_resets":staticResets,
+            "maximum_accepted_capture_gap_ms":maximumCaptureGapMilliseconds,
+            "latest_frame":latestFrameFacts,"recorded_at_ms":Date().timeIntervalSince1970*1000,"capture_time_refreshed":false]
+        let health=healthSnapshot()
+        var healthFields:[String:Any]=[:]
+        for key in ["active","input_sequence","input_age_ms","analysis_age_ms","analysis_ms","depth_coverage","hands_clear","note"] {
+            healthFields[key]=health[key]
+        }
+        diagnostics["camera_health"]=healthFields
+        recordSettlingDiagnostics(diagnostics,epoch:token)
         throw ROBArmRoutineError.blocked("The camera view did not settle within 3 seconds. Keep the workspace still and retry; no new motion was sent.")
     }
 
@@ -652,14 +958,16 @@ final class ROBArmRoutineVision {
     /// Acquire the actual pixels after the local model/GPU is ready. The caller
     /// holds a specific settled neck view throughout both inference and depth
     /// projection; a current callback never refreshes the capture timestamp.
-    func observeWorkspace(objectDetection: Bool = true,
+    func observeWorkspace(objectDetection: Bool = true,nonactuatingSparseDepth:Bool = false,
         onCaptured: @MainActor (Frame) async throws -> Void = { _ in }) async throws -> (ROBWorkspaceObservation, Frame) {
         if objectDetection {
             try await ROBWorkspaceObjectDetector.shared.warmUp()
             try Task.checkCancellation()
             let token = try inspectionEpoch()
-            let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false)
-            try await onCaptured(frame)
+            // Passive search may inspect sparse depth without hiding readable
+            // RGB objects. Other callers retain ordinary readiness admission.
+            let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false,
+                depthMappingOnly:nonactuatingSparseDepth,allowStationaryIMUPassiveFrame:nonactuatingSparseDepth)
             try Task.checkCancellation()
             guard frame.cameraGeneration == cameraGeneration else { throw CancellationError() }
             guard let cg = context.createCGImage(frame.image, from: frame.image.extent),
@@ -669,7 +977,12 @@ final class ROBArmRoutineVision {
             let inputURL = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support/Cerebro/WorkspaceDetector/latest-input.jpg")
             try? jpeg.write(to: inputURL, options: .atomic)
-            let result = try await ROBWorkspaceObjectDetector.shared.detect(jpeg: jpeg)
+            // Both consumers own this exact exposure. Depth-map construction
+            // and object inference are independent; do not serialize their
+            // processing time or replace the frame with a newer one mid-flight.
+            async let detection = ROBWorkspaceObjectDetector.shared.detect(jpeg: jpeg)
+            try await onCaptured(frame)
+            let result = try await detection
             if result.candidates.contains(where: { $0.target == "orangeBucket" && $0.score >= 0.35 }) {
                 let directory = inputURL.deletingLastPathComponent()
                 try? jpeg.write(to: directory.appendingPathComponent("last-bucket-input.jpg"), options: .atomic)
@@ -686,7 +999,8 @@ final class ROBArmRoutineVision {
             var advancing = false
             while ProcessInfo.processInfo.systemUptime < liveDeadline {
                 try Task.checkCancellation()
-                if let current = try inspectionFrame(epoch: token), isFresh(current), current.sequence > frame.sequence {
+                if let current = try inspectionFrame(epoch: token),
+                   (nonactuatingSparseDepth ? isDepthMappingEligible(current):isFresh(current)),current.sequence > frame.sequence {
                     advancing = true; break
                 }
                 try await Task.sleep(nanoseconds: 50_000_000)
@@ -828,10 +1142,56 @@ enum ROBWorkspaceLocalCanShapePrior {
         width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
         depth:(Int,Int)->UInt16?,cameraToRobot:simd_double4x4)
         -> (sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+        func fit(_ candidate:ROBWorkspaceDetection,_ support:Double,_ excluded:[Double]?=nil)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+            fitRing(detection:candidate,allCanDetections:allCanDetections,width:width,height:height,
+                fx:fx,fy:fy,cx:cx,cy:cy,depth:depth,cameraToRobot:cameraToRobot,
+                excludedPixelBounds:excluded,minimumSupport:support)
+        }
+        let ordinary=fit(detection,0.65)
+        guard ordinary.sections==nil,
+              ordinary.diagnostics["rejection_stage"] as? String == "no_dominant_local_table_plane",
+              (ordinary.diagnostics["plane_support_fraction"] as? Double ?? 0)>=0.55 else{return ordinary}
+        // A nearby gripper can occupy much of the immediate ring. A lower
+        // majority requires a separate region with the ordinary strong table
+        // support. Exclude every pixel of the target's ring from that fit.
+        let local=fit(detection,0.55)
+        guard let sections=local.sections,
+              let n=local.diagnostics["plane_normal_robot"] as? [Double],n.count==3 else{return ordinary}
+        let normal=SIMD3(n[0],n[1],n[2]),base=SIMD3(sections.bottom[0],sections.bottom[1],sections.bottom[2])
+        let excluded=[detection.box[0]*Double(width-1)-15,detection.box[1]*Double(height-1)-15,
+                      detection.box[2]*Double(width-1)+15,detection.box[3]*Double(height-1)+15]
+        for candidate in allCanDetections where candidate.box != detection.box {
+            let corroborating=fit(candidate,0.65,excluded).diagnostics
+            guard let other=corroborating["plane_normal_robot"] as? [Double],other.count==3,
+                  let offset=corroborating["plane_offset_m"] as? Double,
+                  let rms=corroborating["plane_rmse_m"] as? Double,rms<=0.008,
+                  let p95=corroborating["plane_p95_m"] as? Double,p95<=0.010,
+                  other[2]>=0.85 else{continue}
+            let otherNormal=SIMD3(other[0],other[1],other[2]),distance=abs(simd_dot(otherNormal,base)+offset)
+            guard simd_dot(normal,otherNormal)>=cos(5*Double.pi/180),distance<=0.006 else{continue}
+            var report=local.diagnostics
+            report["disjoint_table_corroboration"]="confirmed_same_source_frame"
+            report["corroborating_ring_diagnostics"]=corroborating
+            report["ordinary_plane_support_required"]=0.65
+            report["corroborated_plane_support_required"]=0.55
+            report["corroborated_base_plane_distance_m"]=distance
+            return(sections,report)
+        }
+        var rejected=ordinary.diagnostics;rejected["disjoint_table_corroboration"]="unconfirmed"
+        return(nil,rejected)
+    }
+
+    private static func fitRing(detection:ROBWorkspaceDetection,allCanDetections:[ROBWorkspaceDetection],
+        width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
+        depth:(Int,Int)->UInt16?,cameraToRobot:simd_double4x4,
+        excludedPixelBounds:[Double]?,minimumSupport:Double)
+        -> (sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
         var report:[String:Any]=["schema_version":1,"kind":"local_trial_known_empty_coke_cylinder",
             "status":"rejected","box":detection.box,"assumed_height_m":0.120,"assumed_diameter_m":0.066,
             "assumed_axis_robot":[0.0,0,1],"registration_verified":false,"measured_can_wall_depth":false,
-            "local_plane_is_global_floor_calibration":false,"ring_width_pixels":14]
+            "local_plane_is_global_floor_calibration":false,"ring_width_pixels":14,
+            "plane_support_required":minimumSupport]
+        if let excludedPixelBounds {report["excluded_pixel_bounds"]=excludedPixelBounds}
         func reject(_ stage:String)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
             report["rejection_stage"]=stage;return (nil,report)
         }
@@ -853,6 +1213,7 @@ enum ROBWorkspaceLocalCanShapePrior {
         var points:[SIMD3<Double>]=[],sampled=0,missing=0
         for y in stride(from:top,through:bottom,by:step) {for x in stride(from:left,through:right,by:step) {
             let insideOwn=Double(x)>=x0 && Double(x)<=x1 && Double(y)>=y0 && Double(y)<=y1
+            if let e=excludedPixelBounds,Double(x)>=e[0],Double(x)<=e[2],Double(y)>=e[1],Double(y)<=e[3] {continue}
             let insideAnother=allCanDetections.contains { other in
                 other.visuallyUsable && other.box.count==4 && other.box != detection.box &&
                 (other.box[0]*Double(width-1)...other.box[2]*Double(width-1)).contains(Double(x)) &&
@@ -880,7 +1241,7 @@ enum ROBWorkspaceLocalCanShapePrior {
         }
         let support=Double(best.count)/Double(points.count)
         report["plane_inlier_count"]=best.count;report["plane_support_fraction"]=support
-        guard best.count>=80,support>=0.65 else{return reject("no_dominant_local_table_plane")}
+        guard best.count>=80,support>=minimumSupport else{return reject("no_dominant_local_table_plane")}
         let inliers=best.map{points[$0]},mean=inliers.reduce(SIMD3<Double>.zero,+)/Double(inliers.count)
         var xx=0.0,xy=0.0,yy=0.0,xz=0.0,yz=0.0
         for p in inliers {let d=p-mean;xx+=d.x*d.x;xy+=d.x*d.y;yy+=d.y*d.y;xz+=d.x*d.z;yz+=d.y*d.z}
@@ -938,6 +1299,39 @@ enum ROBWorkspaceLocalCanShapePrior {
 /// Attention only: current detector boxes can request at most two fresh
 /// views. A rejected plane/shape never becomes an accepted can by recentering.
 enum ROBWorkspaceCanRecenterPlan {
+    /// A grasp needs room around the can for both fingers. This is only a
+    /// requested view; the caller must reacquire the same can and fresh depth.
+    static func graspFocusView(sighting:ROBWorkspaceRecall.Sighting,
+        nowMilliseconds:Double,boundedPan:(Double)->Double)->ROBWorkspaceView? {
+        guard sighting.target == .can,sighting.valid,nowMilliseconds.isFinite,
+              (0...30_000).contains(nowMilliseconds-sighting.capturedAt),
+              sighting.box[0]<0.15 || sighting.box[1]<0.20 || sighting.box[2]>0.85 || sighting.box[3]>0.80 else{return nil}
+        let centered=sighting.centeredView,pan=boundedPan(centered.panDegrees)
+        guard pan.isFinite,abs(pan-sighting.view.panDegrees)>3 || abs(centered.upperTarget-sighting.view.upperTarget)>100 else{return nil}
+        return .init(panDegrees:pan,upperTarget:centered.upperTarget)
+    }
+
+    /// One current RGB exposure may request attention, never object geometry.
+    /// Recenter a clipped silhouette before another full workspace raster.
+    static func clippedAttentionViews(sightings:[ROBWorkspaceRecall.Sighting],
+        nowMilliseconds:Double,boundedPan:(Double)->Double)->[ROBWorkspaceView] {
+        guard nowMilliseconds.isFinite else{return []}
+        var result:[ROBWorkspaceView]=[]
+        for item in sightings.sorted(by:{$0.confidence>$1.confidence}) where item.target == .can && item.valid &&
+            item.confidence>=0.60 && (0...30_000).contains(nowMilliseconds-item.capturedAt) &&
+            item.box.contains(where:{$0<0.02 || $0>0.98}) {
+            let centered=item.centeredView,pan=boundedPan(centered.panDegrees)
+            guard pan.isFinite else{continue}
+            let view=ROBWorkspaceView(panDegrees:pan,upperTarget:centered.upperTarget)
+            guard abs(view.panDegrees-item.view.panDegrees)>3 || abs(view.upperTarget-item.view.upperTarget)>100 else{continue}
+            if !result.contains(where:{abs($0.panDegrees-view.panDegrees)<3 && abs($0.upperTarget-view.upperTarget)<100}) {
+                result.append(view)
+            }
+            if result.count==2 {break}
+        }
+        return result
+    }
+
     static func views(sightings:[ROBWorkspaceRecall.Sighting],physicalSide:String,
         nowMilliseconds:Double,boundedPan:(Double)->Double)->[ROBWorkspaceView] {
         guard ["left","right"].contains(physicalSide),nowMilliseconds.isFinite else{return []}
@@ -980,6 +1374,8 @@ struct ROBWorkspaceCanSelection {
     var viewReady: ((Double, Int) -> Bool)?
     var canUseView: ((Double, Int) -> Bool)?
     var boundedPan: ((Double) -> Double)?
+    /// Prediction only; actual capture still verifies the exact accepted raw hold.
+    var panTargetForView: ((Double) -> NSNumber?)?
     var finishView: (() -> Void)?
     var announce: ((String) -> Void)?
     private(set) var lastReport: NSDictionary = [:]
@@ -1016,6 +1412,12 @@ struct ROBWorkspaceCanSelection {
         let identity=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
         try requireEstimatedProjectionIdentity(identity,model:model)
         guard identity != nil else {
+            guard ROBFixedHeadCalibrationWindowController.shared.readNeck?()["lower"] as? Int == 6011 else {
+                throw ROBWorkspaceDepthMapError.acquisition("A bent-neck scan needs a camera transform for its actual lower-neck pose; the upright fallback cannot be reused.")
+            }
+            guard ROBNeckRGBPoseDisplay.estimatedProjectionAcceptsSource(model:model,cameraGeneration:frame.cameraGeneration,
+                runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
+                cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256) else {throw ROBWorkspaceDepthMapError.invalidFrame}
             guard let legacy=view.cameraFrame(model:model) else{throw ROBWorkspaceDepthMapError.invalidFrame}
             return (legacy,nil,nil)
         }
@@ -1025,6 +1427,13 @@ struct ROBWorkspaceCanSelection {
         }
         let scope=try controller.scope(model:model,frame:frame)
         try scope.validate()
+        if let failure=ROBNeckRGBPoseDisplay.estimatedProjectionSourceFailure(model:model,actualFrame:.init(cameraGeneration:frame.cameraGeneration,
+                actualDeviceMXID:frame.intrinsics?.runtimeCalibration?.actualDeviceMXID,
+                runtimeCalibrationIdentity:frame.intrinsics?.runtimeCalibration?.identity,
+                cameraServiceSourceSHA256:frame.intrinsics?.cameraServiceSourceSHA256,scope:scope,
+                inertialJSON:(frame.intrinsics?.inertial).flatMap{try?JSONEncoder().encode($0)})) {
+            throw failure
+        }
         let neck=controller.readNeck?() ?? [:],now=ProcessInfo.processInfo.systemUptime
         let captureUptime=now-(Date().timeIntervalSince1970*1000-frame.capturedAt)/1000
         guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,
@@ -1047,7 +1456,7 @@ struct ROBWorkspaceCanSelection {
     }
     @MainActor @nonobjc private func registeredCurrentView(model: ROBGhostRobotModel) -> ROBWorkspaceView? {
         guard let frame = ROBArmRoutineVision.shared.snapshot()["face"],
-              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
               let context = registeredCameraContext(frame:frame,model:model),
               let neck = ROBFixedHeadCalibrationWindowController.shared.readNeck?(),
               let pan = neck["pan_degrees"] as? Double else { return nil }
@@ -1062,6 +1471,69 @@ struct ROBWorkspaceCanSelection {
               (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == value.sessionGeneration,
               (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
         guard let model=collisionSnapshotModel,estimatedCameraProjectionIsCurrent(model:model,map:value) else{return nil}
+        return value
+    }
+
+    /// Target coordinates for a nonactuating floor-route proposal. A long
+    /// survey can contain expired earlier views while its selected can is
+    /// still fresh. Validate that exact observation and current source context;
+    /// do not expose the older map as collision-clearance evidence.
+    @nonobjc func canForBasePlanning() throws -> ROBWorkspaceLocatedObject {
+        precondition(Thread.isMainThread)
+        guard let map = collisionSnapshotValue, let model = collisionSnapshotModel,
+              map.modelID == model.modelID, map.geometryID == model.geometryID, map.mappingID == model.selectedMappingID,
+              map.cameraGeneration == ROBArmRoutineVision.shared.cameraGeneration,
+              (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == map.sessionGeneration,
+              estimatedCameraProjectionIsCurrent(model:model,map:map) else {
+            throw ROBArmRoutineError.blocked("The can's camera/arm source changed; refresh its depth observation.")
+        }
+        guard map.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity else {
+            throw ROBArmRoutineError.blocked("The body moved after the can capture; reacquire it at the current pose.")
+        }
+        let now = Date().timeIntervalSince1970*1000
+        var candidate = locatedObjects[.can]
+        if candidate == nil {
+            // Reach ranking deliberately omits an unreachable can from arm
+            // targets. Retain its confirmed depth for a floor-route proposal;
+            // this must not turn it back into a reachable grasp target.
+            let expected = ROBWorkspaceCanSceneIdentity(sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,
+                sessionGeneration:map.sessionGeneration,bodyMotionIdentity:map.bodyMotionIdentity,
+                modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+                estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity)
+            if canCandidates.context == expected {
+                candidate = canCandidates.confirmed(nowMilliseconds:now).filter { object in
+                    map.observations.contains {
+                        $0.sequence == object.sequence && $0.capturedAtMilliseconds == object.capturedAt &&
+                            $0.registrationID == object.registrationID
+                    }
+                }.min { hypot($0.point.x,$0.point.y) < hypot($1.point.x,$1.point.y) }
+            }
+        }
+        guard let can = candidate, can.position.count == 3, can.position.allSatisfy(\.isFinite) else {
+            throw ROBArmRoutineError.blocked("No confirmed can with matching depth coordinates; scan the front table.")
+        }
+        let age = now-can.capturedAt
+        guard (0...60_000).contains(age) else {
+            throw ROBArmRoutineError.blocked(String(format: "Can observation is %.1f seconds old; reacquire it before base planning.", age/1000))
+        }
+        guard map.observations.contains(where: {
+            $0.sequence == can.sequence && $0.capturedAtMilliseconds == can.capturedAt && $0.registrationID == can.registrationID
+        }) else {
+            throw ROBArmRoutineError.blocked("The selected can has no matching depth source frame; reacquire it.")
+        }
+        return can
+    }
+
+    /// A trial keeps its own bounded evidence age. Revalidate the exact raw
+    /// map against its proof and live source identities; never refresh capture
+    /// timestamps or expose this allowance through the ordinary scene getter.
+    @nonobjc func collisionSnapshot(validating trial:ROBWorkspaceVisualCalibrationTrial)->ROBWorkspaceCollisionSnapshot? {
+        guard let value=collisionSnapshotValue,let model=collisionSnapshotModel,
+              let generation=(ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value,
+              estimatedCameraProjectionIsCurrent(model:model,map:value),
+              (try? ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(value,model:model,generation:generation,
+                sceneID:value.sceneID,cameraGeneration:ROBArmRoutineVision.shared.cameraGeneration,
+                nowMilliseconds:Date().timeIntervalSince1970*1000,trial:trial)) != nil else{return nil}
         return value
     }
 
@@ -1163,6 +1635,317 @@ struct ROBWorkspaceCanSelection {
         return .init(object:nil,preview:nil,diagnostics:diagnostics)
     }
 
+    @nonobjc private static let blockerDepthQueue = DispatchQueue(label: "com.orbitusrobotics.workspace-blocker-depth", qos: .userInitiated)
+
+    /// These value-only workers deliberately use checked continuations rather
+    /// than a nested Task.detached.value inside the large capture coroutine.
+    /// They can add pixels to a map, never send an actuator command or grant.
+    @nonobjc private static func appendBlockerDepth(map:ROBWorkspaceDepthMap,pixels:CameraDepthFrame,
+        intrinsics:CameraIntrinsics,matrix:simd_double4x4,capturedAtMilliseconds:Double,sequence:UInt64,
+        cameraGeneration:UUID,view:ROBWorkspaceView,lowerTarget:Int,projection:String) async throws ->ROBWorkspaceDepthMap {
+        let width=pixels.width,height=pixels.height,fx=intrinsics.fx,fy=intrinsics.fy,cx=intrinsics.cx,cy=intrinsics.cy
+        let pan=view.panDegrees,upper=view.upperTarget
+        return try await withCheckedThrowingContinuation { continuation in
+            blockerDepthQueue.async {
+                do {
+                    var next=map
+                    try next.append(width:width,height:height,fx:fx,fy:fy,cx:cx,cy:cy,
+                        depth:{pixels.distanceMillimeters(x:$0,y:$1)},cameraToRobot:matrix,
+                        capturedAtMilliseconds:capturedAtMilliseconds,sequence:sequence,cameraGeneration:cameraGeneration,
+                        measuredSelfBounds:[],cameraRegistrationVerified:false,recordedPanDegrees:pan,
+                        recordedUpperTarget:upper,recordedLowerTarget:lowerTarget,
+                        estimatedCameraProjectionIdentity:projection)
+                    continuation.resume(returning:next)
+                } catch {continuation.resume(throwing:error)}
+            }
+        }
+    }
+
+    @nonobjc private static func freezeBlockerDepth(map:ROBWorkspaceDepthMap) async ->ROBWorkspaceCollisionSnapshot? {
+        await withCheckedContinuation { continuation in
+            blockerDepthQueue.async {continuation.resume(returning:map.snapshot())}
+        }
+    }
+
+    /// Nonactuating mitigation for a specific unknown cell. A new view adds
+    /// actual rays to the SAME scene; it never masks robot geometry, erases an
+    /// old return or promotes a projected cell into observed free space.
+    // Keep the orchestration unoptimized while isolating the observed Swift
+    // task-stack failure. Map math runs in the separate optimized workers.
+    @_optimize(none)
+    @MainActor @nonobjc func captureBlockerCoverage(blocker:ROBWorkspaceUnknownCellBlocker,
+        continuing snapshot:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,generation:UInt64,
+        attempted:[ROBWorkspaceView],deadlineUptime:Double,recordStage:(String)->Void,check:() throws ->Void,progress:(String)->Void)
+        async throws ->(snapshot:ROBWorkspaceCollisionSnapshot,view:ROBWorkspaceView)? {
+        let vision=ROBArmRoutineVision.shared,controller=ROBFixedHeadCalibrationWindowController.shared
+        try check();try Task.checkCancellation()
+        guard snapshot.registrationID==nil,let projection=snapshot.estimatedCameraProjectionIdentity,
+              snapshot.visualCalibrationScope != nil,snapshot.state(at:blocker.center) == .unknown else {return nil}
+        let deadline=min(deadlineUptime,ProcessInfo.processInfo.systemUptime+12)
+        guard deadline.isFinite,ProcessInfo.processInfo.systemUptime<deadline,
+              attempted.count<2 else {return nil}
+        var anchor=ROBWorkspaceCaptureAnchor()
+        guard anchor.accept(frameGeneration:snapshot.cameraGeneration,currentGeneration:vision.cameraGeneration) else {
+            throw ROBWorkspaceDepthMapError.invalidFrame
+        }
+        let initialNeck=controller.readNeck?() ?? [:]
+        guard initialNeck["known"]as?Bool==true,
+              let heldLowerTarget=initialNeck["lower"]as?Int,heldLowerTarget>0 else {
+            throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires a known lower-neck hold.")
+        }
+        var diagnostic:[String:Any]=["blocker_link":blocker.link,
+            "blocker_voxel":[blocker.voxel.x,blocker.voxel.y,blocker.voxel.z],"candidate_count":0,
+            "scene_id":snapshot.sceneID.uuidString,"before_map_fingerprint":snapshot.fingerprint,
+            "before_state_raw":snapshot.state(at:blocker.center).rawValue,"maximum_views":2,
+            "source_rasters_retained":false,"detector_invoked":false,"arm_command_sent":false,
+            "free_space_inferred":false,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true]
+        func record(_ status:String,_ detail:String) {
+            diagnostic["status"]=status;diagnostic["detail"]=detail;diagnostic["camera_health"]=vision.healthSnapshot()
+            var report=lastReport as? [String:Any] ?? [:]
+            var attempts=report["blocker_coverage_attempts"]as?[[String:Any]] ?? []
+            attempts.append(diagnostic);report["blocker_coverage_attempts"]=Array(attempts.suffix(2))
+            lastReport=report as NSDictionary
+        }
+        func requireContext()throws {
+            try check();try Task.checkCancellation()
+            try requireEstimatedProjectionIdentity(projection,model:model)
+            guard anchor.permitsCurrent(vision.cameraGeneration),
+                  snapshot.cameraGeneration==vision.cameraGeneration,
+                  snapshot.modelID==model.modelID,snapshot.geometryID==model.geometryID,
+                  snapshot.mappingID==model.selectedMappingID,snapshot.sessionGeneration==generation,
+                  snapshot.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,
+                  (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==generation,
+                  collisionSnapshotValue?.fingerprint==snapshot.fingerprint,
+                  (0...60_000).contains(Date().timeIntervalSince1970*1000-snapshot.oldestCapturedAtMilliseconds) else {
+                throw ROBWorkspaceDepthMapError.invalidFrame
+            }
+            let neck=controller.readNeck?() ?? [:]
+            guard neck["known"]as?Bool==true,neck["lower"]as?Int==heldLowerTarget else {
+                throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires the unchanged selected lower-neck hold.")
+            }
+        }
+        try requireContext()
+        guard initialNeck["stationary"]as?Bool==true,
+              let initialReady=initialNeck["ready_at"]as?Double,initialReady.isFinite,initialReady<=ProcessInfo.processInfo.systemUptime,
+              let initialPan=initialNeck["pan"]as?Int,let initialUpper=initialNeck["upper"]as?Int else {
+            record("initial_hold_unavailable","Targeted coverage requires the unchanged stationary neck hold.")
+            throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires the unchanged stationary neck hold.")
+        }
+        func requireInitialHold()throws {
+            try requireContext()
+            let neck=controller.readNeck?() ?? [:]
+            guard neck["stationary"]as?Bool==true,neck["pan"]as?Int==initialPan,
+                  neck["upper"]as?Int==initialUpper,neck["ready_at"]as?Double==initialReady else {
+                throw ROBWorkspaceDepthMapError.invalidFrame
+            }
+        }
+        var initialSource:ROBArmRoutineVision.Frame?
+        do {
+            while initialSource==nil {
+                try requireInitialHold()
+                guard ProcessInfo.processInfo.systemUptime<deadline else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage expired while waiting for a fresh source frame.")
+                }
+                let candidate=try await vision.settledPassiveMappingFrame(deadlineUptime:deadline,check:requireInitialHold)
+                try requireInitialHold()
+                guard ProcessInfo.processInfo.systemUptime<deadline else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage expired while waiting for a fresh source frame.")
+                }
+                // A check may consume capture age. Wait for another original
+                // exposure rather than refreshing or widening its timestamp.
+                guard (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-candidate.capturedAt) else {continue}
+                guard candidate.cameraGeneration==snapshot.cameraGeneration,
+                      let pixels=candidate.depth,let intrinsics=candidate.intrinsics,
+                      intrinsics.isValid(forWidth:pixels.width,height:pixels.height),
+                      intrinsics.rgbOutputUndistorted==true,intrinsics.depthRGBGeometryCorrespondence?.status=="matched" else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage requires normalized synchronized face RGB-D.")
+                }
+                initialSource=candidate
+            }
+        } catch {
+            record("initial_source_capture_failed",error.localizedDescription)
+            throw error
+        }
+        guard let source=initialSource,let depth=source.depth,let k=source.intrinsics else {throw ROBWorkspaceDepthMapError.invalidFrame}
+        guard registeredCameraContext(frame:source,model:model)==nil else {return nil}
+        let sourceScope=try controller.scope(model:model,frame:source)
+        guard sourceScope.gatewaySessionGeneration==generation,sourceScope.cameraGeneration==snapshot.cameraGeneration,
+              sourceScope.lowerTarget==heldLowerTarget else {
+            throw ROBWorkspaceDepthMapError.invalidFrame
+        }
+        let width=depth.width,height=depth.height,sourceK=[k.fx,k.fy,k.cx,k.cy],sourceService=k.cameraServiceSourceSHA256
+        let sourceRuntime=k.runtimeCalibration?.identity
+        func blockerDepthDiagnostic(pixels:CameraDepthFrame,intrinsics:CameraIntrinsics,matrix:simd_double4x4)->[String:Any] {
+            let half=SIMD3<Double>(repeating:blocker.voxelSizeMeters/2),low=blocker.center-half,high=blocker.center+half
+            let inverse=simd_inverse(matrix)
+            var projected:[SIMD2<Double>]=[],opticalDepths:[Double]=[]
+            for x in [low.x,high.x] {for y in [low.y,high.y] {for z in [low.z,high.z] {
+                let q=inverse*SIMD4(x,y,z,1)
+                guard q.x.isFinite,q.y.isFinite,q.z.isFinite,q.z>0 else {
+                    return ["status":"cell_not_projectable","diagnostic_only":true,"semantic_self_classification":false,"free_space_proof":false]
+                }
+                projected.append(SIMD2(intrinsics.fx*q.x/q.z+intrinsics.cx,intrinsics.fy*q.y/q.z+intrinsics.cy))
+                opticalDepths.append(q.z*1000)
+            }}}
+            guard projected.allSatisfy({$0.x.isFinite && $0.y.isFinite && abs($0.x)<1e6 && abs($0.y)<1e6}) else {
+                return ["status":"cell_projection_invalid","diagnostic_only":true,"free_space_proof":false]
+            }
+            let x0=max(0,Int(floor(projected.map(\.x).min()!))),x1=min(width-1,Int(ceil(projected.map(\.x).max()!)))
+            let y0=max(0,Int(floor(projected.map(\.y).min()!))),y1=min(height-1,Int(ceil(projected.map(\.y).max()!)))
+            guard x0<=x1,y0<=y1 else {return ["status":"cell_outside_image","diagnostic_only":true,"free_space_proof":false]}
+            let roiWidth=x1-x0+1,roiHeight=y1-y0+1,area=roiWidth*roiHeight
+            var step=max(1,Int(ceil(sqrt(Double(area)/4096))))
+            while ((roiWidth+step-1)/step)*((roiHeight+step-1)/step)>4096 {step+=1}
+            var sampled=0,missing=0,outOfRange=0,eligible=0,values:[Int]=[]
+            for y in stride(from:y0,through:y1,by:step) {for x in stride(from:x0,through:x1,by:step) {
+                sampled+=1
+                guard let raw=pixels.distanceMillimeters(x:x,y:y),raw>0 else {missing+=1;continue}
+                guard (100...3000).contains(raw) else {outOfRange+=1;continue}
+                values.append(Int(raw))
+                guard x>0,y>0,x<width-1,y<height-1 else {continue}
+                let neighbors=[(x-1,y),(x+1,y),(x,y-1),(x,y+1)]
+                if neighbors.allSatisfy({point in
+                    guard let mm=pixels.distanceMillimeters(x:point.0,y:point.1),(100...3000).contains(mm) else {return false}
+                    return abs(Int(mm)-Int(raw))<=30
+                }) {eligible+=1}
+            }}
+            values.sort()
+            var output:[String:Any]=["status":values.isEmpty ? "no_valid_depth_in_roi":"raw_depth_present",
+                "roi_kind":"projected_cell_bounding_rectangle","pixel_bounds":[x0,y0,x1,y1],
+                "roi_pixel_area":area,"sample_stride":step,"sampled_pixels":sampled,
+                "missing_or_zero_depth_pixels":missing,"out_of_100_3000mm_pixels":outOfRange,
+                "valid_depth_pixels":values.count,"locally_consistent_depth_pixels":eligible,
+                "predicted_cell_optical_depth_mm":[opticalDepths.min()!,opticalDepths.max()!],
+                "diagnostic_only":true,"semantic_self_classification":false,"free_space_proof":false]
+            if !values.isEmpty {output["raw_optical_depth_mm_min_median_max"]=[values.first!,values[values.count/2],values.last!]}
+            return output
+        }
+        var candidates:[ROBWorkspaceBlockerCoverageCandidate]=[]
+        for upper in [5300,5450,5650,5900] {
+            for requested in stride(from:-60.0,through:60.0,by:10) {
+                guard let bounded=boundedPan?(requested),bounded.isFinite,abs(bounded)<=60 else {continue}
+                let view=ROBWorkspaceView(panDegrees:bounded,upperTarget:upper)
+                guard !candidates.contains(where:{$0.view==view}),canUseView?(bounded,upper)==true,
+                      let raw=panTargetForView?(bounded)?.intValue,(3000...10000).contains(raw),
+                      let matrix=ROBNeckRGBPoseDisplay.provisionalCameraToModel(model:model,panTarget:raw,
+                        lowerTarget:heldLowerTarget,upperTarget:upper) else {continue}
+                candidates.append(.init(view:view,cameraToRobotColumnMajor:(0..<4).flatMap { column in (0..<4).map {matrix[column][$0]} }))
+            }
+        }
+        let selected=ROBWorkspaceBlockerCoveragePlan.nextView(blocker:blocker,candidates:candidates,
+            observations:snapshot.observations,attempted:attempted,width:width,height:height,
+            fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy)
+        diagnostic["candidate_count"]=candidates.count
+        guard let view=selected,let rawPan=panTargetForView?(view.panDegrees)?.intValue else {
+            record("no_new_view","No unused bounded camera view projects the entire blocked cell inside the calibrated image.")
+            return nil
+        }
+        recordStage("candidate_selected")
+        diagnostic["pan"]=view.panDegrees;diagnostic["upper"]=view.upperTarget
+        diagnostic["predicted_raw_pan"]=rawPan
+        progress("Checking the blocked \(blocker.link) region from a new camera view.")
+        do {
+            recordStage("settle_started")
+            var settledSince:Double?
+            while true {
+                try requireContext()
+                guard ProcessInfo.processInfo.systemUptime<deadline else {
+                    record("view_unavailable","The new view did not settle within the shared coverage deadline.");return nil
+                }
+                guard panTargetForView?(view.panDegrees)?.intValue==rawPan,
+                      canUseView?(view.panDegrees,view.upperTarget)==true else {throw ROBWorkspaceDepthMapError.invalidFrame}
+                if prepareView?(view.panDegrees,view.upperTarget)==true,viewReady?(view.panDegrees,view.upperTarget)==true {
+                    settledSince=settledSince ?? ProcessInfo.processInfo.systemUptime
+                    if ProcessInfo.processInfo.systemUptime-settledSince!>=1.5 {break}
+                } else {settledSince=nil}
+                try await Task.sleep(nanoseconds:100_000_000)
+            }
+            recordStage("settled")
+            recordStage("seed_started")
+            var map=try ROBWorkspaceDepthMap(continuing:snapshot,modelID:model.modelID,geometryID:model.geometryID,
+                mappingID:model.selectedMappingID,sessionGeneration:generation,cameraGeneration:snapshot.cameraGeneration,
+                estimatedCameraProjectionIdentity:projection)
+            recordStage("seed_complete")
+            var heldScope:ROBFixedHeadRegistrationScope?,previous=snapshot.observations.last?.sequence ?? 0
+            var previousCapture=snapshot.lastCapturedAtMilliseconds,frames:[[String:Any]]=[],expired=0
+            func requireHeldView()throws {
+                try requireContext()
+                let neck=controller.readNeck?() ?? [:]
+                guard viewReady?(view.panDegrees,view.upperTarget)==true,neck["stationary"]as?Bool==true,
+                      neck["pan"]as?Int==rawPan,neck["upper"]as?Int==view.upperTarget,
+                      let actualPan=neck["pan_degrees"]as?Double,abs(actualPan-view.panDegrees)<=0.05,
+                      let ready=neck["ready_at"]as?Double,ready.isFinite,ready<=ProcessInfo.processInfo.systemUptime,
+                      panTargetForView?(view.panDegrees)?.intValue==rawPan else {throw ROBWorkspaceDepthMapError.invalidFrame}
+            }
+            while frames.count<2 {
+                try requireHeldView()
+                guard ProcessInfo.processInfo.systemUptime<deadline else {throw ROBWorkspaceDepthMapError.acquisition("Targeted coverage expired before two advancing depth exposures.")}
+                recordStage("frame_wait")
+                let frame=try await vision.settledPassiveMappingFrame(deadlineUptime:deadline,check:requireHeldView)
+                recordStage("frame_received")
+                try requireHeldView()
+                guard ProcessInfo.processInfo.systemUptime<deadline,frame.sequence>previous,frame.capturedAt>previousCapture,
+                      frame.cameraGeneration==snapshot.cameraGeneration,let pixels=frame.depth,let intrinsics=frame.intrinsics,
+                      pixels.width==width,pixels.height==height,intrinsics.isValid(forWidth:width,height:height),
+                      [intrinsics.fx,intrinsics.fy,intrinsics.cx,intrinsics.cy]==sourceK,
+                      intrinsics.cameraServiceSourceSHA256==sourceService,intrinsics.rgbOutputUndistorted==true,
+                      intrinsics.runtimeCalibration?.identity==sourceRuntime,
+                      intrinsics.depthRGBGeometryCorrespondence?.status=="matched",
+                      registeredCameraContext(frame:frame,model:model)==nil else {throw ROBWorkspaceDepthMapError.invalidFrame}
+                let scope=try controller.scope(model:model,frame:frame)
+                guard scope.lowerTarget==heldLowerTarget,scope.panTarget==rawPan,scope.upperTarget==view.upperTarget,
+                      scope.gatewaySessionGeneration==generation,scope.cameraGeneration==snapshot.cameraGeneration,
+                      heldScope.map({$0==scope}) ?? true else {throw ROBWorkspaceDepthMapError.invalidFrame}
+                heldScope=scope;previous=frame.sequence;previousCapture=frame.capturedAt
+                let projectionContext=try unregisteredCameraProjection(frame:frame,view:view,model:model)
+                guard projectionContext.identity==projection,projectionContext.lowerTarget==heldLowerTarget else {throw ROBWorkspaceDepthMapError.invalidFrame}
+                let input=map
+                do {
+                    recordStage("append_started")
+                    map=try await Self.appendBlockerDepth(map:input,pixels:pixels,intrinsics:intrinsics,
+                        matrix:projectionContext.matrix,capturedAtMilliseconds:frame.capturedAt,sequence:frame.sequence,
+                        cameraGeneration:frame.cameraGeneration,view:view,lowerTarget:heldLowerTarget,projection:projection)
+                    recordStage("append_complete")
+                } catch {
+                    try requireHeldView()
+                    guard let typed=error as?ROBWorkspaceDepthMapError,case .expiredAtProjection=typed,expired<2,
+                          ProcessInfo.processInfo.systemUptime<deadline else {throw error}
+                    expired+=1;continue
+                }
+                try requireHeldView()
+                recordStage("roi_started")
+                let roi=blockerDepthDiagnostic(pixels:pixels,intrinsics:intrinsics,matrix:projectionContext.matrix)
+                recordStage("roi_complete")
+                frames.append(["sequence":NSNumber(value:frame.sequence),"captured_at_ms":frame.capturedAt,
+                    "pan":view.panDegrees,"raw_pan":scope.panTarget,"lower":scope.lowerTarget,"upper":scope.upperTarget,
+                    "blocker_depth_roi":roi])
+                diagnostic["frames"]=frames
+            }
+            let input=map
+            recordStage("freeze_started")
+            let frozen=await Self.freezeBlockerDepth(map:input)
+            recordStage("freeze_complete")
+            guard let result=frozen else {
+                throw ROBWorkspaceDepthMapError.invalidFrame
+            }
+            try requireHeldView()
+            guard ProcessInfo.processInfo.systemUptime<deadline,result.sceneID==snapshot.sceneID,
+                  result.observedFrameCount==snapshot.observedFrameCount+2,!result.isTruncated,
+                  result.bodyMotionIdentity==snapshot.bodyMotionIdentity,result.registrationID==nil,
+                  result.occupiedVoxelCount>=snapshot.occupiedVoxelCount else {throw ROBWorkspaceDepthMapError.invalidFrame}
+            diagnostic["after_map_fingerprint"]=result.fingerprint
+            diagnostic["after_state_raw"]=result.state(at:blocker.center).rawValue
+            diagnostic["observed_frames"]=result.observedFrameCount
+            recordStage("publish")
+            collisionSnapshotValue=result;collisionSnapshotModel=model
+            record("captured","Two original fresh RGB-D exposures appended; only the ordinary full path review may admit motion.")
+            return (result,view)
+        } catch {
+            record("capture_failed",error.localizedDescription)
+            throw error
+        }
+    }
+
     /// Passive acquisition for a reviewed commissioning test. There are no
     /// prepareView callbacks here: the head and both arms must stay unchanged.
     /// The caller owns and checks the live stationary arm observation.
@@ -1171,6 +1954,8 @@ struct ROBWorkspaceCanSelection {
         collisionSnapshotValue = nil
         collisionSnapshotModel = model
         let vision = ROBArmRoutineVision.shared
+        let rawCapture=RawScanCapture(model:model,generation:generation)
+        defer {rawCapture.closeIfIncomplete()}
         var map: ROBWorkspaceDepthMap?, context: (registration: ROBFixedHeadRegistration, scope: ROBFixedHeadRegistrationScope)?
         var previous: UInt64 = 0, frames = 0
         let deadline = ProcessInfo.processInfo.systemUptime + 15
@@ -1206,6 +1991,8 @@ struct ROBWorkspaceCanSelection {
                 return next
             }.value
             try check()
+            await rawCapture.append(frame,sceneID:inputMap.sceneID,scope:measured.scope,transform:measured.registration.cameraToRobot,
+                selfBounds:selfBounds,registration:measured.registration,projectionIdentity:nil)
             previous = frame.sequence; frames += 1
             progress("Passive fixed-head scene: \(frames)/3 frames; arms and head unchanged.")
         }
@@ -1216,9 +2003,12 @@ struct ROBWorkspaceCanSelection {
             throw ROBWorkspaceDepthMapError.invalidFrame
         }
         collisionSnapshotValue = snapshot
+        await rawCapture.finish(snapshot)
         lastReport = ["status":"passive_fixed_head_scene_captured","registration_verified":true,
             "scene_id":snapshot.sceneID.uuidString,"depth_frames":snapshot.observedFrameCount,
             "detail":"Measured current head view; no neck or arm command was sent."]
+        var archiveReport=lastReport as? [String:Any] ?? [:];archiveReport["raw_archive"]=rawCapture.report
+        lastReport=archiveReport as NSDictionary
         return snapshot
     }
 
@@ -1256,7 +2046,7 @@ struct ROBWorkspaceCanSelection {
     @MainActor @nonobjc func estimatedContextIsCurrent(model: ROBGhostRobotModel,
         map: ROBWorkspaceCollisionSnapshot) -> Bool {
         guard let frame = ROBArmRoutineVision.shared.snapshot()["face"],
-              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+              (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
               let context = try? ROBFixedHeadCalibrationWindowController.shared.currentEstimatedContext(model:model,frame:frame),
               let scope = try? ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame),
               context.matches(currentScope:scope,model:model),
@@ -1313,7 +2103,7 @@ struct ROBWorkspaceCanSelection {
                       context.bodyMotionIdentity == bodyIdentity,
                       vision.cameraGeneration == context.scope.cameraGeneration,
                       frame.cameraGeneration == context.scope.cameraGeneration,
-                      (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                      (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
                       controller.readNeck?()["ready_at"] as? Double == readyAt,
                       let depth = frame.depth, let k = frame.intrinsics,
                       depth.width == context.width, depth.height == context.height,
@@ -1409,10 +2199,70 @@ struct ROBWorkspaceCanSelection {
         }
     }
 
+    private func passiveSettleExposure() -> ROBPassiveViewSettling.Exposure? {
+        let vision=ROBArmRoutineVision.shared
+        guard let frame=vision.snapshot()["face"],frame.cameraGeneration==vision.cameraGeneration,
+              let imu=frame.intrinsics?.inertial else { return nil }
+        return .init(generation:frame.cameraGeneration.uuidString,sequence:frame.sequence,capturedAt:frame.capturedAt,
+            stationary:imu.stationary,validIMU:imu.isValid,imuWindowMilliseconds:imu.windowMilliseconds,imuSamples:imu.sampleCount)
+    }
+
+    /// Native neck readiness plus measured stationary exposures can settle
+    /// passive views sooner. Missing IMU retains the previous 1.5 s fallback.
+    @MainActor @nonobjc private func settleCollisionScanView(_ view:ROBWorkspaceView,check:()throws->Void,
+        status:(ROBWorkspaceView,Bool,Bool)->Void) async throws {
+        let deadline=ProcessInfo.processInfo.systemUptime+8
+        var settling=ROBPassiveViewSettling()
+        while true {
+            try check();try Task.checkCancellation()
+            let prepared=prepareView?(view.panDegrees,view.upperTarget)==true
+            let ready=viewReady?(view.panDegrees,view.upperTarget)==true
+            status(view,prepared,ready)
+            if settling.observe(ready:prepared && ready,exposure:passiveSettleExposure(),
+                nowUptime:ProcessInfo.processInfo.systemUptime,nowMilliseconds:Date().timeIntervalSince1970*1000,
+                maximumAgeMilliseconds:ROBVisionFrameAgeBudget.maximumAgeMilliseconds) {return}
+            guard ProcessInfo.processInfo.systemUptime<deadline else {
+                throw ROBWorkspaceDepthMapError.acquisition("neck did not provide a settled view within 8 s (prepareAccepted=\(prepared), viewReady=\(ready), method=\(settling.method))")
+            }
+            try await Task.sleep(nanoseconds:100_000_000)
+        }
+    }
+
+    /// Preserve the selected lower-neck viewpoint while preparing pan/upper.
+    /// Plan views inside the native pan envelope of that settled lower pose.
+    @MainActor @nonobjc private func preparedCollisionScanViews(check:()throws->Void,
+        status:(ROBWorkspaceView,Bool,Bool)->Void) async throws->[ROBWorkspaceView] {
+        let initialNeck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+        guard initialNeck["known"]as?Bool==true,let heldLowerTarget=initialNeck["lower"]as?Int,heldLowerTarget>0 else {
+            throw ROBWorkspaceDepthMapError.acquisition("Workspace scan needs a known active lower-neck pose before staging.")
+        }
+        let stage=ROBWorkspaceView(panDegrees:boundedPan?(0) ?? 0,upperTarget:5650)
+        guard stage.panDegrees.isFinite,canUseView?(stage.panDegrees,stage.upperTarget) != false else {
+            throw ROBWorkspaceDepthMapError.acquisition("No native-allowed neck view is available to stage the workspace scan.")
+        }
+        try await settleCollisionScanView(stage,check:check,status:status)
+        try check();try Task.checkCancellation()
+        let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+        guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,neck["lower"]as?Int==heldLowerTarget else {
+            throw ROBWorkspaceDepthMapError.acquisition("Workspace scan staging changed the selected lower-neck viewpoint.")
+        }
+        let requested = [-45.0,-15,15,45].map {ROBWorkspaceView(panDegrees:$0,upperTarget:5650)}
+            + [30.0,0,-30].map {ROBWorkspaceView(panDegrees:$0,upperTarget:6306)}
+        var views:[ROBWorkspaceView]=[]
+        for request in requested {
+            let pan=boundedPan?(request.panDegrees) ?? request.panDegrees
+            guard pan.isFinite else {throw ROBWorkspaceDepthMapError.invalidFrame}
+            let view=ROBWorkspaceView(panDegrees:pan,upperTarget:request.upperTarget)
+            if canUseView?(pan,view.upperTarget) != false,!views.contains(view) {views.append(view)}
+        }
+        guard !views.isEmpty else {throw ROBWorkspaceDepthMapError.acquisition("No scan views remain within the freshly settled native neck bounds.")}
+        return views
+    }
+
     /// Start every scene from current pixels while the arms remain held. A
     /// previous route, object location or map never authorizes parking first.
     @MainActor @nonobjc func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
-        check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
+        initialEmptyRightLift:Bool=false,check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
         collisionSnapshotValue = nil
         collisionSnapshotModel = model
         // A measured view is retained exactly, including its lower-neck target.
@@ -1423,15 +2273,11 @@ struct ROBWorkspaceCanSelection {
         let estimatedProjectionIdentity=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
         try requireEstimatedProjectionIdentity(estimatedProjectionIdentity,model:model)
         let vision = ROBArmRoutineVision.shared
+        let rawCapture=RawScanCapture(model:model,generation:generation)
+        defer {rawCapture.closeIfIncomplete()}
         let scanBodyIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity
         var captureAnchor = ROBWorkspaceCaptureAnchor()
         var map:ROBWorkspaceDepthMap?
-        let requestedViews = [-45.0,-15,15,45].map { ROBWorkspaceView(panDegrees:$0,upperTarget:5650) }
-            + [30.0,0,-30].map { ROBWorkspaceView(panDegrees:$0,upperTarget:6306) }
-        var views = requestedViews.map { ROBWorkspaceView(panDegrees:boundedPan?($0.panDegrees) ?? $0.panDegrees,upperTarget:$0.upperTarget) }
-            .reduce(into:[ROBWorkspaceView]()) { if !$0.contains($1) { $0.append($1) } }
-        // A local fixed-pose proof cannot be stretched across an unmeasured sweep.
-        if let fixed = registeredCurrentView(model:model) { views = [fixed] }
         let scanStarted = Date().timeIntervalSince1970*1000
         var scanPhase = "initializing", currentView:ROBWorkspaceView?, failureDetail:String?
         var framesProjected = 0, frameSequence:UInt64 = 0, frameCapturedAt:Double?
@@ -1453,11 +2299,37 @@ struct ROBWorkspaceCanSelection {
                     "prepare_accepted":lastPrepareAccepted,"view_ready":lastViewReady,
                     "expected_camera_generation":captureAnchor.cameraGeneration?.uuidString ?? "waiting_for_first_settled_frame","actual_camera_generation":vision.cameraGeneration.uuidString,
                     "expected_gateway_generation":NSNumber(value:generation),"gateway":ROBAmberGatewayClient.shared.connectionSnapshot(),
-                    "camera_health":vision.healthSnapshot(),"markerless_registration_probe":vision.collisionRegistrationDiagnostics()]
+                    "camera_health":vision.healthSnapshot(),"markerless_registration_probe":vision.collisionRegistrationDiagnostics(),"raw_archive":rawCapture.report]
                 lastReport = failureReport as NSDictionary
             }
             vision.endCollisionRegistrationProbe(); finishView?()
         }
+        scanPhase="settling the selected lower-neck pose before choosing scan views"
+        let stagingCheck:()throws->Void = {
+            try check();try self.requireEstimatedProjectionIdentity(estimatedProjectionIdentity,model:model)
+            guard ROBFixedHeadBodyMotionIdentity.currentIdentity==scanBodyIdentity,
+                  captureAnchor.permitsCurrent(vision.cameraGeneration),
+                  (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==generation else {
+                throw ROBWorkspaceDepthMapError.invalidFrame
+            }
+        }
+        let settleStatus:(ROBWorkspaceView,Bool,Bool)->Void = {view,prepared,ready in
+            currentView=view;lastPrepareAccepted=prepared;lastViewReady=ready
+        }
+        var views:[ROBWorkspaceView]
+        if initialEmptyRightLift {
+            // Retain the operator-selected useful view for the initial lift.
+            // The old5650 staging/sweep pointed into the torso on this setup.
+            let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+            guard model.physicalSide=="right",neck["known"]as?Bool==true,
+                  let pan=neck["pan_degrees"]as?Double,pan.isFinite,
+                  let upper=neck["upper"]as?Int else {throw ROBWorkspaceDepthMapError.invalidFrame}
+            views=[ROBWorkspaceView(panDegrees:pan,upperTarget:upper)]
+        } else {
+            views=try await preparedCollisionScanViews(check:stagingCheck,status:settleStatus)
+        }
+        // A local fixed-pose proof cannot be stretched across an unmeasured sweep.
+        if let fixed=registeredCurrentView(model:model) {views=[fixed]}
         for (index,view) in views.enumerated() {
             currentView = view; scanPhase = "checking scene identity"
             try check()
@@ -1471,21 +2343,8 @@ struct ROBWorkspaceCanSelection {
             if canUseView?(view.panDegrees,view.upperTarget) == false { continue }
             progress("Scanning held-arm clearance: view \(index + 1) of \(views.count)")
             scanPhase = "settling neck view"
-            let deadline = ProcessInfo.processInfo.systemUptime + 8
-            var settledSince: TimeInterval?
-            while true {
-                try check()
-                lastPrepareAccepted = prepareView?(view.panDegrees,view.upperTarget) == true
-                lastViewReady = viewReady?(view.panDegrees,view.upperTarget) == true
-                if lastPrepareAccepted && lastViewReady {
-                    settledSince = settledSince ?? ProcessInfo.processInfo.systemUptime
-                    if ProcessInfo.processInfo.systemUptime - settledSince! >= 1.5 { break }
-                } else { settledSince = nil }
-                guard ProcessInfo.processInfo.systemUptime < deadline else {
-                    throw acquisitionFailure("neck did not maintain its 1.5 s settled interval within 8 s (prepareAccepted=\(lastPrepareAccepted), viewReady=\(lastViewReady), settledFor=\(settledSince.map { ProcessInfo.processInfo.systemUptime-$0 } ?? 0) s)")
-                }
-                try await Task.sleep(nanoseconds: 100_000_000)
-            }
+            do {try await settleCollisionScanView(view,check:stagingCheck,status:settleStatus)}
+            catch {throw acquisitionFailure(error.localizedDescription)}
             var projectionBudget=ROBWorkspaceProjectionRetryBudget(startedAtUptime:ProcessInfo.processInfo.systemUptime)
             var projectedInView=0,lastAttemptSequence:UInt64=0,lastAttemptCapture=0.0
             var heldScope:ROBFixedHeadRegistrationScope?,heldServiceSHA:String?,heldUndistorted:Bool?
@@ -1519,7 +2378,7 @@ struct ROBWorkspaceCanSelection {
                     try validateHeldView()
                     let beforeCapture = vision.cameraGeneration
                     do {
-                        let candidate = try await vision.settledDepthFrame(deadlineUptime:projectionBudget.deadlineUptime)
+                        let candidate = try await vision.settledPassiveMappingFrame(deadlineUptime:projectionBudget.deadlineUptime,check:validateHeldView)
                         if captureAnchor.accept(frameGeneration:candidate.cameraGeneration,currentGeneration:vision.cameraGeneration) {
                             acceptedFrame = candidate
                         } else if map != nil {
@@ -1597,6 +2456,8 @@ struct ROBWorkspaceCanSelection {
                 }
                 try validateHeldView()
                 guard ProcessInfo.processInfo.systemUptime<projectionBudget.deadlineUptime else {throw projectionDeadlineFailure()}
+                await rawCapture.append(frame,sceneID:currentMap.sceneID,scope:sourceScope,transform:transform,
+                    selfBounds:selfBounds,registration:measured?.registration,projectionIdentity:estimated?.identity)
                 projectedInView+=1
                 framesProjected += 1
                 try validateHeldView()
@@ -1612,19 +2473,150 @@ struct ROBWorkspaceCanSelection {
         guard captureAnchor.permitsCurrent(vision.cameraGeneration) else { throw acquisitionFailure("capture generation changed before the completed scene snapshot") }
         guard let snapshot = frozen else { throw acquisitionFailure("only \(framesProjected) fresh depth frames were projected; at least two are required") }
         collisionSnapshotValue = snapshot
+        await rawCapture.finish(snapshot)
         lastReport = ["status":"collision_scene_captured", "detail":snapshot.registrationDetail,
             "scene_id":snapshot.sceneID.uuidString,"depth_frames":snapshot.observedFrameCount,
             "occupied_voxels":snapshot.occupiedVoxelCount,"free_voxels":snapshot.freeVoxelCount,
             "registration_verified":snapshot.registrationID != nil,"markerless_registration_probe":vision.collisionRegistrationDiagnostics()]
         completed = true
+        var archiveReport=lastReport as? [String:Any] ?? [:];archiveReport["raw_archive"]=rawCapture.report
+        lastReport=archiveReport as NSDictionary
         return snapshot
+    }
+
+    /// Diagnostics only. Raw pixels do not classify robot returns or admit
+    /// motion. History is observed telemetry, never a planned/FK substitute.
+    /// Replay occupied contributors from each saved original sparse (x,y):
+    /// z=u16le/1000, optical=((x-cx)*z/fx,(y-cy)*z/fy,z), then saved column-major
+    /// cameraToRobot. Apply saved workspace/registered-volume/self-mask rules;
+    /// floor(world/0.025) is the source-group ID before27-cell dilation.
+    /// Occupancy precedes neighbor consistency: that test affects FREE rays
+    /// only. Missing/archive-failed pixels never supply classification or FREE.
+    @MainActor private final class RawScanCapture {
+        let model:ROBGhostRobotModel,generation:UInt64
+        let parentDirectory:URL
+        var finished=false
+        var writer:ROBWorkspaceRawScanArchive?,failure:String?,records:[ROBWorkspaceRawScanArchive.Record]=[]
+        var telemetry:[String:[ROBAmberGatewayTelemetry]]=[:]
+        var observer:NSObjectProtocol?
+        init(model:ROBGhostRobotModel,generation:UInt64,parentDirectory:URL=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/WorkspaceRawScans",isDirectory:true)) {
+            self.model=model;self.generation=generation;self.parentDirectory=parentDirectory
+            observer=NotificationCenter.default.addObserver(forName:.ROBAmberGatewayTelemetryDidUpdate,
+                object:ROBAmberGatewayClient.shared,queue:.main){[weak self] note in
+                guard let sample=note.userInfo?["telemetry"]as?ROBAmberGatewayTelemetry else{return}
+                MainActor.assumeIsolated {self?.record(sample)}
+            }
+            for arm in ["left","right"] {if let sample=ROBAmberGatewayClient.shared.telemetry(forArm:arm){record(sample)}}
+        }
+        deinit {if let observer {NotificationCenter.default.removeObserver(observer)}}
+        func record(_ sample:ROBAmberGatewayTelemetry) {
+            guard (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==generation,
+                  sample.sequence>0,sample.sampleAgeAtReceiptMilliseconds.isFinite else{return}
+            var values=telemetry[sample.arm] ?? []
+            if values.last?.sequence != sample.sequence {values.append(sample);if values.count>240 {values.removeFirst(values.count-240)}}
+            telemetry[sample.arm]=values
+        }
+        func feedback(_ physical:String,frameTime:Double)->ROBWorkspaceRawScanArchive.Availability<ROBWorkspaceRawScanArchive.ArmFeedback> {
+            let arm=physical=="left" ? "right":"left",gateway=ROBAmberGatewayClient.shared
+            guard let sample=telemetry[arm]?.min(by:{a,b in
+                abs(a.receivedAt.timeIntervalSince1970*1000-a.sampleAgeAtReceiptMilliseconds-frameTime)<abs(b.receivedAt.timeIntervalSince1970*1000-b.sampleAgeAtReceiptMilliseconds-frameTime)
+            }),sample.positionsRadians.count==7,sample.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),sample.statuses.count==7,
+                  sample.effectiveSampleAgeMilliseconds.isFinite,sample.effectiveSampleAgeMilliseconds>=0,
+                  sample.effectiveGripperFeedbackAgeMilliseconds.isFinite,sample.effectiveGripperFeedbackAgeMilliseconds>=0,
+                  abs(sample.receivedAt.timeIntervalSince1970*1000-sample.sampleAgeAtReceiptMilliseconds-frameTime)<=150,
+                  let sourceModel=try?ROBGhostRobotModel(directory:model.directory,physicalSide:physical),gateway.modes(forArm:arm).count==7 else {
+                return .unavailable("No actual exposure-nearest physical \(physical) telemetry within150ms in this passive scan history")
+            }
+            return .available(.init(physicalSide:physical,gatewayArm:arm,telemetrySequence:sample.sequence,
+                receivedAtHostMilliseconds:sample.receivedAt.timeIntervalSince1970*1000,effectiveSampleAgeMilliseconds:sample.effectiveSampleAgeMilliseconds,
+                effectiveGripperAgeMilliseconds:sample.effectiveGripperFeedbackAgeMilliseconds,positionsRadians:sample.positionsRadians.map(\.doubleValue),
+                reportedModes:sample.statuses.map(\.intValue),gatewayModes:gateway.modes(forArm:arm).map(\.intValue),
+                exposureOffsetMilliseconds:.available(frameTime-(sample.receivedAt.timeIntervalSince1970*1000-sample.sampleAgeAtReceiptMilliseconds)),
+                referenceIdentity:.unavailable("Raw vendor encoder coordinates; native session reference token is not serialized"),
+                modelID:sourceModel.modelID,geometryID:sourceModel.geometryID,mappingID:sourceModel.selectedMappingID))
+        }
+        func append(_ frame:ROBArmRoutineVision.Frame,sceneID:UUID,scope:ROBFixedHeadRegistrationScope,
+            transform:simd_double4x4,selfBounds:[(low:SIMD3<Double>,high:SIMD3<Double>)],registration:ROBFixedHeadRegistration?,projectionIdentity:String?) async {
+            guard failure==nil else{return}
+            do {
+                guard let depth=frame.depth,let k=frame.intrinsics,let runtime=k.runtimeCalibration,
+                      let image=CIContext(options:[.useSoftwareRenderer:true]).createCGImage(frame.image,from:frame.image.extent),
+                      image.width==depth.width,image.height==depth.height else {throw ROBWorkspaceRawScanArchive.ArchiveError.rejected("Passive source RGB/depth raster/runtime is unavailable")}
+                if writer==nil {
+                    writer=try await .create(parentDirectory:parentDirectory,scene:.init(archiveID:UUID(),workspaceSceneID:sceneID,
+                        bodyMotionIdentity:ROBFixedHeadBodyMotionIdentity.currentIdentity,gatewayGeneration:generation,
+                        modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID))
+                }
+                var rgba=[UInt8](repeating:0,count:depth.width*depth.height*4)
+                let rendered=rgba.withUnsafeMutableBytes{bytes->Bool in
+                    guard let drawing=CGContext(data:bytes.baseAddress,width:depth.width,height:depth.height,bitsPerComponent:8,
+                        bytesPerRow:depth.width*4,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue|CGBitmapInfo.byteOrder32Big.rawValue) else{return false}
+                    drawing.draw(image,in:CGRect(x:0,y:0,width:depth.width,height:depth.height));return true
+                }
+                guard rendered else {throw ROBWorkspaceRawScanArchive.ArchiveError.rejected("Passive normalized RGB888 copy failed")}
+                var rgb=Data(count:depth.width*depth.height*3)
+                rgb.withUnsafeMutableBytes{buffer in let out=buffer.bindMemory(to:UInt8.self)
+                    for i in 0..<(depth.width*depth.height) {out[i*3]=rgba[i*4];out[i*3+1]=rgba[i*4+1];out[i*3+2]=rgba[i*4+2]}}
+                let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+                func json(_ object:[String:Any])throws->Data {try JSONSerialization.data(withJSONObject:object,options:.sortedKeys)}
+                let contracts:[String:Any]=["pixelSource":"retained normalized source raster rendered RGB888 without resizing",
+                    "rgbOutputUndistorted":k.rgbOutputUndistorted as Any? ?? NSNull(),"depthRGBGeometryCorrespondence":k.depthRGBGeometryCorrespondence?.status as Any? ?? NSNull(),
+                    "cameraServiceSourceSHA256":k.cameraServiceSourceSHA256 as Any? ?? NSNull(),"runtimeCalibrationIdentity":runtime.identity,
+                    "sourceSize":k.sourceSize as Any? ?? NSNull(),"sourceIntrinsics":k.sourceIntrinsics as Any? ?? NSNull(),"imageTransform":k.imageTransform as Any? ?? NSNull(),
+                    "depthSourceSize":k.depthSourceSize as Any? ?? NSNull(),"depthSourceIntrinsics":k.depthSourceIntrinsics as Any? ?? NSNull(),"depthImageTransform":k.depthImageTransform as Any? ?? NSNull(),
+                    "rgbSourceDistortionCoefficients":k.rgbSourceDistortionCoefficients as Any? ?? NSNull(),"depthSourceDistortionCoefficients":k.depthSourceDistortionCoefficients as Any? ?? NSNull(),
+                    "gatewayModesObservation":"current native modes at copy time; reportedModes/q are historical telemetry; host association is not exact sensor exposure sync"]
+                let sampling:[String:Any]=["mapper":"ROBWorkspaceDepthMap.append_original_normalized_depth_v1","firstPixel":[1,1],
+                    "exclusivePixelUpperBound":[depth.width-1,depth.height-1],"stride":max(2,Int(ceil(sqrt(Double(depth.width*depth.height)/12000)))),
+                    "acceptedDepthMillimeters":[100,3000],"depthUnits":"u16le_mm","sourceVoxelSizeMeters":0.025,
+                    "sourceGroupID":"floor(projectedX/0.025),floor(projectedY/0.025),floor(projectedZ/0.025)","occupiedDilationOffsets":[-1,0,1],
+                    "workspaceLowMeters":[-2,-2,-0.3],"workspaceHighMeters":[2,2,2.4],"pixelConvention":"original normalized top-left RGB-D",
+                    "registeredValidRobotVolume":try registration.map{try JSONSerialization.jsonObject(with:encoder.encode($0.validRobotVolume))} ?? NSNull(),
+                    "measuredSelfMaskApplied":registration != nil && !selfBounds.isEmpty,"measuredSelfMaskMarginMeters":0.01,
+                    "measuredSelfBounds":registration == nil ? []:selfBounds.map{["low":[$0.low.x,$0.low.y,$0.low.z],"high":[$0.high.x,$0.high.y,$0.high.z]]},
+                    "finalMapLink":"manifest.json sourceMapBinding; all source frames must match before complete","observedSelf":false]
+                let input=ROBWorkspaceRawScanArchive.Frame(frameID:UUID(),sequence:frame.sequence,capturedAtHostMilliseconds:frame.capturedAt,
+                    rgbCapturedAtHostMilliseconds:.unavailable("Independent RGB exposure host timestamp not exported by retained frame"),
+                    depthCapturedAtHostMilliseconds:.unavailable("Independent depth exposure host timestamp not exported by retained frame"),
+                    sourceTimestampJSON:.unavailable("Independent device clock timestamps not exported by retained frame"),cameraGeneration:frame.cameraGeneration,
+                    width:depth.width,height:depth.height,rgb888:rgb,depthU16LittleEndian:Data(depth.millimetersLittleEndian),
+                    infrared:.unavailable("IR not exported by retained frame"),infraredContractJSON:.unavailable("IR not exported by retained frame"),intrinsics:[k.fx,k.fy,k.cx,k.cy],
+                    sourceContractsJSON:try json(contracts),runtimeCalibrationJSON:try encoder.encode(runtime),
+                    imuJSON:try k.inertial.map{.available(try encoder.encode($0))} ?? .unavailable("No actual IMU packet in retained frame"),
+                    actualAppliedNeck:.available(.init(appliedPanTarget:scope.panTarget,appliedLowerTarget:scope.lowerTarget,appliedUpperTarget:scope.upperTarget,
+                        observedAtHostMilliseconds:Date().timeIntervalSince1970*1000,stationary:true,source:"native validated source scope; copied while held view remains checked")),
+                    physicalLeftFeedback:feedback("left",frameTime:frame.capturedAt),physicalRightFeedback:feedback("right",frameTime:frame.capturedAt),
+                    cameraToRobotColumnMajor:(0..<4).flatMap{c in (0..<4).map{r in transform[c][r]}},
+                    projectionMethod:registration == nil ? "native_unregisteredCameraProjection_estimate_not_registration":"native_registeredCameraContext",
+                    projectionScopeJSON:try json(["fixedHeadScope":try JSONSerialization.jsonObject(with:encoder.encode(scope)),
+                        "registrationID":registration?.id as Any? ?? NSNull(),"estimatedCameraProjectionIdentity":projectionIdentity as Any? ?? NSNull()]),returnSamplingContractJSON:try json(sampling))
+                records.append(try await writer!.append(input))
+            }catch {failure=error.localizedDescription;await writer?.closeIncomplete(reason:error.localizedDescription)}
+        }
+        func finish(_ snapshot:ROBWorkspaceCollisionSnapshot) async {
+            guard failure==nil,let writer else {return}
+            do {
+                let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+                _ = try await writer.finish(sourceMap:.init(workspaceSceneID:snapshot.sceneID,mapFingerprint:snapshot.fingerprint,
+                    serializedJSON:try encoder.encode(snapshot),observations:snapshot.observations.map{.init(sequence:$0.sequence,
+                        capturedAtHostMilliseconds:$0.capturedAtMilliseconds,cameraGeneration:snapshot.cameraGeneration)}))
+                finished=true
+            }catch {failure=error.localizedDescription;await writer.closeIncomplete(reason:error.localizedDescription)}
+        }
+        var report:[String:Any] {[
+            "status":finished ? "complete":"incomplete","detail":failure as Any? ?? (finished ? NSNull():"Raw source-map binding is incomplete"),
+            "directory":writer?.directory.path as Any? ?? NSNull(),"archived_frames":records.count,"exact_sensor_exposure_timestamps":false,
+            "self_classification":false,"motion_authority":false]}
+        func closeIfIncomplete() {
+            if let writer {Task {await writer.closeIncomplete(reason:"Passive scan ended before final source-map binding; retained map has no complete raw archive")}}
+        }
     }
 
     @MainActor @nonobjc private func measuredSelfBounds(model: ROBGhostRobotModel) -> [(low:SIMD3<Double>,high:SIMD3<Double>)] {
         let gateway = ROBAmberGatewayClient.shared
         let reference = ROBAmberArmReferenceStore.shared
         guard let left = gateway.telemetry(forArm:"right"), let right = gateway.telemetry(forArm:"left"),
-              left.effectiveSampleAgeMilliseconds <= 250, right.effectiveSampleAgeMilliseconds <= 250,
+              left.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds, right.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
               reference.readiness(forArm:"right").isReady, reference.readiness(forArm:"left").isReady,
               let rightModel = reference.modelPositions(fromVendor:right.positionsRadians.map(\.doubleValue),forArm:"left") else { return [] }
         var positions = model.positions(vendorLeft:left.positionsRadians.map(\.doubleValue))
@@ -1739,9 +2731,28 @@ struct ROBWorkspaceCanSelection {
     }
 
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
-        permitsLocalCanShapePrior: () throws -> Bool = {false}, canReachBaseline:[String:Double]? = nil,
+        surveyFrontTable: Bool = false,
+        armAlreadyAtGraspReady: Bool = false,
+        permitsLocalCanShapePrior physicalCanShapePrior: () throws -> Bool = {false}, canReachBaseline:[String:Double]? = nil,
+        passiveFeedbackCheckpoint:(() async throws->Void)?=nil,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        func permitsLocalCanShapePrior() throws -> Bool {
+            // The front-table ghost survey can illustrate a known can-size
+            // estimate anchored to observed table depth. It is neck-only and
+            // cannot grant or dispatch an arm path. Physical trials retain
+            // their caller's explicit policy; raw wall-depth failures remain.
+            if surveyFrontTable { return true }
+            return try physicalCanShapePrior()
+        }
+        func searchCheckpoint() async throws {
+            if let passiveFeedbackCheckpoint {try await passiveFeedbackCheckpoint()}
+            try check() // Strict admission remains after the asynchronous pause.
+        }
         let vision = ROBArmRoutineVision.shared
+        // Search-only ghost requests need the same actual camera contract as
+        // recycling. The source gate still checks the camera's real readback.
+        vision.ensureActiveForTaskObservation(stereoMode:ROBNeckRGBPoseDisplay.preferredFullHeightTaskStereoMode(model:model))
+        ROBArmRoutineCoordinator.shared.cameraDemand?(true)
         locatedObjects = [:]
         canCandidates = ROBWorkspaceCanCandidateSet()
         collisionSnapshotValue = nil
@@ -1768,7 +2779,7 @@ struct ROBWorkspaceCanSelection {
         var livePointing: (hint: ROBWorkspacePointingHint, view: ROBWorkspaceView, capturedAt: Double)?
         var followedLivePointing = false
         var recall = ROBWorkspaceRecall.load(model: model)
-        let fixedRegisteredView = registeredCurrentView(model:model)
+        let fixedRegisteredView = surveyFrontTable ? nil : registeredCurrentView(model:model)
         let fixedContext = fixedRegisteredView.flatMap { _ in
             vision.snapshot()["face"].flatMap { registeredCameraContext(frame:$0,model:model) }
         }
@@ -1780,7 +2791,7 @@ struct ROBWorkspaceCanSelection {
         func isViewReady(_ view: ROBWorkspaceView) -> Bool {
             guard let fixedContext else { return viewReady?(view.panDegrees,view.upperTarget) == true }
             guard view == fixedRegisteredView, let frame = vision.snapshot()["face"],
-                  (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                  (0...ROBVisionFrameAgeBudget.maximumAgeMilliseconds).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
                   let current = registeredCameraContext(frame:frame,model:model) else { return false }
             return current.scope == fixedContext.scope && current.registration.id == fixedContext.registration.id
         }
@@ -1792,15 +2803,18 @@ struct ROBWorkspaceCanSelection {
         else { tabletopCanBaseHeight = nil }
         var selectedCanMeasurement: ROBWorkspaceLocatedObject?
         var currentCanSightings:[ROBWorkspaceRecall.Sighting]=[]
+        var canSourceSightings:[UInt64:[(object:ROBWorkspaceLocatedObject,sighting:ROBWorkspaceRecall.Sighting)]]=[:]
         var reachSelections:[[String:Any]]=[]
         var localReachSelection:ROBWorkspaceCanSelection?
         var localReachSelectionRequired=false
         var schedule = ROBWorkspaceSearchSchedule(targets:targets,recall:recall,
+            frontTableSide: surveyFrontTable ? model.physicalSide : nil,
             boundedPan:boundedPan ?? { max(-45,min(45,$0)) })
         let recalledViews = schedule.recallViews
         var bestRecallQuality: [ROBWorkspaceTarget: Double] = [:]
         var recenterViews: [(target: ROBWorkspaceTarget, view: ROBWorkspaceView)] = []
         var recenteredViews: [ROBWorkspaceView] = []
+        var clippedCanAttentionViews:[ROBWorkspaceView]=[]
         let reportID = UUID().uuidString
         let startedAt = ISO8601DateFormatter().string(from: Date())
         var finished = false
@@ -1817,8 +2831,10 @@ struct ROBWorkspaceCanSelection {
                 "left_hanging_observed": leftHanging, "right_hanging_observed": rightHanging,
                 "visually_confirmed": visuallyFound.map(\.rawValue).sorted(), "decoded_observations": validObservations,
                 "announcements": announcements,
-                "settle_seconds_per_view": 1.5,
+                "settle_fallback_seconds_per_view": 1.5,"settle_stationary_exposure_span_ms":300,
                 "depth_required": requireDepth,
+                "front_table_survey": surveyFrontTable,
+                "front_table_views": surveyFrontTable ? schedule.attempted.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] } : [],
                 "recall_views": recalledViews.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] },
                 "historical_positions_used_for_motion": false,
                 "nearest_reachable_can_selections":reachSelections,
@@ -1850,7 +2866,7 @@ struct ROBWorkspaceCanSelection {
         func accumulateCollisionDepth(_ view: ROBWorkspaceView, capturedFrame:ROBArmRoutineVision.Frame? = nil,
                                       preservingSceneID:UUID? = nil) async throws {
             guard collectCollisionDepth else { return }
-            try check()
+            try await searchCheckpoint()
             try requireSceneProjectionIdentity()
             guard isViewReady(view) else {
                 throw ROBWorkspaceDepthMapError.acquisition("Neck left the requested settled view before source-frame projection")
@@ -1892,9 +2908,12 @@ struct ROBWorkspaceCanSelection {
                 guard preservingSceneID==nil else {
                     throw ROBWorkspaceDepthMapError.acquisition("Arm-side depth coverage cannot replace the object scene with a new map.")
                 }
+                let previousScene=currentMap.sceneID
                 currentMap = ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
                     sessionGeneration:sceneGatewayGeneration,cameraGeneration:frame.cameraGeneration,
                     estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
+                evidence.append(["fresh_acquisition_scene":true,"previous_scene_id":previousScene.uuidString,
+                    "scene_id":currentMap.sceneID.uuidString,"retained_old_geometry":false,"path_admitted":false])
             }
             let selfBounds = measuredSelfBounds(model:model)
             let captured = frame.capturedAt, sequence = frame.sequence, cameraEpoch = frame.cameraGeneration
@@ -1912,7 +2931,7 @@ struct ROBWorkspaceCanSelection {
                 return next
             }.value
             collisionEnrollment.record(sequence:sequence,capturedAtMilliseconds:captured)
-            try check()
+            try await searchCheckpoint()
             try requireSceneProjectionIdentity()
             guard isViewReady(view) else { throw ROBWorkspaceDepthMapError.invalidFrame }
         }
@@ -1923,15 +2942,14 @@ struct ROBWorkspaceCanSelection {
                 return false
             }
             let deadline = min(ProcessInfo.processInfo.systemUptime + 12,deadlineUptime ?? .infinity)
-            var settledSince: TimeInterval?
+            var settling=ROBPassiveViewSettling()
             progress(String(format: "Local search: camera pan %+.0f°, tilt target %d", view.panDegrees, view.upperTarget))
             while ProcessInfo.processInfo.systemUptime < deadline {
-                try check()
+                try await searchCheckpoint()
                 let prepared = fixedContext != nil ? true : prepareView?(view.panDegrees,view.upperTarget) == true
-                if prepared && isViewReady(view) {
-                    if settledSince == nil { settledSince = ProcessInfo.processInfo.systemUptime }
-                    if ProcessInfo.processInfo.systemUptime - settledSince! >= 1.5 { return true }
-                } else { settledSince = nil }
+                if settling.observe(ready:prepared && isViewReady(view),exposure:passiveSettleExposure(),
+                    nowUptime:ProcessInfo.processInfo.systemUptime,nowMilliseconds:Date().timeIntervalSince1970*1000,
+                    maximumAgeMilliseconds:ROBVisionFrameAgeBudget.maximumAgeMilliseconds) { return true }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
             evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "status": "view_unavailable"])
@@ -1944,30 +2962,38 @@ struct ROBWorkspaceCanSelection {
             var priorHanging: ROBWorkspaceObservation?
             var priorPointing: ROBWorkspacePointingHint?
             var retryVisibleDepth = false
+            var passiveExpiredProjectionRetries=0
             for attempt in 0..<4 {
                 if attempt >= 2 && (!requireDepth || !retryVisibleDepth) { break }
                 retryVisibleDepth = false
-                try check()
+                try await searchCheckpoint()
                 guard isViewReady(view) else {
                     throw ROBArmRoutineError.blocked("Search camera moved during inspection.")
                 }
                 var acceptedWorkspace:(ROBWorkspaceObservation,ROBArmRoutineVision.Frame)?
                 while acceptedWorkspace == nil {
-                    try check(); try Task.checkCancellation()
+                    try await searchCheckpoint(); try Task.checkCancellation()
                     guard observationCaptureAnchor.permitsCurrent(vision.cameraGeneration) else { throw CancellationError() }
                     guard isViewReady(view) else {
                         throw ROBArmRoutineError.blocked("Search camera moved during startup inspection.")
                     }
                     do {
-                        let candidate = try await vision.observeWorkspace(objectDetection: !targets.isEmpty) { sourceFrame in
+                        let candidate = try await vision.observeWorkspace(objectDetection: !targets.isEmpty,nonactuatingSparseDepth:true) { sourceFrame in
                             try await accumulateCollisionDepth(view,capturedFrame:sourceFrame)
                         }
                         guard observationCaptureAnchor.accept(frameGeneration:candidate.1.cameraGeneration,
                             currentGeneration:vision.cameraGeneration) else { throw CancellationError() }
                         acceptedWorkspace = candidate
                     }
+                    catch let error as ROBWorkspaceDepthMapError {
+                        guard passiveFeedbackCheckpoint != nil,case .expiredAtProjection=error,passiveExpiredProjectionRetries<2 else {throw error}
+                        passiveExpiredProjectionRetries+=1
+                        try await searchCheckpoint()
+                        evidence.append(["discarded_expired_source_after_passive_checkpoint":true,"capture_time_refreshed":false])
+                        continue
+                    }
                     catch is CancellationError {
-                        try Task.checkCancellation(); try check()
+                        try Task.checkCancellation(); try await searchCheckpoint()
                         guard observationWarmup.permitsRetry(acceptedObservation:validObservations > 0,
                             anchoredMap:sceneCaptureAnchor.cameraGeneration != nil || observationCaptureAnchor.cameraGeneration != nil,
                             taskCancelled:Task.isCancelled,
@@ -1978,7 +3004,7 @@ struct ROBWorkspaceCanSelection {
                 }
                 let (observation,frame) = acceptedWorkspace!
                 validObservations += 1
-                try check()
+                try await searchCheckpoint()
                 guard isViewReady(view) else {
                     throw ROBArmRoutineError.blocked("Search camera changed before depth projection.")
                 }
@@ -2011,12 +3037,29 @@ struct ROBWorkspaceCanSelection {
                 // when the photo-origin option is disabled.
                 let cameraTransform=measuredCamera?.registration.cameraToRobot ??
                     (estimatedCamera?.identity != nil ? estimatedCamera?.matrix:nil)
-                for target in targets where found[target] == nil {
+                for target in targets where surveyFrontTable || found[target] == nil {
                     var detection = observation[target]
                     var measurement: ROBWorkspaceLocatedObject?
                     if target == .can, let depth = frame.depth, let k = frame.intrinsics {
                         currentCanSightings=(observation.cans ?? [observation.can]).filter(\.visuallyUsable).map {
                             ROBWorkspaceRecall.Sighting(target:.can,view:view,box:$0.box,confidence:$0.confidence,capturedAt:frame.capturedAt)
+                        }
+                        if targets.contains(.orangeBucket),clippedCanAttentionViews.count<2 {
+                            let attention=ROBWorkspaceCanRecenterPlan.clippedAttentionViews(sightings:currentCanSightings,
+                                nowMilliseconds:Date().timeIntervalSince1970*1000,
+                                boundedPan:boundedPan ?? {max(-45,min(45,$0))})
+                            var attentionInsertIndex=0
+                            for centered in attention where clippedCanAttentionViews.count<2 &&
+                                !schedule.hasAttempted(centered) &&
+                                !clippedCanAttentionViews.contains(where:{abs($0.panDegrees-centered.panDegrees)<3 && abs($0.upperTarget-centered.upperTarget)<100}) {
+                                clippedCanAttentionViews.append(centered)
+                                recenterViews.insert((.can,centered),at:attentionInsertIndex)
+                                attentionInsertIndex+=1
+                                evidence.append(["clipped_can_attention_only":true,"pan":centered.panDegrees,
+                                    "upper":centered.upperTarget,"source_sequence":NSNumber(value:frame.sequence),
+                                    "source_captured_at_ms":frame.capturedAt,"maximum_views":2,
+                                    "located_object":false,"path_admitted":false])
+                            }
                         }
                         var candidates: [(detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)] = []
                         var sectionDiagnostics: [[String:Any]] = []
@@ -2030,7 +3073,8 @@ struct ROBWorkspaceCanSelection {
                             "rgb_output_undistorted_contract":k.rgbOutputUndistorted as Any? ?? NSNull(),
                             "estimated_camera_projection_identity":estimatedCamera?.identity as Any? ?? NSNull(),
                             "registration_id":measuredCamera?.registration.id as Any? ?? NSNull(),
-                            "capture_time_refreshed":false,"geometry_thresholds_changed":false]
+                            "capture_time_refreshed":false,"measured_section_thresholds_changed":false,
+                            "local_prior_table_support_policy":"65_percent_or_55_percent_with_disjoint_65_percent_table_and_6mm_agreement"]
                         do {
                             let sourceScope=try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame)
                             sectionSource["raw_neck_pan_target"]=sourceScope.panTarget
@@ -2059,7 +3103,7 @@ struct ROBWorkspaceCanSelection {
                                 let prior=localCanShapePrior(detection:candidate,allCanDetections:observation.cans ?? [observation.can],
                                     frame:frame,view:view,model:model,cameraToRobot:cameraTransform)
                                 diagnostic["local_shape_prior"]=prior.diagnostics
-                                try check();try requireSceneProjectionIdentity()
+                                try await searchCheckpoint();try requireSceneProjectionIdentity()
                                 guard try permitsLocalCanShapePrior(),isViewReady(view),
                                       frame.cameraGeneration==vision.cameraGeneration,
                                       sourceMap.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity else {throw CancellationError()}
@@ -2111,6 +3155,11 @@ struct ROBWorkspaceCanSelection {
                             estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
                         confirmedCanCandidates.observe(candidates.map(\.object),context:candidateContext,
                             nowMilliseconds:Date().timeIntervalSince1970*1000)
+                        canSourceSightings[frame.sequence]=candidates.map { candidate in
+                            (candidate.object,ROBWorkspaceRecall.Sighting(target:.can,view:view,box:candidate.detection.box,
+                                confidence:candidate.object.confidence,capturedAt:frame.capturedAt))
+                        }
+                        if canSourceSightings.count>32,let oldest=canSourceSightings.keys.min() {canSourceSightings.removeValue(forKey:oldest)}
                         // Keep the same currently observed instance across
                         // frames; a remembered point only ranks fresh objects.
                         let selected: (detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)?
@@ -2175,7 +3224,7 @@ struct ROBWorkspaceCanSelection {
                                             return SIMD3(Double(color.redComponent),Double(color.greenComponent),Double(color.blueComponent))
                                         })
                                 }.value
-                                try check();try requireSceneProjectionIdentity()
+                                try await searchCheckpoint();try requireSceneProjectionIdentity()
                                 guard try permitsLocalCanShapePrior(),isViewReady(view),
                                       frame.cameraGeneration==vision.cameraGeneration,
                                       sourceMap.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity else {throw CancellationError()}
@@ -2196,7 +3245,7 @@ struct ROBWorkspaceCanSelection {
                                 } else {entry["bucket_shape_prior"]=["status":"rejected","reason":"rgb_opening_floor_prior_unavailable"]}
                             }
                         }
-                        try check()
+                        try await searchCheckpoint()
                         try requireSceneProjectionIdentity()
                         guard isViewReady(view) else{throw ROBWorkspaceDepthMapError.invalidFrame}
                     }
@@ -2237,7 +3286,9 @@ struct ROBWorkspaceCanSelection {
                     }
                 }
                 evidence.append(entry)
-                if !targets.isEmpty && targetsConfirmed() { break }
+                // Each survey view needs its own two fresh exposures, even
+                // after a different view has already confirmed another can.
+                if !targets.isEmpty && targetsConfirmed() && (!surveyFrontTable || attempt >= 1) { break }
                 if targets.isEmpty && leftHanging && rightHanging { break }
             }
             if let message = speech.confirmed(visuallyFound, targets: targets) {
@@ -2252,9 +3303,16 @@ struct ROBWorkspaceCanSelection {
                 do { try await inspect(view); return }
                 catch is CancellationError { throw CancellationError() }
                 catch {
-                    try check()
+                    try await searchCheckpoint()
+                    let cameraHealth=vision.healthSnapshot()
                     evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "attempt": attempt + 1,
-                        "error": error.localizedDescription, "local_inference": vision.healthSnapshot()["inspection"] ?? [:]])
+                        "error": error.localizedDescription, "local_inference": cameraHealth["inspection"] ?? [:],
+                        "camera_health":cameraHealth])
+                    if let rejection=error as? ROBNeckRGBPoseDisplay.EstimatedProjectionSourceFailure,!rejection.retryAfterSettling {
+                        persist("camera_projection_rejected",rejection.localizedDescription)
+                        finished=true
+                        throw rejection
+                    }
                     let transientCamera = ["camera", "settle", "stream", "view"].contains { error.localizedDescription.lowercased().contains($0) }
                     if !transientCamera || attempt == 1 { return }
                     progress("Camera pause; settling and retrying this view")
@@ -2282,7 +3340,7 @@ struct ROBWorkspaceCanSelection {
             try await inspectWithRetry(view)
             // A partial object at the image edge warrants looking directly
             // at it before continuing the raster, especially a bucket rim.
-            while fixedRegisteredView == nil, !targetsConfirmed(), !recenterViews.isEmpty, recenteredViews.count < 4 {
+            while !surveyFrontTable, fixedRegisteredView == nil, !targetsConfirmed(), !recenterViews.isEmpty, recenteredViews.count < 4 {
                 let candidate = recenterViews.removeFirst(), centered = candidate.view
                 guard found[candidate.target] == nil, !schedule.hasAttempted(centered),
                       !recenteredViews.contains(where: { abs($0.panDegrees - centered.panDegrees) < 5 && abs($0.upperTarget - centered.upperTarget) < 150 }) else { continue }
@@ -2290,7 +3348,7 @@ struct ROBWorkspaceCanSelection {
                 try await inspectWithRetry(centered)
                 persist("searching", "Centered a remembered or partially visible object; taking new measurements")
             }
-            if fixedRegisteredView == nil, !targets.isEmpty, !followedLivePointing, let pointing = livePointing,
+            if !surveyFrontTable, fixedRegisteredView == nil, !targets.isEmpty, !followedLivePointing, let pointing = livePointing,
                Date().timeIntervalSince1970 * 1000 - pointing.capturedAt < 15_000,
                targets.contains(where: { !visuallyFound.contains($0) }) {
                 followedLivePointing = true
@@ -2298,9 +3356,9 @@ struct ROBWorkspaceCanSelection {
                 try await followPointing(pointing.hint, from: pointing.view)
             }
             persist("searching", "Completed search view \(viewIndex); confirmed targets skip their remaining attention hints")
-            if targets.isEmpty ? leftHanging && rightHanging : targetsConfirmed() { break }
+            if !surveyFrontTable && (targets.isEmpty ? leftHanging && rightHanging : targetsConfirmed()) { break }
         }
-        if fixedRegisteredView == nil, validObservations > 0, !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {
+        if !surveyFrontTable, fixedRegisteredView == nil, validObservations > 0, !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {
             let missing = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName).joined(separator: " and ")
             let humanView = nearest?.view ?? ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
             if try await moveView(humanView) {
@@ -2310,7 +3368,7 @@ struct ROBWorkspaceCanSelection {
                 var prior: ROBWorkspacePointingHint?, priorSequence: UInt64 = 0
                 var pointingHint: ROBWorkspacePointingHint?
                 while ProcessInfo.processInfo.systemUptime < deadline {
-                    try check()
+                    try await searchCheckpoint()
                     guard isViewReady(humanView) else {
                         throw ROBArmRoutineError.blocked("Search view changed while waiting for pointing.")
                     }
@@ -2338,44 +3396,59 @@ struct ROBWorkspaceCanSelection {
                 locationConfirmation.invalidate(target)
                 visuallyFound.remove(target)
                 do { try await inspect(object.view) } catch is CancellationError { throw CancellationError() }
-                catch { try check(); evidence.append(["refresh_error": error.localizedDescription]) }
+                catch { try await searchCheckpoint(); evidence.append(["refresh_error": error.localizedDescription]) }
             }
         }
+        // Keep the observed subject as an attention hint if reach selection
+        // later rejects it. Losing a reachable target must not leave the head
+        // at the last diagnostic view. This hint cannot authorize a reach.
+        let lastObservedObjectForAttention=found[.can] ?? found[.orangeBucket]
         // A visible/confirmed can may belong to the opposite arm. Try only
-        // two current selected-side boxes before ending this can-only search.
+        // two current selected-side boxes before ending this can search.
         // Existing inspect requires two advancing exposures and enrolls their
         // exact RGB-D source frames into the same map before inference.
-        if requireDepth,targets == [.can],fixedRegisteredView==nil,let reachBaseline=canReachBaseline,
+        if requireDepth,targets.contains(.can),fixedRegisteredView==nil,let reachBaseline=canReachBaseline,
            try permitsLocalCanShapePrior(),collisionMap != nil {
             guard (1...7).allSatisfy({reachBaseline[model.physicalSide+"_joint\($0)"]?.isFinite==true}) else {
                 throw ROBArmRoutineError.blocked("The targeted can search needs the unchanged measured selected-arm baseline.")
             }
             localReachSelectionRequired=true
-            let scene=collisionMap!.sceneID,camera=vision.cameraGeneration,body=sceneBodyIdentity
+            let camera=vision.cameraGeneration,body=sceneBodyIdentity
             func requireTargetedContext()throws {
                 try check();try Task.checkCancellation();try requireSceneProjectionIdentity()
-                guard try permitsLocalCanShapePrior(),collisionMap?.sceneID==scene,
+                // Perception can roll an expired acquisition into a fresh map.
+                // Keep the robot/source context fixed; freeze the particular
+                // scene only while ranking that scene's confirmed candidates.
+                guard try permitsLocalCanShapePrior(),let map=collisionMap,
+                      map.cameraGeneration==camera,map.sessionGeneration==sceneGatewayGeneration,
+                      map.bodyMotionIdentity==body,map.modelID==model.modelID,
+                      map.geometryID==model.geometryID,map.mappingID==model.selectedMappingID,
+                      map.estimatedCameraProjectionIdentity==estimatedProjectionIdentity,
                       sceneCaptureAnchor.permitsCurrent(camera),vision.cameraGeneration==camera,
                       ROBFixedHeadBodyMotionIdentity.currentIdentity==body,
                       (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==sceneGatewayGeneration else {
-                    throw ROBWorkspaceDepthMapError.invalidFrame
+                    throw ROBWorkspaceDepthMapError.acquisition("Robot, camera or projection context changed during targeted can search")
                 }
             }
-            func rankCurrentCans(_ stage:String) async throws ->ROBWorkspaceCanSelection {
-                try requireTargetedContext()
+            func rankCurrentCans(_ stage:String,candidates:[ROBWorkspaceLocatedObject]?=nil) async throws ->ROBWorkspaceCanSelection {
+                try await searchCheckpoint();try requireTargetedContext()
                 guard let input=collisionMap,
                       let snapshot=await Task.detached(priority:.userInitiated,operation:{input.snapshot()}).value else {
                     throw ROBWorkspaceDepthMapError.invalidFrame
                 }
-                try requireTargetedContext()
-                let expected=ROBWorkspaceCanSceneIdentity(sceneID:scene,cameraGeneration:camera,
+                try await searchCheckpoint();try requireTargetedContext()
+                let expected=ROBWorkspaceCanSceneIdentity(sceneID:snapshot.sceneID,cameraGeneration:camera,
                     sessionGeneration:sceneGatewayGeneration,bodyMotionIdentity:body,modelID:model.modelID,
                     geometryID:model.geometryID,mappingID:model.selectedMappingID,
                     estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
-                let result=await selectReachableCan(candidates:confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000),
+                let result=await selectReachableCan(candidates:candidates ?? confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000),
                     model:model,baseline:reachBaseline,map:snapshot,nowMilliseconds:Date().timeIntervalSince1970*1000,
-                    contextIsCurrent:{(try? requireTargetedContext()) != nil && confirmedCanCandidates.context==expected})
-                try requireTargetedContext()
+                    contextIsCurrent:{(try? requireTargetedContext()) != nil &&
+                        collisionMap?.sceneID==snapshot.sceneID && confirmedCanCandidates.context==expected})
+                try await searchCheckpoint();try requireTargetedContext()
+                guard collisionMap?.sceneID==snapshot.sceneID else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Target scene changed while ranking can reach; reacquire before planning")
+                }
                 reachSelections.append(["stage":stage,"candidates":result.diagnostics,"path_admitted":false])
                 return result
             }
@@ -2384,14 +3457,14 @@ struct ROBWorkspaceCanSelection {
                 let views=ROBWorkspaceCanRecenterPlan.views(sightings:currentCanSightings,physicalSide:model.physicalSide,
                     nowMilliseconds:Date().timeIntervalSince1970*1000,boundedPan:boundedPan ?? {max(-45,min(45,$0))})
                 for (index,view) in views.enumerated() {
-                    try requireTargetedContext()
+                    try await searchCheckpoint();try requireTargetedContext()
                     found.removeValue(forKey:.can);locationConfirmation.invalidate(.can)
                     // Force this view's own two-exposure confirmation rather
                     // than ending on the previous opposite-arm discovery.
                     selectedCanMeasurement=nil
                     progress("Checking a nearer \(model.physicalSide)-arm can, view \(index+1) of \(views.count).")
                     try await inspectWithRetry(view)
-                    try requireTargetedContext()
+                    try await searchCheckpoint();try requireTargetedContext()
                     localReachSelection=try await rankCurrentCans("targeted_reobservation_\(index+1)")
                     evidence.append(["targeted_can_reobservation":true,"attempt":index+1,"maximum_views":2,
                         "pan":view.panDegrees,"upper":view.upperTarget,"reachable_confirmed_can":localReachSelection?.object != nil,
@@ -2399,13 +3472,36 @@ struct ROBWorkspaceCanSelection {
                     if localReachSelection?.object != nil {found[.can]=localReachSelection!.object;break}
                 }
             }
+            if armAlreadyAtGraspReady,let selected=localReachSelection?.object,
+               let source=canSourceSightings[selected.sequence]?.first(where:{$0.object.position==selected.position})?.sighting,
+               let focus=ROBWorkspaceCanRecenterPlan.graspFocusView(sighting:source,
+                    nowMilliseconds:Date().timeIntervalSince1970*1000,boundedPan:boundedPan ?? {max(-45,min(45,$0))}) {
+                try await searchCheckpoint();try requireTargetedContext()
+                let began=Date().timeIntervalSince1970*1000
+                found.removeValue(forKey:.can);locationConfirmation.invalidate(.can);selectedCanMeasurement=selected
+                progress("Centering the selected can and finger workspace, then measuring it again.")
+                try await inspectWithRetry(focus)
+                try await searchCheckpoint();try requireTargetedContext()
+                let centered=confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000).filter {
+                    $0.sequence>selected.sequence && $0.capturedAt>=began && $0.view==focus &&
+                        simd_distance($0.point,selected.point)<=0.05
+                }
+                localReachSelection=try await rankCurrentCans("centered_grasp_view",candidates:centered)
+                guard let reacquired=localReachSelection?.object else {
+                    throw ROBArmRoutineError.blocked("The selected can needs fresh confirmed geometry in its centered grasp view; no reach sent.")
+                }
+                found[.can]=reacquired
+                evidence.append(["centered_grasp_view":true,"pan":focus.panDegrees,"upper":focus.upperTarget,
+                    "original_sequence":NSNumber(value:selected.sequence),"reacquired_sequence":NSNumber(value:reacquired.sequence),
+                    "reacquired_captured_at_ms":reacquired.capturedAt,"path_admitted":false])
+            }
         }
         // The fast object search need not see the selected hanging arm. Add
         // only three bounded depth views for this explicit local trial; detector
         // inference, self masks, occupied returns and free-space gates are unchanged.
         // Use lateral parallax: tilting at one pan kept the hanging forearm
         // behind the same shoulder in the recorded failed entry scans.
-        if requireDepth,collectCollisionDepth,fixedRegisteredView==nil,
+        if !armAlreadyAtGraspReady,requireDepth,collectCollisionDepth,fixedRegisteredView==nil,
            found[.can] != nil,(found[.orangeBucket] != nil || targets == [.can]),try permitsLocalCanShapePrior(),
            let originalMap=collisionMap,originalMap.estimatedCameraProjectionIdentity != nil {
             let started=ProcessInfo.processInfo.systemUptime,deadline=started+20
@@ -2428,16 +3524,16 @@ struct ROBWorkspaceCanSelection {
             }
             progress("Checking \(model.physicalSide)-arm depth coverage.")
             for view in coverageViews {
-                try requireCoverageContext()
+                try await searchCheckpoint();try requireCoverageContext()
                 guard ProcessInfo.processInfo.systemUptime<deadline else {break}
                 let pan=view.panDegrees,upper=view.upperTarget
                 guard try await moveView(view,deadlineUptime:deadline) else {continue}
                 do {
-                    let frame=try await vision.settledDepthFrame(deadlineUptime:deadline)
-                    try requireCoverageContext()
+                    let frame=try await vision.settledPassiveMappingFrame(deadlineUptime:deadline,check:requireCoverageContext)
+                    try await searchCheckpoint();try requireCoverageContext()
                     guard ProcessInfo.processInfo.systemUptime<deadline else {break}
                     try await accumulateCollisionDepth(view,capturedFrame:frame,preservingSceneID:sceneID)
-                    try requireCoverageContext()
+                    try await searchCheckpoint();try requireCoverageContext()
                     guard collisionEnrollment.sequence==frame.sequence,
                           collisionEnrollment.capturedAtMilliseconds==frame.capturedAt else {throw ROBWorkspaceDepthMapError.invalidFrame}
                     capturedViews+=1
@@ -2446,18 +3542,41 @@ struct ROBWorkspaceCanSelection {
                         "captured_at_ms":frame.capturedAt,"detector_invoked":false,"free_space_inferred":false])
                 } catch is CancellationError {throw CancellationError()}
                 catch {
-                    try requireCoverageContext()
+                    try await searchCheckpoint();try requireCoverageContext()
                     evidence.append(["depth_only_arm_coverage":true,"status":"unavailable","pan":pan,"upper":upper,
-                        "detail":error.localizedDescription,"detector_invoked":false,"free_space_inferred":false])
+                        "detail":error.localizedDescription,"detector_invoked":false,"free_space_inferred":false,
+                        "camera_health":vision.healthSnapshot()])
                     if ProcessInfo.processInfo.systemUptime>=deadline {break}
                 }
             }
-            try requireCoverageContext()
+            try await searchCheckpoint();try requireCoverageContext()
             evidence.append(["depth_only_arm_coverage_summary":true,"captured_views":capturedViews,"maximum_views":3,
                 "elapsed_seconds":ProcessInfo.processInfo.systemUptime-started,"budget_seconds":20.0,
                 "scene_id":sceneID.uuidString,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true])
         }
+        if armAlreadyAtGraspReady {
+            evidence.append(["depth_only_arm_coverage_summary":true,"captured_views":0,
+                "skipped_reason":"already_at_measured_grasp_ready_pose","table_depth_retained":true,
+                "occupied_returns_preserved":true,"motion_authority":false])
+        }
         if localReachSelectionRequired {found[.can]=localReachSelection?.object}
+        // Coverage is a temporary glance, not the task's resting attention.
+        // Return to the selected object while this search still owns the neck.
+        // Keep measured fixed-head contexts unchanged and never freshen the
+        // object's earlier coordinates merely because the camera looked back.
+        if fixedRegisteredView==nil,let focus=found[.can] ?? lastObservedObjectForAttention ?? found[.orangeBucket] {
+            try await searchCheckpoint()
+            progress("Returning the camera to the \(focus.target.spokenName).")
+            guard try await moveView(focus.view) else {
+                throw ROBArmRoutineError.blocked("The object was located, but the camera could not return to its view. No reach started.")
+            }
+            try await searchCheckpoint();try requireSceneProjectionIdentity()
+            evidence.append(["object_focus_return":true,"target":focus.target.rawValue,
+                "pan":focus.view.panDegrees,"upper":focus.view.upperTarget,
+                "neck_settled":true,"object_observation_refreshed":false,
+                "reachable_target_available":found[focus.target] != nil,
+                "source_sequence":NSNumber(value:focus.sequence),"source_captured_at_ms":focus.capturedAt])
+        }
         let missing = targets.filter { found[$0] == nil }.map(\.spokenName)
         let unseen = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName)
         let seen = targets.filter { visuallyFound.contains($0) }.map(\.spokenName)
@@ -2474,7 +3593,7 @@ struct ROBWorkspaceCanSelection {
         announce?(message); progress(message)
         if let collisionMap {
             let frozen = await Task.detached(priority:.userInitiated) { collisionMap.snapshot() }.value
-            try check()
+            try await searchCheckpoint()
             try requireSceneProjectionIdentity()
             guard sceneCaptureAnchor.permitsCurrent(vision.cameraGeneration) else { throw ROBWorkspaceDepthMapError.invalidFrame }
             collisionSnapshotValue = frozen

@@ -20,11 +20,6 @@ static NSString * const ROBAmberHostIPDefaultsKey = @"ROBAmberHostIP";
 static NSTimeInterval const kROBServoRenderIntervalSeconds = 0.1;
 static NSTimeInterval const kROBServoRenderToleranceSeconds = 0.01;
 
-static BOOL ROBTorsoTableRowIsValid(NSInteger row, NSUInteger count)
-{
-    return row >= 0 && (NSUInteger)row < count;
-}
-
 static NSTextField *ROBNeckLabel(NSString *text, NSRect frame)
 {
     NSTextField *label = [NSTextField labelWithString:text ?: @""];
@@ -59,7 +54,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     return YES;
 }
 
-@interface ROBTorsoControlsViewController () <NSTextFieldDelegate, NSTableViewDelegate, NSTableViewDataSource, NSNetServiceBrowserDelegate, NSNetServiceDelegate>
+@interface ROBTorsoControlsViewController () <NSTextFieldDelegate, NSNetServiceBrowserDelegate, NSNetServiceDelegate>
 
 @property (readwrite, retain) NSTimer *renderServoControlsTimer;
 @property (readwrite, assign) BOOL is_in_position_mode_R11;
@@ -88,6 +83,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 @property (nonatomic, strong) NSPopover *neckSafetyConfigurationPopover;
 @property (nonatomic, assign) BOOL pendingNeckOperatorCommandAfterStartup;
 @property (nonatomic, assign) BOOL pendingLowerTiltOperatorCommandAfterStartup;
+@property (nonatomic, strong) ROBArmPositionControlState *l10PositionControlState;
+@property (nonatomic, strong) ROBArmPositionControlState *r11PositionControlState;
+- (NSArray<NSSlider *> *)armPositionSlidersForGatewayArm:(NSString *)arm;
+- (void)refreshAmberPositionControls;
+- (void)armPositionSlidersWereEditedForGatewayArm:(NSString *)arm;
 - (void)startAmberHostDiscovery;
 - (void)setupAmberReconnectControl;
 - (IBAction)reconnectAmberArms:(id)sender;
@@ -102,6 +102,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (IBAction)showNeckSafetyConfiguration:(id)sender;
 - (void)loadNeckSafetyConfigurationControls;
 - (void)refreshNeckCommandReadouts;
+- (BOOL)synchronizeUneditedNeckSlidersForControl:(NSControl *)control;
 - (void)renderServoCommandsOperatorInitiated:(BOOL)operatorInitiated
                   lowerTiltOperatorInitiated:(BOOL)lowerTiltOperatorInitiated;
 @end
@@ -111,6 +112,17 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (void) viewDidLoad
 {
     [super viewDidLoad];
+    self.l10PositionControlState = [ROBArmPositionControlState new];
+    self.r11PositionControlState = [ROBArmPositionControlState new];
+    for (NSString *arm in @[@"left", @"right"]) {
+        NSArray<NSSlider *> *sliders = [self armPositionSlidersForGatewayArm:arm];
+        for (NSUInteger i = 0; i < sliders.count; i++) {
+            sliders[i].continuous = YES;
+            sliders[i].accessibilityLabel = [NSString stringWithFormat:@"Robot %@ J%lu position",
+                [arm isEqualToString:@"left"] ? @"right" : @"left", (unsigned long)i+1];
+        }
+    }
+    [self refreshAmberPositionControls];
     [self setupNeckCommandReadouts];
     [self setupNeckSafetyConfigurationControls];
     [[NSNotificationCenter defaultCenter]
@@ -143,11 +155,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     [self setupAmberReconnectControl];
     [self startAmberHostDiscovery];
     
-    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-    //TODO: show this in a selectable tableView list
-    keyframeAnimationManager.animations;
-    
-    self.keyframeNameTextField.stringValue = keyframeAnimationManager.currentAnimation.currentKeyframe.name ?: @"";
+    NSButton *studio = [NSButton buttonWithTitle:@"Animation Studio…" target:self action:@selector(showAnimationStudio:)];
+    studio.frame = NSMakeRect(640, 20, 160, 24);
+    studio.accessibilityIdentifier = @"open-animation-studio";
+    [self.view addSubview:studio];
+
 }
 
 - (void)safeNeckStartupCommandDidChange:(NSNotification *)notification
@@ -603,126 +615,6 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     [self.robMainViewController.speechBox startRecognizer];
 }
 
-#pragma mark - KeyframeTableViewDelegate/Datasource
-
-- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
-    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-    
-    if (tableView == self.keyframeTableView) {
-        return keyframeAnimationManager.currentAnimation.namedKeyframes.count;
-    }
-    if (tableView == self.keyframeSequenceDetailsTableView) {
-        return keyframeAnimationManager.currentAnimation.currentSequence.keyframes.count;
-    }
-    if (tableView == self.keyframeSequencesTableView) {
-        return keyframeAnimationManager.currentAnimation.namedSequences.count;
-    }
-    return 0;
-}
-
-// NSTableViewDelegate methods for view-based table views
-- (NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row {
-    // Get a reusable cell view or create a new one
-    NSTableCellView *cellView = [tableView makeViewWithIdentifier:tableColumn.identifier owner:self];
-
-    if (cellView == nil) {
-        cellView = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
-        cellView.identifier = tableColumn.identifier;
-
-        // Add a text field to the cell view
-        NSTextField *textField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-        textField.translatesAutoresizingMaskIntoConstraints = NO;
-        textField.bordered = NO;
-        textField.editable = NO;
-        textField.backgroundColor = [NSColor clearColor];
-        cellView.textField = textField;
-        [cellView addSubview:textField];
-
-        // Add constraints for the text field
-        [NSLayoutConstraint activateConstraints:@[
-            [textField.leadingAnchor constraintEqualToAnchor:cellView.leadingAnchor constant:5],
-            [textField.trailingAnchor constraintEqualToAnchor:cellView.trailingAnchor constant:-5],
-            [textField.centerYAnchor constraintEqualToAnchor:cellView.centerYAnchor]
-        ]];
-    }
-    
-    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-    // Reused cells must not retain another row's text after deletion, reload,
-    // a stale selection, or a request for an invalid column/row.
-    cellView.textField.stringValue = @"";
-
-    if (tableView == self.keyframeTableView) {
-        // Populate the cell view with data
-        if ([tableColumn.identifier isEqualToString:@"NamedKeyframes"]) { // Replace with your column identifier
-            NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
-            if (ROBTorsoTableRowIsValid(row, keyframes.count)) {
-                cellView.textField.stringValue = keyframes[(NSUInteger)row].name ?: @"";
-            }
-        }
-        return cellView;
-
-    }
-    if (tableView == self.keyframeSequenceDetailsTableView) {
-        // Populate the cell view with data
-        if ([tableColumn.identifier isEqualToString:@"SequenceDetails"]) { // Replace with your column identifier
-            // Count and display use the same current sequence. The selected
-            // table row may be absent/stale while AppKit restores a window.
-            NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.currentSequence.keyframes;
-            if (ROBTorsoTableRowIsValid(row, keyframes.count)) {
-                cellView.textField.stringValue = keyframes[(NSUInteger)row].name ?: @"";
-            }
-        }
-        return cellView;
-    }
-    if (tableView == self.keyframeSequencesTableView) {
-        // Populate the cell view with data
-        if ([tableColumn.identifier isEqualToString:@"NamedSequences"]) { // Replace with your column identifier
-            NSArray<KeyframeSequence *> *sequences = keyframeAnimationManager.currentAnimation.namedSequences;
-            if (ROBTorsoTableRowIsValid(row, sequences.count)) {
-                cellView.textField.stringValue = sequences[(NSUInteger)row].name ?: @"";
-            }
-        }
-        return cellView;
-    }
-
-    return nil;
-}
-
-- (void)tableViewSelectionDidChange:(NSNotification *)notification {
-    NSTableView *tableView = notification.object;
-    NSInteger selectedRow = [tableView selectedRow];
-
-    if (tableView == self.keyframeTableView) {
-        KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-        NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
-        if (ROBTorsoTableRowIsValid(selectedRow, keyframes.count)) {
-            Keyframe *selectedKeyframe = keyframes[(NSUInteger)selectedRow];
-            keyframeAnimationManager.currentAnimation.currentKeyframe = selectedKeyframe;
-            self.keyframeNameTextField.stringValue = selectedKeyframe.name;
-            [self.keyframeSequenceDetailsTableView reloadData];
-            
-        } else {
-            NSLog(@"No row selected.");
-        }
-    }
-    if (tableView == self.keyframeSequenceDetailsTableView) {
-        
-    }
-    if (tableView == self.keyframeSequencesTableView) {
-        KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-        NSArray<KeyframeSequence *> *sequences = keyframeAnimationManager.currentAnimation.namedSequences;
-        if (ROBTorsoTableRowIsValid(selectedRow, sequences.count)) {
-            KeyframeSequence *selectedSequence = sequences[(NSUInteger)selectedRow];
-            keyframeAnimationManager.currentAnimation.currentSequence = selectedSequence;
-            self.sequenceNameTextField.stringValue = selectedSequence.name;
-            [self.keyframeSequenceDetailsTableView reloadData];
-            
-        } else {
-            NSLog(@"No row selected.");
-        }
-    }
-}
-
 - (void)controlTextDidChange:(NSNotification *)obj {
     NSTextField *textField = obj.object;
     if (textField == self.amberHostIP_TextField) {
@@ -889,241 +781,168 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 }
 
 - (void)controlTextDidEndEditing:(NSNotification *)obj {
-    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-
     if (obj.object == self.keyframeNameTextField) {
-        keyframeAnimationManager.currentAnimation.currentKeyframe.name = self.keyframeNameTextField.stringValue;
-        [keyframeAnimationManager saveCurrentKeyframeAnimation];
+        [[ROBAnimationStudio shared] legacyNameChanged:self.keyframeNameTextField.stringValue];
     }
     if (obj.object == self.sequenceNameTextField) {
-        keyframeAnimationManager.currentAnimation.currentSequence.name = self.sequenceNameTextField.stringValue;
-        [keyframeAnimationManager saveCurrentKeyframeAnimation];
-        [self.keyframeSequencesTableView reloadData];
+        [[ROBAnimationStudio shared] renameSequence:self.sequenceNameTextField.stringValue];
     }
-    
 }
 
-- (NSArray<NSTableViewRowAction *> *)tableView:(NSTableView *)tableView rowActionsForRow:(NSInteger)row edge:(NSTableRowActionEdge)edge {
-    if (tableView == self.keyframeTableView) {
-        if (edge == NSTableRowActionEdgeTrailing) { // Right swipe
-            NSTableViewRowAction *deleteAction = [NSTableViewRowAction rowActionWithStyle:NSTableViewRowActionStyleDestructive
-                                                                                    title:@"Delete"
-                                                                                  handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
-                // Remove the keyframe from the model before updating the table.
-                KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-                NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
-                if (!ROBTorsoTableRowIsValid(row, keyframes.count)) return;
-                Keyframe *removedKeyframe = keyframes[(NSUInteger)row];
-                [keyframeAnimationManager.currentAnimation removeNamedKeyframeWithName:removedKeyframe.name];
-                [keyframeAnimationManager saveCurrentKeyframeAnimation];
-                
-                // 2. Update the table view: Remove the row from the NSTableView with animation.
-                [tableView beginUpdates];
-                [tableView removeRowsAtIndexes:[NSIndexSet indexSetWithIndex:row] withAnimation:NSTableViewAnimationEffectFade];
-                [tableView endUpdates];
-            }];
-            return @[deleteAction];
+- (IBAction)showAnimationStudio:(id)sender { [[ROBAnimationStudio shared] show]; }
+- (IBAction)newSequence:(id)sender { [[ROBAnimationStudio shared] newSequence]; }
+- (IBAction)copyNamedKeyframeToCurrentSequence:(id)sender { [[ROBAnimationStudio shared] addSelectedPose]; }
+- (IBAction)playCurrentlySelectedKeyframeAnimation:(id)sender { [[ROBAnimationStudio shared] previewPose]; }
+- (IBAction)playSelectedSequence:(id)sender { [[ROBAnimationStudio shared] previewSelectedSequence]; }
+- (IBAction)captureKeyframe_Torso:(id)sender { [[ROBAnimationStudio shared] recordLegacyControls]; }
+
+- (NSDictionary<NSString *, NSSlider *> *)animationMaestroSliders {
+    return @{@"maestro.0":self.headPan, @"maestro.1":self.headTilt, @"maestro.2":self.headUpperNeckTilt,
+        @"maestro.4":self.arm_L_Elbow_Pan, @"maestro.5":self.arm_R_Elbow_Pan,
+        @"maestro.10":self.arm_R_Wrist_Tilt, @"maestro.11":self.arm_R_Gripper,
+        @"maestro.12":self.arm_L_Shoulder_Pan, @"maestro.13":self.arm_L_Shoulder_Tilt,
+        @"maestro.14":self.arm_L_Elbow_Tilt, @"maestro.15":self.arm_L_Wrist_Pan,
+        @"maestro.16":self.arm_L_Wrist_Tilt, @"maestro.17":self.arm_L_Gripper};
+}
+
+- (NSDictionary<NSString *, NSButton *> *)animationMaestroEnables {
+    return @{@"maestro.0":self.headPan_enabled, @"maestro.1":self.headTilt_enabled, @"maestro.2":self.headUpperNeckTilt_enabled,
+        @"maestro.4":self.arm_L_Elbow_Pan_enabled, @"maestro.5":self.arm_R_Elbow_Pan_enabled,
+        @"maestro.10":self.arm_R_Wrist_Tilt_enabled, @"maestro.11":self.arm_R_Gripper_enabled,
+        @"maestro.12":self.arm_L_Shoulder_Pan_enabled, @"maestro.13":self.arm_L_Shoulder_Tilt_enabled,
+        @"maestro.14":self.arm_L_Elbow_Tilt_enabled, @"maestro.15":self.arm_L_Wrist_Pan_enabled,
+        @"maestro.16":self.arm_L_Wrist_Tilt_enabled, @"maestro.17":self.arm_L_Gripper_enabled};
+}
+
+- (NSDictionary<NSString *, NSNumber *> *)animationControlValues {
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+    for (NSString *arm in @[@"left", @"right"]) {
+        NSArray<NSSlider *> *sliders = [self armPositionSlidersForGatewayArm:arm];
+        NSString *physical = [arm isEqualToString:@"left"] ? @"right" : @"left";
+        for (NSUInteger i=0; i<sliders.count; i++) {
+            values[[NSString stringWithFormat:@"arm.%@.j%lu", physical, (unsigned long)i+1]] = @(sliders[i].doubleValue / 100.0);
         }
     }
-    if (tableView == self.keyframeSequenceDetailsTableView) {
-        if (edge == NSTableRowActionEdgeTrailing) { // Right swipe
-            NSTableViewRowAction *deleteAction = [NSTableViewRowAction rowActionWithStyle:NSTableViewRowActionStyleDestructive
-                                                                                    title:@"Delete"
-                                                                                  handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
-                // Remove the sequence keyframe from the model before updating the table.
-                KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-                if (!ROBTorsoTableRowIsValid(row, keyframeAnimationManager.currentAnimation.currentSequence.keyframes.count)) return;
-                [keyframeAnimationManager.currentAnimation removeSequenceKeyframeWithIndex:row];
-                [keyframeAnimationManager saveCurrentKeyframeAnimation];
-                
-                // 2. Update the table view: Remove the row from the NSTableView with animation.
-                [tableView beginUpdates];
-                [tableView removeRowsAtIndexes:[NSIndexSet indexSetWithIndex:row] withAnimation:NSTableViewAnimationEffectFade];
-                [tableView endUpdates];
-            }];
-            return @[deleteAction];
-        }
-    }
-    if (tableView == self.keyframeSequencesTableView) {
-        if (edge == NSTableRowActionEdgeTrailing) { // Right swipe
-            NSTableViewRowAction *deleteAction = [NSTableViewRowAction rowActionWithStyle:NSTableViewRowActionStyleDestructive
-                                                                                    title:@"Delete"
-                                                                                  handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
-                // Remove the sequence from the model before updating the table.
-                KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-                if (!ROBTorsoTableRowIsValid(row, keyframeAnimationManager.currentAnimation.namedSequences.count)) return;
-                [keyframeAnimationManager.currentAnimation removeSequenceWithIndex:row];
-                [keyframeAnimationManager saveCurrentKeyframeAnimation];
-                
-                // 2. Update the table view: Remove the row from the NSTableView with animation.
-                [tableView beginUpdates];
-                [tableView removeRowsAtIndexes:[NSIndexSet indexSetWithIndex:row] withAnimation:NSTableViewAnimationEffectFade];
-                [tableView endUpdates];
-            }];
-            return @[deleteAction];
-        }
-    }
-    return @[]; // No actions for leading edge (left swipe) or if not trailing edge
-        
+    for (NSString *key in [self animationMaestroSliders]) values[key] = @([self animationMaestroSliders][key].doubleValue);
+    ROBTorsoControlCenter *torso = [ROBTorsoControlCenter shared];
+    if (isfinite(torso.observedHeading)) values[@"torso.heading"] = @(torso.observedHeading);
+    if (isfinite(torso.animationPreviewReferenceHeading)) values[@"preview.torsoReference"] = @(torso.animationPreviewReferenceHeading);
+    ROBNeckSafetyConfig neck = [self.robMainViewController.serialBox neckSafetyConfiguration];
+    values[@"preview.neckPanCenter"] = @(neck.panCenterTarget);
+    if (isfinite(neck.panTargetsPerDegree) && neck.panTargetsPerDegree != 0) values[@"preview.neckPanTargetsPerDegree"] = @(neck.panTargetsPerDegree);
+    values[@"lact.speed"] = @0;
+    return values;
 }
 
-#pragma mark -
-
-- (IBAction)newSequence:(id)sender {
-    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-    [keyframeAnimationManager.currentAnimation addNewNamedSequence];
-    [self.keyframeSequencesTableView reloadData];
-    [keyframeAnimationManager saveCurrentKeyframeAnimation];
-}
-
-- (IBAction)copyNamedKeyframeToCurrentSequence:(id)sender {
-    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-
-    NSInteger selectedNamedKeyframe = self.keyframeTableView.selectedRow;
-    if (selectedNamedKeyframe == -1) {
-        selectedNamedKeyframe = 0;
-    }
-    NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
-    if (ROBTorsoTableRowIsValid(selectedNamedKeyframe, keyframes.count)) {
-        Keyframe *keyframe = keyframes[(NSUInteger)selectedNamedKeyframe];
-        [keyframeAnimationManager.currentAnimation addKeyframeToCurrentSequence:keyframe];
-        [self.keyframeSequenceDetailsTableView reloadData];
-        [keyframeAnimationManager saveCurrentKeyframeAnimation];
-    }
-    
-}
-
-- (IBAction) playCurrentlySelectedKeyframeAnimation:(id)sender {
-    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-    NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
-    NSInteger row = self.keyframeTableView.selectedRow;
-    if (row == -1) {
-        row = 0;
-        if (!ROBTorsoTableRowIsValid(row, keyframes.count)) return;
-        [self.keyframeTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
-    }
-    if (!ROBTorsoTableRowIsValid(row, keyframes.count)) return;
-    Keyframe *keyframe = keyframes[(NSUInteger)row];
-
-    BOOL shouldSleep = NO;
-    if (!self.is_in_position_mode_R11 && keyframe.arm_R11_keyframe) {
-        [self set_position_mode_R11_SendCommand:self];
-        shouldSleep = YES;
-    }
-    if (!self.is_in_position_mode_L10 && keyframe.arm_L10_keyframe) {
-        [self set_position_mode_L10_SendCommand:self];
-        shouldSleep = YES;
-    }
-    if (shouldSleep) {
-        sleep(2);
-    }
-    //Since we only have 1 keyframe selected... animate it... just for test purposes
-    //1. get selected keyframe
-    if (keyframe.arm_R11_keyframe) {
-        self.arm_R11_cmdTime.doubleValue = keyframe.arm_R11_cmd_time;
-        self.arm_R11_cmdSleep.doubleValue = keyframe.arm_R11_cmd_sleep;
-        self.arm_R11_position_servo1.doubleValue = keyframe.arm_R11_servo1;
-        self.arm_R11_position_servo2.doubleValue = keyframe.arm_R11_servo2;
-        self.arm_R11_position_servo3.doubleValue = keyframe.arm_R11_servo3;
-        self.arm_R11_position_servo4.doubleValue = keyframe.arm_R11_servo4;
-        self.arm_R11_position_servo5.doubleValue = keyframe.arm_R11_servo5;
-        self.arm_R11_position_servo6.doubleValue = keyframe.arm_R11_servo6;
-        self.arm_R11_position_servo7.doubleValue = keyframe.arm_R11_servo7;
-        
-        [self update_arm_R11_Action:self]; //Updates all the label values with new servo values
-        [self update_arm_R11_position_SendCommand:self]; //Sends the command to the arm
-    }
-    if (keyframe.arm_L10_keyframe) {
-        NSLog(@"keyframe = %f, %f, %f, %f, %f, %f, %f", keyframe.arm_L10_servo1, keyframe.arm_L10_servo2, keyframe.arm_L10_servo3, keyframe.arm_L10_servo4, keyframe.arm_L10_servo5, keyframe.arm_L10_servo6, keyframe.arm_L10_servo7);
-        self.arm_L10_position_cmdTime.doubleValue = keyframe.arm_L10_cmd_time;
-        self.arm_L10_position_cmdSleep.doubleValue = keyframe.arm_L10_cmd_sleep;
-        self.arm_L10_position_servo1.doubleValue = keyframe.arm_L10_servo1;
-        self.arm_L10_position_servo2.doubleValue = keyframe.arm_L10_servo2;
-        self.arm_L10_position_servo3.doubleValue = keyframe.arm_L10_servo3;
-        self.arm_L10_position_servo4.doubleValue = keyframe.arm_L10_servo4;
-        self.arm_L10_position_servo5.doubleValue = keyframe.arm_L10_servo5;
-        self.arm_L10_position_servo6.doubleValue = keyframe.arm_L10_servo6;
-        self.arm_L10_position_servo7.doubleValue = keyframe.arm_L10_servo7;
-        
-        [self update_arm_L10_Action:self]; //Updates all the label values with new servo values
-        [self update_arm_L10_position_SendCommand:self]; //Sends the command to the arm
+- (void)animationMaestroDemand:(NSNotification *)notification {
+    NSDictionary *values = notification.userInfo[@"values"];
+    for (NSString *key in values) {
+        NSSlider *slider = [self animationMaestroSliders][key];
+        if (slider == nil) continue;
+        slider.doubleValue = [values[key] doubleValue];
+        [self animationMaestroEnables][key].state = NSControlStateValueOn;
     }
 }
 
-- (IBAction)captureKeyframe_Torso:(id)sender {
-    //Example of setting properties to add keyframes. should be saved and loaded properly
-    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-    Keyframe *currentKeyframe = keyframeAnimationManager.currentAnimation.currentKeyframe;
-    currentKeyframe.name = self.keyframeNameTextField.stringValue;
-    currentKeyframe.arm_R11_keyframe = self.arm_R11_keyframe_enabled.state == NSControlStateValueOn ? YES : NO;
-    if (currentKeyframe.arm_R11_keyframe) {
-        currentKeyframe.arm_R11_cmd_time = self.arm_R11_cmdTime.doubleValue;
-        currentKeyframe.arm_R11_cmd_sleep = self.arm_R11_cmdSleep.doubleValue;
-        currentKeyframe.arm_R11_servo1 = self.arm_R11_position_servo1.doubleValue;
-        currentKeyframe.arm_R11_servo2 = self.arm_R11_position_servo2.doubleValue;
-        currentKeyframe.arm_R11_servo3 = self.arm_R11_position_servo3.doubleValue;
-        currentKeyframe.arm_R11_servo4 = self.arm_R11_position_servo4.doubleValue;
-        currentKeyframe.arm_R11_servo5 = self.arm_R11_position_servo5.doubleValue;
-        currentKeyframe.arm_R11_servo6 = self.arm_R11_position_servo6.doubleValue;
-        currentKeyframe.arm_R11_servo7 = self.arm_R11_position_servo7.doubleValue;
+- (NSArray<NSString *> *)animationEnabledChannels {
+    NSMutableArray *keys = [NSMutableArray array];
+    for (NSString *side in @[@"right", @"left"]) {
+        NSButton *enabled = [side isEqualToString:@"right"] ? self.arm_L10_keyframe_enabled : self.arm_R11_keyframe_enabled;
+        if (enabled.state == NSControlStateValueOn) for (NSUInteger j=1;j<=7;j++) [keys addObject:[NSString stringWithFormat:@"arm.%@.j%lu",side,(unsigned long)j]];
     }
-    currentKeyframe.arm_L10_keyframe = self.arm_L10_keyframe_enabled.state == NSControlStateValueOn ? YES : NO;
-    if (currentKeyframe.arm_L10_keyframe) {
-        currentKeyframe.arm_L10_cmd_time = self.arm_L10_position_cmdTime.doubleValue;
-        currentKeyframe.arm_L10_cmd_sleep = self.arm_L10_position_cmdSleep.doubleValue;
-        currentKeyframe.arm_L10_servo1 = self.arm_L10_position_servo1.doubleValue;
-        currentKeyframe.arm_L10_servo2 = self.arm_L10_position_servo2.doubleValue;
-        currentKeyframe.arm_L10_servo3 = self.arm_L10_position_servo3.doubleValue;
-        currentKeyframe.arm_L10_servo4 = self.arm_L10_position_servo4.doubleValue;
-        currentKeyframe.arm_L10_servo5 = self.arm_L10_position_servo5.doubleValue;
-        currentKeyframe.arm_L10_servo6 = self.arm_L10_position_servo6.doubleValue;
-        currentKeyframe.arm_L10_servo7 = self.arm_L10_position_servo7.doubleValue;
-    }
-    //TODO: Bind cartesian commands as well
-    
-    NSLog(@"servo1 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo1);
-    NSLog(@"servo2 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo2);
-    NSLog(@"servo3 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo3);
-    NSLog(@"servo4 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo4);
-    NSLog(@"servo5 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo5);
-    NSLog(@"servo6 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo6);
-    NSLog(@"servo7 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo7);
-
-    
-    [keyframeAnimationManager.currentAnimation addNewNamedKeyframe];
-    [keyframeAnimationManager saveCurrentKeyframeAnimation];
-    [self.keyframeTableView reloadData];
-    self.keyframeNameTextField.stringValue = keyframeAnimationManager.currentAnimation.currentKeyframe.name;
+    for (NSString *key in [self animationMaestroEnables]) if ([self animationMaestroEnables][key].state == NSControlStateValueOn) [keys addObject:key];
+    return keys;
 }
 
 - (IBAction)mirrorPosition_R11_to_L10:(id)sender {
     self.arm_L10_position_cmdTime.doubleValue = self.arm_R11_position_cmdTime.doubleValue;
     self.arm_L10_position_cmdSleep.doubleValue = self.arm_R11_position_cmdSleep.doubleValue;
-    self.arm_L10_position_servo1.doubleValue = -self.arm_R11_position_servo1.doubleValue;
-    self.arm_L10_position_servo2.doubleValue = -self.arm_R11_position_servo2.doubleValue;
-    self.arm_L10_position_servo3.doubleValue = -self.arm_R11_position_servo3.doubleValue;
-    self.arm_L10_position_servo4.doubleValue = -self.arm_R11_position_servo4.doubleValue;
-    self.arm_L10_position_servo5.doubleValue = -self.arm_R11_position_servo5.doubleValue;
-    self.arm_L10_position_servo6.doubleValue = -self.arm_R11_position_servo6.doubleValue;
-    self.arm_L10_position_servo7.doubleValue = -self.arm_R11_position_servo7.doubleValue;
+    NSArray<NSNumber *> *values = [ROBArmPoseMirror mirroredJointValues:
+        [[self armPositionSlidersForGatewayArm:@"right"] valueForKey:@"doubleValue"]];
+    NSArray<NSSlider *> *destination = [self armPositionSlidersForGatewayArm:@"left"];
+    if (values.count != 7) return;
+    for (NSUInteger i = 0; i < 7; i++) destination[i].doubleValue = values[i].doubleValue;
+    [self armPositionSlidersWereEditedForGatewayArm:@"left"];
     [self update_arm_L10_Action:self];
 }
 
 - (IBAction)mirrorPosition_L10_to_R11:(id)sender {
     self.arm_R11_position_cmdTime.doubleValue = self.arm_L10_position_cmdTime.doubleValue;
     self.arm_R11_position_cmdSleep.doubleValue = self.arm_L10_position_cmdSleep.doubleValue;
-    self.arm_R11_position_servo1.doubleValue = -self.arm_L10_position_servo1.doubleValue;
-    self.arm_R11_position_servo2.doubleValue = -self.arm_L10_position_servo2.doubleValue;
-    self.arm_R11_position_servo3.doubleValue = -self.arm_L10_position_servo3.doubleValue;
-    self.arm_R11_position_servo4.doubleValue = -self.arm_L10_position_servo4.doubleValue;
-    self.arm_R11_position_servo5.doubleValue = -self.arm_L10_position_servo5.doubleValue;
-    self.arm_R11_position_servo6.doubleValue = -self.arm_L10_position_servo6.doubleValue;
-    self.arm_R11_position_servo7.doubleValue = -self.arm_L10_position_servo7.doubleValue;
+    NSArray<NSNumber *> *values = [ROBArmPoseMirror mirroredJointValues:
+        [[self armPositionSlidersForGatewayArm:@"left"] valueForKey:@"doubleValue"]];
+    NSArray<NSSlider *> *destination = [self armPositionSlidersForGatewayArm:@"right"];
+    if (values.count != 7) return;
+    for (NSUInteger i = 0; i < 7; i++) destination[i].doubleValue = values[i].doubleValue;
+    [self armPositionSlidersWereEditedForGatewayArm:@"right"];
     [self update_arm_R11_Action:self];
+}
+
+- (NSArray<NSSlider *> *)armPositionSlidersForGatewayArm:(NSString *)arm
+{
+    if ([arm isEqualToString:@"left"]) return @[
+        self.arm_L10_position_servo1, self.arm_L10_position_servo2, self.arm_L10_position_servo3,
+        self.arm_L10_position_servo4, self.arm_L10_position_servo5, self.arm_L10_position_servo6,
+        self.arm_L10_position_servo7];
+    return @[
+        self.arm_R11_position_servo1, self.arm_R11_position_servo2, self.arm_R11_position_servo3,
+        self.arm_R11_position_servo4, self.arm_R11_position_servo5, self.arm_R11_position_servo6,
+        self.arm_R11_position_servo7];
+}
+
+- (void)refreshAmberPositionControls
+{
+    ROBAmberGatewayClient *gateway = ROBAmberGatewayClient.shared;
+    for (NSString *arm in @[@"left", @"right"]) {
+        BOOL l10 = [arm isEqualToString:@"left"];
+        ROBArmPositionControlState *state = l10 ? self.l10PositionControlState : self.r11PositionControlState;
+        ROBAmberGatewayTelemetry *sample = [gateway telemetryForArm:arm];
+        NSArray<NSNumber *> *values = [state nextSliderValuesWithTargetRadians:[gateway targetPositionsForArm:arm]
+            measuredRadians:sample.positionsRadians ?: @[]
+            feedbackFresh:sample != nil && sample.effectiveSampleAgeMilliseconds <= ROBArmPositionControlState.maximumFeedbackAgeMilliseconds];
+        if (values.count != 7) continue;
+        NSArray<NSSlider *> *sliders = [self armPositionSlidersForGatewayArm:arm];
+        for (NSUInteger i = 0; i < 7; i++) sliders[i].doubleValue = values[i].doubleValue;
+        // Update labels only. A passive refresh must never call Send Position.
+        if (l10) [self update_arm_L10_Action:self];
+        else [self update_arm_R11_Action:self];
+    }
+}
+
+- (void)armPositionSlidersWereEditedForGatewayArm:(NSString *)arm
+{
+    ROBArmPositionControlState *state = [arm isEqualToString:@"left"]
+        ? self.l10PositionControlState : self.r11PositionControlState;
+    [state noteEditedSliderValues:[[self armPositionSlidersForGatewayArm:arm] valueForKey:@"doubleValue"]];
+    if (ROBArmRoutineCoordinator.shared.ownsPhysicalMotion) {
+        [ROBArmRoutineCoordinator.shared cancelWithReason:@"Operator adjusted an arm position; automatic motion held"];
+        [ROBShowMotionCoordinator.shared stop];
+    }
+    if (ROBAmberGestureExecutor.shared.isExecuting) {
+        [ROBAmberGestureExecutor.shared cancelCurrentGestureWithReason:@"Operator adjusted an arm position"];
+    }
+    if (ROBTorsoControlCenter.shared.isArmed) [ROBTorsoControlCenter.shared stop];
 }
 
 - (void) bindArm_controls
 {
+    for (NSString *key in [self animationMaestroSliders]) {
+        NSString *channel = [key componentsSeparatedByString:@"."].lastObject;
+        [self animationMaestroSliders][key].accessibilityLabel = [@"Maestro channel " stringByAppendingString:channel];
+        if (channel.integerValue > 2) [self animationMaestroEnables][key].title = [@"Ch " stringByAppendingString:channel];
+    }
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(animationMaestroDemand:) name:@"ROBAnimationMaestroDemand" object:nil];
+    __weak typeof(self) weakSelf = self;
+    [[ROBAnimationPlayback shared] configureSpeech:^(NSString *text, void (^completion)(BOOL)) {
+        ROBSpeechBox *speech = weakSelf.robMainViewController.speechBox;
+        if (speech) [speech sayAnimationGreeting:text completion:completion];
+        else completion(NO);
+    } cancel:^{ [weakSelf.robMainViewController.speechBox stopIt:nil]; }];
+    [[ROBAnimationStudio shared] connectWithLibrary:self.keyframeTableView clips:self.keyframeSequenceDetailsTableView
+        sequences:self.keyframeSequencesTableView poseName:self.keyframeNameTextField sequenceName:self.sequenceNameTextField
+        serial:self.robMainViewController.serialBox capture:^NSDictionary<NSString *, NSNumber *> *{ return [weakSelf animationControlValues] ?: @{}; }
+        enabled:^NSArray<NSString *> *{ return [weakSelf animationEnabledChannels] ?: @[]; }];
+
     self.robMainViewController.serialBox.amberHostIP = self.amberHostIP_TextField.stringValue;
     self.robMainViewController.serialBox.amberMasterCoreOutput_R11 = self.amberMasterCore_R11;
     self.robMainViewController.serialBox.amberMasterCoreOutput_L10 = self.amberMasterCore_L10;
@@ -1176,6 +995,57 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
 #pragma mark - Servo Commands
 
+- (BOOL)synchronizeUneditedNeckSlidersForControl:(NSControl *)control
+{
+    ROBSerialBox *serialBox = self.robMainViewController.serialBox;
+    if (serialBox == nil || serialBox.isSafeNeckStartupInProgress
+        || self.pendingNeckOperatorCommandAfterStartup) return YES;
+
+    // A manual edit changes only its selected axis. Search/tracking may have
+    // changed the other applied targets since these sliders last rendered.
+    // Never overwrite the axis being dragged or a deliberate startup queue.
+    BOOL editsPan = control == self.headPan || control == (id)self.headPan_enabled;
+    BOOL editsLower = control == self.headTilt || control == (id)self.headTilt_enabled;
+    BOOL editsUpper = control == self.headUpperNeckTilt
+        || control == (id)self.headUpperNeckTilt_enabled;
+    BOOL editsEnableToggle = control == (id)self.headPan_enabled
+        || control == (id)self.headTilt_enabled
+        || control == (id)self.headUpperNeckTilt_enabled;
+    BOOL uneditedAxisInactive = NO;
+    NSNumber *upperDemand = serialBox.upperNeckOperatorDemandTarget;
+    if (!editsUpper && serialBox.upperNeckTiltCommandKnown
+        && serialBox.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff
+        && upperDemand == nil) return NO;
+
+    if (!editsPan) {
+        BOOL active = serialBox.neckPanCommandKnown
+            && serialBox.commandedNeckPanTarget != ROBNeckSafetyTargetOff;
+        uneditedAxisInactive = uneditedAxisInactive || !active;
+        self.headPan_enabled.state = active ? NSControlStateValueOn : NSControlStateValueOff;
+        if (active) self.headPan.integerValue = serialBox.commandedNeckPanTarget;
+    }
+    if (!editsLower) {
+        BOOL active = serialBox.lowerNeckTiltCommandKnown
+            && serialBox.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff;
+        uneditedAxisInactive = uneditedAxisInactive || !active;
+        self.headTilt_enabled.state = active ? NSControlStateValueOn : NSControlStateValueOff;
+        if (active) self.headTilt.integerValue = serialBox.commandedLowerNeckTiltTarget;
+    }
+    if (!editsUpper) {
+        uneditedAxisInactive = uneditedAxisInactive || upperDemand == nil;
+        self.headUpperNeckTilt_enabled.state = upperDemand != nil
+            ? NSControlStateValueOn : NSControlStateValueOff;
+        // The slider is an uncompensated demand. Copying the applied upper
+        // output would apply Keep upright's lower-neck adjustment twice.
+        if (upperDemand != nil) self.headUpperNeckTilt.integerValue = upperDemand.integerValue;
+    }
+    // The coupled gateway can recenter/retain supporting axes during an OFF
+    // request. A slider-only gesture must not initiate that recovery on an
+    // untouched inactive/unknown axis. Deliberate enable/disable toggles retain
+    // their original coupled startup/shutdown behavior below.
+    return editsEnableToggle || !uneditedAxisInactive;
+}
+
 - (IBAction) reconnectMaestro:(id)sender;
 {
     [self.robMainViewController.serialBox connectMaestro];
@@ -1221,6 +1091,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         || slider == (id)self.headPan_enabled
         || slider == (id)self.headTilt_enabled
         || slider == (id)self.headUpperNeckTilt_enabled;
+    if (neckOperatorAction && ![self synchronizeUneditedNeckSlidersForControl:slider]) {
+        [self refreshNeckCommandReadouts];
+        NSBeep();
+        return;
+    }
     BOOL allNeckAxesEnabled = self.headPan_enabled.state == NSControlStateValueOn
         && self.headTilt_enabled.state == NSControlStateValueOn
         && self.headUpperNeckTilt_enabled.state == NSControlStateValueOn;
@@ -1247,9 +1122,17 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
             && self.headTilt_enabled.state == NSControlStateValueOff)
         || (slider == (id)self.headUpperNeckTilt_enabled
             && self.headUpperNeckTilt_enabled.state == NSControlStateValueOff);
-    if (neckNeedsSafeStartup && neckActivationAction) {
+    BOOL neckEnableToggleAction = (slider == (id)self.headPan_enabled
+            && self.headPan_enabled.state == NSControlStateValueOn)
+        || (slider == (id)self.headTilt_enabled
+            && self.headTilt_enabled.state == NSControlStateValueOn)
+        || (slider == (id)self.headUpperNeckTilt_enabled
+            && self.headUpperNeckTilt_enabled.state == NSControlStateValueOn);
+    if (neckNeedsSafeStartup && neckActivationAction
+        && (allNeckAxesEnabled || neckEnableToggleAction)) {
         // Recover the neck as one coupled unit; never energize only the first
-        // checkbox an operator happens to switch back on.
+        // checkbox an operator happens to switch back on. A slider-only edit
+        // must not reactivate an untouched OFF or unknown axis.
         self.headPan_enabled.state = NSControlStateValueOn;
         self.headTilt_enabled.state = NSControlStateValueOn;
         self.headUpperNeckTilt_enabled.state = NSControlStateValueOn;
@@ -1307,11 +1190,12 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         NSInteger requestedUpperTilt = self.headUpperNeckTilt.integerValue;
         self.pendingNeckOperatorCommandAfterStartup = NO;
         self.pendingLowerTiltOperatorCommandAfterStartup = NO;
-        // Restore the original operator-calibrated resting defaults. The
-        // serial gateway first uses 6011 only as a temporary clearance lift.
-        self.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;
-        self.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;
-        self.headUpperNeckTilt.integerValue = ROBNeckSafetyDefaultUpperTarget;
+        // Mirror the operator's saved final phase, including custom values.
+        // The serial gateway alone owns the preceding clearance sequence.
+        ROBServoSequencePhase *rest = [[ROBServoControlStore shared] startupPhaseAtIndex:2];
+        self.headPan.integerValue = rest.panTarget;
+        self.headTilt.integerValue = rest.lowerTarget;
+        self.headUpperNeckTilt.integerValue = rest.upperTarget;
         ROBNeckCommandDisposition disposition = [serialBox startSafeNeckStartup];
         if (disposition == ROBNeckCommandDispositionRejected) NSBeep();
         if (neckSliderAction) {
@@ -1342,6 +1226,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
 - (void) renderServoCommands
 {
+    [self refreshAmberPositionControls];
     ROBSerialBox *serialBox = self.robMainViewController.serialBox;
     if (self.pendingNeckOperatorCommandAfterStartup
         && !serialBox.isSafeNeckStartupInProgress) {
@@ -1450,6 +1335,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 }
 
 - (IBAction)update_arm_R11_Action:(id)sender {
+    if ([[self armPositionSlidersForGatewayArm:@"right"] containsObject:sender]) {
+        [self armPositionSlidersWereEditedForGatewayArm:@"right"];
+    }
     
     int force = [self.arm_R11_force intValue];
     self.arm_R11_force_label.stringValue = [NSString stringWithFormat:@"%i", force];
@@ -1529,6 +1417,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 }
 
 - (IBAction)update_arm_L10_Action:(id)sender {
+    if ([[self armPositionSlidersForGatewayArm:@"left"] containsObject:sender]) {
+        [self armPositionSlidersWereEditedForGatewayArm:@"left"];
+    }
     int force = [self.arm_L10_force intValue];
     self.arm_L10_force_label.stringValue = [NSString stringWithFormat:@"%i", force];
     

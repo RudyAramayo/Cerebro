@@ -1,0 +1,117 @@
+# Animation Studio
+
+Open **Animation Studio…** at the bottom of Torso Servo Controls. Its three tables and the compact panel share the same library:
+
+1. **Pose library** stores named, reusable joint/channel targets.
+2. **Selected sequence** contains independent clips, in playback order.
+3. **Sequences** selects the animation being edited.
+
+Choose **New draft**, include the individual joints or groups you want, set values (or **Capture controls**), name the pose, and **Record new**. Capture reads the editable control targets; it is not a claim of measured arrival. **Update selected** edits exactly the identified library pose or sequence clip shown above the inspector. Unsaved edits are retained until saved or discarded. Duplicate names are allowed: UUIDs identify everything.
+
+Select a library pose and a sequence, then **Add →**. Each insertion takes a value snapshot. Editing/deleting the source pose leaves existing clips intact. **Refresh from pose** deliberately replaces only the selected clip's values from its source. Clip timing is independent. Use ↑/↓, Duplicate, Remove, Transition, Hold and Smooth/Linear to arrange the timeline. The shaded tail of a block is its hold interval. Undo/Redo saves a new library revision.
+
+## Channels and grasp-ready poses
+
+- `arm.right.j1`…`j7`: physical RIGHT/L10, gateway `left`; **vendor radians**. `arm.left.*`: physical LEFT/R11, gateway `right`. No implicit mirroring, encoder reset, or URDF conversion occurs in stored targets. These poses depend on the robot's existing startup datum.
+- `maestro.0/1/2`: neck pan/lower/upper; targets in **quarter-microseconds**. Other available Maestro channels: **4, 5, 10–17**. Channel 3 has no assigned control; 6–9 remain exclusively managed by the Bubble runtime.
+- `torso.heading`: degrees relative to the existing torso-to-base reference, positive ROB-left. The Torso Rotation window selects and supervises the hardware source, count calibration and pulse ceiling. Headings are circular, not a count of complete turns; debug mode chooses the equivalent heading near its tracked cable reference to unwind. Ghost interpolation uses that same reference when available.
+- `lact.speed`: signed percentage, positive forward. This timed demand runs for the clip's transition + hold, then returns to zero. It is not a position or lean-angle measurement.
+
+Missing channels are untouched by that pose. An arm trajectory fills omitted joints from its fresh measured hold; a later clip does not reset omitted joints to zero. The neck gateway retains its necessary coupled staging/compensation.
+
+Use a stationary raised pose to inspect gripper alignment. Hanging arms can settle differently, so a hanging appearance is not a repeatable encoder-zero reference. **The camera image is the calibration reference.** Keep fresh joint feedback alongside it as a diagnostic log; do not turn those values into a reusable arm calibration keyframe. **Capture controls** copies targets, not measured feedback. A visual wrist trim applies to the inspected pose and startup datum; it does not establish all-joint calibration, camera registration, or a correction to every animation. Recheck alignment after a power cycle or changed startup pose.
+
+The raised alignment procedure is an observation/correction loop for the operator or agent using the existing native controls:
+
+1. Hold the raised arms and frame both grippers. Compare against the accepted reference image at matching camera/head context; during initial teaching, explicitly select the held reference side. The current teaching session uses the left gripper to align the right.
+2. Compare physical orientation and fingertip alignment, alongside fresh measured joints. Correct the observed discrepancy, wait for measured arrival, then capture and compare again. Repeat until the observed pose matches; a fixed number of nudges or equal/opposite encoder values is not a completion condition.
+3. Keep an incomplete image explicitly provisional. When matching is observed, save the reference image with its observation time, camera targets, startup/connection context and acceptance evidence. Keep all fourteen measured joint values in the operation's diagnostic log only. Distinguish an operator-observed match from a quantitatively validated calibration.
+4. Before later precision work, repeat the image comparison and correction when needed. A changed startup datum or power cycle requires a new comparison; stored joint values are not the visual target and must not be replayed as calibration. Retain the previous accepted image separately from new inspection images.
+
+If camera evidence is too ambiguous to determine improvement, retain the hold and obtain the missing visual comparison. This procedure does not add an unattended camera servo loop to **Run on robot**, and it does not reset motor coordinates or copy a local wrist correction to unrelated poses.
+
+The role menu assigns a taught library pose to `grasp.horizontal.right`, `grasp.vertical.right`, `grasp.horizontal.left`, or `grasp.vertical.left`. Only one pose owns each role. Values must be taught or edited; no vertical posture is guessed. `graspReadyValues(physicalSide:vertical:)` exposes a read-only sparse lookup to native mission consumers. This release stores the profiles; it does not replace the recycling planner's measured path admission.
+
+## Ghost output and robot playback
+
+**Arm speed** is saved per sequence. Use the slider or enter **25–200%** and choose **Apply speed**. **100%** uses the saved arm transition times, **50%** doubles them and **200%** halves them. Holds and neck, Maestro, torso and timed LACT tracks keep their authored timing. In a mixed clip, a faster arm waits for the other tracks; slower arms can extend the clip. The ghost timeline reflects requested arm speed. Hardware playback extends timing when needed for the 0.30 rad/s (about 17.2°/s) local-animation ceiling, controller segment duration and measured progress, and reports when motor limits apply. Changing speed applies to the next Run; it does not change a sequence already executing.
+
+**Play ghost** starts at the playhead and becomes **Pause ghost** while playing. Press it again to resume a paused preview; after the endpoint it starts again from the beginning. **Ghost speed** provides **0.25×, 0.5×, 0.75×, 1×, 1.5×, 2×, 3× and 4×** for the whole visual animation, including pauses and illustrated body/head motion. A speed change takes effect during playback without jumping the playhead. **Loop** repeats the ghost until paused or stopped. These viewing controls do not edit the library, change saved arm speed, send motor commands or repeat Run on robot. The ghost timer continues while menus are open.
+
+**Ghost output**, **Play ghost**, and timeline scrubbing are silent and nonactuating. The existing diagnostic ghost window shows both arms, neck and torso. Its mappings are display priors; the original mesh/depth evidence stays separate. Unmapped Maestro channels and LACT remain timeline tracks. The optional **Ghost lean °** field (`previewLeanDegrees`, 0–45) illustrates body lean independently of the timed LACT channel; it is not an angle command or a measurement. A blank field carries the previous illustration forward within a sequence. Choose a ghost preset to return to that window's original gesture editor.
+
+**Run on robot** is a direct local panel command covering the saved sequence. It takes over automatic owners once, verifies position hold for included arms, and stops on manual takeover, Stop, close, sleep, connection change, stale feedback, rejected/late acknowledgement or current-limit trip. Arm segments use the gateway lease, existing joint bounds and 0.30 rad/s local-animation transport admission; timing must accommodate the selected easing and measured start. Torso turns retain both-arm clearance and the existing TIC/camera supervision. No additional voice authorization is requested.
+
+The timeline describes nominal command timing. Amber segments wait for the preceding command's duration, then use a shared duration sufficient for both arms' current measured positions at the 0.30 rad/s local-animation ceiling. Response delay can extend a segment within the clip's existing settling allowance; playback never overlaps or skips targets to catch up with the wall clock. Both arms receive a preflight before either is sent, with a repeated check at dispatch. Rejection text identifies feedback ages, position mode, bounds, session or the physical arm/joint's required timing. The clip's hold follows its final segment. The faster local-animation limit does not change the incremental remote-controller limit. Both arms must reach and settle at a coordinated target before another target is dispatched.
+
+Amber arrival is checked from advancing feedback; torso arrival uses the selected controller source. Neck safety staging, servo ramps and physical settling can extend a clip before the next begins. Maestro has command estimates rather than shaft feedback. LACT stops at its requested clip duration even if another channel is still settling. Stop holds issued targets and discards pending neck staging; it does not promise an instantaneous mechanical stop.
+
+## Shared human/LLM JSON edits
+
+The canonical file is `~/Documents/ROB Animations/library.json` (`schemaVersion: 1`). The application is the single writer. Each successful change increments `revision`, writes atomically and keeps `library.json.previous`. Existing files in `~/Documents/ROB KeyframeAnimations` remain unchanged. Migration imports their saved poses/sequences once and marks the ambiguous legacy unit conversions for review. Review and Update selected confirms an imported pose or clip; updating a library pose does not implicitly confirm its old clip snapshots.
+
+```sh
+python3 Scripts/rob-animation.py export /tmp/animation-edit.json
+# Edit this exported copy, preserving document ID/revision and existing UUIDs.
+python3 Scripts/rob-animation.py apply /tmp/animation-edit.json
+```
+
+Create new UUIDs for new poses, sequences, clips **and each clip's embedded pose**. A clip contains `id`, optional `sourcePoseID`, `pose`, `transition`, `hold`, and `easing` (`smooth` or `linear`). A pose contains `id`, `name`, sparse `values`, optional `role`, `note`, and `needsReview`. Body tracks use the units above. Unknown/reserved channels, invalid IDs, ranges, duplicate roles and invalid timing are rejected.
+
+A sequence may contain `armSpeedMultiplier` from `0.25` to `2.0`. Omitted means `1.0` (100%), so existing libraries retain their timing. This scales arm transitions without rewriting clip snapshots or changing other channels' timing. It participates in revision checks and undo like other sequence edits.
+
+The CLI writes a request into `inbox/`; the running controller validates and applies it on the same serialized path as UI edits. The `.result` file records acceptance/conflict and the actual resulting revision. Stale revisions reject the complete edit; re-export and merge by UUID. A timeout means pending, not saved. Import JSON edit uses the same identity/revision check. Neither path can execute a sequence. Unsaved UI drafts survive incoming edits, and a stale draft cannot overwrite the newer library.
+
+## Basic gesture pack
+
+`Animations/basic-gestures.json` contains five sequences and their reusable poses:
+
+- **Hands Folded Up:** lift outward, lift higher with wrists held, orient the raised grippers, then bring both hands inward and hold in front of the chest. Defaults to 25% for the collision-retry draft.
+- **Wave · Right Hand:** raise, wave three times and return to the raised ready pose.
+- **Handshake · Right Hand:** offer the hand, make three small vertical gestures and withdraw. This is a mime; it does not sense contact or close the jaws.
+- **Kung Fu · Guard and Flow:** use the same staged raised-hands entry, salute, alternate outward blocks and palm presses, then return. Defaults to 25% with the revised entry.
+- **Sword Form · Right Hand · 60 cm:** salute, high guards, two diagonal sweeps, blade presentation and recovery. The left hand remains raised away from the blade path; jaw settings are unchanged.
+
+Install without replacing existing animations:
+
+```sh
+python3 Scripts/rob-animation.py add-pack Animations/basic-gestures.json
+```
+
+Repeated installation preserves existing edits by stable ID. The app still validates the whole merged document and its revision before saving. All five sequences contain arm tracks only. Clip timings use smooth easing and a nominal peak below 0.20 rad/s. Folded Hands and Kung Fu use the staged hanging entry described below; their 25% setting keeps the nominal peak below 0.05 rad/s. The other three sequences retain their original 18-second first transitions and have not received this entry revision. Native playback checks the actual measured start. Each pose can be edited independently in the studio. The targets were authored with the bundled model's FK and each arm's own vendor-coordinate mapping; they are model-derived gestures, not physically commissioned motions.
+
+An optional pose field, `previewProp: {"kind":"sword", "arm":"right", "lengthMeters":0.6}`, draws a reference sword along the tool's +Z axis. It follows the ghost hand while scrubbing, survives pose/clip copies and JSON edits, and disappears for poses without the field. This is display geometry, not a measured grip transform, jaw command or payload-clearance model. Other values remain unchanged.
+
+## Japanese greeting bow
+
+`Animations/japanese-bow.json` adds **Japanese Greeting · Prayer Bow** and nine reusable poses. Following the reported bow twisting and raised-hands/tread collision, the bow, Hands Folded Up and Kung Fu share this revised entry:
+
+1. **Lift outward, wrists held:** coordinate J1/J2/J4 to move the grippers outward and slightly forward with a small elbow lift. J3 and J5–J7 are omitted and retain their measured starting positions.
+2. **Lift above treads, wrists held:** increase the lift with more elbow bend and a compact shoulder angle before any wrist rotation; the same omitted channels remain unchanged.
+3. **Orient raised grippers:** keep the raised shoulder/elbow targets and coordinate J5–J7 together. J3 stays unchanged until the subsequent hands-raised approach. A pitch-only intermediate was rejected because it approached the modeled torso.
+
+Each entry clip has a one-second hold, and native playback requires measured arrival of both arms before advancing. At the saved **25% arm speed**, their arm transitions take **24, 40 and 50 seconds** respectively; the subsequent hands-raised approach takes 50 seconds. Neck timing, LACT pulse lengths, jaw state and the existing motor/feedback/current/Stop protections are unchanged. These are editable sequence settings, not new global speed restrictions.
+
+The compact revision keeps those timings and the user's saved speed. Its modeled paired span decreases from **1.477 m to 1.308 m** (about **17 cm / 11% narrower**), with forward reach increasing by about 8 mm. The regression compares the complete entry against the previous wide lift, including both arms and a 3 cm allowance around each tool: it must reduce total lateral span by at least 15 cm without adding more than 2 cm of forward reach. Wrist orientation must keep a 6 cm modeled gap between the gripper hulls; the current sampled minimum is about 11.8 cm. These are offline candidate checks, not new runtime interlocks or a physical clearance measurement; the revised path still needs observation on ROB.
+
+The remaining clips bring the grippers close together with fingertips tilted slightly inward in front of the chest, nod and lean, pause, then return upright with the hands still together. The pose leaves space between the grippers; it does not command contact or close their jaws. The bow takes a nominal **204.7 seconds at 25%**; Hands Folded Up takes **183.1 seconds**. Settling can extend either. No torso rotation is included. Selecting a sparse sequence clip previews its inherited arm/head pose; selecting a library pose uses current controls for omitted channels. The revised entry is reviewed from hanging zero. Physical clearance, starting encoder alignment and the cause of the reported left-arm twisting remain unverified; no failed run is replayed automatically.
+
+```sh
+python3 Scripts/rob-animation.py add-pack Animations/japanese-bow.json
+```
+
+`add-pack` installs missing IDs and preserves existing assets. To update an already installed bow, export the current library, merge the revised pose/sequence snapshots by ID while retaining user edits, and submit the export with `apply` at its current revision.
+
+**Finish: Japanese greeting** is a per-sequence option, editable in the native studio. JSON uses `completionGreeting: {"morningHour":5,"daytimeHour":11,"eveningHour":18}`; omit it for no speech. Resolve the computer's current local time after all motion completes: 05:00–10:59 **おはようございます。**, 11:00–17:59 **こんにちは。**, otherwise **こんばんは。** The cutoffs are editable application defaults. Speech uses the existing Japanese voice preference and installed-voice routing. Preview and import stay silent. Stop, manual takeover, interrupted motion or a connection change prevents/cancels the greeting; old completion callbacks cannot finish a newer run. Timed outputs stop before speech, while arm hold supervision remains active until speech finishes.
+
+The short LACT draft is **+40% for 0.8 s**, stopped during the pause, then **−40% for 0.8 s**, stopped afterward. Both moving clips have zero hold because LACT runs throughout transition + hold. The illustrated bow is 12°, independently editable; equal forward/reverse time does not establish equal travel or a measured upright return.
+
+ROB's hardware evidence identifies **Concentric Glideforce MD122004**, Pololu item **3613** (April 2022 receipt and the [ROB component inventory](https://hackaday.io/project/159056/components)). The [vendor specifications](https://www.pololu.com/product/3613), checked October 29, 2026, give **14.7 mm/s unloaded** and **10.4 mm/s at rated load**, at 12 V, with no position potentiometer. These are full-drive linear speeds. A 0.8 s full-drive reference corresponds to 8.3–11.8 mm. Multiplying by 40% gives a **3.3–4.7 mm linear-duty estimate only**: PWM, startup, supply voltage and opposing/assisting load are not calibrated, so this is neither measured travel nor a guaranteed range. The builder's separately documented 200/302 mm pin-to-pin endpoints give 102 mm installed travel; they do not establish intermediate angle or speed. The draft needs observed tuning on ROB before using it as a repeatable lean-position routine.
+
+## Verification
+
+`Scripts/test-animation-entry-geometry.sh` samples the complete bow, folded-hands and Kung Fu sequences from explicit hanging-zero coordinates, including the first transition and saved speed. It checks retained wrist channels through both lifts, outward gripper travel, extra arm/open-gripper height throughout wrist orientation, joint/rate bounds and full-arm tread proxies. It also samples both arms together against the body with convex hulls, excluding mechanically adjacent links, and compares the compact entry's width and forward reach with the previous wide entry. Existing conservative proxy overlap at hanging must not deepen; later tread checks restore the ordinary modeled margin. A regression retains the old rejected pitch-only shortcut as an explicit torso-intersection example. These are offline regression checks, not a measured clearance certificate or additional runtime movement restrictions.
+
+`Tests/ROBAmberManualCommandTests.py` also covers the manual Zero command after shutdown. Zero requests seven hanging joint targets without resetting encoder coordinates or changing torque mode. It now requires reported position mode and checks the controller acknowledgement; rejection or timeout is an error, not a successful reset. Position + Hold is the existing manual mode command. An acknowledged target still does not establish physical arrival.
+
+`Scripts/test-animation-studio.sh` runs the production model, native table/editor, and playback coordinator with inert hardware. It covers aliasing, duplicate names, row-selection errors, sparse tracks and inherited clip previews, timeline intervals, migrations, atomic revision conflicts, acknowledgements, Stop/takeover and reconnects. Its bow-lift fixture models travel time and unequal arm response delays, checks all 30 segment commands without overlap, and verifies that arm retiming cannot extend LACT output. A failed second-arm preflight must send neither arm. The gateway compatibility fixtures exercise the actual dispatch checks and specific rejection reasons in Debug and Release. Greeting fixtures cover local-time boundaries, silent previews, stopping LACT before speech, cancellation and stale completion callbacks. The production ghost fixture checks illustrative body lean without changing measured evidence. `Tests/ROBNeckOutputRuntimeTests.py` exercises the real Maestro gateway with recorded bytes; torso/gateway/ghost regression suites retain their hardware isolation. Physical multi-channel playback still needs commissioning on ROB; no robot movement is part of editor verification.

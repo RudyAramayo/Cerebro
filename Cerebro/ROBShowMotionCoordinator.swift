@@ -191,7 +191,7 @@ import CryptoKit
 
     private func hangingArms() -> Bool {
         ["left", "right"].allSatisfy { arm in
-            guard let sample = gateway.telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250,
+            guard let sample = gateway.telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= ROBArmFeedbackTiming.maximumAgeMilliseconds,
                   sample.positionsRadians.count == 7,
                   sample.positionsRadians.allSatisfy({ abs($0.doubleValue) <= 0.08 }) else { return false }
             let modes = gateway.modes(forArm: arm).map(\.intValue)

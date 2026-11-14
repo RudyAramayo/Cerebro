@@ -2,6 +2,197 @@ import Foundation
 import CryptoKit
 import simd
 
+/// A saved numerical rehearsal can be displayed, never granted execution.
+struct ROBCanPourRehearsal {
+    struct Frame {
+        let time: Double, stage: String, positions: [String: Double]
+        let canPose: simd_double4x4, worldFromRobot: simd_double4x4
+        let attached: Bool
+        let detail: String
+    }
+    static var directory: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/CanPourTests")
+    }
+    static var latestReport: URL { directory.appendingPathComponent("latest-report.json") }
+    let baseline: [String: Double], frames: [Frame], timed: Bool
+    let sceneTransform: simd_double4x4
+    let canInTool: simd_double4x4
+    let pivotAnchor: SIMD3<Double>, pivotAxis: SIMD3<Double>, pivotPointInObject: SIMD3<Double>
+    let rotationAuditPassed: Bool
+    let cupCenter: SIMD3<Double>, cupRadius: Double, cupHeight: Double
+    let canRadius: Double, canHeight: Double, canSpoutRadius: Double, tableBounds: [[Double]], tableZ: Double
+    let tableOutline: [SIMD2<Double>]
+    let tableHeightAboveFloor: Double
+    let summary: String
+    var duration: Double { frames.last?.time ?? 0 }
+
+    init(data: Data, model: ROBGhostRobotModel, timed: Bool) throws {
+        func fail(_ message: String) -> ROBGhostMotionError { .blocked("Pour rehearsal: " + message) }
+        guard data.count <= 16_000_000,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              root["schemaVersion"] as? Int == 2, root["hardwareOutputEnabled"] as? Bool == false,
+              root["executable"] as? Bool == false,
+              root["modelID"] as? String == model.modelID,
+              root["modelReferenceID"] as? String == model.referenceID else {
+            throw fail("rerun the saved test: pivot-aware schema, non-executable marker and matching robot model are required.")
+        }
+        func positions(_ value: Any?) throws -> [String: Double] {
+            guard let values = value as? [String: Double], values.values.allSatisfy(\.isFinite) else { throw fail("invalid joint pose.") }
+            let active = model.joints.filter { $0.kind != "fixed" }
+            guard Set(values.keys) == Set(active.map(\.name)), active.allSatisfy({ joint in
+                let q=values[joint.name]!
+                return joint.kind == "continuous" || (q >= joint.lower-1e-8 && q <= joint.upper+1e-8)
+            }) else { throw fail("incomplete pose or joint bounds exceeded.") }
+            for side in ["left","right"] {
+                let prior = side == "left" ? ROBGhostRobotModel.uprightPrior : (1...7).map { -(model.reference["right_joint\($0)"] ?? 0) }
+                guard (1...7).allSatisfy({abs(values["\(side)_joint\($0)"]! + prior[$0-1]) <= 2.09+1e-8}) else { throw fail("final vendor joint bounds exceeded.") }
+            }
+            return values
+        }
+        func matrix(_ value: Any?) throws -> simd_double4x4 {
+            guard let rows=value as? [[Double]],rows.count==4,rows.allSatisfy({$0.count==4 && $0.allSatisfy(\.isFinite)}),
+                  abs(rows[3][0])+abs(rows[3][1])+abs(rows[3][2])+abs(rows[3][3]-1)<1e-8 else {throw fail("invalid rigid transform.")}
+            let m=simd_double4x4(columns:(SIMD4(rows[0][0],rows[1][0],rows[2][0],0),SIMD4(rows[0][1],rows[1][1],rows[2][1],0),SIMD4(rows[0][2],rows[1][2],rows[2][2],0),SIMD4(rows[0][3],rows[1][3],rows[2][3],1)))
+            let r=simd_double3x3(columns:(SIMD3(m.columns.0.x,m.columns.0.y,m.columns.0.z),SIMD3(m.columns.1.x,m.columns.1.y,m.columns.1.z),SIMD3(m.columns.2.x,m.columns.2.y,m.columns.2.z)))
+            guard abs(simd_determinant(r)-1)<1e-5,(0..<3).allSatisfy({abs(simd_length(r[$0])-1)<1e-5}),
+                  abs(simd_dot(r[0],r[1]))+abs(simd_dot(r[0],r[2]))+abs(simd_dot(r[1],r[2]))<1e-5,
+                  (0..<3).allSatisfy({abs(m.columns.3[$0])<5}) else {throw fail("nonrigid or unbounded transform.")}
+            return m
+        }
+        func number(_ value: Any?, _ range: ClosedRange<Double>) throws -> Double {
+            guard let n=value as? Double,n.isFinite,range.contains(n) else {throw fail("invalid geometry dimension.")};return n
+        }
+        let savedBaseline=try positions(root["baseline"])
+        guard model.frames(savedBaseline)["right_tool"] != nil else {throw fail("model lacks the carrying tool frame.")}
+        baseline=savedBaseline
+        guard let geometry=root["sceneGeometry"] as? [String:Any],let can=geometry["can"] as? [String:Any],
+              let cup=geometry["cup"] as? [String:Any],let center=cup["rim_center"] as? [Double],center.count==3,center.allSatisfy(\.isFinite),
+              let bounds=geometry["tableBoundsXY"] as? [[Double]],bounds.count==2,bounds.allSatisfy({$0.count==2 && $0.allSatisfy(\.isFinite)}),
+              bounds[1][0]>bounds[0][0],bounds[1][1]>bounds[0][1] else {throw fail("missing can, cup or table geometry.")}
+        sceneTransform=try matrix(geometry["modelFromScene"])
+        canInTool=try matrix(root["canInTool"])
+        func point(_ value:Any?) throws -> SIMD3<Double> {
+            guard let p=value as? [Double],p.count==3,p.allSatisfy({$0.isFinite && abs($0)<5}) else {throw fail("invalid pivot point or axis.")}
+            return SIMD3(p[0],p[1],p[2])
+        }
+        guard let pivot=root["rotationPivot"] as? [String:Any],
+              let audit=pivot["interpolationAudit"] as? [String:Any],audit["valid"] is Bool,
+              pivot["physicalCalibrationVerified"] as? Bool == false,
+              pivot["exactJointReturn"] as? Bool == true else {throw fail("missing fixed-pivot path audit.")}
+        let localPoint=try point(pivot["pointInObject"]),localAxis=try point(pivot["axisInObject"])
+        let anchor=try point(pivot["anchorInScene"]),axis=try point(pivot["axisInScene"])
+        let initial=try matrix(pivot["initialCanPoseInScene"])
+        guard abs(simd_length(localAxis)-1)<1e-6,abs(simd_length(axis)-1)<1e-6,
+              simd_length(initial*SIMD4(localPoint,1)-SIMD4(anchor,1))<1e-6,
+              simd_length(initial*SIMD4(localAxis,0)-SIMD4(axis,0))<1e-6 else {throw fail("inconsistent fixed pivot or axis.")}
+        _ = try number(pivot["tiltDegrees"],1...170)
+        pivotPointInObject=localPoint
+        let worldAnchor=sceneTransform*SIMD4(anchor,1),worldAxis=sceneTransform*SIMD4(axis,0)
+        pivotAnchor=SIMD3(worldAnchor.x,worldAnchor.y,worldAnchor.z)
+        pivotAxis=SIMD3(worldAxis.x,worldAxis.y,worldAxis.z)
+        let selectedAudit=timed ? (root["preparedTimedPour"] as? [String:Any])?["rotationAudit"] as? [String:Any] : audit
+        guard let selectedPassed=selectedAudit?["valid"] as? Bool else {throw fail("missing interpolated path review.")}
+        rotationAuditPassed=selectedPassed
+        let tableUp=SIMD3(sceneTransform.columns.2.x,sceneTransform.columns.2.y,sceneTransform.columns.2.z)
+        guard simd_length(tableUp-SIMD3<Double>(0,0,1))<1e-6,
+              let outline=geometry["tableOutlineXY"] as? [[Double]],(3...64).contains(outline.count),
+              outline.allSatisfy({$0.count==2 && $0.allSatisfy({$0.isFinite && abs($0)<3})}) else {
+            throw fail("table must be horizontal and retain its observed outline; rerun the saved test.")
+        }
+        let polygon=outline.map {SIMD2($0[0],$0[1])}
+        guard polygon.indices.allSatisfy({ i in
+            let a=polygon[(i+1)%polygon.count]-polygon[i]
+            let b=polygon[(i+2)%polygon.count]-polygon[(i+1)%polygon.count]
+            return a.x*b.y-a.y*b.x>1e-9
+        }) else {throw fail("invalid convex tabletop outline.")}
+        tableOutline=polygon
+        cupCenter=SIMD3(center[0],center[1],center[2]);cupRadius=try number(cup["outer_radius"],0.015 ... 0.12)
+        cupHeight=try number(cup["height"],0.05 ... 0.3);canRadius=try number(can["radius"],0.015 ... 0.06)
+        canHeight=try number(can["height"],0.05 ... 0.25);tableBounds=bounds;tableZ=try number(geometry["tableZ"],-2 ... 3)
+        guard let alignment=root["tableAlignment"] as? [String:Any],
+              alignment["heightSource"] as? String == "observed floor/table separation",
+              let observation=alignment["observation"] as? [String:Any],
+              observation["method"] as? String == "same-frame parallel floor/table depth planes" else {
+            throw fail("table height needs paired floor/table evidence; rerun the saved test.")
+        }
+        tableHeightAboveFloor=try number(alignment["tableHeightAboveFloorMeters"],0.3 ... 1.2)
+        let floor=try number(alignment["floorHeightInModelMeters"],-0.001 ... 0.001)
+        let measured=try number(observation["tableHeightMeters"],0.3 ... 1.2)
+        let floorOffset=try number(observation["floorOffsetOpticalMeters"],-3 ... 0)
+        let tableOffset=try number(observation["tableOffsetOpticalMeters"],-3 ... 0)
+        guard abs(tableOffset-floorOffset-measured)<1e-6,abs(measured-tableHeightAboveFloor)<1e-6,
+              abs(sceneTransform.columns.3.z+tableZ-floor-tableHeightAboveFloor)<1e-6 else {
+            throw fail("rendered table height disagrees with its floor/table measurement.")
+        }
+        canSpoutRadius=try number(can["spout_radius"],0 ... canRadius)
+        guard let preparation=root["bodyPreparation"] as? [String:Any],
+              preparation["executable"] as? Bool == false,
+              preparation["torsoPerpendicularVerifiedInModel"] as? Bool == true,
+              preparation["baseRouteChecked"] as? Bool == false,
+              preparation["sequence"] as? [String] == ["drive toward fixed table","turn torso perpendicular","reach and pour"] else {
+            throw fail("missing drive and perpendicular torso preparation.")
+        }
+        let advance=try number(preparation["forwardTravelMeters"],0 ... 0.4)
+        let torsoYaw=try number(preparation["torsoTargetYawRadians"],-1.2 ... 1.2)
+        guard abs(atan2(sceneTransform.columns.0.y,sceneTransform.columns.0.x)-torsoYaw)<1e-6 else {
+            throw fail("torso is not perpendicular to the fixed tabletop front edge.")
+        }
+        var expectedBase=matrix_identity_double4x4;expectedBase.columns.3.x=advance
+        let reportedBase=try matrix(preparation["worldFromRobotAtReach"])
+        guard simd_length(reportedBase.columns.3-expectedBase.columns.3)<1e-6 else {throw fail("inconsistent base approach.")}
+        guard let rows=root[timed ? "nativeTimedPreview":"steps"] as? [[String:Any]],(2...5000).contains(rows.count) else {throw fail("no solved timeline available; run the saved test first.")}
+        var built:[Frame]=[]
+        var lastPhase = -1
+        var previousAdvance=0.0
+        for (index,row) in rows.enumerated() {
+            if !timed {
+                guard let ik=row["ik"] as? [String:Any],ik["solved"] as? Bool == true else {
+                    throw fail("IK did not reach every target; inspect the saved report before changing the approach.")
+                }
+            }
+            let time=timed ? try number(row["timeSeconds"],0 ... 600):Double(index)
+            guard time >= (built.last?.time ?? 0),let stage=row["stage"] as? String,stage.count<=200 else {throw fail("invalid timeline.")}
+            let checks=["ik","selfClearance","worldClearance"].compactMap { key -> String? in
+                guard let value=row[key] as? [String:Any] else {return nil}
+                return "\(key): \((value["clear"] as? Bool ?? value["solved"] as? Bool ?? false) ? "passed":"blocked")"
+            }.joined(separator:" · ")
+            let pose=try positions(row["positions"]),base=try matrix(row["worldFromRobot"])
+            guard let phase=row["phase"] as? String,let phaseIndex=["drive","torso","arm"].firstIndex(of:phase),
+                  phaseIndex>=lastPhase,base.columns.3.x>=previousAdvance-1e-6,base.columns.3.x<=advance+1e-6,
+                  simd_length(base.columns.0-SIMD4<Double>(1,0,0,0))+simd_length(base.columns.1-SIMD4<Double>(0,1,0,0))+simd_length(base.columns.2-SIMD4<Double>(0,0,1,0))<1e-6,
+                  abs(base.columns.3.y)+abs(base.columns.3.z)<1e-6 else {throw fail("invalid drive/turn/reach sequence.")}
+            if index==0 && !timed {
+                guard phase=="drive",simd_length(base.columns.3-SIMD4<Double>(0,0,0,1))<1e-6 else {throw fail("full replay must start before the drive.")}
+            }
+            if phase != "drive" && abs(base.columns.3.x-advance)>1e-6 {throw fail("reach/turn starts before drive arrival.")}
+            if !timed && phase=="arm" && lastPhase<1 {throw fail("torso preparation is missing from full replay.")}
+            if phase=="drive" && abs(pose["torso_yaw",default:0]-baseline["torso_yaw",default:0])>1e-6 {throw fail("torso turns before drive arrival.")}
+            if phase=="arm" && abs((pose["torso_yaw"] ?? .infinity)-torsoYaw)>1e-6 {throw fail("reach starts before torso alignment.")}
+            if phase != "arm" {
+                guard pose.allSatisfy({ name,value in name=="torso_yaw" || abs(value-savedBaseline[name,default:value])<1e-6 }) else {throw fail("arm moves during base preparation.")}
+            }
+            lastPhase=phaseIndex;previousAdvance=base.columns.3.x
+            guard let attached=row["attached"] as? Bool else {throw fail("missing payload attachment state.")}
+            built.append(Frame(time:time,stage:stage,positions:pose,canPose:try matrix(row["desiredCanPose"]),worldFromRobot:base,attached:attached,detail:checks))
+        }
+        guard (built.last?.time ?? 0)>0 else {throw fail("empty duration.")}
+        frames=built;self.timed=timed
+        let quick=root["preparedTimedPour"] as? [String:Any]
+        summary=String(format:"Saved test · drive %.0f cm, then torso %.1f° perpendicular\nActive tilt %.2f s + hold %.2f s; return begins %.2f s.\nPivot path: %@. Registration and full task remain unverified.",
+            advance*100,torsoYaw*180 / .pi,quick?["tiltSeconds"] as? Double ?? 0,
+            quick?["fixedHoldSeconds"] as? Double ?? 0,quick?["uprightRecallAtSeconds"] as? Double ?? 0,
+            selectedPassed ? "model check passed":"BLOCKED; inspect audit")
+    }
+
+    /// Render the payload from the same interpolated joints as the robot.
+    /// Independent Cartesian interpolation conceals the spout's actual arc.
+    func payloadPose(positions:[String:Double],worldFromRobot:simd_double4x4,
+                     detachedPose:simd_double4x4,attached:Bool,model:ROBGhostRobotModel) -> simd_double4x4 {
+        if !attached {return detachedPose}
+        return worldFromRobot * model.frames(positions)["right_tool"]! * canInTool
+    }
+}
+
 enum ROBGhostMotionError: LocalizedError {
     case blocked(String)
     var errorDescription: String? { if case .blocked(let text) = self { return text }; return nil }
@@ -225,6 +416,27 @@ final class ROBGhostRobotModel {
         }
         return minimum
     }
+
+    /// Height is invariant under the modeled vertical torso-yaw axis. Raising
+    /// every arm/gripper hull above the tread envelope therefore avoids a
+    /// gripper sweeping into a track anywhere in a torso turn. This remains
+    /// a mechanical model check, not environment or payload clearance.
+    func torsoTurnVerticalClearance(vendorJoints: [Double]) -> Double? {
+        let limits = ROBWorkspaceCollisionPlan.jointBounds(model: self)
+        guard vendorJoints.count == 7,
+              zip(vendorJoints, limits).allSatisfy({ $0.isFinite && $1.contains($0) }),
+              let yaw = joints.first(where: { $0.name == "torso_yaw" }),
+              abs(yaw.axis.x) < 0.0001, abs(yaw.axis.y) < 0.0001, abs(yaw.axis.z) > 0.9999 else { return nil }
+        let bounds = worldCollisionBounds(positions: positions(vendorLeft: vendorJoints))
+        let arms = bounds.keys.filter { $0.hasPrefix(physicalSide + "_") && ($0.hasSuffix("_Link") || $0 == toolLink) }
+        let treads = bounds.keys.filter { $0.contains("track") || $0.contains("flipper") || $0.contains("sprocket") }
+        guard arms.count >= 8, arms.contains(toolLink), !treads.isEmpty,
+              let top = treads.compactMap({ bounds[$0]?.high.z }).max() else { return nil }
+        return arms.compactMap { link -> Double? in
+            guard let box = bounds[link] else { return nil }
+            return box.low.z - top - (link == toolLink ? ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters : 0)
+        }.min()
+    }
     /// Exact world AABBs of the verified model's local collision boxes. Used
     /// by depth self filtering and full-arm workspace checking, never as a
     /// claim that a model prior is a measured camera/arm registration.
@@ -239,6 +451,37 @@ final class ROBGhostRobotModel {
             bounds[link] = (points.reduce(points[0]) { simd_min($0, $1) }, points.reduce(points[0]) { simd_max($0, $1) })
         }
         return bounds
+    }
+    /// Upper bound for displacement of EVERY point in the local collision
+    /// boxes between two configurations. Rigid point displacement is convex
+    /// over each box, so its eight corners suffice. This is model geometry,
+    /// not camera registration, endpoint-only TCP tracking or a force sensor.
+    func maximumArmHullDisplacement(from start:[Double],to end:[Double],openJawPadding:Double) throws->Double {
+        let limits=ROBWorkspaceCollisionPlan.jointBounds(model:self)
+        guard start.count==7,end.count==7,openJawPadding.isFinite,(0...0.1).contains(openJawPadding),
+              zip(start,limits).allSatisfy({$0.isFinite && $1.contains($0)}),
+              zip(end,limits).allSatisfy({$0.isFinite && $1.contains($0)}) else {
+            throw ROBGhostMotionError.blocked("The measured arm corridor has invalid joints or jaw padding.")
+        }
+        let a=frames(positions(vendorLeft:start)),b=frames(positions(vendorLeft:end))
+        let links=hulls.keys.filter{$0.hasPrefix(physicalSide+"_") && ($0.hasSuffix("_Link") || $0==toolLink || $0==physicalSide+"_base_link")}
+        guard links.count>=8 else {throw ROBGhostMotionError.blocked("The measured arm corridor lacks the complete arm model.")}
+        var maximum=0.0
+        for link in links {
+            guard let corners=hullBoxes[link],corners.count==8,let first=a[link],let second=b[link] else {
+                throw ROBGhostMotionError.blocked("The measured arm corridor lost a collision box or frame.")
+            }
+            let padding=link==toolLink ? openJawPadding:0
+            let low=corners.reduce(corners[0]){simd_min($0,$1)}-SIMD3(repeating:padding)
+            let high=corners.reduce(corners[0]){simd_max($0,$1)}+SIMD3(repeating:padding)
+            for x in [low.x,high.x] {for y in [low.y,high.y] {for z in [low.z,high.z] {
+                let p=SIMD4(x,y,z,1),u=first*p,v=second*p
+                let distance=simd_distance(SIMD3(u.x,u.y,u.z),SIMD3(v.x,v.y,v.z))
+                guard distance.isFinite else {throw ROBGhostMotionError.blocked("The measured arm corridor has a nonfinite hull displacement.")}
+                maximum=max(maximum,distance)
+            }}}
+        }
+        return maximum
     }
     /// Bounded position-only numerical IK for preview. No motor command is
     /// generated here; the separate proposal compiler enforces execution scope.
@@ -275,6 +518,274 @@ final class ROBGhostRobotModel {
             }
         }
         return toolPosition(q).map { simd_distance($0, target) < 0.012 } == true ? q : nil
+    }
+}
+
+/// Physical RIGHT can-recycling start, measured on 2026-10-27 at 17:04:11Z.
+/// LEFT uses the shared Mirror L10 → R11 mapping candidate. Both native
+/// mirror buttons share this provisional joint-specific mapping. Its J5
+/// sign/zero relationship is not physically calibrated. An operator-adjusted
+/// hold must not be overwritten merely to match this assumed ready target.
+/// These are physical-side Amber encoder radians, not mirrored URDF angles.
+/// Saving a target does not grant motion or certify camera registration.
+enum ROBCanRecyclingReadyPose {
+    static let revision = "operator_ready_20261028_shared_mirror_j5_v7"
+    static let jointTolerance = 0.015
+    private static let rightTarget = [-0.2564815877344792,-1.6648804817852159,0,-0.9825658273336827,1.107465951929527,1.7111044361935033,0.46278495947412146]
+    static func target(physicalSide:String)throws->[Double] {
+        switch physicalSide {
+        case "left": return ROBArmPoseMirror.mirroredJointValues(rightTarget.map(NSNumber.init(value:)))!.map(\.doubleValue)
+        case "right": return rightTarget
+        default: throw ROBGhostMotionError.blocked("The recycling ready pose needs a physical left or right arm.")
+        }
+    }
+    static func matches(_ measured:[Double],physicalSide:String)->Bool {
+        guard measured.count==7,measured.allSatisfy(\.isFinite),let goal=try?target(physicalSide:physicalSide) else{return false}
+        return reached(measured,goal:goal)
+    }
+    /// Only omits an unnecessary empty preparation move. The caller still
+    /// needs fresh stationary feedback and a new workspace/approach review.
+    /// This does not make the measured pose a saved calibration target.
+    static func isRaisedSearchHold(model:ROBGhostRobotModel,measured:[Double],modes:[Int])->Bool {
+        modes.count==7 && modes.allSatisfy{$0==2} &&
+            model.torsoTurnVerticalClearance(vendorJoints:measured).map{$0>=0.03}==true
+    }
+    static func reached(_ measured:[Double],goal:[Double])->Bool {
+        ROBArmRoutinePlan.near(measured,goal,tolerance:jointTolerance)
+    }
+    /// Motors share a destination and duration, but their measured progress
+    /// need not be identical. Full path geometry is reviewed separately.
+    static func containsFeedback(_ measured:[Double],from start:[Double],to goal:[Double])->Bool {
+        guard measured.count==7,start.count==7,goal.count==7,
+              (measured+start+goal).allSatisfy(\.isFinite) else{return false}
+        return (0..<7).allSatisfy { i in
+            measured[i]>=min(start[i],goal[i])-jointTolerance &&
+            measured[i]<=max(start[i],goal[i])+jointTolerance
+        }
+    }
+    /// A direct coordinated interpolation from fresh feedback. No old front
+    /// pose, hanging detour or J2/J4 inverse-kinematic entry is inserted.
+    static func steps(model:ROBGhostRobotModel,baseline:[Double])throws->[ROBLeftGestureProposal.Step] {
+        let goal=try target(physicalSide:model.physicalSide),bounds=ROBWorkspaceCollisionPlan.jointBounds(model:model)
+        guard baseline.count==7,(baseline+goal).allSatisfy(\.isFinite),
+              zip(baseline,bounds).allSatisfy({$1.contains($0)}),zip(goal,bounds).allSatisfy({$1.contains($0)}) else {
+            throw ROBGhostMotionError.blocked("The taught recycling entry exceeds the current model or motor bounds.")
+        }
+        if matches(baseline,physicalSide:model.physicalSide){return []}
+        let delta=zip(baseline,goal).map{$1-$0},count=max(1,Int(ceil((delta.map{abs($0)}.max() ?? 0)/0.30)))
+        var previous=baseline,result:[ROBLeftGestureProposal.Step]=[]
+        for index in 1...count {
+            let target=index==count ? goal:zip(baseline,delta).map{$0+$1*Double(index)/Double(count)}
+            guard let minimum=ROBArmRoutinePlan.duration(from:previous,to:target) else {
+                throw ROBGhostMotionError.blocked("The taught recycling entry exceeds the trajectory timing bound.")
+            }
+            let delta=zip(previous,target).map{abs($0-$1)}.max() ?? 0
+            let duration=max(minimum,(delta+jointTolerance)/ROBArmRoutinePlan.maximumAverageSpeed)
+            guard duration<=5 else {throw ROBGhostMotionError.blocked("The taught recycling entry exceeds the trajectory timing bound.")}
+            result.append(.init(positions:target,seconds:duration,stage:"Direct move to taught recycling ready pose"));previous=target
+        }
+        return result
+    }
+}
+
+/// Geometry for the explicitly operator-observed, empty two-arm torso test.
+/// This reviews modeled tread-proxy separation. External clearance comes
+/// from the operator; the mirrored left target remains model-assumed.
+struct ROBOperatorObservedReadyPlan {
+    let baseline: [Double]
+    let steps: [ROBLeftGestureProposal.Step]
+    let initialPairs: [String: Double]
+
+    static func make(model: ROBGhostRobotModel, baseline: [Double]) throws -> Self {
+        let goal = try ROBCanRecyclingReadyPose.target(physicalSide: model.physicalSide)
+        let bounds = ROBWorkspaceCollisionPlan.jointBounds(model: model)
+        guard baseline.count == 7, (baseline + goal).allSatisfy(\.isFinite),
+              zip(baseline, bounds).allSatisfy({ $1.contains($0) }),
+              zip(goal, bounds).allSatisfy({ $1.contains($0) }),
+              model.torsoTurnVerticalClearance(vendorJoints: goal).map({ $0 >= 0.03 }) == true else {
+            throw ROBGhostMotionError.blocked("The grasp-ready target exceeds the arm model or tread-clearance bounds.")
+        }
+        var proxy = ROBWorkspaceSelfProxyClearance(model: model)
+        let initial = try proxy.separations(vendorLeft: baseline)
+        if ROBCanRecyclingReadyPose.reached(baseline, goal: goal) {
+            return .init(baseline: baseline, steps: [], initialPairs: initial)
+        }
+        // Keep all moving joints coordinated. A slightly earlier shoulder lift
+        // can clear the left tread proxy without separate joint test motions.
+        for bias in [0.0, 0.05, 0.1, 0.2, 0.35, -0.05, -0.1, -0.2] {
+            let delta = zip(baseline, goal).map { $1 - $0 }
+            let count = max(8, Int(ceil((delta.map(abs).max() ?? 0) * (1 + abs(bias)) / 0.25)))
+            var previous = baseline, steps: [ROBLeftGestureProposal.Step] = []
+            for index in 1...count {
+                let t = Double(index) / Double(count)
+                let q = (0..<7).map { i in
+                    baseline[i] + delta[i] * (i == 1 ? t + bias * t * (1-t) : t)
+                }
+                // Accepted endpoint error affects every timing bound, including
+                // the cubic bound; padding only average speed can reject the
+                // next segment despite an in-tolerance measured hold.
+                guard let seconds = ROBArmRoutinePlan.duration(from: previous, to: q,
+                    padding: ROBCanRecyclingReadyPose.jointTolerance) else { continue }
+                guard seconds <= 5 else { break }
+                steps.append(.init(positions: q, seconds: seconds, stage: "Coordinated grasp-ready lift"))
+                previous = q
+            }
+            guard steps.count == count else { continue }
+            let plan = Self(baseline: baseline, steps: steps, initialPairs: initial)
+            do {
+                var start = baseline
+                for (index, step) in steps.enumerated() {
+                    try plan.review(from: start, to: step.positions, final: index == steps.count-1, model: model)
+                    start = step.positions
+                }
+                return plan
+            } catch { try Task.checkCancellation() }
+        }
+        throw ROBGhostMotionError.blocked("No coordinated grasp-ready lift preserves the starting tread-proxy clearance.")
+    }
+
+    func review(from start: [Double], to target: [Double], final: Bool, model: ROBGhostRobotModel) throws {
+        let bounds = ROBWorkspaceCollisionPlan.jointBounds(model: model)
+        guard start.count == 7, target.count == 7, (start+target).allSatisfy(\.isFinite),
+              zip(start, bounds).allSatisfy({ $1.contains($0) }),
+              zip(target, bounds).allSatisfy({ $1.contains($0) }) else {
+            throw ROBGhostMotionError.blocked("The measured lift segment exceeds joint bounds.")
+        }
+        var proxy = ROBWorkspaceSelfProxyClearance(model: model)
+        let narrow = Set(initialPairs.filter { $0.value < 0.03 }.keys)
+        let count = max(1, Int(ceil((zip(start, target).map { abs($1-$0) }.max() ?? 0) / 0.005)))
+        for index in 0...count {
+            try Task.checkCancellation()
+            let t = Double(index) / Double(count)
+            let q = zip(start, target).map { $0 + ($1-$0)*t }
+            let pairs = try proxy.separations(vendorLeft: q, forceNarrowPairs: narrow, minimumRetreatBounds: initialPairs)
+            guard pairs.keys == initialPairs.keys,
+                  pairs.allSatisfy({ pair, gap in gap + 1e-8 >= min(0.03, initialPairs[pair]!) }),
+                  !final || index != count || pairs.values.allSatisfy({ $0 >= 0.03 }) else {
+                throw ROBGhostMotionError.blocked("The coordinated lift approaches a tread proxy; holding the current pose.")
+            }
+        }
+    }
+}
+
+/// Relative EMPTY preparation geometry. This has no scene-clearance or motion
+/// authority: the caller must review every full-arm segment against live depth.
+struct ROBEmptyArmLiftGeometry {
+    let baseline:[Double]
+    let steps:[ROBLeftGestureProposal.Step]
+    let initialTip:SIMD3<Double>,liftedTip:SIMD3<Double>,rearwardTip:SIMD3<Double>,finalTip:SIMD3<Double>
+    let maximumInitialHorizontalTravelMeters:Double
+
+    /// Covers the measured beginning of an interrupted EMPTY vertical lift,
+    /// without commanding a return to zero or reusing an old waypoint.
+    /// Other joints retain the ordinary hanging tolerance. Full geometry,
+    /// empty-state and current operator scope are checked by the caller.
+    static func acceptsOperatorClearedInitialStart(_ q:[Double])->Bool {
+        q.count==7 && q.enumerated().allSatisfy { index,value in
+            value.isFinite && (index==1 || index==3 ? (-0.05...0.025).contains(value):abs(value)<=0.025)
+        }
+    }
+
+    static func make(model:ROBGhostRobotModel,baseline:[Double],initialRise:Double=0.06,
+        rearwardDistance:Double=0.10,remainingRise:Double=0.10)throws->Self {
+        guard model.physicalSide=="right",baseline.count==7,baseline.allSatisfy(\.isFinite),
+              initialRise.isFinite,(0.02...0.08).contains(initialRise),
+              rearwardDistance.isFinite,(0.05...0.15).contains(rearwardDistance),
+              remainingRise.isFinite,(0.03...0.15).contains(remainingRise) else {
+            throw ROBGhostMotionError.blocked("Staged empty lift needs a finite current RIGHT pose and bounded relative distances.")
+        }
+        let limits=ROBWorkspaceCollisionPlan.jointBounds(model:model)
+        guard zip(baseline,limits).allSatisfy({$1.contains($0)}) else {
+            throw ROBGhostMotionError.blocked("The current empty-lift pose is outside model or motor limits.")
+        }
+        func tip(_ q:[Double])throws->SIMD3<Double> {
+            guard let value=model.toolPosition(model.positions(vendorLeft:q)),
+                  [value.x,value.y,value.z].allSatisfy(\.isFinite) else {
+                throw ROBGhostMotionError.blocked("The staged empty lift lost its model tool frame.")
+            }
+            return value
+        }
+        var q=baseline,steps:[ROBLeftGestureProposal.Step]=[],maximumInitialHorizontal=0.0
+        let initial=try tip(q)
+        func append(_ target:[Double],stage:String,origin:SIMD3<Double>,horizontalLimit:Double,
+                    vertical:Bool,initialStage:Bool=false)throws {
+            let previous=try tip(q)
+            // Check the interpolated joint path, not only the solved endpoint.
+            // Physical table/self clearance is checked separately on all hulls.
+            for index in 1...20 {
+                let fraction=Double(index)/20,probe=zip(q,target).map{$0+($1-$0)*fraction}
+                let point=try tip(probe),horizontal=hypot(point.x-origin.x,point.y-origin.y)
+                if vertical {
+                    guard horizontal<=horizontalLimit,point.z>=previous.z-0.0005 else {
+                        throw ROBGhostMotionError.blocked("The coupled J2/J4 lift would sweep too far horizontally or descend.")
+                    }
+                    if initialStage {maximumInitialHorizontal=max(maximumInitialHorizontal,horizontal)}
+                }else {
+                    guard point.x<=previous.x+0.0005,point.z>=origin.z-0.002,abs(point.y-origin.y)<=0.02 else {
+                        throw ROBGhostMotionError.blocked("The J1 clearance stage would move forward, descend or sweep sideways.")
+                    }
+                }
+            }
+            guard zip(target,limits).allSatisfy({$1.contains($0)}),
+                  let minimum=ROBLeftArmInteractionPlan.duration(from:q,to:target),minimum<=5 else {
+                throw ROBGhostMotionError.blocked("The staged empty lift exceeds joint or trajectory limits.")
+            }
+            // The native joint feedback is asynchronous and the loaded shoulder
+            // tracks more slowly than the elbow. Slow the coupled path while
+            // retaining the existing3mm measured corridor and endpoint gate.
+            steps.append(.init(positions:target,seconds:max(3.2,minimum),stage:stage));q=target
+        }
+        func vertical(_ rise:Double,stage:String,horizontalLimit:Double,initialStage:Bool=false)throws {
+            let origin=try tip(q),count=Int(ceil(rise/0.015))
+            for segment in 1...count {
+                let targetY=origin.y,targetZ=origin.z+rise*Double(segment)/Double(count)
+                var target=q,solved=false
+                for _ in 0..<60 {
+                    let point=try tip(target),error=SIMD2(targetY-point.y,targetZ-point.z)
+                    if simd_length(error)<=0.0002 {solved=true;break}
+                    var a=target,b=target;a[1]+=0.0001;b[3]+=0.0001
+                    let pa=try tip(a),pb=try tip(b)
+                    let j2=SIMD2((pa.y-point.y)/0.0001,(pa.z-point.z)/0.0001)
+                    let j4=SIMD2((pb.y-point.y)/0.0001,(pb.z-point.z)/0.0001)
+                    let aa=simd_dot(j2,j2)+1e-7,bb=simd_dot(j4,j4)+1e-7,ab=simd_dot(j2,j4)
+                    let determinant=aa*bb-ab*ab
+                    guard determinant.isFinite,determinant>1e-12 else {break}
+                    let ea=simd_dot(j2,error),eb=simd_dot(j4,error)
+                    let d2=(ea*bb-eb*ab)/determinant,d4=(eb*aa-ea*ab)/determinant
+                    let scale=min(1,0.06/max(0.000001,max(abs(d2),abs(d4))))
+                    target[1]=max(limits[1].lowerBound,min(limits[1].upperBound,target[1]+scale*d2))
+                    target[3]=max(limits[3].lowerBound,min(limits[3].upperBound,target[3]+scale*d4))
+                }
+                guard solved else {throw ROBGhostMotionError.blocked("J2/J4 cannot reach this relative vertical lift within current joint limits.")}
+                try append(target,stage:stage,origin:origin,horizontalLimit:horizontalLimit,vertical:true,initialStage:initialStage)
+            }
+        }
+        try vertical(initialRise,stage:"J2/J4 vertical lift",horizontalLimit:0.003,initialStage:true)
+        let lifted=try tip(q),rearwardSegments=Int(ceil(rearwardDistance/0.02))
+        for segment in 1...rearwardSegments {
+            let targetX=lifted.x-rearwardDistance*Double(segment)/Double(rearwardSegments)
+            var target=q,solved=false
+            for _ in 0..<60 {
+                let point=try tip(target),error=targetX-point.x
+                if abs(error)<=0.0002 {solved=true;break}
+                var shifted=target;shifted[0]+=0.0001
+                let derivative=((try tip(shifted)).x-point.x)/0.0001
+                guard derivative.isFinite,abs(derivative)>0.05 else {break}
+                let delta=max(-0.06,min(0.06,error/derivative))
+                target[0]=max(limits[0].lowerBound,min(limits[0].upperBound,target[0]+delta))
+            }
+            guard solved else {throw ROBGhostMotionError.blocked("J1 cannot reach the rearward clearance target within current joint limits.")}
+            try append(target,stage:"J1 rearward clearance",origin:lifted,horizontalLimit:0,vertical:false)
+        }
+        let rearward=try tip(q)
+        try vertical(remainingRise,stage:"J2/J4 raised approach",horizontalLimit:0.04)
+        let final=try tip(q)
+        guard final.x<=initial.x-0.04,final.z>=initial.z+initialRise+remainingRise-0.001,
+              !steps.isEmpty,steps.count<=30,steps.reduce(0,{$0+$1.seconds})<=60 else {
+            throw ROBGhostMotionError.blocked("The staged lift did not retain its rearward clearance and raised endpoint.")
+        }
+        return .init(baseline:baseline,steps:steps,initialTip:initial,liftedTip:lifted,rearwardTip:rearward,finalTip:final,
+            maximumInitialHorizontalTravelMeters:maximumInitialHorizontal)
     }
 }
 
@@ -344,6 +855,7 @@ enum ROBLeftGestureCompiler {
                         collisionMap: (any ROBWorkspaceCollisionMap)? = nil,
                         collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
                         visualCalibrationTrial: ROBWorkspaceVisualCalibrationTrial? = nil,
+                        verifiedAttachment: ROBWorkspaceVerifiedAttachedCan? = nil,
                         nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws -> ROBLeftGestureProposal {
         func validatePath(_ path:ROBWorkspaceCollisionPlan,map:any ROBWorkspaceCollisionMap,sceneID:UUID,camera:UUID) throws {
             if let trial = visualCalibrationTrial {
@@ -367,6 +879,60 @@ enum ROBLeftGestureCompiler {
             }
             try validatePath(path,map:map,sceneID:sceneID,camera:camera)
             var result = proposal; result.workspaceCollisionPlan = path; return result
+        }
+        let attachedCarry=kind=="recycling_carry_release"
+        guard attachedCarry || (verifiedAttachment==nil && workspaceCollisionPlan?.intentionalContact?.verifiedAttachment==nil) else {
+            throw ROBGhostMotionError.blocked("An attached-can phase cannot be substituted for another gesture type.")
+        }
+        if attachedCarry {
+            guard let attachment=verifiedAttachment,attachment.valid,
+                  let path=workspaceCollisionPlan,path.intentionalContact?.verifiedAttachment==attachment,
+                  path.carryingAtStart==true,path.contactStepIndex==nil,
+                  let payload=path.payload,payload.valid,payload.fingerprint==attachment.payloadFingerprint,
+                  let contact=path.intentionalContact,contact.gripStepIndex==nil,let release=contact.releaseStepIndex,
+                  path.baseline==baseline,baseline==attachment.baseline,
+                  workspaceApproachPlan==nil,recyclingActions==nil,recyclingParameters==nil,
+                  !name.isEmpty,name.count<=100,generation>0,
+                  path.steps.count==contact.stepCount,path.steps.count<=80,path.steps.count>=3,
+                  path.steps.allSatisfy({$0.positions.count==7 && $0.positions.allSatisfy{$0.isFinite && abs($0)<=3.1}}),
+                  path.steps.reduce(0,{$0+$1.seconds})<=maximumScheduledSeconds,
+                  !path.steps.contains(where:{$0.jawAction == .prepare || $0.jawAction == .grip}),
+                  path.steps.filter({$0.jawAction == .release}).count==1,
+                  path.steps.indices.contains(release),path.steps[release].jawAction == .release else {
+                throw ROBGhostMotionError.blocked("A carry/release proposal needs the caller's matching verified native attachment and a complete carrying-at-start path; decoded evidence alone is insufficient.")
+            }
+            let rendered=path.steps.map{model.positions(vendorLeft:$0.positions)}
+            guard poses.isEmpty || poses==rendered,
+                  let held=model.toolPosition(model.positions(vendorLeft:baseline)),
+                  let drop=model.toolPosition(rendered[release]),let retreat=model.toolPosition(rendered.last!),
+                  simd_distance(drop,held)>=0.04,retreat.z-drop.z>=0.04 else {
+                throw ROBGhostMotionError.blocked("A carry/release path needs its exact selected-arm poses, a distinct drop and an upward empty retreat.")
+            }
+            // Do not reopen or regrip an already held can. Preserve the
+            // horizontal-jaw bound over every interpolated carrying segment.
+            var previous=baseline,checks=0
+            for step in path.steps.prefix(release+1) {
+                let travel=1.5*zip(previous,step.positions).reduce(0.0,{$0+abs($1.0-$1.1)})
+                guard previous.count==7,step.positions.count==7,travel.isFinite else {
+                    throw ROBGhostMotionError.blocked("The attached carrying segment is malformed.")
+                }
+                let samples=max(1,Int(ceil(travel/0.01)))
+                checks+=samples+1
+                guard checks<=ROBWorkspaceCollisionPlan.maximumPoseChecks else {
+                    throw ROBGhostMotionError.blocked("The attached carrying orientation review exceeded its bounded sample count.")
+                }
+                for index in 0...samples {
+                    let t=Double(index)/Double(samples),q=zip(previous,step.positions).map{$0+($1-$0)*t}
+                    guard let frame=model.frames(model.positions(vendorLeft:q))[model.toolLink],
+                          max(abs(frame.columns.1.z),abs(frame.columns.2.z))<=sin(8 * .pi/180) else {
+                        throw ROBGhostMotionError.blocked("The attached carrying path would turn the held can's jaws vertically.")
+                    }
+                }
+                previous=step.positions
+            }
+            return try checked(.init(id:id,name:name,kind:kind,modelID:model.modelID,referenceID:model.referenceID,
+                geometryID:model.geometryID,mappingID:model.selectedMappingID,sessionGeneration:generation,
+                baseline:baseline,poses:rendered,steps:path.steps))
         }
         let terminalGraspHold=kind=="recycling_grasp_hold"
         if terminalGraspHold {
@@ -498,6 +1064,7 @@ enum ROBLeftGestureCompiler {
                          collisionMap: (any ROBWorkspaceCollisionMap)? = nil,
                          collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
                          visualCalibrationTrial: ROBWorkspaceVisualCalibrationTrial? = nil,
+                         verifiedAttachment: ROBWorkspaceVerifiedAttachedCan? = nil,
                          nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws {
         guard proposal.modelID == model.modelID, proposal.referenceID == model.referenceID,
               proposal.geometryID == model.geometryID, proposal.mappingID == model.selectedMappingID else {
@@ -508,7 +1075,7 @@ enum ROBLeftGestureCompiler {
             recyclingActions: proposal.recyclingActions, recyclingParameters: proposal.recyclingParameters,
             workspaceCollisionPlan:proposal.workspaceCollisionPlan,workspaceApproachPlan:proposal.workspaceApproachPlan,collisionMap:collisionMap,
             collisionSceneID:collisionSceneID,collisionCameraGeneration:collisionCameraGeneration,
-            visualCalibrationTrial:visualCalibrationTrial,nowMilliseconds:nowMilliseconds)
+            visualCalibrationTrial:visualCalibrationTrial,verifiedAttachment:verifiedAttachment,nowMilliseconds:nowMilliseconds)
         guard proposal == expected else { throw ROBGhostMotionError.blocked("The reviewed path or timing changed; review a new proposal.") }
     }
 
@@ -703,6 +1270,9 @@ enum ROBTabletopPickPlace {
     static let stages = ["Pickup approach", "Grasp can", "Small lift", "Bucket release", "Retreat"]
     static let savedKey = "ROBTabletopPickPlace.v1"
     static let intensity = 2
+    // Operator restored the previous grip setting after identifying startup
+    // calibration as a possible crushing cause. These are vendor command units.
+    static let recyclingIntensity = intensity
 
     static func saved() -> ROBGhostGesture? {
         guard let data = UserDefaults.standard.data(forKey: savedKey), data.count <= 200_000,

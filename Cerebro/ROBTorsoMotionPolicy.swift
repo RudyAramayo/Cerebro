@@ -1,7 +1,24 @@
 import Foundation
 
-/// Angles are camera-observed degrees relative to ROB's base. Tic counts never
-/// establish a reference. No hardware or UI dependency is permitted here.
+/// Operator-observed calibration, not mechanical end stops or an encoder.
+/// ROB-left is positive yaw and decreasing Tic counts. The slipring permits
+/// full turns; the temporary debugging cables are handled separately below.
+struct ROBTorsoCountCalibration {
+    static let leftCount = -8_907.0
+    static let rightCount = 9_091.0
+    static let nominalCenter = 92.0
+    static let countsPerTurn = 35_996.0
+    var centerCount = nominalCenter
+    func heading(count: Double) -> Double { (centerCount-count) * 360 / Self.countsPerTurn }
+    func count(heading: Double) -> Double { centerCount-heading * Self.countsPerTurn / 360 }
+    mutating func align(count: Double, observedHeading: Double) {
+        guard count.isFinite, observedHeading.isFinite else { return }
+        centerCount = count + observedHeading * Self.countsPerTurn / 360
+    }
+}
+
+/// Angles come from the caller's selected observation source. Raw Tic counts
+/// cannot establish physical base alignment. No hardware/UI dependency here.
 struct ROBTorsoMotionPolicy {
     enum Mode { case hold, velocity, heading }
     struct Observation {
@@ -14,7 +31,18 @@ struct ROBTorsoMotionPolicy {
 
     var maximumSpeed = 8.0
     var acceleration = 8.0
-    var slowdownAngle = 25.0
+    var maximumControlInterval = 0.25
+    // Operator-confirmed TIC ceiling; output angles use observed table counts,
+    // without applying an unverified gearbox ratio a second time.
+    static let maximumPulseRate = 3_000.0
+    static let speedRange = 1.0...(maximumPulseRate * 360 / ROBTorsoCountCalibration.countsPerTurn)
+    var debugCableMode = false
+    private(set) var cableReferenceHeading: Double?
+    private(set) var cableTrackingInterrupted = false
+    var cableTravelDegrees: Double? {
+        guard let reference = cableReferenceHeading, let current = unwrappedHeading else { return nil }
+        return current-reference
+    }
     let maximumObservationAge = 0.75
     private(set) var observation: Observation?
     private(set) var unwrappedHeading: Double?
@@ -38,7 +66,8 @@ struct ROBTorsoMotionPolicy {
         return (0 ... maximumObservationAge).contains(now - observation.capturedAt)
     }
 
-    @discardableResult mutating func observe(_ value: Observation, now: TimeInterval) -> Bool {
+    @discardableResult mutating func observe(_ value: Observation, now: TimeInterval,
+        continuousStationaryCounter: Bool = false) -> Bool {
         guard value.heading.isFinite, value.uncertainty.isFinite,
               (0 ... 2).contains(value.uncertainty), value.capturedAt.isFinite,
               (0 ... maximumObservationAge).contains(now - value.capturedAt),
@@ -56,15 +85,18 @@ struct ROBTorsoMotionPolicy {
         if let previous = observation, let oldHeading = unwrappedHeading {
             let delta = Self.wrap(heading - previous.heading)
             let gap = value.capturedAt - previous.capturedAt
-            let changedFrame = value.stream != previous.stream || gap > maximumObservationAge
+            let stationaryContinuity = continuousStationaryCounter && !armed && mode == .hold && velocity == 0 && delta == 0
+            let changedFrame = value.stream != previous.stream || (gap > maximumObservationAge && !stationaryContinuity)
             let unexpected = abs(delta) > max(8, maximumSpeed * max(0, gap) + 4)
             if changedFrame || (armed && unexpected) {
                 invalidate(changedFrame ? "Camera reference changed; re-arm from the new estimate"
                            : "Torso moved differently from the request; camera estimate corrected, motion stopped")
+                cableReferenceHeading = nil; cableTrackingInterrupted = true
             }
             unwrappedHeading = changedFrame ? heading : oldHeading + delta
         } else {
             unwrappedHeading = heading
+            if !cableTrackingInterrupted { cableReferenceHeading = heading }
         }
         observation = Observation(heading: heading, capturedAt: value.capturedAt,
                                   uncertainty: value.uncertainty, stream: value.stream, sequence: value.sequence)
@@ -94,8 +126,19 @@ struct ROBTorsoMotionPolicy {
 
     mutating func requestHeading(_ heading: Double) {
         guard armed, heading.isFinite, let current = unwrappedHeading else { return }
-        targetHeading = current + Self.wrap(heading - Self.wrap(current))
-        mode = .heading; status = "Turning to heading with a smooth slowdown"
+        // With the debugging tether, choose the equivalent heading near the
+        // tracked starting turn, so repeated requests unwind instead of ratchet.
+        // Untethered operation retains the shortest circular route, without stops.
+        let reference = debugCableMode ? cableReferenceHeading ?? current : current
+        targetHeading = reference + Self.wrap(heading - Self.wrap(reference))
+        mode = .heading; status = "Turning to heading with a ramped stop"
+    }
+
+    @discardableResult mutating func requestUnwind() -> Bool {
+        guard armed, debugCableMode, let reference = cableReferenceHeading else { return false }
+        targetHeading = reference; mode = .heading
+        status = "Reversing the tracked debug turn to its starting orientation"
+        return true
     }
 
     mutating func hold() {
@@ -109,6 +152,7 @@ struct ROBTorsoMotionPolicy {
     }
 
     mutating func resetObservation() {
+        if observation != nil { cableReferenceHeading = nil; cableTrackingInterrupted = true }
         invalidate("Waiting for a camera-confirmed torso angle")
         observation = nil; unwrappedHeading = nil; targetHeading = nil
     }
@@ -117,32 +161,44 @@ struct ROBTorsoMotionPolicy {
         invalidate(reason); observation = nil
     }
 
-    /// Smooth quadratic taper plus a stopping-distance bound. Reversals pass through
-    /// zero; large timing gaps or missing visual evidence stop authority.
-    mutating func tick(at now: TimeInterval) -> Double {
+    /// Cruise until braking distance, without a long low-speed taper. Acceleration
+    /// remains bounded and reversals pass through zero; stale evidence stops.
+    mutating func tick(at now: TimeInterval, measuredPositionVelocity: Double? = nil,
+                       positionReached: Bool = false) -> Double {
         guard armed else { return 0 }
-        guard maximumSpeed.isFinite, (0.1 ... 20).contains(maximumSpeed),
+        guard maximumSpeed.isFinite, Self.speedRange.contains(maximumSpeed),
               acceleration.isFinite, (0.1 ... 30).contains(acceleration),
-              slowdownAngle.isFinite, (5 ... 90).contains(slowdownAngle),
               hasFreshObservation(at: now), let current = unwrappedHeading else {
             invalidate("Visual confirmation lost or motion profile invalid; torso stopped")
             return 0
         }
         let dt = now - (previousTick ?? now)
-        guard dt >= 0, dt <= 0.25 else {
+        guard maximumControlInterval.isFinite, (0.05...0.5).contains(maximumControlInterval),
+              dt >= 0, dt <= maximumControlInterval else {
             invalidate("Control timing expired; torso stopped")
             return 0
         }
         previousTick = now
+        if mode == .heading, let measuredPositionVelocity {
+            guard measuredPositionVelocity.isFinite else {
+                invalidate("TIC velocity feedback is invalid; torso stopped"); return 0
+            }
+            // TIC's onboard position planner owns acceleration and braking.
+            // The host only supervises freshness/deadlines and exact arrival.
+            velocity = measuredPositionVelocity
+            if positionReached {
+                velocity = 0; mode = .hold; stallStart = nil
+                status = "At requested TIC target; controller stopped"
+            } else { status = "TIC moving to target position" }
+            return velocity
+        }
         var desired = 0.0
         if mode == .velocity { desired = rate * maximumSpeed }
         if mode == .heading, let target = targetHeading {
             let error = target - current
             let tolerance = max(0.75, 2 * (observation?.uncertainty ?? 2))
             let distance = max(0, abs(error) - tolerance)
-            let t = min(1, abs(error) / slowdownAngle)
-            let tapered = maximumSpeed * t * (2 - t)
-            desired = (error < 0 ? -1 : 1) * min(tapered, sqrt(2 * acceleration * distance))
+            desired = (error < 0 ? -1 : 1) * min(maximumSpeed, sqrt(2 * acceleration * distance))
             if distance == 0 && abs(velocity) < 0.05 {
                 mode = .hold; status = "At requested heading within camera uncertainty"
             }
