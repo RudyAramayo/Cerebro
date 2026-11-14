@@ -374,8 +374,8 @@ Brake
                         <outlet property="forwardButton" destination="2qg-8N-K1f" id="KPN-cE-rpT"/>
                         <outlet property="lactBackward" destination="7yy-OT-pR2" id="RLa-eV-hDr"/>
                         <outlet property="lactForward" destination="GbD-SW-0M1" id="NYx-8k-HGG"/>
-                        <outlet property="localTreadSpeedSlider" destination="BId-oe-CQf" id="ROB-speed-outlet"/>
                         <outlet property="leftButton" destination="VL9-5k-YtA" id="41A-QN-ghQ"/>
+                        <outlet property="localTreadSpeedSlider" destination="BId-oe-CQf" id="ROB-speed-outlet"/>
                         <outlet property="rightButton" destination="xT8-H2-5BM" id="y0e-0R-RIT"/>
                         <outlet property="waistRotationSlider" destination="vkg-Qr-cRZ" id="FbD-b1-7T6"/>
                     </connections>
@@ -515,7 +515,7 @@ Brake
                                         </buttonCell>
                                     </button>
                                     <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="sxx-y3-lb2">
-                                        <rect key="frame" x="0.0" y="116" width="22" height="18"/>
+                                        <rect key="frame" x="0.0" y="141" width="22" height="18"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                         <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="nOr-g2-8S6">
                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -539,7 +539,7 @@ Brake
                                         </buttonCell>
                                     </button>
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="DX1-NI-9b4">
-                                        <rect key="frame" x="36" y="138" width="96" height="19"/>
+                                        <rect key="frame" x="36" y="116" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                         <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="rfT-As-d3L"/>
                                         <connections>
@@ -580,7 +580,7 @@ Brake
                                         </connections>
                                     </slider>
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="8ew-oh-hDz">
-                                        <rect key="frame" x="36" y="115" width="96" height="19"/>
+                                        <rect key="frame" x="36" y="140" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                         <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="4000" tickMarkPosition="above" sliderType="linear" id="1Rh-6I-Mfs"/>
                                         <connections>
@@ -588,7 +588,7 @@ Brake
                                         </connections>
                                     </slider>
                                     <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="UXA-1L-beq">
-                                        <rect key="frame" x="0.0" y="139" width="22" height="18"/>
+                                        <rect key="frame" x="0.0" y="117" width="22" height="18"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                         <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="X3D-nR-200">
                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -2850,8 +2850,6 @@ Brake
                                                     </prototypeCellViews>
                                                 </tableColumn>
                                             </tableColumns>
-                                            <connections>
-                                            </connections>
                                         </tableView>
                                     </subviews>
                                 </clipView>
@@ -2983,8 +2981,6 @@ Brake
                                                     </prototypeCellViews>
                                                 </tableColumn>
                                             </tableColumns>
-                                            <connections>
-                                            </connections>
                                         </tableView>
                                     </subviews>
                                 </clipView>
@@ -3080,8 +3076,6 @@ Brake
                                                     </prototypeCellViews>
                                                 </tableColumn>
                                             </tableColumns>
-                                            <connections>
-                                            </connections>
                                         </tableView>
                                     </subviews>
                                 </clipView>
