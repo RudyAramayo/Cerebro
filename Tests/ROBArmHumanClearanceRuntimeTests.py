@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Actual frame-bound token/factory wiring; inert controlled geometry result."""
+"""Actual prepared-only token/factory wiring; inert controlled geometry result."""
 from pathlib import Path
 import subprocess,tempfile
 from ROBMainCameraHeadlessStaticTests import braced_declaration as block
@@ -8,10 +8,16 @@ source=(ROOT/'Cerebro/ROBArmRoutineVision.swift').read_text()
 method=block(source,'func makeGripperVisualServoFrame(')
 guard=method[method.index('        guard nowMilliseconds'):method.index('        let width=min(320,source.width)')]
 assert 'humanClearance:HumanClearance? = nil' in method
+factory=block(source,'func makeHumanClearance(')
+assert 'assess(prepared:preparedCorridor,' in factory
+assert 'model:ROBGhostRobotModel' not in factory and 'JSONEncoder' not in factory
+assert factory.index('assess(prepared:') < factory.rindex('guard isFresh(frame),frame.cameraGeneration==cameraGeneration')
 swift=r'''
 import Foundation
 import simd
 import CryptoKit
+enum Clock {static var milliseconds=1_000_020.0}
+struct Date {var timeIntervalSince1970:Double {Clock.milliseconds/1000}}
 /* EVIDENCE */
 struct ROBGhostRobotModel {
  let modelID="actual-model-fixture",geometryID="geometry",selectedMappingID="right"
@@ -19,15 +25,26 @@ struct ROBGhostRobotModel {
 }
 enum ROBWorkspaceHumanProximity {
  struct Assessment {let clear:Bool,reason:String}
+ // Controlled inert prepared input. The actual sealed constructor/projector
+ // is tested separately; this fixture extracts the native consumer verbatim.
+ struct PreparedCorridor {
+  let routeIdentity:String,route:[[Double]]
+  let width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double
+  static func fixture(route:[[Double]],width:Int=640,fx:Double=500)->PreparedCorridor {
+   .init(routeIdentity:ROBGhostRobotModel.hash(try! JSONEncoder().encode(route)),route:route,
+    width:width,height:480,fx:fx,fy:500,cx:319.5,cy:239.5)
+  }
+ }
  static var clear=true,calls=0,lastRegions:[[Double]]=[],lastRoute:[[Double]]=[]
- static func assess(model:ROBGhostRobotModel,baseline:[Double],route:[[Double]],cameraToRobot:simd_double4x4,
-  width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,humanRegions:[[Double]],localizationSucceeded:Bool,
-  spatialErrorMeters:Double)->Assessment {
-  calls+=1;lastRegions=humanRegions;lastRoute=route
+ static var onAssess:(()->Void)?
+ static func assess(prepared:PreparedCorridor,humanRegions:[[Double]],localizationSucceeded:Bool)->Assessment {
+  calls+=1;lastRegions=humanRegions;lastRoute=prepared.route
+  onAssess?()
   return .init(clear:clear && localizationSucceeded,reason:"controlled inert core verdict")
  }
 }
 enum ROBVisualGraspVerifier {enum Unavailable:Error {case evidence(String)}}
+struct Advisory {let usesOperatorClearedCameraCollisionAdvisory:Bool;let cameraGeneration:UUID}
 struct Runtime {let identity:String}
 struct Match {var status="matched"}
 struct K {
@@ -56,7 +73,7 @@ final class Harness {
  /* FRESH */
  func adapter(frame:Frame,scopeIdentity:String="frozen-route",jointPositions:[Double]=Array(repeating:0,count:7),
   jointCapturedAtMilliseconds:Double,poseHeldDuringCapture:Bool=true,openingCommandAtMilliseconds:Double?=nil,
-  nowMilliseconds:Double,humanClearance:HumanClearance?=nil)throws->Bool {
+  nowMilliseconds:Double,humanClearance:HumanClearance?=nil,cameraCollisionAdvisoryTrial:Advisory?=nil)throws->Bool {
   /* GUARD */
   return true
  }
@@ -68,12 +85,13 @@ func evidence(_ f:Harness.Frame,success:Bool=true,unlocalized:Bool=false,regions
 }
 @main enum Fixture {
  static func main()throws {
-  let h=Harness(),now=Date().timeIntervalSince1970*1000,model=ROBGhostRobotModel(),q=Array(repeating:0.0,count:7)
+  let h=Harness(),now=Date().timeIntervalSince1970*1000
   let route=[[0.01,0,0,0,0,0,0]]
   var frame=Harness.Frame(capturedAt:now-20,cameraGeneration:h.cameraGeneration)
   frame.humanObservations=evidence(frame)
-  func make(_ f:Harness.Frame,scope:String="frozen-route",path:[[Double]]?=nil)throws->Harness.HumanClearance {
-   try h.makeHumanClearance(frame:f,scopeIdentity:scope,model:model,baseline:q,route:path ?? route,cameraToRobot:matrix_identity_double4x4)
+  func make(_ f:Harness.Frame,scope:String="frozen-route",path:[[Double]]?=nil,
+   prepared:ROBWorkspaceHumanProximity.PreparedCorridor?=nil)throws->Harness.HumanClearance {
+   try h.makeHumanClearance(frame:f,scopeIdentity:scope,preparedCorridor:prepared ?? .fixture(route:path ?? route))
   }
   func rejected(_ body:()throws->Void) {do {try body();preconditionFailure("Invalid human token/adapter accepted")}catch{}}
   let token=try make(frame)
@@ -120,16 +138,26 @@ func evidence(_ f:Harness.Frame,success:Bool=true,unlocalized:Bool=false,regions
   var old=frame;old.capturedAt=now-701;old.humanObservations=evidence(old);rejected{_ = try make(old)}
   var future=frame;future.capturedAt=now+1000;future.humanObservations=evidence(future);rejected{_ = try make(future)}
   var sparse=frame;sparse.depthCoverage=0.249;rejected{_ = try make(sparse)}
-  rejected{_ = try make(frame,scope:"")};rejected{_ = try make(frame,path:[])}
+  rejected{_ = try make(frame,scope:"")}
+  let beforeInvalid=ROBWorkspaceHumanProximity.calls
+  rejected{_ = try make(frame,prepared:.fixture(route:route,width:639))}
+  rejected{_ = try make(frame,prepared:.fixture(route:route,fx:501))}
+  precondition(ROBWorkspaceHumanProximity.calls==beforeInvalid,"Wrong prepared K/dimensions reached assessment")
+  ROBWorkspaceHumanProximity.onAssess={Clock.milliseconds=now+701}
+  rejected{_ = try make(frame)};Clock.milliseconds=now
+  let originalGeneration=h.cameraGeneration
+  ROBWorkspaceHumanProximity.onAssess={h.cameraGeneration=UUID()}
+  rejected{_ = try make(frame)};h.cameraGeneration=originalGeneration
+  ROBWorkspaceHumanProximity.onAssess=nil
   rejected{_ = try h.adapter(frame:frame,jointCapturedAtMilliseconds:now-1000,nowMilliseconds:now,humanClearance:token)}
   rejected{_ = try h.adapter(frame:frame,jointCapturedAtMilliseconds:now-10,poseHeldDuringCapture:false,nowMilliseconds:now,humanClearance:token)}
-  print("PASS actual native sameframe human-token factory/adapter: callscontrolledkernelwithfrozenroute+sameframeevidence; unknown/failure/overlap holds; upperbodyextension+thresholds; source/K/seq/time/gen/scope binding; final700/depth/feedback/held checks; legacydefaultunchanged. Geometry tested separately; no device/motionauthority.")
+  print("PASS actual prepared-only native human-token factory/adapter: no perframeCAD; sealedK/dimensions checkedbeforecheapassessment; postassessment700ms+generation rechecked; exactroute/source/evidence binding; unknown/failure/overlap holds; upperbodyextension+thresholds; legacydepth/feedback/held/default checks. Projector tested separately; no device/motionauthority.")
  }
 }
 '''.replace('/* EVIDENCE */',block(source,'struct ROBArmHumanObservationEvidence {'))
-swift=swift.replace('/* TOKEN */',block(source,'struct HumanClearance {')).replace('/* FACTORY */',block(source,'func makeHumanClearance('))
+swift=swift.replace('/* TOKEN */',block(source,'struct HumanClearance {')).replace('/* FACTORY */',factory)
 swift=swift.replace('/* FRESH */',block(source,'private func isFresh(')).replace('/* GUARD */',guard)
 with tempfile.TemporaryDirectory(prefix='rob-frame-human-token-',dir='/private/tmp') as folder:
  path=Path(folder);(path/'Fixture.swift').write_text(swift)
- subprocess.run(['xcrun','swiftc','-O','-swift-version','5','-parse-as-library',str(path/'Fixture.swift'),'-o',str(path/'fixture')],check=True,timeout=35)
+ subprocess.run(['xcrun','swiftc','-O','-swift-version','5','-parse-as-library',str(ROOT/'Cerebro/ROBArmJointLimits.swift'),str(path/'Fixture.swift'),'-o',str(path/'fixture')],check=True,timeout=35)
  subprocess.run([str(path/'fixture')],check=True,timeout=10)

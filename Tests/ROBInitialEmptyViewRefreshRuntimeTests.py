@@ -59,6 +59,8 @@ final class Sample{var positionsRadians=Array(repeating:NSNumber(value:0),count:
 @MainActor final class Trial{
  let vision=ROBArmRoutineVision.shared,sample=Sample();var localReceiptCommand:String?="right_recycle_cans"
  var activeCameraCollisionAdvisory=false
+ var usesApproachHumanCorridor=false
+ func requireApproachHumanClearance(frame:ROBArmRoutineVision.Frame)throws->Bool{throw ROBArmRoutineError.blocked("No corridor capability in legacy-view fixture")}
  var cameraReady=false,leased=false,armTravelDispatched=false,jawCommandDispatched=false,jawSetupDispatchUncertain=false,recyclingGripDispatched=false,servoPossiblePayloadUncertain=false
  var localReceiptHeldNeckIdentity:String?="head",head="head",stopped=false,feedbackFresh=true,checks=0,strictCalls=0
  var generation:UInt64=1,collisionReviewStatus:NSDictionary=[:]
@@ -128,5 +130,5 @@ final class Sample{var positionsRadians=Array(repeating:NSNumber(value:0),count:
 '''.replace('/* HELPER */',helper).replace('/* REFERENCE TYPE */',referenceType).replace('/* PIN */',pin).replace('/* ACTUAL SCOPE */',scopeBody)
 with tempfile.TemporaryDirectory(prefix='rob-initial-view-refresh-',dir='/private/tmp')as folder:
  p=Path(folder);(p/'Fixture.swift').write_text(fixture)
- subprocess.run(['xcrun','swiftc','-O','-swift-version','5','-parse-as-library',str(p/'Fixture.swift'),'-o',str(p/'fixture')],check=True)
+ subprocess.run(['xcrun','swiftc','-O','-swift-version','5','-parse-as-library',str(root/'Cerebro/ROBArmJointLimits.swift'),str(p/'Fixture.swift'),'-o',str(p/'fixture')],check=True)
  subprocess.run([str(p/'fixture')],check=True,timeout=10)

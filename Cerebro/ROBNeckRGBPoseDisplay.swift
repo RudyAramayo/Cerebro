@@ -748,6 +748,18 @@ enum ROBNeckRGBPoseDisplay {
         return value["estimatedGravityPitchRefinement"] != nil || value["demoPortableGravityPitchPrior"]as?Bool==true
     }
     static func robotModelDisplayLiftMeters(model:ROBGhostRobotModel)->Double {profile(model:model)?.robotModelDisplayLiftMeters ?? 0}
+    /// Upright ROB has no lateral body roll. The QR floor fit is a display
+    /// reference, not an observation of chassis attitude. Remove only its
+    /// lateral tilt for the shared viewport; retain pitch, pivot and physical
+    /// camera-to-model transforms. This never changes registration evidence.
+    static func uprightPresentationGauge(model:ROBGhostRobotModel,modelToDisplay:simd_double4x4)->simd_double4x4 {
+        let up=modelToDisplay*SIMD4<Double>(0,0,1,0)
+        guard up.y.isFinite,up.z.isFinite,hypot(up.y,up.z)>1e-12,
+              let torso=model.frames(model.reference)["torso_link"] else{return modelToDisplay}
+        let angle=atan2(up.y,up.z)
+        let center=SIMD3(torso.columns.3.x,torso.columns.3.y,torso.columns.3.z)
+        return translated(center)*rotated(SIMD3(angle,0,0))*translated(-center)*modelToDisplay
+    }
     /// Child-group presentation only. Conjugate display-up through the common
     /// gauge so mesh lift stays vertical without translating camera rays or
     /// measured world overlays. This matrix is never a camera/model transform.

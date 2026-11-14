@@ -28,7 +28,8 @@ enum ROBRecyclingVisualInspection {
     }
     @MainActor static func beginIncrementalVisualServo(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
         map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
-        feedbackForFrame:@escaping(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,check:()throws->Void) async throws->ServoContext {
+        feedbackForFrame:@escaping(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,
+        humanClearanceForFrame:((ROBArmRoutineVision.Frame,String)throws->ROBArmRoutineVision.HumanClearance)?=nil,check:()throws->Void) async throws->ServoContext {
         try check();throw ROBArmRoutineError.blocked("No actual jaw pixels were supplied to this hardware-free task seam.")
     }
     @MainActor static func observeIncrementalVisualServo(context:ServoContext,model:ROBGhostRobotModel,
@@ -467,6 +468,20 @@ final class ROBArmRoutineVision {
     var runtimeIdentity=String(repeating:"a",count:64)
     var stereoPolicyIdentity=String(repeating:"c",count:64)
     var clearsFramesOnSetActive=false,frameAvailable=true
+    struct HumanEvidence {
+        enum Kind {case hand,person}
+        struct Rect {let xMin:Double,yMin:Double,xMax:Double,yMax:Double}
+        struct Region {let kind:Kind,confidence:Double,normalizedTopLeft:Rect,upperBodyOnly:Bool}
+        let sequence:UInt64,capturedAtMilliseconds:Double,cameraGeneration:UUID,width:Int,height:Int
+        let localizationSucceeded:Bool,unavailableReason:String?,regions:[Region]
+    }
+    struct HumanClearance {
+        let routeIdentity:String
+        func matches(frame:Frame,scopeIdentity:String)->Bool {false}
+    }
+    func makeHumanClearance(frame:Frame,scopeIdentity:String,preparedCorridor:ROBWorkspaceHumanProximity.PreparedCorridor)throws->HumanClearance {
+        throw ROBArmRoutineError.blocked("No native localized human evidence was supplied to this passive task fixture.")
+    }
     struct RuntimeCalibration:Codable {let identity:String;let stereoPolicySHA256:String;let actualDeviceMXID="fixture-device"}
     struct Correspondence {let status="matched"}
     struct Intrinsics {
@@ -480,7 +495,7 @@ final class ROBArmRoutineVision {
         func isValid(forWidth:Int,height:Int)->Bool {forWidth==24 && height==24 && fx>0 && fy>0}
     }
     struct Depth {var width=24,height=24;var millimetersLittleEndian:Data {Data(repeating:0,count:width*height*2)};func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
-    struct Frame {var image=CIImage(color:CIColor(red:0,green:0,blue:0)).cropped(to:CGRect(x:0,y:0,width:24,height:24));let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true;var depthCoverage=1.0}
+    struct Frame {var image=CIImage(color:CIColor(red:0,green:0,blue:0)).cropped(to:CGRect(x:0,y:0,width:24,height:24));let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true;var depthCoverage=1.0;var humanObservations:HumanEvidence?=nil}
     var frameSequence:UInt64=10,captureFocalLength=24.0
     var captureCameraServiceSourceSHA256:String?=nil
     var captureWidth=24,captureHeight=24

@@ -229,17 +229,17 @@ final class ROBArmRoutineVision {
         }
     }
 
-    func makeHumanClearance(frame:Frame,scopeIdentity:String,model:ROBGhostRobotModel,baseline:[Double],
-        route:[[Double]],cameraToRobot:simd_double4x4,spatialErrorMeters:Double=0.05) throws ->HumanClearance {
+    func makeHumanClearance(frame:Frame,scopeIdentity:String,
+        preparedCorridor:ROBWorkspaceHumanProximity.PreparedCorridor) throws ->HumanClearance {
         guard isFresh(frame),frame.cameraGeneration==cameraGeneration,!scopeIdentity.isEmpty,
               scopeIdentity.utf8.count<=8192,let depth=frame.depth,let k=frame.intrinsics,
               k.isValid(forWidth:depth.width,height:depth.height),k.rgbOutputUndistorted==true,
               k.depthRGBGeometryCorrespondence?.status=="matched",let observed=frame.humanObservations,
               observed.sequence==frame.sequence,observed.capturedAtMilliseconds==frame.capturedAt,
               observed.cameraGeneration==frame.cameraGeneration,observed.width==depth.width,observed.height==depth.height,
-              observed.localizationSucceeded,baseline.count==7,baseline.allSatisfy(\.isFinite),
-              !route.isEmpty,route.count<=80,route.allSatisfy({$0.count==7 && $0.allSatisfy(\.isFinite)}) else {
-            throw ROBVisualGraspVerifier.Unavailable.evidence("Current localized hand/person observations and a frozen empty-arm route are required.")
+              observed.localizationSucceeded,preparedCorridor.width==depth.width,preparedCorridor.height==depth.height,
+              [preparedCorridor.fx,preparedCorridor.fy,preparedCorridor.cx,preparedCorridor.cy]==[k.fx,k.fy,k.cx,k.cy] else {
+            throw ROBVisualGraspVerifier.Unavailable.evidence("Current localized hand/person observations and the frozen empty-arm projection are required.")
         }
         let regions=observed.regions.compactMap { region -> [Double]? in
             guard region.confidence >= (region.kind == .hand ? 0.3:0.4) else {return nil}
@@ -252,14 +252,15 @@ final class ROBArmRoutineVision {
             }
             return [r.xMin,r.yMin,r.xMax,r.yMax]
         }
-        let assessment=ROBWorkspaceHumanProximity.assess(model:model,baseline:baseline,route:route,
-            cameraToRobot:cameraToRobot,width:depth.width,height:depth.height,fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,
-            humanRegions:regions,localizationSucceeded:observed.localizationSucceeded,spatialErrorMeters:spatialErrorMeters)
+        let assessment=ROBWorkspaceHumanProximity.assess(prepared:preparedCorridor,
+            humanRegions:regions,localizationSucceeded:observed.localizationSucceeded)
         guard assessment.clear else {throw ROBVisualGraspVerifier.Unavailable.evidence(assessment.reason)}
-        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
-        let identityPrefix=Data([model.modelID,model.geometryID,model.selectedMappingID].joined(separator:"|").utf8)
-        let routeIdentity=ROBGhostRobotModel.hash(identityPrefix+(try encoder.encode([baseline]+route)))
-        return HumanClearance(assessment:assessment,routeIdentity:routeIdentity,frame:frame,scope:scopeIdentity)
+        // Even a cheap assessment does not refresh its source. Context may have
+        // restarted or this original exposure may have aged out while checking.
+        guard isFresh(frame),frame.cameraGeneration==cameraGeneration else {
+            throw ROBVisualGraspVerifier.Unavailable.evidence("The localized human observation expired or its camera source changed during assessment.")
+        }
+        return HumanClearance(assessment:assessment,routeIdentity:preparedCorridor.routeIdentity,frame:frame,scope:scopeIdentity)
     }
 
     func setActive(_ value: Bool, teaching: Bool = false) {

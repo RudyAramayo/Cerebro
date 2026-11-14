@@ -51,6 +51,38 @@ import simd
         let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
         expect(try JSONDecoder().decode(ROBWorkspaceHumanProximity.Assessment.self,from:encoder.encode(clear))==clear,"Assessment audit failed roundtrip")
 
+        func prepare(matrix:simd_double4x4?=nil,baseline:[Double]?=nil,route:[[Double]]?=nil,
+            fx:Double=200,cx:Double=319.5,modelError:Double=0.05,humanBuffer:Double=0.10)throws->ROBWorkspaceHumanProximity.PreparedCorridor {
+            try ROBWorkspaceHumanProximity.prepare(model:model,baseline:baseline ?? start,route:route ?? [goal],cameraToRobot:matrix ?? camera,
+                width:640,height:480,fx:fx,fy:200,cx:cx,cy:239.5,spatialErrorMeters:modelError,humanBufferMeters:humanBuffer)
+        }
+        let prepared=try prepare(),samePrepared=try prepare()
+        expect(prepared.routeIdentity==samePrepared.routeIdentity && prepared.routeIdentity.count==64,"Exact native geometry did not produce a stable identity")
+        expect(prepared.modelID==model.modelID && prepared.referenceID==model.referenceID && prepared.geometryID==model.geometryID &&
+            prepared.mappingID==model.selectedMappingID && prepared.physicalSide=="right" && prepared.baseline==start && prepared.route==[goal],"Prepared corridor lost its exact physical source/route")
+        expect(prepared.width==640 && prepared.height==480 && prepared.fx==200 && prepared.fy==200 && prepared.cx==319.5 && prepared.cy==239.5 &&
+            prepared.cameraToRobotColumnMajor==(0..<4).flatMap{c in(0..<4).map{camera[c][$0]}},"Prepared projection/K binding changed")
+        expect(ROBWorkspaceHumanProximity.assess(prepared:prepared,humanRegions:far,localizationSucceeded:true)==clear,"Prepared-only assessment changed the actual geometric result")
+        for _ in 0..<1000 {
+            let repeated=ROBWorkspaceHumanProximity.assess(prepared:prepared,humanRegions:far,localizationSucceeded:true)
+            precondition(repeated==clear,"Fresh-region intersection mutated the sealed native geometry")
+        }
+        checks+=1
+        expect(!ROBWorkspaceHumanProximity.assess(prepared:prepared,humanRegions:[[0,0,1,1]],localizationSucceeded:true).clear,"Prepared-only intersection ignored an actual overlapping human")
+        expect(!ROBWorkspaceHumanProximity.assess(prepared:prepared,humanRegions:[],localizationSucceeded:false).clear,"Prepared-only detector failure became no humans")
+        let incomplete=try prepare(fx:4000)
+        expect(!incomplete.fullCorridorVisible && !ROBWorkspaceHumanProximity.assess(prepared:incomplete,humanRegions:far,localizationSucceeded:true).clear,"Incomplete sealed geometry admitted a visible person")
+        let incompleteNoHuman=ROBWorkspaceHumanProximity.assess(prepared:incomplete,humanRegions:[],localizationSucceeded:true)
+        expect(incompleteNoHuman.clear && !incompleteNoHuman.fullCorridorVisible,"No-detection inferred visibility or changed legacy behavior for an offscreen corridor")
+        var movedCamera=camera;movedCamera.columns.3.x+=0.001
+        var movedStart=start;movedStart[0]=0.001
+        var movedGoal=goal;movedGoal[2]=0.001
+        for changed in [try prepare(matrix:movedCamera),try prepare(baseline:movedStart),try prepare(route:[movedGoal]),
+            try prepare(fx:201),try prepare(cx:320),try prepare(modelError:0.051),try prepare(humanBuffer:0.101)] {
+            expect(changed.routeIdentity != prepared.routeIdentity,"Changed frozen projection/route/uncertainty reused an old native corridor identity")
+        }
+        do {_=try prepare(fx:0);preconditionFailure("Invalid K produced a sealed corridor")}catch{checks+=1}
+
         // A shoulder/motor can intersect a person while the tool stays clear.
         let inverse=simd_inverse(camera)
         func point(_ world:SIMD3<Double>)->[Double] {
@@ -84,6 +116,6 @@ import simd
             foundInterior=true;break
         }
         expect(foundInterior,"Actual CAD fixture did not produce a distinct intervening swept region")
-        print("PASS \(checks) actual-CAD human-proximity checks: whole arm/open jaw, sampled complete route, separated human allowed, overlapping/unknown/cropped/behind held, explicit buffers, bounded audit; no authority or actuators")
+        print("PASS \(checks) actual-CAD human-proximity checks: sealed source/route/K/buffer identity, prepared-only repeated intersection, whole arm/open jaw, sampled complete route, separated human allowed, overlapping/unknown/cropped/behind held, explicit buffers, bounded audit; no authority or actuators")
     }
 }

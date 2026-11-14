@@ -194,6 +194,7 @@ import CoreImage
         var retainedFrames:[ROBGripperVisualServo.Frame]=[]
         var provisionalCoMotion=false
         var canAppearanceSeed:ROBVisualGraspVerifier.AppearanceSeed?
+        var humanClearanceForFrame:((ROBArmRoutineVision.Frame,String)throws->ROBArmRoutineVision.HumanClearance)?
         var cameraCollisionAdvisoryTrial:ROBWorkspaceVisualCalibrationTrial?
         var nativeObservedSupport:ROBVisualGraspVerifier.ObservedSupport?
         @MainActor init(baseline:ServoBaseline,can:ROBWorkspaceLocatedObject,model:ROBGhostRobotModel,box:[Double]) {
@@ -240,7 +241,9 @@ import CoreImage
     /// This retained appearance seed never serves as a live servo observation.
     private static func captureIncrementalCanAppearance(frame:ROBArmRoutineVision.Frame,model:ROBGhostRobotModel,
         trial:ROBWorkspaceVisualCalibrationTrial,
-        feedbackForFrame:(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,check:()throws->Void)throws->ROBGripperVisualServo.Frame {
+        feedbackForFrame:(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,
+        humanClearanceForFrame:((ROBArmRoutineVision.Frame,String)throws->ROBArmRoutineVision.HumanClearance)?=nil,
+        check:()throws->Void)throws->ROBGripperVisualServo.Frame {
         try check()
         guard let feedback=feedbackForFrame(frame),feedback.sampleAgeAtReceiptMilliseconds<=ROBArmFeedbackTiming.maximumAgeMilliseconds else {
             throw ROBGhostMotionError.blocked("Pre-approach can appearance needs its actual exposure-matched held feedback.")
@@ -251,18 +254,20 @@ import CoreImage
         return try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:frame,scopeIdentity:view,
             jointPositions:feedback.positionsRadians.map(\.doubleValue),jointCapturedAtMilliseconds:now-feedback.effectiveSampleAgeMilliseconds,
             poseHeldDuringCapture:true,openingCommandAtMilliseconds:nil,nowMilliseconds:now,
+            humanClearance:try humanClearanceForFrame?(frame,view),
             cameraCollisionAdvisoryTrial:trial.usesOperatorClearedCameraCollisionAdvisory ? trial:nil)
     }
 
     static func beginIncrementalVisualServo(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
         map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
         feedbackForFrame:@escaping(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,
+        humanClearanceForFrame:((ROBArmRoutineVision.Frame,String)throws->ROBArmRoutineVision.HumanClearance)?=nil,
         check:() throws->Void) async throws->ServoContext {
         try check()
         var capturedAppearance:ROBGripperVisualServo.Frame?
         let(observation,reference)=try await ROBArmRoutineVision.shared.observeWorkspace(onCaptured:{frame in
             capturedAppearance=try captureIncrementalCanAppearance(frame:frame,model:model,trial:trial,
-                feedbackForFrame:feedbackForFrame,check:check)
+                feedbackForFrame:feedbackForFrame,humanClearanceForFrame:humanClearanceForFrame,check:check)
         })
         try check()
         let controller=ROBFixedHeadCalibrationWindowController.shared,scope=try controller.scope(model:model,frame:reference)
@@ -293,6 +298,7 @@ import CoreImage
         let view=try incrementalCanViewIdentity(scope:scope,trial:trial,frame:reference)
         let baseline=ServoBaseline(projection:.visualTrial(projection),scope:scope,targetIdentity:"can-\(can.sequence)-\(trial.receiptID)",viewIdentity:view)
         let result=ServoContext(baseline:baseline,can:can,model:model,box:detections[0].box)
+        result.humanClearanceForFrame=humanClearanceForFrame
         result.cameraCollisionAdvisoryTrial=trial.usesOperatorClearedCameraCollisionAdvisory ? trial:nil
         guard let seedPixels=capturedAppearance,seedPixels.sequence==reference.sequence,
               seedPixels.capturedAtMilliseconds==reference.capturedAt,seedPixels.scopeIdentity==view else {
@@ -387,9 +393,10 @@ import CoreImage
             targetDepth=optical.z>0 ? optical.z:nil
         }
         checkpoint("can_geometry_reacquired")
+        let frameHuman=try context.humanClearanceForFrame?(frame,context.baseline.viewIdentity)
         var pixels=try ROBArmRoutineVision.shared.makeGripperVisualServoFrame(frame:frame,scopeIdentity:context.baseline.viewIdentity,
             jointPositions:feedback.positionsRadians.map(\.doubleValue),jointCapturedAtMilliseconds:historicalTime,
-            poseHeldDuringCapture:true,openingCommandAtMilliseconds:openingCommandAtMilliseconds,nowMilliseconds:now,cameraCollisionAdvisoryTrial:context.cameraCollisionAdvisoryTrial)
+            poseHeldDuringCapture:true,openingCommandAtMilliseconds:openingCommandAtMilliseconds,nowMilliseconds:now,humanClearance:frameHuman,cameraCollisionAdvisoryTrial:context.cameraCollisionAdvisoryTrial)
         checkpoint("jaw_pixels_materialized")
         let currentTool=model.toolPosition(model.positions(vendorLeft:currentFeedback.positionsRadians.map(\.doubleValue)))
         guard let currentTool,let k=frame.intrinsics,let depth=frame.depth else {throw ROBGhostMotionError.blocked("Missing nominal tool search region; no visual jaw location inferred.")}
