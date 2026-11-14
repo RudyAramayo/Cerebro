@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ROB · Chess from two viewpoints</title>
+<style>
+:root { color-scheme:dark; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:#101b27; color:#edf3f8 }
+* { box-sizing:border-box } body { margin:0; padding:36px clamp(18px,4vw,64px); max-width:1600px; margin-inline:auto }
+.eyebrow { color:#66e0c8; font-size:12px; letter-spacing:2px; font-weight:750 }
+h1 { font-size:clamp(28px,4vw,46px); letter-spacing:-1.5px; margin:14px 0 12px; font-weight:650 }
+p { line-height:1.55; color:#b8c9d9; max-width:880px; margin:8px 0 }
+.stats { display:flex; gap:12px; flex-wrap:wrap; margin:26px 0 }
+.stat { border:1px solid #344759; background:#182737; border-radius:12px; padding:13px 20px; min-width:190px }
+.stat b { display:block; font-size:21px; color:#f5fafc; margin-bottom:5px }
+.stat span { font-size:12px; color:#bacbd8 }
+.toolbar { display:flex; align-items:center; gap:14px; padding:15px 0 }
+button { border:1px solid #4f697e; background:#23394b; color:#eef8ff; border-radius:8px; padding:9px 15px; cursor:pointer; font:inherit }
+button:hover { background:#335570 } button:disabled { opacity:.4; cursor:default }
+input[type=range] { flex:1; accent-color:#66e0c8 } #counter { min-width:120px; font-variant-numeric:tabular-nums }
+.views { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px }
+figure { margin:0; background:#182737; border:1px solid #344759; border-radius:16px; overflow:hidden }
+figcaption { display:flex; justify-content:space-between; gap:12px; padding:17px 20px; font-weight:600 }
+figcaption small { color:#80ddc8; font-weight:450 }
+.image { position:relative; line-height:0 } .image img { width:100%; display:block }
+svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none }
+.frame-meta { padding:12px 20px; color:#afc2d3; font-size:12px; line-height:1.6; overflow-wrap:anywhere }
+.review { margin-top:22px; padding:20px 24px; background:#182737; border-left:3px solid #66e0c8; border-radius:0 12px 12px 0 }
+.review b { color:#80ddc8 } code { display:block; margin-top:12px; color:#d2e0eb; font-size:12px; overflow-wrap:anywhere }
+.notes { display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:24px }
+h2 { font-size:16px; margin:0 0 10px } .notes p { font-size:14px }
+.chip { display:inline-block; border:1px solid #486477; border-radius:6px; padding:5px 8px; margin:8px 8px 0 0; font-size:13px }
+footer { margin-top:30px; color:#8399ac; font-size:12px; line-height:1.6 }
+@media(max-width:850px) { .views,.notes { grid-template-columns:1fr } body { padding-top:24px } .toolbar { flex-wrap:wrap } }
+</style>
+<div class="eyebrow">ROB / MAKER FAIRE CHESS STUDY</div>
+<h1>One board. Two viewpoints.</h1>
+<p>The main camera shows the position. The belly camera adds side profiles to help study this marble set’s similar-looking pieces.</p>
+<div class="stats">
+  <div class="stat"><b id="pair-count"></b><span>Associated camera pairs</span></div>
+  <div class="stat"><b id="depth-count"></b><span>Frames with aligned depth</span></div>
+  <div class="stat"><b id="annotation-count"></b><span>Reviewed piece crops</span></div>
+</div>
+<div class="toolbar">
+  <button id="prev" aria-label="Previous camera pair">←</button>
+  <span id="counter" aria-live="polite"></span>
+  <input id="slider" aria-label="Camera pair" type="range" min="0" value="0" step="1">
+  <button id="next" aria-label="Next camera pair">→</button>
+</div>
+<div class="views">
+  <figure><figcaption>Main camera <small>Board position</small></figcaption>
+    <div class="image"><img id="face-image" alt="Main camera chessboard evidence"><svg id="face-overlay" aria-hidden="true"></svg></div>
+    <div class="frame-meta" id="face-meta"></div>
+  </figure>
+  <figure><figcaption>Belly camera <small>Piece profiles</small></figcaption>
+    <div class="image"><img id="belly-image" alt="Belly camera chess piece side profiles"><svg id="belly-overlay" aria-hidden="true"></svg></div>
+    <div class="frame-meta" id="belly-meta"></div>
+  </figure>
+</div>
+<div class="review"><b id="review-title"></b><p id="review-description"></p><code id="fen"></code><div id="labels"></div></div>
+<div class="notes">
+  <div><h2>Timing for a still board</h2><p id="timing"></p><p>When the board stays still, the views can describe the same position. Moving pieces and hands need tighter timing checks.</p></div>
+  <div><h2>From profiles to measurements</h2><p>Each camera keeps its own RGB image, depth and intrinsics. Reviewed boxes identify visible examples; they do not locate every square in the belly image. Millimeter heights await a verified board plane and usable depth.</p></div>
+</div>
+<footer>Local teaching evidence · Original RGB-D files are retained and checked by SHA-256 · No automatic move acceptance or robot motion · Recorded camera poses have not been validated for this board.</footer>
+<script>
+const DATA=__ROB_DATA__;
+const {session,reviews,annotations,images}=DATA;
+const $=id=>document.getElementById(id);
+const slider=$('slider'); slider.max=session.pairs.length-1;
+$('pair-count').textContent=session.pairs.length;
+$('depth-count').textContent=Object.values(session.frames).filter(f=>f.hasAlignedDepth).length;
+$('annotation-count').textContent=annotations.length;
+const firstReviewed=session.pairs.findIndex(p=>reviews.some(r=>r.pairID===p.id));
+slider.value=Math.max(0,firstReviewed);
+function show() {
+  const i=Number(slider.value), pair=session.pairs[i];
+  const reviewed=reviews.filter(r=>r.pairID===pair.id).sort((a,b)=>a.reviewedAt.localeCompare(b.reviewedAt)).at(-1);
+  const currentAnnotations=annotations.filter(a=>a.reviewID===reviewed?.id);
+  $('counter').textContent=`Pair ${i+1} of ${session.pairs.length}`;
+  $('prev').disabled=i===0; $('next').disabled=i===session.pairs.length-1;
+  for(const role of ['face','belly']) {
+    const frame=session.frames[pair[role]], overlay=$(role+'-overlay');
+    $(role+'-image').src=images[frame.id];
+    $(role+'-meta').textContent=`${frame.width} × ${frame.height} · ${frame.hasAlignedDepth?'RGB + aligned depth':'RGB only'} · Received ${frame.receivedAt} · ${frame.id}`;
+    overlay.setAttribute('viewBox',`0 0 ${frame.width} ${frame.height}`); overlay.replaceChildren();
+    for(const a of currentAnnotations.filter(a=>a.frameID===frame.id)) {
+      const [x,y,r,b]=a.boxPixels, ns='http://www.w3.org/2000/svg';
+      const rect=document.createElementNS(ns,'rect');
+      for(const [k,v] of Object.entries({x,y,width:r-x,height:b-y,fill:'none',stroke:'#67ffe0','stroke-width':2}))rect.setAttribute(k,v);
+      const label=document.createElementNS(ns,'text');
+      for(const [k,v] of Object.entries({x:x+2,y:Math.max(13,y-4),fill:'#b4fff0',stroke:'#102126','stroke-width':3,'paint-order':'stroke','font-size':12,'font-family':'sans-serif'}))label.setAttribute(k,v);
+      label.textContent=`${a.squareContext} ${a.label.replaceAll('_',' ')}`;
+      overlay.append(rect,label);
+    }
+  }
+  $('review-title').textContent=reviewed?'Confirmed stationary scene':'Awaiting position review';
+  $('review-description').textContent=reviewed?'The main view was checked against the saved chess position. Only explicitly annotated belly pieces have image labels.':'Timing associates these images. Their piece identities and board state have not been confirmed.';
+  $('fen').textContent=reviewed?reviewed.fen:'';
+  $('labels').replaceChildren();
+  for(const a of currentAnnotations) {
+    const chip=document.createElement('span'); chip.className='chip';
+    chip.textContent=`${a.cameraRole} · ${a.squareContext} · ${a.label.replaceAll('_',' ')} · ${a.visibility}`;
+    $('labels').append(chip);
+  }
+  $('timing').textContent=`Recorder receipt times differ by ${(pair.hostReceiptSkewSeconds*1000).toFixed(1)} ms. The cameras retain separate device timestamps. Exposure-time difference has not been measured.`;
+}
+slider.addEventListener('input',show);
+$('prev').onclick=()=>{slider.value=Math.max(0,Number(slider.value)-1);show()};
+$('next').onclick=()=>{slider.value=Math.min(session.pairs.length-1,Number(slider.value)+1);show()};
+document.addEventListener('keydown',event=>{
+  if(event.target===slider)return;
+  if(event.key==='ArrowLeft')$('prev').click();
+  if(event.key==='ArrowRight')$('next').click();
+});
+show();
+</script>
+</html>

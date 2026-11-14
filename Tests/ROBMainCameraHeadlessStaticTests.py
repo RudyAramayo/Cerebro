@@ -417,9 +417,18 @@ def main() -> None:
     deliver = braced_declaration(MANAGER, "private func deliverLatest(")
     require(
         "videoSampleHandler?(frameSet.rgbSampleBuffer)" in deliver
-        and "delegate?.cameraManager(self, didOutput: frameSet)" in deliver,
+        and "var identified = frameSet" in deliver
+        and "let identifiedFrame = identified" in deliver
+        and "delegate?.cameraManager(self, didOutput: identifiedFrame)" in deliver,
         "Disabling the local preview also disconnected capture consumers",
     )
+    agent_status = braced_declaration(MAIN, "- (NSDictionary *)localAgentStatus")
+    for owner in (
+        "![ROBArmRoutineCoordinator shared].ownsPhysicalMotion",
+        "![ROBRecycleMissionCoordinator shared].active",
+        "![ROBAnimationPlayback shared].isRunning",
+    ):
+        require(owner in agent_status, f"Chess camera adjustment lost motion owner guard: {owner}")
     frame_fanout = braced_declaration(
         CAMERA,
         "func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet)",
