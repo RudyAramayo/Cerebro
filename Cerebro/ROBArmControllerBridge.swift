@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 extension Notification.Name {
     static let ROBArmControllerTargetIntentDidUpdate = Notification.Name(
@@ -131,6 +132,17 @@ final class ROBArmControllerBridge {
     private var grants: [ROBArmSide: AuthorityGrant] = [:]
     private var runs: [ROBArmSide: ActiveRun] = [:]
     private var pendingHolds: [UInt64: PendingHold] = [:]
+    private struct TeleoperationLane {
+        var request: ROBArmTeleoperationRequest
+        var clutch: ROBArmTeleoperationClutch
+        var receivedAt: Double
+        let mapFingerprint: String
+        let planner: ROBArmTeleoperationPlanner
+        var lastDispatch = 0.0
+    }
+    private var teleoperation: [ROBArmSide: TeleoperationLane] = [:]
+    private var teleoperationSequences: [SequenceKey: UInt64] = [:]
+    private var teleoperationTargets: Set<UUID> = []
 
     init(server: AutoNetServer) {
         self.server = server
@@ -196,6 +208,7 @@ final class ROBArmControllerBridge {
         grants.removeAll()
         runs.removeAll()
         pendingHolds.removeAll()
+        teleoperation.removeAll(); teleoperationSequences.removeAll(); teleoperationTargets.removeAll()
     }
 
     func claimsArmControlProtocol(_ data: Data) -> Bool {
@@ -402,7 +415,8 @@ final class ROBArmControllerBridge {
     private func consumeTarget(
         _ target: ROBArmTargetIntentEnvelope,
         authenticatedControllerID: UUID,
-        authenticatedSessionID: UUID
+        authenticatedSessionID: UUID,
+        cartesian: Bool = false
     ) {
         let now = ROBArmControlWireCodec.currentUnixMilliseconds()
         let uptime = ProcessInfo.processInfo.systemUptime
@@ -440,7 +454,7 @@ final class ROBArmControllerBridge {
             target,
             authenticatedControllerID: authenticatedControllerID,
             authenticatedSessionID: authenticatedSessionID,
-            lastAcceptedSequence: lastInboundSequence[key] ?? 0,
+            lastAcceptedSequence: cartesian ? target.sequence - 1 : lastInboundSequence[key] ?? 0,
             authorityEnabled: grantIsValid,
             executionContext: executionContext,
             nowUnixMilliseconds: now
@@ -461,7 +475,11 @@ final class ROBArmControllerBridge {
                 passedExecutionPreflight: false
             )
         }
-        if decision.advancesSequence { lastInboundSequence[key] = target.sequence }
+        if !cartesian && teleoperation[target.arm] != nil {
+            decision = ROBArmTargetGateDecision(disposition: .rejectedArmBusy,
+                detail: "Release Cartesian control before joint jogging.", advancesSequence: true, passedExecutionPreflight: false)
+        }
+        if decision.advancesSequence && !cartesian { lastInboundSequence[key] = target.sequence }
 
         guard decision.passedExecutionPreflight,
               ROBAmberArmMotionArbiter.shared.reserve(target.arm, owner: target.messageID) else {
@@ -551,13 +569,15 @@ final class ROBArmControllerBridge {
                 sessionID: authenticatedSessionID
               ) else { return }
         lastInboundSequence[key] = hold.sequence
+        teleoperation.removeValue(forKey: hold.arm)
         let commandID = requestPriorityHold(
             arm: hold.arm,
             requestMessageID: hold.messageID,
             recipientID: authenticatedControllerID,
             sessionID: authenticatedSessionID,
             successDisposition: .holdConfirmed,
-            detail: "Vision released its arm dead-man: \(hold.reason)"
+            detail: "Vision released its arm dead-man: \(hold.reason)",
+            runOwnerID: runs[hold.arm]?.ownerID
         )
         if commandID == 0 {
             sendDisposition(
@@ -768,6 +788,7 @@ final class ROBArmControllerBridge {
 
     private func monitorSafetyState() {
         let uptime = ProcessInfo.processInfo.systemUptime
+        monitorTeleoperation(now: uptime)
         for (arm, grant) in Array(grants) {
             let sessionActive = ROBControlLiveSessionRegistry.isActiveOperator(
                 controllerID: grant.controllerID,
@@ -896,6 +917,7 @@ final class ROBArmControllerBridge {
 
     private func finishRun(_ arm: ROBArmSide, expectedOwnerID: UUID) {
         guard let run = runs[arm], run.ownerID == expectedOwnerID else { return }
+        teleoperationTargets.remove(run.target.messageID)
         runs.removeValue(forKey: arm)
         ROBAmberArmMotionArbiter.shared.release(arm, owner: expectedOwnerID)
     }
@@ -948,6 +970,11 @@ final class ROBArmControllerBridge {
         measuredPositionsRadians: [Double]? = nil,
         maximumErrorRadians: Double? = nil
     ) {
+        if teleoperationTargets.contains(targetMessageID), let lane = teleoperation[arm] {
+            let failed = terminal && disposition != .completedMeasured
+            sendTeleoperation(lane.request, status: failed ? "blocked" : "following", detail: detail)
+            if failed { teleoperation.removeValue(forKey: arm) }
+        }
         let message = ROBArmTargetDispositionEnvelope(
             targetMessageID: targetMessageID,
             recipientID: recipientID,
@@ -967,6 +994,154 @@ final class ROBArmControllerBridge {
             to: recipientID,
             sessionID: sessionID
         )
+    }
+
+    /// Called only by AutoNet's authenticated operator route. This protocol can
+    /// use existing explicit per-arm grants; it cannot create or activate one.
+    func consumeTeleoperation(_ data: Data, controllerID: UUID, sessionID: UUID) {
+        let key = SequenceKey(controllerID: controllerID, sessionID: sessionID)
+        guard let request = try? ROBArmTeleoperationProtocol.request(data),
+              request.controllerID == controllerID, request.sessionID == sessionID,
+              request.sequence > (teleoperationSequences[key] ?? 0),
+              ROBControlLiveSessionRegistry.isActiveOperator(controllerID: controllerID, sessionID: sessionID),
+              let arm = ROBArmSide(rawValue: request.command.arm) else { return }
+        teleoperationSequences[key] = request.sequence
+        let command = request.command, now = ProcessInfo.processInfo.systemUptime
+        if command.action == .release {
+            guard let lane = teleoperation[arm], lane.request.command.clutchID == command.clutchID,
+                  lane.request.controllerID == controllerID, lane.request.sessionID == sessionID,
+                  lane.request.command.authorityID == command.authorityID else { return }
+            stopTeleoperation(arm, detail: "Controller clutch released; measured hold requested.", status: "held")
+            return
+        }
+        do {
+            let measured = try teleoperationFeedback(request, now: now)
+            guard let map = ROBWorkspaceSearch.shared.collisionSnapshot else {
+                throw ROBKinematicsError.invalid("Scan the current workspace with both arms stationary before teleoperation.")
+            }
+            if command.action == .clutch {
+                guard teleoperation[arm] == nil, runs[arm] == nil,
+                      !pendingHolds.values.contains(where: { $0.arm == arm }),
+                      !ROBAmberArmMotionArbiter.shared.isReserved(arm),
+                      let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
+                    throw ROBKinematicsError.invalid("Wait for the current arm operation and measured hold before clutching.")
+                }
+                let planner = try ROBArmTeleoperationPlanner(directory: directory)
+                try validateTeleoperationCalibration(planner)
+                try planner.checkPath(from: measured, to: [:], map: map,
+                    generation: gatewayGeneration(), cameraGeneration: ROBArmRoutineVision.shared.cameraGeneration,
+                    now: Date().timeIntervalSince1970 * 1000)
+                let clutch = try ROBArmTeleoperationClutch(sample: command.tracking!,
+                    tool: planner.tool(arm: arm.rawValue, measured: measured), scale: command.translationScale)
+                teleoperation[arm] = TeleoperationLane(request: request, clutch: clutch, receivedAt: now - max(0, Date().timeIntervalSince1970-request.issuedAt),
+                    mapFingerprint: map.fingerprint, planner: planner)
+                sendTeleoperation(request, status: "clutched", detail: "Measured tool captured. Move and rotate this hand; release either grip to hold both arms.")
+            } else {
+                guard var lane = teleoperation[arm], lane.request.command.clutchID == command.clutchID,
+                      lane.request.controllerID == controllerID, lane.request.sessionID == sessionID,
+                      lane.request.command.authorityID == command.authorityID,
+                      lane.clutch.scale == command.translationScale else {
+                    throw ROBKinematicsError.invalid("Release both grips and establish a new Cartesian clutch.")
+                }
+                try lane.clutch.update(command.tracking!)
+                lane.request = request; lane.receivedAt = now - max(0, Date().timeIntervalSince1970-request.issuedAt); teleoperation[arm] = lane
+            }
+        } catch {
+            if teleoperation[arm] != nil { stopTeleoperation(arm, detail: error.localizedDescription) }
+            sendTeleoperation(request, status: "blocked", detail: error.localizedDescription)
+        }
+    }
+
+    private func teleoperationFeedback(_ request: ROBArmTeleoperationRequest, now: Double) throws -> [String: [Double]] {
+        guard let arm = ROBArmSide(rawValue: request.command.arm), let grant = grants[arm],
+              grant.id == request.command.authorityID, grant.controllerID == request.controllerID,
+              grant.sessionID == request.sessionID, grant.expiresAtUptime > now,
+              ROBControlLiveSessionRegistry.isActiveOperator(controllerID: request.controllerID, sessionID: request.sessionID),
+              ROBAmberGatewayClient.shared.isReady() else { throw ROBKinematicsError.invalid("Authenticated arm authority expired or was released.") }
+        var result: [String: [Double]] = [:]
+        for side in ROBArmSide.allCases {
+            guard let sample = latestTelemetry[side], sample.effectiveAgeMilliseconds <= 250,
+                  gatewayModes(for: side).count == 7, gatewayModes(for: side).allSatisfy({ $0 == 2 }),
+                  ROBAmberArmReferenceStore.shared.readiness(forArm: side.rawValue).isReady,
+                  let q = ROBAmberArmReferenceStore.shared.modelPositions(fromVendor: sample.positionsRadians, forArm: side.rawValue) else {
+                throw ROBKinematicsError.invalid("Both arms require fresh measured feedback, commissioned references and verified position mode.")
+            }
+            result[side.rawValue] = q
+        }
+        return result
+    }
+    private func validateTeleoperationCalibration(_ planner: ROBArmTeleoperationPlanner) throws {
+        guard let data = try? Data(contentsOf: ROBArmTeleoperationPlanner.calibrationURL),
+              ROBGhostRobotModel.hash(data) == planner.fingerprint else { throw ROBKinematicsError.invalid("Teleoperation calibration changed; release and re-clutch.") }
+        for side in ROBArmSide.allCases {
+            let binding = planner.calibration.arms[side.rawValue]!
+            guard let source = ROBAmberArmReferenceStore.shared.calibrationSnapshot(forArm: side.rawValue),
+                  source.parkModelRadians == binding.sourceParkRadians, source.direction == binding.sourceDirections else {
+                throw ROBKinematicsError.invalid("Canonical motor mapping belongs to another commissioned arm reference.")
+            }
+        }
+    }
+    private func gatewayGeneration() -> UInt64 {
+        (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
+    }
+    private func monitorTeleoperation(now: Double) {
+        for (arm, var lane) in Array(teleoperation) {
+            guard teleoperation[arm] != nil else { continue }
+            do {
+                guard now - lane.receivedAt <= 0.15,
+                      (lane.request.command.tracking?.ageMilliseconds ?? .infinity) + (now-lane.receivedAt)*1000 <= 150 else {
+                    throw ROBKinematicsError.invalid("Controller pose stream expired; measured hold requested.")
+                }
+                let measured = try teleoperationFeedback(lane.request, now: now)
+                try validateTeleoperationCalibration(lane.planner)
+                guard let map = ROBWorkspaceSearch.shared.collisionSnapshot, map.fingerprint == lane.mapFingerprint else {
+                    throw ROBKinematicsError.invalid("Workspace evidence changed or expired; hold and scan again.")
+                }
+                // Other supervised executors cannot share a Cartesian session.
+                guard ROBArmSide.allCases.allSatisfy({ side in
+                    !ROBAmberArmMotionArbiter.shared.isReserved(side) || runs[side].map { teleoperationTargets.contains($0.target.messageID) } == true
+                }) else { throw ROBKinematicsError.invalid("Another executor owns an arm; Cartesian control stopped.") }
+                guard runs[arm] == nil, now-lane.lastDispatch >= 0.7 else { continue }
+                let tool = try lane.planner.tool(arm: arm.rawValue, measured: measured)
+                let target = try lane.clutch.target(from: tool, seconds: 0.7)
+                // Skip unchanged hands without dispatching zero-length trajectories.
+                guard simd_distance(ROBSerialChain.translation(tool), ROBSerialChain.translation(target)) > 0.0005 ||
+                    ROBArmTeleoperationClutch.angle(simd_quatd(tool), simd_quatd(target)) > 0.008 else { continue }
+                let q = try lane.planner.solve(arm: arm.rawValue, target: target, measured: measured)
+                var goals = Dictionary(uniqueKeysWithValues: runs.map { ($0.key.rawValue, $0.value.target.positionsRadians) })
+                goals[arm.rawValue] = q
+                try lane.planner.checkPath(from: measured, to: goals, map: map, generation: gatewayGeneration(),
+                    cameraGeneration: ROBArmRoutineVision.shared.cameraGeneration, now: Date().timeIntervalSince1970*1000)
+                // Recheck source age after IK/clearance work; do not dispatch a stale solve.
+                guard ProcessInfo.processInfo.systemUptime-now < 0.10,
+                      (lane.request.command.tracking?.ageMilliseconds ?? .infinity) + (ProcessInfo.processInfo.systemUptime-lane.receivedAt)*1000 <= 150 else {
+                    throw ROBKinematicsError.invalid("Cartesian solve exceeded the fresh-input budget.")
+                }
+                let request = lane.request
+                let intent = ROBArmTargetIntentEnvelope(senderID: request.controllerID, sessionID: request.sessionID,
+                    authorityID: request.command.authorityID, sequence: request.sequence,
+                    issuedAtUnixMilliseconds: ROBArmControlWireCodec.currentUnixMilliseconds(), leaseMilliseconds: 1000,
+                    arm: arm, source: .visionProSpatial, positionsRadians: q, durationSeconds: 0.7, deadManHeld: true)
+                lane.lastDispatch = now; teleoperation[arm] = lane; teleoperationTargets.insert(intent.messageID)
+                consumeTarget(intent, authenticatedControllerID: request.controllerID, authenticatedSessionID: request.sessionID, cartesian: true)
+                if runs[arm] == nil { teleoperationTargets.remove(intent.messageID) }
+            } catch { stopTeleoperation(arm, detail: error.localizedDescription) }
+        }
+    }
+    private func stopTeleoperation(_ arm: ROBArmSide, detail: String, status: String = "blocked") {
+        guard let origin = teleoperation[arm] else { return }
+        for (side, lane) in Array(teleoperation) where lane.request.sessionID == origin.request.sessionID {
+            teleoperation.removeValue(forKey: side)
+            if let run = runs[side] { requestRunHold(arm: side, run: run, disposition: .cancelledHeld, detail: detail) }
+            else { _ = ROBAmberGatewayClient.shared.priorityHold(forArm: side.rawValue) }
+            sendTeleoperation(lane.request, status: status, detail: detail)
+        }
+    }
+    private func sendTeleoperation(_ request: ROBArmTeleoperationRequest, status: String, detail: String) {
+        let response = ROBArmTeleoperationResponse(request: request, status: status, detail: String(detail.prefix(1500)))
+        if let data = try? ROBArmTeleoperationProtocol.encode(response) {
+            _ = server?.sendArmControlMessage(data, to: request.controllerID, sessionID: request.sessionID)
+        }
     }
 
     private func postDiagnostic(

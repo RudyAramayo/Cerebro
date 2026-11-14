@@ -425,6 +425,14 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 }
                 return
             }
+            if ROBArmTeleoperationProtocol.claims(data) {
+                if sendingConnection.authenticatedRole == .operatorController,
+                   let controllerID = sendingConnection.authenticatedDeviceID,
+                   let sessionID = sendingConnection.authenticatedSessionUUID {
+                    armControllerBridge.consumeTeleoperation(data, controllerID: controllerID, sessionID: sessionID)
+                }
+                return // Claimed malformed/future Cartesian frames never reach legacy motors.
+            }
             if ROBShadowProtocol.claims(data) {
                 if sendingConnection.authenticatedRole == .operatorController,
                    let controllerID = sendingConnection.authenticatedDeviceID,
