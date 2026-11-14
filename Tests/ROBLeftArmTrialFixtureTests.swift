@@ -1477,11 +1477,18 @@ final class ROBArmRoutineCoordinator {
             g.commands = []; g.q = ["left":zero,"right":front]; g.mode = ["left":0,"right":2]
             search.clearCollisionScene()
             let beforeDrift = search.collisionScanCalls
-            g.onTelemetry = { side in if side == "left" { g.q[side]![0] += 0.0003 } }
+            // The production hold gate measures CAD hull displacement, not a
+            // summed encoder-angle proxy. Exercise actual drift beyond 3 mm.
+            let driftingModel = try ROBGhostRobotModel(directory:model.directory,physicalSide:"right")
+            var driftTarget = zero; driftTarget[0] = 0.02
+            let driftMeters = try driftingModel.maximumArmHullDisplacement(from:zero,to:driftTarget,openJawPadding:0.04)
+            precondition(driftMeters > 0.003,"Fixture motion must exceed the measured hull drift limit")
+            g.onTelemetry = { side in if side == "left" { g.q[side]![0] += 0.02 } }
             let moving = await run("left_scan_clearance")
             g.onTelemetry = nil
             precondition(moving["status"] as? String == "blocked",moving.description)
-            precondition((moving["detail"] as? String)?.contains("still moving") == true,moving.description)
+            let movingDetail = moving["detail"] as? String ?? ""
+            precondition(movingDetail.contains("still moving") || movingDetail.contains("position_drift_m"),moving.description)
             precondition(search.collisionScanCalls == beforeDrift && g.commands.isEmpty,
                 "A gradually moving arm entered static mapping or dispatched actuation")
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
