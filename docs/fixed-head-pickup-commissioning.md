@@ -1,0 +1,318 @@
+# Fixed-head pickup commissioning
+
+The sandbox separates a measured camera view from a general neck calibration.
+One validated view can support a local experiment without claiming that every
+neck angle or arm encoder offset is commissioned.
+
+## Standing can campaign and visual correction
+
+Rudy's standing authorization covers the current four empty cans and orange
+bucket. Import its private local campaign file once in Testing Sandbox, then
+use **Run standing can campaign**. Normal can executions bind their actual
+current context without another voice, receipt or waypoint approval. The
+private authorization and its hashes stay outside Git. This does not authorize
+arbitrary gestures, treads or torso movement. Stop durably revokes the campaign;
+completion consumes it. Commanded transfers and camera-verified bucket landings
+are counted separately.
+
+A connection interruption stops the current motion. The campaign can reconnect
+telemetry and retry a fresh request at most three times, with new measured poses,
+camera observations and path review. It never resumes an old waypoint, resets
+encoders or restarts CAN/core torque while an arm may be raised or carrying.
+Possible payloads and uncertain gripper actions require a hold and observation.
+An application relaunch preserves authorization, not the interrupted path.
+
+Standing tasks enroll their camera directly and request the full 640 × 480
+view before freezing context. They do not need a calibration capture to turn
+observation on. Already-active frames remain intact; the actual camera source
+identity still changes when its hardware configuration changes. Explicit
+recording and calibration demands retain priority. The selected-arm depth
+coverage uses two lateral pan views to seek space hidden behind the shoulder.
+
+The incremental grasp task reviews its empty entry first. At a visible held
+pose, the jaw observer uses actual finger edges and their symmetric opening
+after a real release request, with a stationary background. A model projection
+is only a search region. Command acceptance does not prove jaw position or force;
+Amber does not report those measurements. An already-open or occluded gripper
+may require a gentle empty close/open identification at an independently clear
+held pose. If that evidence is unavailable, the task reports the missing image
+evidence instead of substituting predicted pixels.
+
+Small corrections use observed jaw-to-can image error. Up to two explicitly
+estimated image-response directions can start the task; observed joint/image
+responses then supply a local correction model. Each correction still needs
+fresh live feedback and an independently reviewed whole-arm sweep. Historical
+joint samples match the image exposure without restamping; current feedback and
+the held pose are checked separately. Closing requires a new alignment
+observation after contact/lift review. A short lift checks visual co-motion and
+ends in a hold; it does not establish measured possession or authorize an
+unreviewed carry.
+
+Visual-trial collision review now narrows broad boxes against hash-verified
+closed convex envelopes and retained source-return bounds. Unknown cells remain
+whole unknown volumes. Exact whole-box distance already contains voxel extent,
+so its margin keeps mechanical clearance, assumed registration error and sweep
+allowance without adding the voxel half-diagonal a second time. Ordinary
+registered-route admission and all original occupied returns remain intact.
+These geometric improvements do not certify the provisional scan assignments
+or remove an actual unobserved segment of the route.
+
+Synthetic jaw tests establish software behavior, not real-camera detection
+reliability. Record the actual jaw/can images, feedback, corrections and outcome
+for each physical trial. A missed grasp is an experimental result; it must not
+be reported as a grasp or a recycled can.
+
+The separate, default-off **One-degree empty-arm calibration step** is an
+actuator observation rather than a pickup or clearance certificate. Its exact
+private session receipt permits physical RIGHT J2 −0.02 rad over four seconds,
+at most 20 mm modeled full-hull travel, then measured hold. The full raw map,
+predicted environmental contacts and unknown regions remain in the diagnostic
+record; the unverified camera transform does not certify clearance. Fresh
+feedback, source/body identity, ownership, joint bounds, nonworsening modeled
+self clearance, a tight measured motion corridor and Stop remain required.
+It issues no jaw command, carries no payload, chains no further movement and
+reports zero can transfers. It is mutually exclusive with the nominal
+commissioning experiment and cannot authorize ordinary recycling routes.
+
+## Optional runtime stereo calibration
+
+The camera worker can load a device-specific stereo correction into **RAM** at
+startup. It does not flash EEPROM, rescale depth or change RGB intrinsics,
+distortion, focus, the right-camera-to-RGB anchor, IMU data or specification
+translations. The approved changes are the raw left-to-right rotation and
+translation plus the two stored rectification rotations. The loader checks the
+original B→C→A camera graph, unchanged unrelated fields, proper bounded rotations
+and translations, and consistency between the raw pair and rectification.
+
+Keep profiles, requested calibration JSON and commissioning evidence outside the
+repository. The worker reads this activation pointer once; restart the camera
+worker after changing it:
+
+`~/Library/Application Support/Cerebro/DepthCamera/RuntimeStereoCalibration/{role}-active.json`
+
+The pointer has `schemaVersion: 1`, `kind: "runtime_stereo_calibration_activation"`,
+`cameraRole`, an absolute `profilePath`, and that immutable file's `profileSHA256`.
+The referenced profile has these required fields:
+
+| Field | Required value |
+| --- | --- |
+| `schemaVersion`, `kind` | `1`, `runtime_stereo_calibration_profile` |
+| `cameraRole`, `actualDeviceMXID` | Exact camera role and device |
+| `platform`, `sdkVersion` | `RVC2`, `3.8.0` |
+| `factoryEEPROMSHA256` | SHA256 of the original EEPROM JSON export bytes |
+| `requestedCalibrationPath`, `requestedCalibrationSHA256` | Absolute immutable JSON path and byte SHA256 |
+| `requestedCalibrationSemanticSHA256` | SHA256 after normalizing `cameraData` to a socket-keyed object |
+| `candidateSHA256` | SHA256 of the approved candidate evidence |
+| `validationEvidencePath`, `validationEvidenceSHA256` | Absolute commissioning-summary path and byte SHA256 |
+
+Calibration exports and semantic canonicalization use sorted keys, two-space
+indentation and a final newline; semantic canonicalization first normalizes
+only the camera-table ordering. File hashes always pin the actual saved bytes.
+The summary records measured results and their
+limits; pinning it does not create a global metric pass or arm authorization.
+
+A missing or rejected profile sends no calibration override. Diagnostics call
+the observed data **FACTORY** only when it equals EEPROM; an unrelated prior RAM
+calibration remains identified as **OBSERVED_EXISTING_RUNTIME**. Both paths
+retain actual effective-runtime provenance. Once an override is attempted, an
+apply/readback mismatch aborts capture and restores the prior effective RAM
+calibration rather than silently continuing. Restoration and unchanged EEPROM
+are checked **before** pipeline teardown, because SDK 3.8 closes the device when
+the pipeline stops.
+
+Auto-calibration is explicitly OFF for factory and profile workers. An applied
+profile also explicitly disables all three specification-translation policies.
+The packet's `runtime_calibration` binds device, role, SDK, factory EEPROM hash,
+effective-runtime semantic hash, actual HOST stereo/RGB-normalization policy hash and optional
+candidate/profile hashes. `runtime_calibration_identity` hashes the prefix
+`runtime-camera-calibration-v1` followed by those eight fields in that order,
+joined by LF with no final LF; absent candidate/profile values use `-`. HOST
+configuration is not a firmware-strategy observation. Identity changes start a
+new camera generation and invalidate dependent scenes and registrations.
+
+The October 24 single-RGB, RGB-aligned 640×400 standard-stereo TABLE check still
+measured a **+10.7–12.7 mm center optical-Z residual** against the 120 mm RGB
+target pose. No constant correction was applied. Preserve this local residual
+in the commissioning uncertainty; do not generalize it to another range or
+view. Correcting stereo geometry does not establish camera-to-body or
+camera-to-arm registration. A fresh independently validated body reference and
+ordinary path admission remain necessary, and this camera test claims no grasp
+or bucket-delivery success.
+
+A later check at P6015/L6411/U5813 found a larger off-axis error on the
+120 mm left-floor square: standard depth read its center 54.5–55.6 mm farther
+than RGB PnP at approximately 1.03 m. Subpixel reduced depth banding but did not
+remove that bias. The central table result therefore does not validate the
+image field or nearby body surfaces. Body registration remains unaccepted;
+native stereo and RGB alignment are being checked separately. No uniform depth
+scale or arm-registration exemption was applied.
+
+### RGB raster check, 25 October 2026
+
+Separate, single-output captures at the same held head pose showed that changing
+the Camera RGB undistortion request changed SDK distortion/alignment metadata
+without the predicted several-pixel image warp. The request flag and a reported
+zero-distortion vector therefore did not establish the raster's geometry.
+
+The FACE path now requests one Camera RGB output with undistortion disabled,
+then explicitly runs SDK `ImageManip` with the CPU backend preference and
+`setUndistort(True)`. It preserves the frame dimensions and RGB format and feeds
+the postprocessed output to RGB-D synchronization, depth alignment and detection.
+An exact same-exposure control measured **0.603 px strict QR corner prediction
+error**, versus **6.20 px** for unchanged pixel coordinates. Actual HOST backend
+and normalization configuration enter the runtime policy hash; metadata alone
+still does not prove a particular frame's warp. The belly path is unchanged
+pending its own independent pixel/metric check.
+
+The remaining off-axis left-floor center optical-Z residual was **+28.6–31.8 mm**
+after this change. Source age in the CPU control was approximately **260 ms**.
+These local measurements do not establish a global metric pass. No depth scale,
+camera-to-body registration or successful arm grasp/delivery is claimed.
+
+Engineering note: face NN input now derives from the normalized RGB stream at
+capture cadence with bounded input queues, rather than a separate 5 fps Camera
+request. Loaded-model throughput and latency have not been measured; freshness
+limits remain unchanged.
+
+CPU-only profile, identity and restoration fixtures run with
+`python3 -B Scripts/test-runtime-stereo-calibration.py` in the calibration Python
+environment. They do not open a camera or actuate ROB.
+
+## Capture and registration
+
+Open **Testing Sandbox → Camera-to-arm registration → Open fixed-head
+calibration**. Choose the physical arm whose model mapping will be used. Hold a
+head view containing visible base-fixed and torso surfaces and choose **Capture
++ fit current head pose**. This captures five actual RGB-D frames after two
+seconds of advancing source frames in the requested camera mode. It never
+activates, positions or calibrates an arm. Both arms are reserved against
+competing operations during acquisition.
+
+**Full camera height (640 × 480)** optionally requests the full-height view;
+the default remains **640 × 400**. This helps seek a shared view of rigid body
+surfaces and an object's full height, without promising that either is visible
+or that registration will pass. Both sizes retain exact requested dimensions,
+stereo-mode readbacks, source settling/freshness, unchanged head/body and camera
+identity, and all independent fit/validation gates. A different resolution or
+camera mode needs its own matching scope; moving the neck after registration
+does not preserve the fixed-view measurement.
+
+The automatic fitter uses the pinned robot CAD only as a physical surface
+reference and initial pose hypothesis. It fits distinct spatial patches on the
+first frame, checks separate patches on later frames, compares optimizer
+starts, and evaluates six-degree-of-freedom observability. A planar or ambiguous
+view, missing depth, excessive residuals or unstable fit produces a diagnostic
+result rather than an executable transform.
+
+The explicit CAD reference uncertainty is an assumption supplied to the test;
+the image residual cannot measure manufacturing or CAD error. The default
+allowance is 20 mm. The Swift validator independently recomputes the transform,
+held-out errors and delete-one sensitivity over the requested local volume.
+It rejects a total allowance above 50 mm. These are conditional engineering
+allowances, not statistical confidence or proof of perfect grasp precision.
+
+The saved measurement binds exact raw pan/lower/upper targets, model and
+geometry hashes, physical-arm mapping, camera and gateway generations,
+intrinsics and manual display-correction identity. Moving outside that scope
+requires another measurement. Raw aligned depth uses the fitted optical-to-robot
+matrix directly; the provisional display translation/pitch is not applied again.
+Registered search retains the exact measured pan, lower and upper targets.
+It waits for fresh frames without invoking legacy neck preparation or broadening
+one pose into a neck sweep. Losing that registration blocks the fixed search.
+
+Private captures and recomputable input artifacts are under
+`~/Library/Application Support/Cerebro/FixedHeadRegistration/`. RGB and raw depth
+stay local. A saved input is refitted on load; a `verified` label cannot create
+registration authority. Calibration does not create an arm-motion grant.
+
+## Right-arm recycling
+
+**Recycle can · right arm** selects physical right, Amber L10 / gateway `left`.
+The model uses the right URDF joints, hulls, tool and independent mapping prior.
+It never reflects a left trajectory or inherits left reach residuals. The
+remaining encoder mapping is explicitly a prior; visual commissioning must
+establish actual accuracy before claiming a general arm calibration.
+
+Set **Number of cans** to a whole number from **1 through 8**, then run the
+selected recycling test. One approval covers the stated complete batch: both
+arms may enter stationary holds at their current measured positions, and only
+the selected right arm travels. The spoken prompt remains **“Can I move my arms?”**.
+Each can receives fresh observation, depth, scene admission and a reviewed path.
+An existing left-only session cannot authorize the right task. A failure or
+uncertain grasp stops the batch in a hold before the next reach. Existing time,
+feedback, scene and Stop limits still apply. A completed transfer path records a
+commanded gravity release; it does not by itself verify landing inside the bin.
+
+The count-based API commands are `left_recycle_cans` and `right_recycle_cans`,
+with the decimal count supplied in `target`. Existing one-can, two-can and
+right-three-can command names retain their original counts.
+
+The can's visible wall is distinguished from its estimated cylinder axis. Side
+grasp geometry uses measured top, middle and bottom bands plus a radius offset
+away from the camera. Intentional contact applies only to the selected tool and
+carried object, inside the identified can cylinder and authorized route stages.
+It does not remove table returns, hide another obstacle, waive other-link
+clearance or make unobserved space free. See [intentional can contact](intentional-can-contact.md).
+
+## Live grasp evidence and moving targets
+
+Immediately before closing, the task uniquely reacquires the selected can,
+checks source-to-current image continuity and measures its current registered
+3D sections. A displacement greater than 12 mm invalidates the old close point.
+The existing frozen approach is not silently changed while executing.
+
+After closing, only the reviewed short verification lift may run. Carrying and
+release require several advancing observations in which the can's texture,
+image displacement and depth follow the measured tool, with stable background
+and head pose. Occlusion, identity ambiguity or missing depth leaves possession
+unknown and causes a hold. Pixel change alone is insufficient. This is visual
+support for possession, not a jaw-position or force measurement. See
+[visual grasp evidence](visual-grasp-evidence.md).
+
+Following a continuously moving can needs a later receding-horizon controller:
+short collision-checked motion increments, local target tracking, velocity and
+latency bounds, and fresh alignment before closure. The present target-shift
+veto prevents stale closure; it does not claim successful moving-target pursuit.
+Useful trial metrics include perception-to-command latency, relative target/tool
+error, motion-induced replans, grasp success and verified bucket delivery.
+
+## Validation record
+
+The tracked `CerebroCommissioning` Xcode scheme builds the signed local Debug
+app without requiring a developer's private scheme. Its launch settings do not
+silently enable cloud sessions or an action tool. This commissioning install is
+not a production release or an update to public distribution channels.
+
+For the physical trial, build with `SWIFT_OPTIMIZATION_LEVEL=-O`; runtime guards
+and preconditions remain enabled. The right-probe fixture measured about 4.0
+seconds to build the checked proof with optimization, versus 36.5 seconds at
+`-Onone`. These are fixture timings. The runtime reuses an exact internally
+verified immutable proof only while its map, model, resource hashes, measured
+start and fixed-head context still match. Imported proofs retain full validation.
+
+Record the actual capture result, installed binary hash, source commit, held-out
+error allowance, physical trial observations and outcome separately from the
+synthetic fixtures. Passing a fixture or a model path never proves that a can
+was picked up or delivered.
+
+
+### Physical camera check, 23 October 2026
+
+The signed commissioning app enabled the face OAK-D Pro dot projector at 0.5,
+with the flood LED and belly dot projector off. The reloaded worker recorded
+both face SDK commands as accepted. Five frames per treatment at the same
+P6000/L6011/U5300 pose and intrinsics increased mean native nonzero depth
+coverage from 22.00% to 51.69%; a manually bounded body region increased from
+2.00% to 49.70%. These are coverage measurements, not depth accuracy. Some floor
+pixels gained implausibly near returns and the minimum valid depth stayed
+316 mm. Extended disparity was not enabled.
+
+Automatic registration at that pose and a second P6000/L6495/U5698 view did
+not pass known base/torso surface admission. No measured transform was installed,
+no physical arm trial executed, and no cans delivered in this commissioning
+run. The remaining blocker is a genuinely validated optical-to-robot reference,
+plus ordinary path admission from the modeled hanging pose.
+
+The [numerical record](commissioning/2026-10-23-fixed-head-ir.json) contains input
+and raw-depth hashes and the signed executable hash. Private RGB/depth captures
+remain local.

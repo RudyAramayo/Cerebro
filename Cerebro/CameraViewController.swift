@@ -183,7 +183,19 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public let height: Int
     public let rgbPixelBuffer: CVPixelBuffer?
     public let isBelly: Bool
+    /// Objective-C display consumers share the exact source identity used by calibration.
+    public var captureStreamID: String? { sourceCaptureStreamID }
+    public var sequence: UInt64 { sourceSequence ?? 0 }
     @nonobjc let calibratedIntrinsics: CameraIntrinsics?
+    /// Exact source metadata, when forwarded by the producer. Arrival time
+    /// and capture ordinals must never stand in for these camera identities.
+    @nonobjc let sourceSequence: UInt64?
+    @nonobjc let sourceCapturedAtMilliseconds: Double?
+    @nonobjc let sourceCaptureStreamID: String?
+    @nonobjc let sourceTimestampNanoseconds: UInt64?
+    @nonobjc let rectifiedLeft: CameraStereoFrame?
+    @nonobjc let rectifiedRight: CameraStereoFrame?
+    @nonobjc let stereoSourceExtrinsics: CameraStereoPairExtrinsics?
     let receivedUptime: TimeInterval
     let capturedUptime: TimeInterval
     public var hasCalibratedIntrinsics: Bool { calibratedIntrinsics?.isValid(forWidth: width, height: height) == true }
@@ -193,13 +205,24 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public var cameraCY: Double { hasCalibratedIntrinsics ? calibratedIntrinsics!.cy : .nan }
 
     init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false,
-         intrinsics: CameraIntrinsics? = nil, capturedAtMilliseconds: Double? = nil) {
+         intrinsics: CameraIntrinsics? = nil, capturedAtMilliseconds: Double? = nil,
+         sourceSequence: UInt64? = nil, sourceCapturedAtMilliseconds: Double? = nil,
+         sourceCaptureStreamID: String? = nil, sourceTimestampNanoseconds: UInt64? = nil,
+         rectifiedLeft: CameraStereoFrame? = nil, rectifiedRight: CameraStereoFrame? = nil,
+         stereoSourceExtrinsics: CameraStereoPairExtrinsics? = nil) {
         millimetersLittleEndian = depth.millimetersLittleEndian as NSData
         width = depth.width
         height = depth.height
         rgbPixelBuffer = CMSampleBufferGetImageBuffer(rgbSampleBuffer)
         self.isBelly = isBelly
         calibratedIntrinsics = intrinsics
+        self.sourceSequence = sourceSequence
+        self.sourceCapturedAtMilliseconds = sourceCapturedAtMilliseconds
+        self.sourceCaptureStreamID = sourceCaptureStreamID
+        self.sourceTimestampNanoseconds = sourceTimestampNanoseconds
+        self.rectifiedLeft = rectifiedLeft
+        self.rectifiedRight = rectifiedRight
+        self.stereoSourceExtrinsics = stereoSourceExtrinsics
         receivedUptime = ProcessInfo.processInfo.systemUptime
         let age = capturedAtMilliseconds.map { Date().timeIntervalSince1970 - $0 / 1000 }
         // A missing/unusable clock gets a conservative transport allowance;
@@ -723,6 +746,7 @@ final class CameraViewController: NSViewController {
     private var followVideoIsActive = false
     private var bubbleVideoIsActive = false
     private var recordingDemandActive = false
+    private var fixedHeadCalibrationCaptureID: UUID?
     private var cameraSessionIsRequested = false
     private var cameraStatusState = CameraSourceState.stopped
     private var cameraStatusDetail: String?
@@ -859,6 +883,8 @@ final class CameraViewController: NSViewController {
         )
         NotificationCenter.default.addObserver(self, selector: #selector(recordingDemandDidChange(_:)),
                                                name: ROBTorsoControlCenter.cameraDemandChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(fixedHeadCalibrationDemandDidChange(_:)),
+            name: ROBFixedHeadCalibrationWindowController.cameraDemandChanged, object: nil)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(remoteVideoDemandDidChange(_:)),
@@ -1002,6 +1028,7 @@ final class CameraViewController: NSViewController {
             || remoteVideoIsActive
             || geminiVideoIsActive
             || recordingDemandActive
+            || fixedHeadCalibrationCaptureID != nil
             || ROBTorsoControlCenter.shared.cameraDemandActive
             || ROBHologramExporter.shared.isMovieRecording
         guard shouldRun != cameraSessionIsRequested else { return }
@@ -1093,6 +1120,29 @@ final class CameraViewController: NSViewController {
         reconcileCameraSession()
     }
 
+    @objc private func fixedHeadCalibrationDemandDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.fixedHeadCalibrationDemandDidChange(notification) }
+            return
+        }
+        guard let active = notification.userInfo?["active"] as? Bool,
+              let identifier = notification.userInfo?["captureID"] as? String,
+              let token = UUID(uuidString: identifier) else { return }
+        if active {
+            guard let resolution = notification.userInfo?["resolution"] as? String,
+                  ["640x400", "640x480"].contains(resolution),
+                  let mode = notification.userInfo?["stereoMode"] as? String,
+                  ["standard", "near_field"].contains(mode) else { return }
+            fixedHeadCalibrationCaptureID = token
+            cameraManager?.setCalibrationCaptureOverride(token: token, resolution: resolution, stereoMode: mode)
+        } else {
+            guard fixedHeadCalibrationCaptureID == token else { return }
+            fixedHeadCalibrationCaptureID = nil
+            cameraManager?.clearCalibrationCaptureOverride(token: token)
+        }
+        applyRecordingDemand(); reconcileCameraSession()
+    }
+
     private func applyRecordingDemand() {
         let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .face)
         recordingDemandActive = demand.active
@@ -1100,7 +1150,9 @@ final class CameraViewController: NSViewController {
         // profile. Explicit footage resolution still has priority; freshness
         // gates may refuse motion if that recording configuration is too slow.
         let realtime = armRoutineDemand || geminiVideoIsActive || followVideoIsActive
-        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (realtime ? "640x400" : nil))
+        let taskResolution = armRoutineDemand && ROBArmRoutineVision.shared.fullHeightTaskObservationRequested
+            ? "640x480" : "640x400"
+        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (realtime ? taskResolution : nil))
     }
 
     private func applyProcessingSettings() {
@@ -1718,7 +1770,11 @@ extension CameraViewController: CameraManagerDelegate {
         
         if let depth = frameSet.alignedDepth {
             let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false,
-                intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds)
+                intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds,
+                sourceSequence: frameSet.sequence, sourceCapturedAtMilliseconds: frameSet.capturedAtMilliseconds,
+                sourceCaptureStreamID: frameSet.captureStreamID, sourceTimestampNanoseconds: frameSet.timestampNanoseconds,
+                rectifiedLeft: frameSet.rectifiedLeft, rectifiedRight: frameSet.rectifiedRight,
+                stereoSourceExtrinsics: frameSet.stereoSourceExtrinsics)
             ROBHologramExporter.shared.capture(hologramFrame)
             if cameraViewIsVisible {
                 faceDepthPointCloudRenderer.offer(depth: depth, rgbSampleBuffer: sampleBuffer, in: skeletonView)

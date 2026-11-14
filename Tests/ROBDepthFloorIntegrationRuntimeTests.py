@@ -5,6 +5,7 @@ Only app services and geometry publication are inert substitutes. The candidate
 gate and complete processing method are extracted verbatim from the controller.
 """
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -13,14 +14,21 @@ source = (ROOT / "Cerebro/ROBSCNViewController.m").read_text()
 helpers = source[source.index("static NSUInteger const ROBMaximumDisplayedCloudPoints"):source.index("static NSString *ROBDiagnosticInhibitReason")]
 status_method = source[source.index("- (void)refreshFloorStatus\n"):source.index("- (void)armTrialViewPrepared:")]
 method = source[source.index("- (void)refreshFloorCloudVisibilityAtUptime:"):source.rindex("\n@end")]
+source_methods = source[source.index("- (void)resetAccumulatedSurfaceForBelly:"):source.index("- (void)refreshAccumulatedSurfaceStatus\n")]
+source_names = ["headCloudStreamID", "bellyCloudStreamID", "headCloudSourceEpoch", "headSurfaceGeneration",
+                "headSurfaceUpdatePending", "lastHeadSurfaceResetUptime", "surfaceGeneration", "surfaceUpdatePending",
+                "lastHeadSurfaceSubmission", "lastHeadSurfaceCapture", "lastSurfaceResetUptime", "headSurfaceAccumulator",
+                "bellySurfaceAccumulator", "headSurfaceSummary", "bellySurfaceSummary", "lastHeadCloudSubmission", "lastBellyCloudSubmission"]
+source_properties = "\n".join(dict.fromkeys(re.search(r"^@property[^\n]*\b" + name + r"\b[^\n]*;", source, re.M).group()
+                                         for name in source_names))
 HARNESS = r'''
 #import <Foundation/Foundation.h>
 #import <SceneKit/SceneKit.h>
 #import <CoreVideo/CoreVideo.h>
 #import "ROBDepthCloudProjection.h"
 #import "ROBDepthFloorRectification.h"
+#import "ROBAccumulatedSurfaceMap.h"
 #include <assert.h>
-__HELPERS__
 @interface ROBScanVisualModel : NSObject
 + (float)presentationScale;
 @end
@@ -33,8 +41,12 @@ __HELPERS__
 @property double cameraFX, cameraFY, cameraCX, cameraCY, capturedUptime;
 @property(strong) NSData *millimetersLittleEndian;
 @property CVPixelBufferRef rgbPixelBuffer;
+@property(copy) NSString *captureStreamID;
 @end
-@implementation ROBDepthCloudFrame @end
+@implementation ROBDepthCloudFrame
+- (instancetype)init {self=[super init];if(self) _captureStreamID=@"fixture-stream";return self;}
+@end
+__HELPERS__
 @interface ROBSerialBox : NSObject
 @property BOOL isNeckCommandStateKnown;
 @property NSInteger commandedLowerNeckTiltTarget, commandedNeckPanTarget, commandedUpperNeckTiltTarget;
@@ -68,10 +80,22 @@ __HELPERS__
 @property(copy) NSString *stringValue;
 @end
 @implementation FixtureLabel @end
+@interface FixtureGhostEditor : NSObject
+@property(copy) NSString *depthProjectionIdentity, *headDisplayPoseDescription;
+@end
+@implementation FixtureGhostEditor @end
+@interface ROBFixedHeadBodyMotionIdentity : NSObject
++ (NSString *)currentIdentity;
+@end
+@implementation ROBFixedHeadBodyMotionIdentity
++ (NSString *)currentIdentity { return @"fixture-body-motion"; }
+@end
+@class ROBSurfaceAccumulator;
 @interface Harness : NSObject
 @property(strong) FixtureNode *robotNode;
 @property(strong) SCNNode *liveRGBCloudNode, *liveBellyRGBCloudNode;
 @property(strong) ROBSerialBox *serialBox;
+@property(strong) FixtureGhostEditor *ghostGestureEditor;
 @property BOOL cloudUpdatePending, bellyCloudUpdatePending;
 @property double lastHeadCloudUptime, lastBellyCloudUptime;
 @property double bellyCloudDisplayUntil;
@@ -83,12 +107,44 @@ __HELPERS__
 @property(strong) NSArray<NSValue *> *capturedPoints;
 @property(strong) NSArray<NSNumber *> *capturedColors;
 @property(strong) FixtureLabel *cloudStatusLabel, *floorStatusLabel;
+@property(strong) NSButton *surfaceMode;
+@property(strong) SCNNode *headSurfaceNode, *bellySurfaceNode;
+@property(copy) NSArray *headSurfaceContext, *bellySurfaceContext;
+@property BOOL treadCommandsAreActive;
+@property BOOL headUsesSurfaces, bellyUsesSurfaces;
+@property(strong) NSData *capturedSurfaceSamples;
+@property ROBSurfaceDepthView capturedSurfaceView;
+@property(copy) NSString *capturedSurfaceProjectionIdentity;
+@property BOOL capturedSurfaceProjectionReady;
+__SOURCE_PROPERTIES__
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets;
+- (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose;
+- (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose sourceStreamID:(NSString *)sourceStreamID sourceEpoch:(NSUInteger)sourceEpoch;
 - (void)refreshFloorCloudVisibilityAtUptime:(NSTimeInterval)now;
 - (void)retainHeadCloudForDisplayAtUptime:(NSTimeInterval)now;
 - (void)refreshFloorStatus;
 @end
 @implementation Harness
+- (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose {
+    [self updateDepthCloudStream:frame];
+    if(frame.isBelly) self.bellyCloudUpdatePending=YES;else self.cloudUpdatePending=YES;
+    [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets projectionIdentity:projectionIdentity
+        explicitCameraPose:explicitCameraPose sourceStreamID:frame.captureStreamID ?: @"unavailable"
+        sourceEpoch:frame.isBelly ? self.bellyCloudSourceEpoch : self.headCloudSourceEpoch];
+}
+- (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets {
+    [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets
+        projectionIdentity:self.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:NO];
+}
+- (void)refreshAccumulatedSurfaceStatus {}
+- (void)resetAccumulatedSurfaces:(id)sender {}
+__SOURCE_METHODS__
+- (void)offerAccumulatedSurfaceSamples:(NSData *)samples frame:(ROBDepthCloudFrame *)frame
+                                 view:(ROBSurfaceDepthView)view robotTransform:(SCNMatrix4)robot projectionReady:(BOOL)projectionReady
+                   projectionIdentity:(NSString *)projectionIdentity {
+    self.capturedSurfaceSamples=[samples copy]; self.capturedSurfaceView=view;
+    self.capturedSurfaceProjectionIdentity=projectionIdentity; self.capturedSurfaceProjectionReady=projectionReady;
+}
 - (SCNGeometry *)pointGeometry:(NSArray *)p colors:(NSArray *)c pointSize:(CGFloat)s {
     self.capturedPoints=p; self.capturedColors=c;
     if(p.count==0) return nil;
@@ -126,12 +182,21 @@ static Harness *newHarness(SCNMatrix4 world) {
     h.serialBox.isNeckCommandStateKnown=YES; h.serialBox.commandedLowerNeckTiltTarget=6011;
     h.serialBox.commandedNeckPanTarget=6000; h.serialBox.commandedUpperNeckTiltTarget=6306;
     h.cloudStatusLabel=[FixtureLabel new]; h.floorStatusLabel=[FixtureLabel new];
+    h.ghostGestureEditor=[FixtureGhostEditor new];
+    h.ghostGestureEditor.depthProjectionIdentity=@"fixture-camera-pose";
+    h.ghostGestureEditor.headDisplayPoseDescription=@"fixture camera";
     h.robotNode.worldTransform=world; return h;
 }
 static void publish(Harness *h, ROBDepthCloudFrame *f, ROBDepthCloudTransform camera, NSArray *targets) {
     f.capturedUptime=NSProcessInfo.processInfo.systemUptime;
     if(f.isBelly) h.bellyCloudUpdatePending=YES; else h.cloudUpdatePending=YES;
     [h processDepthFrame:f robotTransform:h.robotNode.worldTransform cameraTransform:camera neckTargets:targets]; drain(h);
+}
+static void publishExplicit(Harness *h, ROBDepthCloudFrame *f, ROBDepthCloudTransform camera, NSArray *targets) {
+    f.capturedUptime=NSProcessInfo.processInfo.systemUptime;
+    if(f.isBelly) h.bellyCloudUpdatePending=YES; else h.cloudUpdatePending=YES;
+    [h processDepthFrame:f robotTransform:h.robotNode.worldTransform cameraTransform:camera neckTargets:targets
+        projectionIdentity:h.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:YES]; drain(h);
 }
 static void assertHeadRetained(Harness *h, id geometry, double capturedAt, NSArray *context) {
     assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry==geometry && h.headFloorHoldingAcceptedFrame &&
@@ -191,12 +256,20 @@ int main(void) { @autoreleasepool {
         assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry && [h.headFloorSummary containsString:@"aligned"]);
         NSUInteger index=0, floorCount=0; double floorError=0, floorSquared=0, objectError=0;
         const uint16_t *mm=f.millimetersLittleEndian.bytes;
+        assert(h.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)==h.capturedPoints.count);
+        const ROBSurfaceSample *surface=h.capturedSurfaceSamples.bytes;
         for(int y=0;y<160;y+=4) for(int x=0;x<160;x+=4) if(mm[y*160+x]>=150 && mm[y*160+x]<=10000) {
             assert(index<h.capturedPoints.count); SCNVector3 p=h.capturedPoints[index].SCNVector3Value;
             double height=(y>=64 && y<=76 && x>=64 && x<=92) ? .3 : 0;
             double error=fabs(p.y-(5+scale*height)); if(height) objectError=fmax(objectError,error); else { floorError=fmax(floorError,error); floorSquared+=error*error; floorCount++; }
             uint32_t color=((uint32_t)x<<24)|((uint32_t)y<<16)|((uint32_t)((x+y)%256)<<8)|255;
-            assert(h.capturedColors[index].unsignedIntValue==color); index++;
+            assert(h.capturedColors[index].unsignedIntValue==color && surface[index].rgba==color);
+            double opticalDepth=mm[y*160+x]/1000.;
+            ROBDepthCloudTransform surfaceCamera=ROBDepthCloudMakeTransform(h.capturedSurfaceView.cameraToMap);
+            ROBDepthPoint inMap=ROBDepthCloudProject(surfaceCamera,(x-f.cameraCX)*opticalDepth/f.cameraFX,
+                (y-f.cameraCY)*opticalDepth/f.cameraFY,opticalDepth);
+            assert(ROBSurfaceDistance2((ROBSurfacePoint){inMap.x,inMap.y,inMap.z},surface[index].point)<1e-18);
+            assert(fabs(surface[index].point.y-height)<.004);index++;
         }
         assert(index==h.capturedPoints.count && index==h.capturedColors.count && floorError<.004 && sqrt(floorSquared/floorCount)<.0015 && objectError<.002);
     }
@@ -208,12 +281,16 @@ int main(void) { @autoreleasepool {
     publish(raw,table,ROBDepthCloudMakeTransform(tableRows),targets);
     assert(raw.capturedPoints.count>500 && [raw.headFloorSummary containsString:@"raw cloud"] &&
         [raw.headFloorSummary containsString:@"no plane within floor tilt/height bounds"] && !raw.headFloorAlignmentEstablished);
+    // Legacy projection still requires an accepted floor before accumulating;
+    // a tabletop-only raw preview cannot manufacture that floor reference.
+    assert(!raw.capturedSurfaceProjectionReady);
     for(NSValue *value in raw.capturedPoints) assert(fabs(value.SCNVector3Value.y-(5+scale*.75))<.002);
     id acceptedGeometry=h.liveRGBCloudNode.geometry;
     double acceptedAt=h.lastHeadCloudUptime;
     NSArray *acceptedContext=h.headFloorCloudContext;
     NSArray *acceptedWorldPoints=[((FixtureGeometry *)(id)acceptedGeometry).points copy];
-    publish(h,table,ROBDepthCloudMakeTransform(tableRows),targets);
+    ROBDepthCloudFrame *rejectedHead=noisyFrame(.001);
+    publish(h,rejectedHead,camera,targets);
     assertHeadRetained(h,acceptedGeometry,acceptedAt,acceptedContext);
     assert(h.headFloorAlignmentEstablished && ![h.headFloorSummary containsString:@"raw cloud"]);
 
@@ -302,13 +379,24 @@ int main(void) { @autoreleasepool {
     publish(h,f,camera,targets);
     acceptedGeometry=h.liveRGBCloudNode.geometry; acceptedAt=h.lastHeadCloudUptime; acceptedContext=h.headFloorCloudContext;
 
-    // New intrinsics/mount with a rejected fit do not mutate the retained
-    // accepted world geometry or its capture context.
+    // A changed camera projection clears the old alignment. A fresh rejected
+    // floor fit is displayed raw in its new frame, never relabelled as history
+    // from the old camera pose/intrinsics.
     noise.cameraFX++;
-    publish(h,noise,camera,targets); assertHeadRetained(h,acceptedGeometry,acceptedAt,acceptedContext);
+    publish(h,noise,camera,targets);
+    assert(h.liveRGBCloudNode.geometry!=acceptedGeometry && !h.headFloorHoldingAcceptedFrame &&
+        !h.headFloorAlignmentEstablished && h.lastHeadCloudUptime==noise.capturedUptime &&
+        [h.headFloorSummary containsString:@"raw cloud"]);
     noise.cameraFX--;
+    publish(h,f,camera,targets);
+    acceptedGeometry=h.liveRGBCloudNode.geometry; acceptedAt=h.lastHeadCloudUptime; acceptedContext=h.headFloorCloudContext;
     ROBDepthCloudTransform changedCamera=camera; changedCamera.m[3]+=.01;
-    publish(h,noise,changedCamera,targets); assertHeadRetained(h,acceptedGeometry,acceptedAt,acceptedContext);
+    publish(h,noise,changedCamera,targets);
+    assert(h.liveRGBCloudNode.geometry!=acceptedGeometry && !h.headFloorHoldingAcceptedFrame &&
+        !h.headFloorAlignmentEstablished && h.lastHeadCloudUptime==noise.capturedUptime &&
+        [h.headFloorSummary containsString:@"raw cloud"]);
+    publish(h,f,camera,targets);
+    acceptedGeometry=h.liveRGBCloudNode.geometry; acceptedAt=h.lastHeadCloudUptime; acceptedContext=h.headFloorCloudContext;
     [h refreshFloorCloudVisibilityAtUptime:acceptedAt+.8];
     assertHeadRetained(h,acceptedGeometry,acceptedAt,acceptedContext);
     for(NSNumber *age in @[@4,@60,@86400]) {
@@ -353,6 +441,103 @@ int main(void) { @autoreleasepool {
     [belly refreshFloorCloudVisibilityAtUptime:bellyAt+.701];
     assert(!belly.liveBellyRGBCloudNode.geometry && belly.lastBellyCloudUptime==bellyAt);
     f.isBelly=NO; noise.isBelly=NO; empty.isBelly=NO;
+
+    // A supplied HEAD or BELLY pose must keep the exact projected rays even
+    // when the same frame has a strong, tilted floor fit. Switching from the
+    // legacy aligned display also clears its aligned/hold state.
+    for (NSNumber *bellyMode in @[@NO,@YES]) {
+        Harness *explicit=newHarness(world);
+        ROBDepthCloudTransform explicitCamera=tiltedCamera(25);
+        // This fixture's legacy transform mirrors optical X. Supply a proper
+        // rigid optical pose for the accumulated-surface validity contract.
+        explicitCamera.m[0]=-scale;
+        BOOL isBelly=bellyMode.boolValue;
+        f.isBelly=isBelly; noise.isBelly=isBelly;
+        publish(explicit,f,explicitCamera,targets);
+        assert(isBelly ? explicit.bellyFloorAlignmentEstablished : explicit.headFloorAlignmentEstablished);
+        id previous=isBelly ? explicit.liveBellyRGBCloudNode.geometry : explicit.liveRGBCloudNode.geometry;
+        publishExplicit(explicit,f,explicitCamera,targets);
+        assert((isBelly ? explicit.liveBellyRGBCloudNode.geometry : explicit.liveRGBCloudNode.geometry)!=previous);
+        assert(!explicit.headFloorAlignmentEstablished && !explicit.bellyFloorAlignmentEstablished &&
+            !explicit.headFloorHoldingAcceptedFrame && !explicit.bellyFloorHoldingAcceptedFrame);
+        NSString *summary=isBelly ? explicit.bellyFloorSummary : explicit.headFloorSummary;
+        assert([summary containsString:@"residual (not corrected)"] && ![summary containsString:@"aligned"]);
+        assert(explicit.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)==explicit.capturedPoints.count);
+        ROBSurfaceDepthView explicitView=explicit.capturedSurfaceView;
+        assert(explicit.capturedSurfaceProjectionReady && ROBSurfaceViewValid(&explicitView));
+        assert([explicit.capturedSurfaceProjectionIdentity isEqual:explicit.ghostGestureEditor.depthProjectionIdentity]);
+        const ROBSurfaceSample *explicitSurface=explicit.capturedSurfaceSamples.bytes;
+        const double *surfaceMatrix=explicitView.cameraToMap;
+        for(int i=0;i<12;i++) assert(fabs(surfaceMatrix[i]-explicitCamera.m[i]/scale)<1e-12);
+        ROBDepthCloudTransform surfaceCamera=ROBDepthCloudMakeTransform(surfaceMatrix);
+        NSUInteger index=0; double maximumHeightFromFlattenedFloor=0, maximumSurfaceHeight=0;
+        const uint16_t *mm=f.millimetersLittleEndian.bytes;
+        for(int y=0;y<160;y+=4) for(int x=0;x<160;x+=4) if(mm[y*160+x]>=150 && mm[y*160+x]<=10000) {
+            double z=mm[y*160+x]/1000.;
+            double opticalX=(x-f.cameraCX)*z/f.cameraFX, opticalY=(y-f.cameraCY)*z/f.cameraFY;
+            ROBDepthPoint local=ROBDepthCloudProject(explicitCamera,opticalX,opticalY,z);
+            ROBDepthPoint inMap=ROBDepthCloudProject(surfaceCamera,opticalX,opticalY,z);
+            ROBSurfacePoint sample=explicitSurface[index].point;
+            assert(fabs(sample.x-local.x/scale)<1e-12 && fabs(sample.y-local.y/scale)<1e-12 && fabs(sample.z-local.z/scale)<1e-12);
+            assert(ROBSurfaceDistance2(sample,(ROBSurfacePoint){inMap.x,inMap.y,inMap.z})<1e-24);
+            double dx=sample.x-surfaceMatrix[3],dy=sample.y-surfaceMatrix[7],dz=sample.z-surfaceMatrix[11];
+            assert(fabs(surfaceMatrix[0]*dx+surfaceMatrix[4]*dy+surfaceMatrix[8]*dz-opticalX)<1e-9);
+            assert(fabs(surfaceMatrix[1]*dx+surfaceMatrix[5]*dy+surfaceMatrix[9]*dz-opticalY)<1e-9);
+            assert(fabs(surfaceMatrix[2]*dx+surfaceMatrix[6]*dy+surfaceMatrix[10]*dz-z)<1e-9);
+            uint32_t color=((uint32_t)x<<24)|((uint32_t)y<<16)|((uint32_t)((x+y)%256)<<8)|255;
+            assert(explicitSurface[index].rgba==color && explicit.capturedColors[index].unsignedIntValue==color);
+            maximumSurfaceHeight=fmax(maximumSurfaceHeight,fabs(sample.y));
+            SCNVector3 expected=SCNVector3Make(
+                world.m11*local.x+world.m21*local.y+world.m31*local.z+world.m41,
+                world.m12*local.x+world.m22*local.y+world.m32*local.z+world.m42,
+                world.m13*local.x+world.m23*local.y+world.m33*local.z+world.m43);
+            SCNVector3 actual=explicit.capturedPoints[index++].SCNVector3Value;
+            assert(fabs(actual.x-expected.x)<1e-6 && fabs(actual.y-expected.y)<1e-6 && fabs(actual.z-expected.z)<1e-6);
+            maximumHeightFromFlattenedFloor=fmax(maximumHeightFromFlattenedFloor,fabs(actual.y-5));
+        }
+        assert(index==explicit.capturedPoints.count && maximumHeightFromFlattenedFloor>.05 && maximumSurfaceHeight>.05);
+        publishExplicit(explicit,noise,explicitCamera,targets);
+        assert(!explicit.headFloorAlignmentEstablished && !explicit.bellyFloorAlignmentEstablished &&
+            !explicit.headFloorHoldingAcceptedFrame && !explicit.bellyFloorHoldingAcceptedFrame);
+        assert((isBelly ? explicit.lastBellyCloudUptime : explicit.lastHeadCloudUptime)==noise.capturedUptime);
+        assert((isBelly ? explicit.liveBellyRGBCloudNode.geometry : explicit.liveRGBCloudNode.geometry)!=nil);
+        // HEAD commonly sees only a tabletop. An explicit projection remains
+        // usable for display accumulation even when floor fitting rejects it.
+        // The flag conveys projection availability, never measured authority.
+        summary=isBelly ? explicit.bellyFloorSummary : explicit.headFloorSummary;
+        assert([summary containsString:@"fit rejected"] && [summary containsString:@"raw cloud"]);
+        ROBSurfaceDepthView noFloorView=explicit.capturedSurfaceView;
+        assert(explicit.capturedSurfaceProjectionReady && ROBSurfaceViewValid(&noFloorView));
+        assert([explicit.capturedSurfaceProjectionIdentity isEqual:explicit.ghostGestureEditor.depthProjectionIdentity]);
+        for(int i=0;i<12;i++) assert(fabs(noFloorView.cameraToMap[i]-explicitCamera.m[i]/scale)<1e-12);
+        ROBDepthCloudTransform noFloorCamera=ROBDepthCloudMakeTransform(noFloorView.cameraToMap);
+        const ROBSurfaceSample *noFloorSamples=explicit.capturedSurfaceSamples.bytes;
+        assert(explicit.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)==explicit.capturedPoints.count && explicit.capturedPoints.count>500);
+        const uint16_t *noisyMM=noise.millimetersLittleEndian.bytes;
+        index=0;
+        for(int y=0;y<160;y+=4) for(int x=0;x<160;x+=4) if(noisyMM[y*160+x]>=150 && noisyMM[y*160+x]<=10000) {
+            double z=noisyMM[y*160+x]/1000.;
+            double opticalX=(x-noise.cameraCX)*z/noise.cameraFX, opticalY=(y-noise.cameraCY)*z/noise.cameraFY;
+            ROBDepthPoint local=ROBDepthCloudProject(explicitCamera,opticalX,opticalY,z);
+            ROBDepthPoint mapped=ROBDepthCloudProject(noFloorCamera,opticalX,opticalY,z);
+            ROBSurfacePoint sample=noFloorSamples[index].point;
+            assert(ROBSurfaceDistance2(sample,(ROBSurfacePoint){mapped.x,mapped.y,mapped.z})<1e-24);
+            assert(fabs(sample.x-local.x/scale)<1e-12 && fabs(sample.y-local.y/scale)<1e-12 && fabs(sample.z-local.z/scale)<1e-12);
+            SCNVector3 actual=explicit.capturedPoints[index].SCNVector3Value;
+            assert(fabs(actual.x-(world.m11*local.x+world.m21*local.y+world.m31*local.z+world.m41))<1e-6);
+            assert(fabs(actual.y-(world.m12*local.x+world.m22*local.y+world.m32*local.z+world.m42))<1e-6);
+            assert(fabs(actual.z-(world.m13*local.x+world.m23*local.y+world.m33*local.z+world.m43))<1e-6);
+            uint32_t color=((uint32_t)x<<24)|((uint32_t)y<<16)|((uint32_t)((x+y)%256)<<8)|255;
+            assert(noFloorSamples[index].rgba==color && explicit.capturedColors[index].unsignedIntValue==color);
+            index++;
+        }
+        assert(index==explicit.capturedPoints.count);
+        if(isBelly) {
+            [explicit refreshFloorCloudVisibilityAtUptime:explicit.lastBellyCloudUptime+.701];
+            assert(explicit.liveBellyRGBCloudNode.hidden && !explicit.liveBellyRGBCloudNode.geometry);
+        }
+    }
+    f.isBelly=NO; noise.isBelly=NO;
 
     // Per-camera histories are independent: the HEAD snapshot persists after
     // BELLY expires; neck moves do not alter the belly's fixed captured points.
@@ -416,8 +601,55 @@ int main(void) { @autoreleasepool {
     h.liveRGBCloudNode.geometry=nil; cap.capturedUptime=NSProcessInfo.processInfo.systemUptime; h.cloudUpdatePending=YES;
     [h processDepthFrame:cap robotTransform:world cameraTransform:camera neckTargets:targets]; h.robotNode.worldTransform=moved; drain(h);
     assert(!h.liveRGBCloudNode.geometry);
-    CVPixelBufferRelease(nearBudget.rgbPixelBuffer); CVPixelBufferRelease(noise.rgbPixelBuffer); CVPixelBufferRelease(empty.rgbPixelBuffer);
-    CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD captured-world retention with age labels and fresh replacement during arm operations, unchanged BELLY250ms noise hold/700ms freshness, no resurrection after base clears, independent cameras, RGB pairing and20k cap");
+    // Once a surface history replaces the cloud, skip the hidden point
+    // geometry but keep delivering metrically correct samples to accumulation.
+    h.robotNode.worldTransform=world; h.headUsesSurfaces=YES;
+    NSArray *previousPoints=h.capturedPoints; publish(h,f,camera,targets);
+    assert(h.capturedPoints==previousPoints && h.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)>500);
+    /* Exact production completion guards reject old valid AND invalid work
+       before either can clear a newer pending flag or resurrect raw geometry. */
+    for (int role=0;role<2;role++) {
+        BOOL belly=role==1;
+        Harness *epochs=newHarness(world);
+        ROBDepthCloudFrame *old=frameAtHeight(1,0,NO);old.isBelly=belly;
+        ROBDepthCloudFrame *other=frameAtHeight(1,0,NO);other.isBelly=!belly;
+        publishExplicit(epochs,old,camera,targets);publishExplicit(epochs,other,camera,targets);
+        id otherGeometry=(belly ? epochs.liveRGBCloudNode : epochs.liveBellyRGBCloudNode).geometry;
+        assert(otherGeometry);
+        NSUInteger oldEpoch=belly ? epochs.bellyCloudSourceEpoch : epochs.headCloudSourceEpoch;
+        NSString *oldStream=old.captureStreamID;
+        old.capturedUptime=NSProcessInfo.processInfo.systemUptime;
+        if(belly) epochs.bellyCloudUpdatePending=YES;else epochs.cloudUpdatePending=YES;
+        [epochs processDepthFrame:old robotTransform:world cameraTransform:camera neckTargets:targets
+            projectionIdentity:epochs.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:YES sourceStreamID:oldStream sourceEpoch:oldEpoch];
+        ROBDepthCloudFrame *invalidOld=[ROBDepthCloudFrame new];invalidOld.isBelly=belly;
+        invalidOld.width=invalidOld.height=100;invalidOld.millimetersLittleEndian=[NSData data];
+        [epochs processDepthFrame:invalidOld robotTransform:world cameraTransform:camera neckTargets:targets
+            projectionIdentity:epochs.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:YES sourceStreamID:oldStream sourceEpoch:oldEpoch];
+        ROBDepthCloudFrame *fresh=frameAtHeight(1,0,NO);fresh.isBelly=belly;fresh.captureStreamID=@"runtime-profile-changed-with-identical-K";
+        [epochs updateDepthCloudStream:fresh];
+        SCNNode *changedNode=belly ? epochs.liveBellyRGBCloudNode : epochs.liveRGBCloudNode;
+        assert(changedNode.hidden && !changedNode.geometry);
+        assert((belly ? epochs.liveRGBCloudNode : epochs.liveBellyRGBCloudNode).geometry==otherGeometry);
+        epochs.cloudUpdatePending=YES;epochs.bellyCloudUpdatePending=YES;
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.025]];
+        assert(epochs.cloudUpdatePending && epochs.bellyCloudUpdatePending && !changedNode.geometry);
+        assert((belly ? epochs.liveRGBCloudNode : epochs.liveBellyRGBCloudNode).geometry==otherGeometry);
+        if(belly) epochs.cloudUpdatePending=NO;else epochs.bellyCloudUpdatePending=NO;
+        fresh.capturedUptime=NSProcessInfo.processInfo.systemUptime;
+        NSUInteger freshEpoch=belly ? epochs.bellyCloudSourceEpoch : epochs.headCloudSourceEpoch;
+        [epochs processDepthFrame:fresh robotTransform:world cameraTransform:camera neckTargets:targets
+            projectionIdentity:epochs.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:YES
+            sourceStreamID:fresh.captureStreamID sourceEpoch:freshEpoch];drain(epochs);
+        assert(changedNode.geometry && !changedNode.hidden);
+        NSArray *freshContext=belly ? epochs.bellyFloorCloudContext : epochs.headFloorCloudContext;
+        assert([freshContext[5] isEqual:fresh.captureStreamID]);
+        [epochs updateDepthCloudStream:fresh];
+        assert((belly ? epochs.bellyCloudSourceEpoch : epochs.headCloudSourceEpoch)==freshEpoch && changedNode.geometry);
+        CVPixelBufferRelease(old.rgbPixelBuffer);CVPixelBufferRelease(other.rgbPixelBuffer);CVPixelBufferRelease(fresh.rgbPixelBuffer);
+    }
+    CVPixelBufferRelease(rejectedHead.rgbPixelBuffer); CVPixelBufferRelease(nearBudget.rgbPixelBuffer); CVPixelBufferRelease(noise.rgbPixelBuffer); CVPixelBufferRelease(empty.rgbPixelBuffer);
+    CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD captured-world retention with age labels and fresh replacement during arm operations, unchanged BELLY250ms noise hold/700ms freshness, explicit HEAD/BELLY raw and surface rays agree without double floor correction even without an accepted floor, projection-change invalidation, no resurrection after base clears, independent cameras, RGB pairing,20k cap and surface-only geometry delivery");
 } return 0; }
 '''
 
@@ -425,7 +657,8 @@ int main(void) { @autoreleasepool {
 def main():
     with tempfile.TemporaryDirectory(prefix="cerebro-depth-floor-integration-") as folder:
         harness = Path(folder) / "integration.m"
-        harness.write_text(HARNESS.replace("__HELPERS__", helpers).replace("__STATUS_METHOD__", status_method).replace("__METHOD__", method))
+        harness.write_text(HARNESS.replace("__HELPERS__", helpers).replace("__SOURCE_PROPERTIES__", source_properties)
+                           .replace("__SOURCE_METHODS__", source_methods).replace("__STATUS_METHOD__", status_method).replace("__METHOD__", method))
         binary = Path(folder) / "integration"
         subprocess.run(["xcrun", "clang", "-fobjc-arc", "-fblocks", "-framework", "Foundation", "-framework", "SceneKit", "-framework", "CoreVideo", "-I", str(ROOT / "Cerebro"), str(harness), "-o", str(binary)], check=True, timeout=120)
         subprocess.run([str(binary)], check=True, timeout=30)

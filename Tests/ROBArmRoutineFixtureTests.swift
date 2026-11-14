@@ -1,6 +1,22 @@
 import AppKit
 import simd
 
+// Hardware-free workspace-gate fixtures do not fabricate pixel evidence.
+// Pure verifier fixtures separately exercise actual RGB-D tracking. Any legacy
+// travel-positive case reaching this adapter must stop instead of inventing it.
+enum ROBRecyclingVisualInspection {
+    enum TargetMoved:Error {case displacement(Double)}
+    static var fixedContext=false
+    @MainActor static func fixedHeadContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {fixedContext}
+    struct Context {}
+    @MainActor static func begin(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,gatewayArm:String,check:() throws ->Void) async throws ->Context {
+        throw ROBArmRoutineError.blocked("No synthetic visual baseline has been supplied to this fixture.")
+    }
+    @MainActor static func verifyAfterLift(context:Context,model:ROBGhostRobotModel,gatewayArm:String,check:() throws ->Void) async throws ->ROBVisualGraspVerifier.Evidence {
+        throw ROBArmRoutineError.blocked("No synthetic visual motion evidence has been supplied to this fixture.")
+    }
+}
+
 final class ROBShowMotionCoordinator {
     static let shared = ROBShowMotionCoordinator()
     static let greetingSummary = "Fixture combined greeting"
@@ -149,6 +165,10 @@ final class ROBWorkspaceSearch {
               value.sessionGeneration == ROBAmberGatewayClient.shared.generation,
               (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
         return value
+    }
+    @MainActor func captureRegisteredCurrentScene(model:ROBGhostRobotModel,generation:UInt64,
+        check:() throws->Void,progress:(String)->Void) async throws->ROBWorkspaceCollisionSnapshot {
+        try await scanCollisionScene(model:model,generation:generation,check:check,progress:progress)
     }
     func clearCollisionScene() { collisionSnapshotValue = nil }
     @MainActor func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,

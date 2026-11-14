@@ -48,6 +48,6 @@
   "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
   "referenceSource": "approved_scan_estimate",
   "simulationOnly": true,
-  "surfacesSHA256": "97cf72b57d165405c83aee90be96cd887248536488f905adacec8e23eac0b91f",
+  "surfacesSHA256": "c1b942de363ff40940f5e388b183800fb3a505d43179e0b83730a19954c386bd",
   "toolNote": "Provisional 110 mm tool offset; not a measured grasp point."
 }

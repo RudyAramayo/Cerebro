@@ -376,19 +376,73 @@ enum ROBWorkspaceObservationError: LocalizedError {
 /// The detector's full box supplies endpoints only after unclipped depth and
 /// plausible physical height/diameter checks; these are observations, not poses.
 struct ROBWorkspaceCanSections: Codable {
+    /// An explicit local-trial object prior, never a depth-band measurement or
+    /// camera/body registration. Live source/receipt admission belongs to the
+    /// search executor; these fields preserve how its geometry was estimated.
+    struct ShapePriorEvidence: Codable {
+        let kind: String
+        let source: String
+        let assumedHeightMeters: Double
+        let assumedDiameterMeters: Double
+        let planeRMSEMeters: Double
+        let planePointCount: Int
+        let planeSupportFraction: Double
+        let silhouetteIoU: Double
+        let silhouetteMaximumEdgeErrorPixels: Double
+        var valid:Bool {
+            kind=="local_visual_trial_known_empty_coke_cylinder" &&
+                source=="fresh_RGB_base_ray_local_depth_table_plane_and_silhouette" &&
+                assumedHeightMeters==0.120 && assumedDiameterMeters==0.066 &&
+                planeRMSEMeters.isFinite && planeRMSEMeters>=0 && (3...10000).contains(planePointCount) &&
+                planeSupportFraction.isFinite && planeSupportFraction>0 && planeSupportFraction<=1 &&
+                silhouetteIoU.isFinite && silhouetteIoU>0 && silhouetteIoU<=1 &&
+                silhouetteMaximumEdgeErrorPixels.isFinite && silhouetteMaximumEdgeErrorPixels>=0
+        }
+    }
     let top: [Double]
     let middle: [Double]
     let bottom: [Double]
     let heightMeters: Double
     let diameterMeters: Double
+    /// RGB-D bands sample the visible wall. A measured projection may shift
+    /// them to an estimated cylinder axis; legacy section records lack this.
+    var surfaceToAxisOffsetMeters: [Double]? = nil
+    var shapePriorEvidence: ShapePriorEvidence? = nil
     var valid: Bool {
         guard [top,middle,bottom].allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
               heightMeters.isFinite, (0.09...0.18).contains(heightMeters),
               diameterMeters.isFinite, (0.04...0.09).contains(diameterMeters) else { return false }
+        if let prior=shapePriorEvidence {
+            guard prior.valid,abs(heightMeters-prior.assumedHeightMeters)<1e-9,
+                  abs(diameterMeters-prior.assumedDiameterMeters)<1e-9,
+                  surfaceToAxisOffsetMeters==nil else {return false}
+        }
+        if let offset = surfaceToAxisOffsetMeters {
+            guard offset.count == 3, offset.allSatisfy(\.isFinite),
+                  abs(simd_length(SIMD3(offset[0],offset[1],offset[2]))-diameterMeters/2) <= 0.000001 else { return false }
+        }
         let a = SIMD3(top[0],top[1],top[2]), b = SIMD3(bottom[0],bottom[1],bottom[2])
         let m = SIMD3(middle[0],middle[1],middle[2]), axis = a-b, length = simd_length(axis)
         return length.isFinite && abs(length-heightMeters) <= 0.001 && axis.z >= 0.6*length &&
             simd_distance(m,(a+b)/2) <= 0.001
+    }
+    /// Pure construction after a separately admitted local visual trial has
+    /// checked its table plane, fresh silhouette and exact source. `base` is
+    /// the estimated AXIS base center, not a measured reflective-wall sample.
+    static func localKnownEmptyCokeCylinder(base:SIMD3<Double>,axis:SIMD3<Double>,planeRMSEMeters:Double,
+        planePointCount:Int,planeSupportFraction:Double,silhouetteIoU:Double,
+        silhouetteMaximumEdgeErrorPixels:Double)->Self? {
+        guard [base,axis].allSatisfy({[$0.x,$0.y,$0.z].allSatisfy(\.isFinite)}),simd_length(axis)>1e-9 else {return nil}
+        let evidence=ShapePriorEvidence(kind:"local_visual_trial_known_empty_coke_cylinder",
+            source:"fresh_RGB_base_ray_local_depth_table_plane_and_silhouette",assumedHeightMeters:0.120,
+            assumedDiameterMeters:0.066,planeRMSEMeters:planeRMSEMeters,planePointCount:planePointCount,
+            planeSupportFraction:planeSupportFraction,silhouetteIoU:silhouetteIoU,
+            silhouetteMaximumEdgeErrorPixels:silhouetteMaximumEdgeErrorPixels)
+        guard evidence.valid else {return nil}
+        let delta=simd_normalize(axis)*0.120,top=base+delta,middle=base+delta/2
+        let value=Self(top:[top.x,top.y,top.z],middle:[middle.x,middle.y,middle.z],bottom:[base.x,base.y,base.z],
+            heightMeters:0.120,diameterMeters:0.066,surfaceToAxisOffsetMeters:nil,shapePriorEvidence:evidence)
+        return value.valid ? value:nil
     }
     static func fit(topBand:SIMD3<Double>,middleBand:SIMD3<Double>,bottomBand:SIMD3<Double>,
                     diameterMeters:Double) -> Self? {
@@ -404,31 +458,97 @@ struct ROBWorkspaceCanSections: Codable {
     }
     static func measure(detection:ROBWorkspaceDetection,width:Int,height:Int,
                         fx:Double,fy:Double,cx:Double,cy:Double,depth:(Int,Int)->UInt16?,
-                        view:ROBWorkspaceView,model:ROBGhostRobotModel) -> Self? {
-        guard detection.usable, detection.box.allSatisfy({ (0.02...0.98).contains($0) }),
-              width > 1, height > 1, [fx,fy,cx,cy].allSatisfy(\.isFinite), fx > 0, fy > 0,
-              (0..<Double(width)).contains(cx), (0..<Double(height)).contains(cy),
-              let transform = view.cameraFrame(model:model) else { return nil }
+                        view:ROBWorkspaceView,model:ROBGhostRobotModel, cameraToRobot:simd_double4x4? = nil) -> Self? {
+        measureWithDiagnostics(detection:detection,width:width,height:height,fx:fx,fy:fy,cx:cx,cy:cy,
+            depth:depth,view:view,model:model,cameraToRobot:cameraToRobot).sections
+    }
+    /// Bounded evidence from the same raw samples and unchanged fit gates.
+    /// A failed band does not hide the remaining two bands from diagnostics.
+    static func measureWithDiagnostics(detection:ROBWorkspaceDetection,width:Int,height:Int,
+                        fx:Double,fy:Double,cx:Double,cy:Double,depth:(Int,Int)->UInt16?,
+                        view:ROBWorkspaceView,model:ROBGhostRobotModel,cameraToRobot:simd_double4x4? = nil)
+                        -> (sections:Self?,diagnostics:[String:Any]) {
+        func number(_ value:Double)->Any {value.isFinite ? value as Any : NSNull()}
+        var info:[String:Any]=["schema_version":1,"status":"rejected","box":detection.box.map(number),
+            "width":width,"height":height,"intrinsics":[fx,fy,cx,cy].map(number),"bands":[],
+            "thresholds":["minimum_valid_samples":9,"depth_min_mm":150,"depth_max_mm":3000,
+                "maximum_MAD_m":0.025,"maximum_p90_p10_m":0.06,"height_m":[0.09,0.18],
+                "diameter_m":[0.04,0.09],"minimum_axis_up_fraction":0.6,"maximum_middle_deviation_m":0.025]]
+        func rejected(_ stage:String)->(sections:Self?,diagnostics:[String:Any]) {
+            info["rejection_stage"]=stage;return(nil,info)
+        }
+        guard detection.usable else {return rejected("unusable_detection")}
+        guard detection.box.allSatisfy({(0.02...0.98).contains($0)}) else {return rejected("clipped_box")}
+        guard width>1,height>1,[fx,fy,cx,cy].allSatisfy(\.isFinite),fx>0,fy>0,
+              (0..<Double(width)).contains(cx),(0..<Double(height)).contains(cy) else {return rejected("invalid_intrinsics")}
+        guard let transform=cameraToRobot ?? view.cameraFrame(model:model) else {return rejected("camera_projection_unavailable")}
         let left = detection.box[0]*Double(width-1), right = detection.box[2]*Double(width-1)
         let top = detection.box[1]*Double(height-1), bottom = detection.box[3]*Double(height-1), u = (left+right)/2
         let radiusX = max(1,min(3,Int((right-left)*0.12))), radiusY = max(1,min(3,Int((bottom-top)*0.04)))
-        func band(_ fraction:Double) -> (point:SIMD3<Double>,depth:Double)? {
+        var bandReports:[[String:Any]]=[]
+        func band(_ label:String,_ fraction:Double) -> (point:SIMD3<Double>,depth:Double)? {
             let v = top+(bottom-top)*fraction, x = Int(u.rounded()), y = Int(v.rounded())
-            var samples: [Double] = []
+            var samples:[Double]=[],raw:[Any]=[],zeros=0,missing=0,outOfRange=0,outside=0
             for dy in -radiusY...radiusY { for dx in -radiusX...radiusX {
-                guard (0..<width).contains(x+dx), (0..<height).contains(y+dy) else { continue }
-                if let mm = depth(x+dx,y+dy), (150...3000).contains(mm) { samples.append(Double(mm)/1000) }
+                guard (0..<width).contains(x+dx),(0..<height).contains(y+dy) else {outside+=1;continue}
+                guard let mm=depth(x+dx,y+dy) else {missing+=1;raw.append(NSNull());continue}
+                raw.append(Int(mm))
+                if mm==0 {zeros+=1}
+                if (150...3000).contains(mm) {samples.append(Double(mm)/1000)} else {outOfRange+=1}
             } }
-            guard samples.count >= 9 else { return nil }
-            samples.sort(); let z = samples[samples.count/2], deviations = samples.map { abs($0-z) }.sorted()
-            guard deviations[deviations.count/2] <= 0.025,
-                  samples[samples.count*9/10]-samples[samples.count/10] <= 0.06 else { return nil }
+            var report:[String:Any]=["label":label,"fraction":fraction,"pixel_center":[u,v],
+                "rounded_pixel_center":[x,y],"radii":[radiusX,radiusY],"sample_count":raw.count,
+                "valid_count":samples.count,"zero_count":zeros,"missing_count":missing,
+                "out_of_range_count":outOfRange,"outside_image_count":outside,"raw_mm":raw]
+            guard !samples.isEmpty else {
+                report["rejection_stage"]="insufficient_valid_samples";report["minimum_count_pass"]=false
+                bandReports.append(report);return nil
+            }
+            samples.sort();let z=samples[samples.count/2],deviations=samples.map{abs($0-z)}.sorted()
+            let mad=deviations[deviations.count/2],p10=samples[samples.count/10],p90=samples[samples.count*9/10],spread=p90-p10
             let point = transform*SIMD4((u-cx)*z/fx,(v-cy)*z/fy,z,1)
+            report["median_m"]=number(z);report["MAD_m"]=number(mad);report["p10_m"]=number(p10);report["p90_m"]=number(p90)
+            report["spread_m"]=number(spread);report["median_xyz_m"]=[point.x,point.y,point.z].map(number)
+            report["minimum_count_pass"]=samples.count>=9;report["MAD_pass"]=mad<=0.025;report["spread_pass"]=spread<=0.06
+            let failure=samples.count<9 ? "insufficient_valid_samples" : mad>0.025 ? "MAD_exceeded" : spread>0.06 ? "p90_p10_exceeded" : nil
+            report["rejection_stage"]=failure as Any? ?? NSNull();bandReports.append(report)
+            guard failure==nil else {return nil}
             return (SIMD3(point.x,point.y,point.z),z)
         }
-        guard let upper = band(0.18), let middle = band(0.50), let lower = band(0.82) else { return nil }
-        return fit(topBand:upper.point,middleBand:middle.point,bottomBand:lower.point,
-            diameterMeters:(right-left)*middle.depth/fx)
+        let upperBand=band("top",0.18),middleBand=band("middle",0.50),lowerBand=band("bottom",0.82)
+        info["bands"]=bandReports
+        guard let upper=upperBand,let middle=middleBand,let lower=lowerBand else {
+            let failed=bandReports.filter{($0["rejection_stage"] as? String) != nil}.map{($0["label"] as! String)+":"+($0["rejection_stage"] as! String)}
+            info["failed_bands"]=failed;return rejected("band_depth_quality")
+        }
+        let diameter = (right-left)*middle.depth/fx
+        let bandAxis=upper.point-lower.point,length=simd_length(bandAxis),fittedHeight=length/0.64
+        let middleDeviation=simd_distance(middle.point,(upper.point+lower.point)/2)
+        info["diameter_m"]=number(diameter);info["fitted_height_m"]=number(fittedHeight)
+        info["axis_up_fraction"]=length>0 ? number(bandAxis.z/length):NSNull()
+        info["middle_deviation_m"]=number(middleDeviation)
+        guard let surface = fit(topBand:upper.point,middleBand:middle.point,bottomBand:lower.point,
+            diameterMeters:diameter) else {
+            if !diameter.isFinite || !(0.04...0.09).contains(diameter) {return rejected("diameter_outside_can_range")}
+            if !length.isFinite || !(0.09...0.18).contains(fittedHeight) {return rejected("height_outside_can_range")}
+            if !(bandAxis.z>=0.6*length) {return rejected("axis_not_upright")}
+            if !(middleDeviation<=0.025) {return rejected("middle_band_not_on_axis")}
+            return rejected("invalid_fitted_sections")
+        }
+        let a = SIMD3(surface.top[0],surface.top[1],surface.top[2])
+        let b = SIMD3(surface.bottom[0],surface.bottom[1],surface.bottom[2])
+        let axis = simd_normalize(a-b)
+        let origin = SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)
+        let ray = middle.point-origin, radial = ray-axis*simd_dot(ray,axis)
+        info["radial_ray_length_m"]=number(simd_length(radial))
+        guard simd_length(radial) > 0.01 else { return rejected("radial_ray_too_short") }
+        let offset = simd_normalize(radial)*(diameter/2)
+        func shifted(_ p:[Double])->[Double] { [p[0]+offset.x,p[1]+offset.y,p[2]+offset.z] }
+        let sections=Self(top:shifted(surface.top),middle:shifted(surface.middle),bottom:shifted(surface.bottom),
+            heightMeters:surface.heightMeters,diameterMeters:diameter,
+            surfaceToAxisOffsetMeters:[offset.x,offset.y,offset.z])
+        info["status"]="accepted";info["rejection_stage"]=NSNull()
+        return(sections,info)
     }
 }
 
@@ -440,8 +560,10 @@ struct ROBWorkspaceLocatedObject: Codable {
     let sequence: UInt64
     let view: ROBWorkspaceView
     var openingRadius: Double? = nil
+    var bucketShapePrior: ROBWorkspaceBucketOpeningPrior.Evidence? = nil
     var floorCorrectionDegrees: Double? = nil
     var sections: ROBWorkspaceCanSections? = nil
+    var registrationID: String? = nil
     var point: SIMD3<Double> { SIMD3(position[0], position[1], position[2]) }
     func agrees(with other: Self) -> Bool {
         target == other.target && sequence != other.sequence && other.capturedAt > capturedAt &&
@@ -474,6 +596,40 @@ struct ROBWorkspaceLocationConfirmation {
 /// immutable proposal; editing the file never changes an active operation.
 /// Pace removes optional timing padding only. The existing trajectory minimum,
 /// telemetry, lease and joint limits continue to apply to every dispatched step.
+/// The sandbox supplies a finite task count before the one operation approval.
+/// Legacy command names keep their original counts; perception and completion
+/// checks are still repeated for every item by the executor.
+enum ROBRecyclingBatchRequest {
+    static let maximumCount = 8
+    static let configuredCommands = ["left_recycle_cans", "right_recycle_cans"]
+
+    /// The authorization keeps its exact target count; a resumed campaign job
+    /// executes only its frozen remaining transfers. No grasp/hold earns credit.
+    static func executionCount(requestedCount:Int,standingRemainingTransfers:Int?=nil)->Int? {
+        guard (1...maximumCount).contains(requestedCount) else{return nil}
+        guard let remaining=standingRemainingTransfers else{return requestedCount}
+        guard (1...requestedCount).contains(remaining) else{return nil}
+        return remaining
+    }
+
+    static func requestedCount(command: String, target: String) throws -> Int? {
+        if configuredCommands.contains(command) {
+            let text = target.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }),
+                  let count = Int(text), (1...maximumCount).contains(count) else {
+                throw ROBGhostMotionError.blocked("Choose a whole number of cans from 1 to \(maximumCount) before requesting recycling.")
+            }
+            return count
+        }
+        switch command {
+        case "left_recycle_can", "right_recycle_can": return 1
+        case "left_recycle_two_cans", "right_recycle_two_cans": return 2
+        case "right_recycle_three_cans": return 3
+        default: return nil
+        }
+    }
+}
+
 struct ROBRecyclingTestParameters: Codable, Equatable {
     var motionPace: Double = 1.25
     var jawSettleSeconds: Double = 1.5
@@ -511,6 +667,12 @@ struct ROBLeftCanReachCalibration: Codable {
     let mappingID: String
     let translationMeters: [Double]
     let source: String
+    /// A new measured optical transform needs its own local residual. Historical
+    /// left-reach tuning belongs to the old provisional camera frame.
+    var registrationID: String? = nil
+    var toolLink: String? = nil
+    var validRegionLowMeters: [Double]? = nil
+    var validRegionHighMeters: [Double]? = nil
     var bucketYawDegrees: Double? = nil
     var bucketInwardMeters: Double? = nil
     var recoveryGraspClearanceMeters: Double? = nil
@@ -520,7 +682,10 @@ struct ROBLeftCanReachCalibration: Codable {
     /// Head-depth placement in effect when translationMeters was calibrated.
     /// Older files predate that adjustment and therefore use the raw frame.
     var depthTowardRobotMetersAtCalibration: Double? = nil
-    static var file: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/LeftArmCalibration/can-reach.json") }
+    static var file: URL { file(forPhysicalSide:"left") }
+    static func file(forPhysicalSide side:String) -> URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/\(side == "right" ? "Right" : "Left")ArmCalibration/can-reach.json")
+    }
     func effectiveTranslation(depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot()) throws -> SIMD3<Double> {
         guard let depthAlignment, translationMeters.count == 3,
               translationMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
@@ -538,9 +703,24 @@ struct ROBLeftCanReachCalibration: Codable {
         }
         return result
     }
-    static func load(model: ROBGhostRobotModel, can: ROBWorkspaceLocatedObject? = nil, file: URL = file,
-                     depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot()) throws -> SIMD3<Double> {
-        guard let value = try configuration(model:model,file:file) else { return .zero }
+    static func load(model: ROBGhostRobotModel, can: ROBWorkspaceLocatedObject? = nil, file: URL? = nil,
+                     depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot(),
+                     estimatedCameraProjectionIdentity:String? = nil) throws -> SIMD3<Double> {
+        // A photo-origin estimate is a different coordinate model. Never read
+        // or rebase legacy camera-space tuning into it. Measured local
+        // registration residuals keep their existing independent precedence.
+        if can?.registrationID == nil,estimatedCameraProjectionIdentity != nil {return .zero}
+        guard let value = try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:can?.registrationID) else { return .zero }
+        if let registration=can?.registrationID {
+            guard value.registrationID==registration,value.toolLink==model.toolLink,
+                  let low=value.validRegionLowMeters,let high=value.validRegionHighMeters,
+                  low.count==3,high.count==3,let point=can?.point,
+                  (0..<3).allSatisfy({point[$0]>=low[$0] && point[$0]<=high[$0]}) else { return .zero }
+            // A residual taught in measured robot XYZ is not rebased by the
+            // visualization-only head shift and does not inherit old tabletop Z.
+            return SIMD3(value.translationMeters[0],value.translationMeters[1],value.translationMeters[2])
+        }
+        guard value.registrationID == nil else { return .zero }
         guard let depthAlignment else {
             throw ROBGhostMotionError.blocked("The current head depth adjustment is invalid.")
         }
@@ -577,24 +757,69 @@ struct ROBLeftCanReachCalibration: Codable {
         }
         return correction
     }
-    static func loadBucketYaw(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
-        try configuration(model:model,file:file)?.bucketYawDegrees ?? 0
+    static func loadBucketYaw(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil,
+        estimatedCameraProjectionIdentity:String? = nil) throws -> Double {
+        if registrationID == nil,estimatedCameraProjectionIdentity != nil {return 0}
+        guard let value=try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:registrationID) else{return 0}
+        return value.bucketYawDegrees ?? 0
     }
-    static func loadBucketInward(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
-        try configuration(model:model,file:file)?.bucketInwardMeters ?? 0
+    static func loadBucketInward(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil,
+        estimatedCameraProjectionIdentity:String? = nil) throws -> Double {
+        if registrationID == nil,estimatedCameraProjectionIdentity != nil {return 0}
+        guard let value=try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:registrationID) else{return 0}
+        return value.bucketInwardMeters ?? 0
     }
-    static func loadRecoveryGraspClearance(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
-        try configuration(model:model,file:file)?.recoveryGraspClearanceMeters ?? 0
+    static func loadRecoveryGraspClearance(model:ROBGhostRobotModel,file:URL? = nil) throws -> Double {
+        try configuration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide))?.recoveryGraspClearanceMeters ?? 0
     }
-    static func loadTabletopCanBaseHeight(model:ROBGhostRobotModel,file:URL = file) throws -> Double? {
-        try configuration(model:model,file:file)?.tabletopCanBaseHeightMeters
+    static func loadTabletopCanBaseHeight(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil,
+        estimatedCameraProjectionIdentity:String? = nil) throws -> Double? {
+        if registrationID == nil,estimatedCameraProjectionIdentity != nil {return nil}
+        return try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:registrationID)?.tabletopCanBaseHeightMeters
+    }
+    static func registeredFile(base:URL,registrationID:String)->URL {
+        base.deletingLastPathComponent().appendingPathComponent("RegisteredReach")
+            .appendingPathComponent(ROBGhostRobotModel.hash(Data(registrationID.utf8))+".json")
+    }
+    /// Explicit experiment correction; it preserves the historical prior-frame
+    /// file and is valid only for this registration, tool and measured region.
+    @discardableResult static func saveRegisteredResidual(model:ROBGhostRobotModel,registrationID:String,
+        regionLowMeters:[Double],regionHighMeters:[Double],translationMeters:[Double],source:String,baseFile:URL) throws ->URL {
+        guard !registrationID.isEmpty,registrationID.utf8.count<=512,!source.isEmpty,source.utf8.count<=1024,
+              translationMeters.count==3,translationMeters.allSatisfy({$0.isFinite && abs($0)<=0.15}),
+              regionLowMeters.count==3,regionHighMeters.count==3,
+              (0..<3).allSatisfy({regionLowMeters[$0].isFinite && regionHighMeters[$0].isFinite &&
+                  abs(regionLowMeters[$0])<=5 && abs(regionHighMeters[$0])<=5 && regionLowMeters[$0]<regionHighMeters[$0]}) else {
+            throw ROBGhostMotionError.blocked("A reach correction needs a measured registration, tool, finite local region and translation within 15 cm.")
+        }
+        let value=Self(modelID:model.modelID,referenceID:model.referenceID,mappingID:model.selectedMappingID,
+            translationMeters:translationMeters,source:source,registrationID:registrationID,toolLink:model.toolLink,
+            validRegionLowMeters:regionLowMeters,validRegionHighMeters:regionHighMeters)
+        let destination=registeredFile(base:baseFile,registrationID:registrationID)
+        try FileManager.default.createDirectory(at:destination.deletingLastPathComponent(),withIntermediateDirectories:true)
+        let encoder=JSONEncoder();encoder.outputFormatting=[.prettyPrinted,.sortedKeys]
+        try encoder.encode(value).write(to:destination,options:.atomic)
+        return destination
+    }
+    private static func scopedConfiguration(model:ROBGhostRobotModel,file:URL,registrationID:String?) throws ->Self? {
+        guard let registrationID else { return try configuration(model:model,file:file) }
+        let scoped=registeredFile(base:file,registrationID:registrationID)
+        let candidate=FileManager.default.fileExists(atPath:scoped.path) ? scoped : file
+        guard FileManager.default.fileExists(atPath:candidate.path) else{return nil}
+        let data=try Data(contentsOf:candidate)
+        guard data.count<=16_384 else{throw ROBGhostMotionError.blocked("The local reach calibration is too large.")}
+        // An old provisional-frame file is not a measured-frame residual.
+        // Its translation, tabletop datum and release offsets are ignored.
+        guard let metadata=try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+              metadata["registrationID"] as? String==registrationID else{return nil}
+        return try configuration(model:model,file:candidate)
     }
     private static func configuration(model:ROBGhostRobotModel,file:URL) throws -> Self? {
         guard FileManager.default.fileExists(atPath:file.path) else { return nil }
         let data = try Data(contentsOf:file)
         guard data.count <= 16_384, let value = try? JSONDecoder().decode(Self.self,from:data),
               value.modelID == model.modelID, value.referenceID == model.referenceID,
-              value.mappingID == ROBGhostRobotModel.mappingID, !value.source.isEmpty,
+              value.mappingID == model.selectedMappingID, !value.source.isEmpty,
               value.translationMeters.count == 3, value.translationMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
               (value.bucketYawDegrees ?? 0).isFinite, abs(value.bucketYawDegrees ?? 0) <= 30,
               (value.bucketInwardMeters ?? 0).isFinite, (0...0.08).contains(value.bucketInwardMeters ?? 0),
@@ -603,8 +828,17 @@ struct ROBLeftCanReachCalibration: Codable {
               value.tabletopGraspHeightMeters.map({ $0.isFinite && (0.30...1.40).contains($0) }) ?? true,
               value.tabletopCanBaseHeightMeters.map({ $0.isFinite && (0.30...1.40).contains($0) }) ?? true,
               value.depthTowardRobotMetersAtCalibration.map({ $0.isFinite && (0...0.30).contains($0) }) ?? true,
-              value.tabletopGraspHeightMeters == nil || value.tabletopCanBaseHeightMeters == nil else {
-            throw ROBGhostMotionError.blocked("The local left-can reach calibration is invalid or belongs to a different robot model.")
+              value.tabletopGraspHeightMeters == nil || value.tabletopCanBaseHeightMeters == nil,
+              value.registrationID.map({!$0.isEmpty && $0.utf8.count<=512}) ?? true,
+              value.toolLink.map({$0==model.toolLink}) ?? true,
+              value.registrationID==nil || (value.toolLink==model.toolLink && value.validRegionLowMeters?.count==3 && value.validRegionHighMeters?.count==3),
+              (value.validRegionLowMeters==nil && value.validRegionHighMeters==nil) ||
+                (value.validRegionLowMeters?.count==3 && value.validRegionHighMeters?.count==3 &&
+                 (0..<3).allSatisfy({ i in
+                    let low=value.validRegionLowMeters![i],high=value.validRegionHighMeters![i]
+                    return low.isFinite && high.isFinite && abs(low)<=5 && abs(high)<=5 && low<high
+                 })) else {
+            throw ROBGhostMotionError.blocked("The local can reach calibration is invalid or belongs to another physical arm/model.")
         }
         return value
     }
@@ -677,6 +911,146 @@ enum ROBWorkspaceBucketRim {
     }
 }
 
+/// Explicit RGB/floor SHAPE PRIOR for the locally approved calibration trial.
+/// It never reports a measured rim or a measured recessed interior. The
+/// admitted tapered-bucket family is deliberately recorded with the result.
+enum ROBWorkspaceBucketOpeningPrior {
+    struct Evidence: Codable {
+        let kind: String, source: String
+        let assumedHeightToOpeningDiameterRange: [Double]
+        let assumedBottomToOpeningRadiusRange: [Double]
+        let contourRMSEPixels: Double, contourPointCount: Int
+        let floorRMSEMeters: Double, floorPointCount: Int, floorSupportFraction: Double
+        let commonOpeningRadiusMeters: Double, shapeInsetMeters: Double
+        let maximumVariantCenterXYSpreadMeters: Double, maximumRimHeightMeters: Double
+        let maximumBottomProjectionErrorPixels: Double
+        var valid:Bool {
+            kind == "local_visual_trial_RGB_opening_floor_shape_prior" &&
+            source == "fresh_orange_upper_contour_surrounding_depth_floor_and_declared_tapered_bucket_family" &&
+            assumedHeightToOpeningDiameterRange == [0.8,1.2] && assumedBottomToOpeningRadiusRange == [0.6,1.0] &&
+            [contourRMSEPixels,floorRMSEMeters,floorSupportFraction,commonOpeningRadiusMeters,shapeInsetMeters,
+             maximumVariantCenterXYSpreadMeters,maximumRimHeightMeters,maximumBottomProjectionErrorPixels].allSatisfy(\.isFinite) &&
+            contourPointCount >= 30 && floorPointCount >= 40 && floorSupportFraction >= 0.35 && floorSupportFraction <= 1 &&
+            contourRMSEPixels >= 0 && floorRMSEMeters >= 0 && floorRMSEMeters <= 0.012 &&
+            commonOpeningRadiusMeters >= 0.068 && commonOpeningRadiusMeters <= 0.28 && shapeInsetMeters >= 0.010 &&
+            maximumVariantCenterXYSpreadMeters >= 0 && maximumRimHeightMeters.isFinite && maximumBottomProjectionErrorPixels >= 0
+        }
+    }
+    struct Estimate { let center:SIMD3<Double>, radius:Double, evidence:Evidence }
+    private static func solve(_ rows:[SIMD3<Double>],_ values:[Double])->SIMD3<Double>? {
+        guard rows.count==values.count,rows.count>=3 else{return nil}
+        var a=Array(repeating:Array(repeating:0.0,count:4),count:3)
+        for (r,v) in zip(rows,values) {for i in 0..<3 {for j in 0..<3 {a[i][j]+=r[i]*r[j]};a[i][3]+=r[i]*v}}
+        for c in 0..<3 {let p=(c..<3).max(by:{abs(a[$0][c])<abs(a[$1][c])})!;guard abs(a[p][c])>1e-10 else{return nil};a.swapAt(c,p)
+            let d=a[c][c];for j in c..<4 {a[c][j]/=d};for i in 0..<3 where i != c {let f=a[i][c];for j in c..<4 {a[i][j]-=f*a[c][j]}}}
+        let r=SIMD3(a[0][3],a[1][3],a[2][3]);return [r.x,r.y,r.z].allSatisfy(\.isFinite) ? r:nil
+    }
+    static func estimate(box:[Double],width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
+                         cameraToRobot:simd_double4x4,depth:(Int,Int)->UInt16?,
+                         color:(Int,Int)->SIMD3<Double>?) -> Estimate? {
+        guard box.count==4,box.allSatisfy({$0.isFinite && (0.02...0.98).contains($0)}),box[2]>box[0],box[3]>box[1],
+              width>1,height>1,[fx,fy,cx,cy].allSatisfy(\.isFinite),fx>0,fy>0 else{return nil}
+        let x0=Int(box[0]*Double(width-1)),x1=Int(box[2]*Double(width-1)),y0=Int(box[1]*Double(height-1)),y1=Int(box[3]*Double(height-1))
+        let w=x1-x0+1,h=y1-y0+1,scale=max(1,Double(width)/640)
+        guard w>=24,h>=24,w*h<=180_000 else{return nil}
+        var mask=Array(repeating:false,count:w*h)
+        for y in 0..<h {for x in 0..<w {if let c=color(x+x0,y+y0),[c.x,c.y,c.z].allSatisfy(\.isFinite) {
+            mask[y*w+x]=c.x>0.3 && c.x-c.y>0.22 && c.x-c.z>0.32
+        }}}
+        var visited=Array(repeating:false,count:mask.count),component:[Int]=[]
+        for seed in mask.indices where mask[seed] && !visited[seed] {
+            var queue=[seed],index=0;visited[seed]=true
+            while index<queue.count {let p=queue[index];index+=1;let x=p%w,y=p/w
+                for q in [x>0 ? p-1:-1,x+1<w ? p+1:-1,y>0 ? p-w:-1,y+1<h ? p+w:-1] where q>=0 && mask[q] && !visited[q] {visited[q]=true;queue.append(q)}}
+            if queue.count>component.count {component=queue}
+        }
+        guard component.count>=200,Double(component.count)/Double(w*h)<0.9 else{return nil}
+        var columns=Array(repeating:[Int](),count:w)
+        for p in component {columns[p%w].append(p/w)}
+        let edges=columns.enumerated().compactMap {x,ys -> SIMD2<Double>? in guard ys.count>=4,let y=ys.min() else{return nil};return SIMD2(Double(x+x0),Double(y+y0))}
+        guard edges.count>=30,let xmin=edges.map(\.x).min(),let xmax=edges.map(\.x).max(),xmax-xmin>=24 else{return nil}
+        let mid=(xmin+xmax)/2,half=(xmax-xmin)/2
+        var ellipse:(cx:Double,cy:Double,a:Double,b:Double,rmse:Double,support:[SIMD2<Double>])?
+        for center in stride(from:mid-3*scale,through:mid+3*scale,by:0.5*scale) {
+            for radius in stride(from:half-scale,through:half+3.5*scale,by:0.5*scale) where radius>0 {
+                let selected=edges.filter{abs(($0.x-center)/radius)<0.94};guard selected.count>=30 else{continue}
+                let xs=selected.map{sqrt(max(0,1-pow(($0.x-center)/radius,2)))},ys=selected.map(\.y)
+                let n=Double(xs.count),sx=xs.reduce(0,+),sy=ys.reduce(0,+),sxx=xs.reduce(0){$0+$1*$1},sxy=zip(xs,ys).reduce(0){$0+$1.0*$1.1}
+                let det=n*sxx-sx*sx;guard det>1e-8 else{continue}
+                let b=(sx*sy-n*sxy)/det,c=(sy+b*sx)/n
+                guard b>radius*0.25,b<radius*1.2 else{continue}
+                let error=sqrt(zip(xs,ys).reduce(0){$0+pow($1.1-(c-b*$1.0),2)}/n)
+                if error<(ellipse?.rmse ?? .infinity) {ellipse=(center,c,radius,b,error,selected)}
+            }
+        }
+        guard let e=ellipse,e.rmse<=2.5*scale,e.cx-e.a>Double(x0)-5*scale,e.cx+e.a<Double(x1)+5*scale else{return nil}
+        let middleY=component.filter{abs(Double($0%w+x0)-e.cx)<e.a*0.3}.map{Double($0/w+y0)}.sorted()
+        guard middleY.count>=20 else{return nil}
+        let bottom=middleY[middleY.count*99/100]
+        guard bottom-e.cy-e.b>=e.b*0.1,bottom-e.cy-e.b<=e.b*1.2 else{return nil}
+        // An observed shadowed interior below a bright curved lip is required;
+        // a flat uniform orange disk does not become an opening from its box.
+        func luma(_ c:SIMD3<Double>)->Double {0.299*c.x+0.587*c.y+0.114*c.z}
+        let lip=e.support.compactMap{color(Int($0.x),min(height-1,Int($0.y)+3))}.map(luma)
+        let inside=(-2...2).flatMap{dy in (-2...2).compactMap{dx in color(Int(e.cx)+dx,Int(e.cy)+dy)}}.map(luma)
+        guard !lip.isEmpty,!inside.isEmpty,lip.reduce(0,+)/Double(lip.count)-inside.reduce(0,+)/Double(inside.count)>=0.045 else{return nil}
+        let origin=SIMD3(cameraToRobot.columns.3.x,cameraToRobot.columns.3.y,cameraToRobot.columns.3.z)
+        func ray(_ x:Double,_ y:Double)->SIMD3<Double> {let r=cameraToRobot*SIMD4((x-cx)/fx,(y-cy)/fy,1,0);return SIMD3(r.x,r.y,r.z)}
+        var points:[SIMD3<Double>]=[];let pad=Int(50*scale),step=max(2,Int(3*scale))
+        for y in stride(from:max(0,y0-pad),through:min(height-1,y1+pad),by:step) {for x in stride(from:max(0,x0-pad),through:min(width-1,x1+pad),by:step) {
+            if (x0-3...x1+3).contains(x) && (y0-3...y1+3).contains(y) {continue}
+            if let mm=depth(x,y),(200...3000).contains(mm) {points.append(origin+ray(Double(x),Double(y))*Double(mm)/1000)}
+        }}
+        guard points.count>=80 else{return nil}
+        var best:(n:SIMD3<Double>,d:Double,support:[SIMD3<Double>])?
+        for i in 0..<128 {let a=points[(i*17)%points.count],b=points[(i*37+points.count/3)%points.count],c=points[(i*61+points.count*2/3)%points.count]
+            let cross=simd_cross(b-a,c-a),length=simd_length(cross);guard length>0.001 else{continue};var n=cross/length;if n.z<0 {n = -n};let d = -simd_dot(n,a)
+            guard n.z>=cos(35 * .pi/180),(0.6...1.5).contains(simd_dot(n,origin)+d) else{continue}
+            let support=points.filter{abs(simd_dot(n,$0)+d)<=0.015};if support.count>(best?.support.count ?? 0) {best=(n,d,support)}
+        }
+        guard let floor=best,floor.support.count>=40,Double(floor.support.count)/Double(points.count)>=0.35,
+              let ab=solve(floor.support.map{SIMD3($0.x,$0.y,1)},floor.support.map(\.z)) else{return nil}
+        let n=simd_normalize(SIMD3(-ab.x,-ab.y,1)),d = -ab.z/sqrt(ab.x*ab.x+ab.y*ab.y+1),cameraHeight=simd_dot(n,origin)+d
+        let floorRMSE=sqrt(floor.support.reduce(0){$0+pow(simd_dot(n,$1)+d,2)}/Double(floor.support.count))
+        guard n.z>=cos(35 * .pi/180),floorRMSE<=0.012,cameraHeight>0.6,cameraHeight<1.5 else{return nil}
+        let axis=simd_normalize(SIMD3(1,0,0)-n*n.x),other=simd_cross(n,axis)
+        var ground:[SIMD3<Double>]=[]
+        for p in e.support {let r=ray(p.x,p.y),den=simd_dot(n,r);guard den < -0.1 else{return nil};let distance = -cameraHeight/den;guard distance>0,distance<3 else{return nil};ground.append(origin+r*distance)}
+        let uv=ground.map{SIMD2(simd_dot($0,axis),simd_dot($0,other))}
+        guard let circle=solve(uv.map{SIMD3(2*$0.x,2*$0.y,1)},uv.map{simd_length_squared($0)}) else{return nil}
+        let radicand=circle.z+circle.x*circle.x+circle.y*circle.y;guard radicand>0 else{return nil}
+        let r0=sqrt(radicand),c0=axis*circle.x+other*circle.y-n*d
+        let radialRMSE=sqrt(uv.reduce(0){$0+pow(simd_distance($1,SIMD2(circle.x,circle.y))-r0,2)}/Double(uv.count))
+        guard radialRMSE<=0.012 else{return nil}
+        let inverse=simd_inverse(cameraToRobot)
+        func project(_ p:SIMD3<Double>)->SIMD2<Double>? {let q=inverse*SIMD4(p.x,p.y,p.z,1);guard q.z>0 else{return nil};return SIMD2(fx*q.x/q.z+cx,fy*q.y/q.z+cy)}
+        var variants:[(c:SIMD3<Double>,r:Double,h:Double)]=[],bottomError=0.0
+        for aspect in [0.8,1.0,1.2] {let h=2*aspect*r0/(1+2*aspect*r0/cameraHeight),fraction=(cameraHeight-h)/cameraHeight
+            let c=origin+(c0-origin)*fraction,r=r0*fraction;guard (0.12...0.5).contains(h),(0.06...0.28).contains(r) else{return nil};variants.append((c,r,h))
+            // The admitted taper family must explain visible floor contact
+            // within the explicitly assumed35mm local trial precision.
+            var bestError=Double.infinity
+            for taper in [0.6,0.8,1.0] {var projected:[SIMD2<Double>]=[]
+                for k in 0..<72 {let angle=Double(k)*2 * .pi/72;if let p=project(c-n*h+(axis*cos(angle)+other*sin(angle))*r*taper) {projected.append(p)}}
+                if let low=projected.max(by:{$0.y<$1.y}) {bestError=min(bestError,simd_distance(low,SIMD2(e.cx,bottom)))}
+            }
+            bottomError=max(bottomError,bestError)
+        }
+        guard bottomError<=18*scale else{return nil}
+        let selected=variants[1].c,xy=SIMD2(selected.x,selected.y)
+        let spread=variants.map{simd_distance(SIMD2($0.c.x,$0.c.y),xy)}.max()!,rimHeight=variants.map{$0.c.z+sqrt(max(0,1-n.z*n.z))*$0.r}.max()!
+        let inset=max(0.010,floorRMSE+3*radialRMSE+e.rmse*cameraHeight/min(fx,fy))
+        let common=variants.map{$0.r*n.z-simd_distance(SIMD2($0.c.x,$0.c.y),xy)}.min()!-inset
+        guard common>=0.068 else{return nil}
+        let evidence=Evidence(kind:"local_visual_trial_RGB_opening_floor_shape_prior",source:"fresh_orange_upper_contour_surrounding_depth_floor_and_declared_tapered_bucket_family",
+            assumedHeightToOpeningDiameterRange:[0.8,1.2],assumedBottomToOpeningRadiusRange:[0.6,1.0],contourRMSEPixels:e.rmse,contourPointCount:e.support.count,
+            floorRMSEMeters:floorRMSE,floorPointCount:floor.support.count,floorSupportFraction:Double(floor.support.count)/Double(points.count),
+            commonOpeningRadiusMeters:common,shapeInsetMeters:inset,maximumVariantCenterXYSpreadMeters:spread,maximumRimHeightMeters:rimHeight,maximumBottomProjectionErrorPixels:bottomError)
+        guard evidence.valid else{return nil}
+        return Estimate(center:SIMD3(xy.x,xy.y,rimHeight),radius:common,evidence:evidence)
+    }
+}
+
 /// Visual rehearsal only. Deliberately separate from executable proposals:
 /// selecting a right-hand model does not assert a right-arm hardware mapping.
 struct ROBCanGrabPreview {
@@ -694,17 +1068,89 @@ struct ROBCanGrabPreview {
     let gripperTiltDegrees: Double
     let reachesCan: Bool
     var reachOffset: [Double] = [0,0,0]
+    /// Ghost prefix from the measured start through a can-derived pregrasp.
+    /// Physical callers plan every connector separately against the live map.
+    var dynamicEntryStepCount: Int = 0
+    var dynamicEntryWaypoints: [[String:Double]] {
+        Array(steps.prefix(dynamicEntryStepCount+1).dropFirst().map(\.pose))
+    }
+    var recyclingBodySteps: ArraySlice<Step> { steps.dropFirst(dynamicEntryStepCount) }
     var calibratedGraspPoint: SIMD3<Double> { can.point + SIMD3(reachOffset[0],reachOffset[1],reachOffset[2]) }
     var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
+    /// Every generated entry connector receives the same registered full-arm,
+    /// open-jaw and observed-space checks as an ordinary workspace path.
+    func plannedDynamicEntry(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,
+                             generation:UInt64,sceneID:UUID,cameraGeneration:UUID,
+                             nowMilliseconds:Double) throws -> ROBWorkspaceCollisionPlan {
+        guard dynamicEntryStepCount>0,dynamicEntryStepCount<steps.count,
+              model.physicalSide==side,!dynamicEntryWaypoints.isEmpty else {
+            throw ROBGhostMotionError.blocked("The can-derived entry prefix is incomplete.")
+        }
+        let start=model.vendorLeft(baseline)
+        var previous=start,segments:[ROBLeftGestureProposal.Step]=[]
+        for pose in dynamicEntryWaypoints {
+            let goal=model.vendorLeft(pose)
+            let connector=try ROBWorkspaceCollisionPlan.make(from:previous,to:goal,map:map,model:model,
+                generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
+            segments += connector.steps.map { .init(positions:$0.positions,seconds:$0.seconds,
+                jawAction:nil,stage:"Corkscrew entry from measured start") }
+            previous=goal
+        }
+        return try ROBWorkspaceCollisionPlan.review(baseline:start,steps:segments,map:map,model:model,
+            generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
+    }
     var helpRequest: String? {
         // An orientation-only failure must not be described as too far away.
         graspError > 0.012 ? ROBWorkspaceReachError.outOfReach(.can).helpRequest : nil
     }
 
+    /// Compare distal collision-hull centers, rather than the tool alone, to
+    /// choose rearward shoulder rotation in the current side's FK convention.
+    static func rearwardJoint1Direction(model: ROBGhostRobotModel, baseline: [String:Double], side: String) -> Double {
+        let name=side+"_joint1",joint=model.joints.first { $0.name==name }!
+        let links=["three","four","five","six","seven"].map { side+"_"+$0+"_Link" }
+        func meanX(_ pose:[String:Double])->Double {
+            let bounds=model.worldCollisionBounds(positions:pose)
+            let centers=links.compactMap { bounds[$0].map { ($0.low.x+$0.high.x)/2 } }
+            return centers.reduce(0,+)/Double(max(1,centers.count))
+        }
+        let origin=meanX(baseline)
+        let candidates=[1.0,-1.0].map { sign -> (Double,Double) in
+            var pose=baseline
+            pose[name]=max(joint.lower,min(joint.upper,baseline[name,default:0]+sign*0.05))
+            return (sign,meanX(pose)-origin)
+        }
+        return candidates.min { $0.1<$1.1 }!.0
+    }
+
+    private static func forearmHullCenters(model:ROBGhostRobotModel,pose:[String:Double],side:String)->[SIMD3<Double>] {
+        let bounds=model.worldCollisionBounds(positions:pose)
+        return (["four","five","six","seven"].map { side+"_"+$0+"_Link" }+[side+"_tool"]).compactMap {
+            bounds[$0].map { ($0.low+$0.high)/2 }
+        }
+    }
+    static func outwardJoint2Direction(model:ROBGhostRobotModel,baseline:[String:Double],side:String)->Double {
+        let name=side+"_joint2",joint=model.joints.first { $0.name==name }!
+        return [1.0,-1.0].map { sign -> (Double,Double) in
+            var pose=baseline;pose[name]=max(joint.lower,min(joint.upper,baseline[name,default:0]+sign*0.05))
+            let centers=forearmHullCenters(model:model,pose:pose,side:side)
+            return (sign,centers.reduce(0) { $0+abs($1.y) }/Double(max(1,centers.count)))
+        }.max { $0.1<$1.1 }!.0
+    }
+    static func forwardJoint3Direction(model:ROBGhostRobotModel,baseline:[String:Double],side:String)->Double {
+        let name=side+"_joint3",joint=model.joints.first { $0.name==name }!
+        return [1.0,-1.0].map { sign -> (Double,Double) in
+            var pose=baseline;pose[name]=max(joint.lower,min(joint.upper,baseline[name,default:0]+sign*0.05))
+            let centers=forearmHullCenters(model:model,pose:pose,side:side)
+            return (sign,centers.reduce(0) { $0+$1.x }/Double(max(1,centers.count)))
+        }.max { $0.1<$1.1 }!.0
+    }
+
     static func make(can: ROBWorkspaceLocatedObject, model: ROBGhostRobotModel,
                      baseline: [String: Double], side: String = "left", now: Double = Date().timeIntervalSince1970 * 1000,
                      bucket: ROBWorkspaceLocatedObject? = nil, reachOffset: SIMD3<Double> = .zero,
-                     bucketYawDegrees: Double = 0, bucketInwardMeters: Double = 0) throws -> Self {
+                     bucketYawDegrees: Double = 0, bucketInwardMeters: Double = 0,
+                     rearwardJoint1Radians: Double = 0.24) throws -> Self {
         guard can.target == .can, can.position.count == 3, can.position.allSatisfy(\.isFinite),
               ["left", "right"].contains(side),
               can.confidence.isFinite, (0.35...1).contains(can.confidence), can.sequence > 0,
@@ -712,7 +1158,8 @@ struct ROBCanGrabPreview {
               baseline.values.allSatisfy(\.isFinite),
               [reachOffset.x,reachOffset.y,reachOffset.z].allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
               bucketYawDegrees.isFinite, abs(bucketYawDegrees) <= 30,
-              bucketInwardMeters.isFinite, (0...0.08).contains(bucketInwardMeters) else {
+              bucketInwardMeters.isFinite, (0...0.08).contains(bucketInwardMeters),
+              rearwardJoint1Radians.isFinite, (0.12...0.40).contains(rearwardJoint1Radians) else {
             throw ROBGhostMotionError.blocked("Find the can again; its measured position is missing or older than 60 seconds.")
         }
         let graspPoint = can.point + reachOffset
@@ -721,6 +1168,13 @@ struct ROBCanGrabPreview {
             return SIMD3(frame.columns.3.x, frame.columns.3.y, frame.columns.3.z)
         }
         let chain = model.joints.filter { $0.name.hasPrefix(side + "_joint") }
+        let selectedModel=model.physicalSide==side ? model:try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
+        let rawBounds=ROBWorkspaceCollisionPlan.jointBounds(model:selectedModel)
+        let allowed=Dictionary(uniqueKeysWithValues:(0..<7).map { index in
+            let lower=rawBounds[index].lowerBound-selectedModel.armUprightPrior[index]
+            let upper=rawBounds[index].upperBound-selectedModel.armUprightPrior[index]
+            return (side+"_joint\(index+1)",lower...upper)
+        })
         // Captured gripper: +Z approaches, +Y spans the jaw opening; +X is
         // its thin plane normal. Keep +Y/+Z horizontal, including wrist roll.
         func features(_ q: [String: Double]) -> [Double] {
@@ -753,7 +1207,12 @@ struct ROBCanGrabPreview {
             return b.allSatisfy(\.isFinite) ? b : nil
         }
         func closest(_ target: SIMD3<Double>, _ seed: [String: Double]) -> [String: Double] {
-            var q = seed, best = seed, bestLoss = Double.infinity
+            var q=seed
+            for joint in chain {
+                let range=allowed[joint.name]!
+                q[joint.name]=max(range.lowerBound,min(range.upperBound,seed[joint.name,default:0]))
+            }
+            var best=q,bestLoss=Double.infinity
             let goal = [target.x, target.y, target.z, 0, 0]
             for _ in 0..<250 {
                 let current = features(q), delta = zip(goal, current).map(-)
@@ -772,39 +1231,46 @@ struct ROBCanGrabPreview {
                 let changes = columns.map { zip($0, correction).reduce(0) { $0 + $1.0*$1.1 } }
                 let scale = min(1, 0.06 / max(0.000001, changes.map(abs).max() ?? 0))
                 for (joint, change) in zip(chain, changes) {
-                    q[joint.name] = max(joint.lower, min(joint.upper, q[joint.name, default: 0] + change * scale))
+                    let range=allowed[joint.name]!
+                    q[joint.name] = max(range.lowerBound, min(range.upperBound, q[joint.name, default: 0] + change * scale))
                 }
             }
             // Equivalent half-turns preserve the horizontal jaw line. Prefer
             // the branch nearest the starting wrist, avoiding approach flips.
             let wrist = side + "_joint7"
             let reference = seed[wrist, default: baseline[wrist, default: 0]]
-            let joint = chain.first { $0.name == wrist }!
+            let wristRange=allowed[wrist]!
             for delta in [-Double.pi, Double.pi] {
                 let candidate = best[wrist, default: 0] + delta
-                if (joint.lower...joint.upper).contains(candidate), abs(candidate-reference) < abs(best[wrist, default: 0]-reference) {
+                if wristRange.contains(candidate), abs(candidate-reference) < abs(best[wrist, default: 0]-reference) {
                     best[wrist] = candidate
                 }
             }
             return best
         }
-        var seed = baseline
-        let front = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
-        // The first pose must be the complete registered front target. Small
-        // measured wrist residuals at hanging belong to the baseline, not this
-        // target; horizontal leveling chooses its nearest wrist branch next.
-        for i in 1...7 { seed["\(side)_joint\(i)"] = (side == "left" ? 1 : -1) * front["left_joint\(i)"]! }
         var previous = baseline, steps: [Step] = []
         func append(_ pose: [String: Double], _ stage: String, dwell: Double = 0, action: ROBLeftGestureProposal.JawAction? = nil) {
             let angle = chain.map { abs(pose[$0.name, default: 0] - previous[$0.name, default: 0]) }.max() ?? 0
             steps.append(.init(pose: pose, seconds: max(0.8, angle / 0.6) + dwell, stage: stage, jawAction: action)); previous = pose
         }
-        append(seed, "Present ghost hand")
-        let frontTip = tip(seed)
-        let level = closest(frontTip, seed)
-        append(level, "Level gripper horizontally")
-        let raised = closest(SIMD3(frontTip.x, frontTip.y, max(frontTip.z, graspPoint.z + 0.15)), level)
-        append(raised, "Raise before crossing")
+        append(baseline, "Measured start (ghost only; clearance unverified)")
+        func shifted(_ pose:[String:Double],joint index:Int,delta:Double)->[String:Double] {
+            let name=side+"_joint\(index)",range=allowed[name]!
+            var result=pose;result[name]=max(range.lowerBound,min(range.upperBound,pose[name,default:0]+delta));return result
+        }
+        let outwardJ2=outwardJoint2Direction(model:model,baseline:baseline,side:side)
+        let outwardLift=shifted(baseline,joint:2,delta:outwardJ2*0.10)
+        append(outwardLift,"Corkscrew: small J2 outward lift (clearance unverified)")
+        let rearward=rearwardJoint1Direction(model:model,baseline:outwardLift,side:side)
+        let forwardJ3=forwardJoint3Direction(model:model,baseline:outwardLift,side:side)
+        var spiral=shifted(outwardLift,joint:1,delta:rearward*rearwardJoint1Radians)
+        spiral=shifted(spiral,joint:2,delta:outwardJ2*0.10)
+        spiral=shifted(spiral,joint:3,delta:forwardJ3*rearwardJoint1Radians*0.75)
+        append(spiral,"Corkscrew: J1 rearward + J2 outward + J3 forearm forward (clearance unverified)")
+        let spiralTip=tip(spiral),outward=side=="left" ? 1.0 : -1.0
+        let liftTarget=SIMD3(spiralTip.x,spiralTip.y+outward*0.02,max(spiralTip.z+0.18,graspPoint.z+0.12))
+        let raised=closest(liftTarget,spiral)
+        append(raised,"Corkscrew: lift and level forearm (clearance unverified)")
         let approachTarget = graspPoint + SIMD3(0, 0, 0.12)
         var approach = closest(approachTarget, raised)
         // A cross-body target can trap the numerical solver in a local
@@ -814,7 +1280,8 @@ struct ROBCanGrabPreview {
             let candidate = closest(approachTarget, alternate)
             if loss(candidate, approachTarget) < loss(approach, approachTarget) { approach = candidate }
         }
-        append(approach, "Cross above can (table clearance unverified)")
+        append(approach, "Can-derived horizontal pregrasp (clearance unverified)")
+        let entryStepCount=steps.count-1
         var grasp = approach
         for index in 1...4 {
             grasp = closest(graspPoint + SIMD3(0, 0, 0.12 * (1 - Double(index)/4)), grasp)
@@ -832,7 +1299,7 @@ struct ROBCanGrabPreview {
             else if bucket != nil { throw ROBWorkspaceReachError.outOfReach(.can) }
         }
         if let bucket {
-            guard side == "left", ready else { throw ROBWorkspaceReachError.outOfReach(.can) }
+            guard ready else { throw ROBWorkspaceReachError.outOfReach(.can) }
             guard bucket.target == .orangeBucket, bucket.position.count == 3, bucket.position.allSatisfy(\.isFinite),
                   (0...60_000).contains(now - bucket.capturedAt), bucket.confidence >= 0.35,
                   let radius = bucket.openingRadius, (0.06...0.28).contains(radius) else {
@@ -842,7 +1309,7 @@ struct ROBCanGrabPreview {
             // toward ROB's left around the shoulder, then shift it horizontally
             // toward that shoulder. Raw sightings, height and measured opening
             // radius remain unchanged.
-            let pivotFrame = model.frames(baseline)["left_one_Link"]!
+            let pivotFrame = model.frames(baseline)[side + "_one_Link"]!
             let pivot = SIMD2(pivotFrame.columns.3.x,pivotFrame.columns.3.y)
             let delta = SIMD2(bucket.point.x,bucket.point.y)-pivot, yaw = bucketYawDegrees * .pi/180
             let rotatedDelta = SIMD2(cos(yaw)*delta.x-sin(yaw)*delta.y,sin(yaw)*delta.x+cos(yaw)*delta.y)
@@ -850,7 +1317,7 @@ struct ROBCanGrabPreview {
             if bucketInwardMeters > 0 {
                 let distance = simd_length(rotatedDelta)
                 guard distance.isFinite, distance > bucketInwardMeters + 0.05 else {
-                    throw ROBGhostMotionError.blocked("The calibrated bucket release point is too close to the left shoulder.")
+                    throw ROBGhostMotionError.blocked("The calibrated bucket release point is too close to the selected shoulder.")
                 }
                 bucketXY -= rotatedDelta / distance * bucketInwardMeters
             }
@@ -871,7 +1338,16 @@ struct ROBCanGrabPreview {
             // still leaves 5.5 cm of opening radius for the can and fit error.
             let towardHand = SIMD2(graspPoint.x-bucketPoint.x,graspPoint.y-bucketPoint.y)
             let offset = simd_length(towardHand) > 0.001 ? simd_normalize(towardHand) * min(0.04,max(0,radius-0.055)) : .zero
-            let dropXY = bucketXY + offset
+            // The RGB/floor prior contains one common gravity-drop disk for
+            // every admitted shape variant. Keep its center and full inset;
+            // legacy inward/yaw/handward corrections cannot spend that disk.
+            if let prior=bucket.bucketShapePrior {
+                guard prior.valid,bucket.registrationID == nil,bucketYawDegrees==0,bucketInwardMeters==0,
+                      abs(radius-prior.commonOpeningRadiusMeters)<0.000001 else {
+                    throw ROBGhostMotionError.blocked("The explicitly estimated bucket opening or its common drop disk changed.")
+                }
+            }
+            let dropXY = bucket.bucketShapePrior == nil ? bucketXY + offset : SIMD2(bucket.point.x,bucket.point.y)
             var releaseTarget: SIMD3<Double>?
             for extra in [0.15,0.10,0.20,0.25] {
                 let point = SIMD3(dropXY.x,dropXY.y,max(graspPoint.z+extra,bucket.point.z+0.12))
@@ -886,7 +1362,8 @@ struct ROBCanGrabPreview {
             try travel(releaseTarget + SIMD3(0,0,0.08), stage: "Retreat above bucket")
         }
         return .init(can: can, side: side, baseline: baseline, steps: steps, graspError: error,
-            gripperTiltDegrees: tilt, reachesCan: ready, reachOffset:[reachOffset.x,reachOffset.y,reachOffset.z])
+            gripperTiltDegrees: tilt, reachesCan: ready, reachOffset:[reachOffset.x,reachOffset.y,reachOffset.z],
+            dynamicEntryStepCount:entryStepCount)
     }
 }
 
@@ -930,10 +1407,10 @@ enum ROBWorkspaceGrounding {
     static func locate(target: ROBWorkspaceTarget, detection: ROBWorkspaceDetection,
                        width: Int, height: Int, fx: Double, fy: Double, cx: Double, cy: Double,
                        depth: (Int, Int) -> UInt16?, view: ROBWorkspaceView, model: ROBGhostRobotModel,
-                       capturedAt: Double, sequence: UInt64) -> ROBWorkspaceLocatedObject? {
+                       capturedAt: Double, sequence: UInt64, cameraToRobot:simd_double4x4? = nil, registrationID:String? = nil) -> ROBWorkspaceLocatedObject? {
         guard detection.usable, width > 0, height > 0, [fx, fy, cx, cy].allSatisfy(\.isFinite), fx > 0, fy > 0,
               (0..<Double(width)).contains(cx), (0..<Double(height)).contains(cy),
-              let transform = view.cameraFrame(model: model) else { return nil }
+              let transform = cameraToRobot ?? view.cameraFrame(model: model) else { return nil }
         let x = Int(detection.depthPoint[0] * Double(width - 1)), y = Int(detection.depthPoint[1] * Double(height - 1))
         var samples: [Double] = []
         for dy in -3...3 { for dx in -3...3 {
@@ -948,7 +1425,7 @@ enum ROBWorkspaceGrounding {
         let position = transform * SIMD4((u - cx) * z / fx, (v - cy) * z / fy, z, 1)
         guard [position.x, position.y, position.z].allSatisfy(\.isFinite) else { return nil }
         return .init(target: target, position: [position.x, position.y, position.z], confidence: detection.confidence,
-            capturedAt: capturedAt, sequence: sequence, view: view)
+            capturedAt: capturedAt, sequence: sequence, view: view, registrationID:registrationID)
     }
 
     static func task(can: ROBWorkspaceLocatedObject, bucket: ROBWorkspaceLocatedObject,
@@ -1009,7 +1486,25 @@ struct ROBWorkspaceSearchSchedule {
             ROBWorkspaceView(panDegrees:0,upperTarget:6306),.init(panDegrees:-30,upperTarget:6306),
             .init(panDegrees:30,upperTarget:6306),.init(panDegrees:0,upperTarget:5650),
             .init(panDegrees:30,upperTarget:5650),.init(panDegrees:-30,upperTarget:5650)] : []
-        pending = recalled + nearby + (coarse + fallback).map { Job(view:$0,target:nil) }
+        // Calibrated pan gain makes native ±55° approximately the physical
+        // side bearings. The old ±45° raster misses objects directly beside
+        // ROB. Cover both side-floor heights after recall even when recall
+        // exists for only one requested object. The native envelope owns the
+        // admitted pan: absent a wider configured envelope, remain at ±45°.
+        var sideFloor:[ROBWorkspaceView]=[]
+        if !targets.isEmpty {
+            for sign in [1.0,-1.0] {
+                for (upper,pans) in [(5650,[55.0,60.0]),(5300,[60.0,55.0])] {
+                    for candidate in pans {
+                        let pan=boundedPan(sign*candidate)
+                        guard pan.isFinite,abs(pan)>45,
+                              !sideFloor.contains(where:{abs($0.panDegrees-pan)<3 && abs($0.upperTarget-upper)<100}) else {continue}
+                        sideFloor.append(.init(panDegrees:pan,upperTarget:upper))
+                    }
+                }
+            }
+        }
+        pending = recalled + sideFloor.map {Job(view:$0,target:nil)} + nearby + (coarse + fallback).map { Job(view:$0,target:nil) }
         plannedViewCount = pending.count
     }
     static func clipped(_ box: [Double]) -> Bool {

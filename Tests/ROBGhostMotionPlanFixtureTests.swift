@@ -5,6 +5,28 @@ private extension ROBLeftCanReachCalibration {
     func saveFixture(to file:URL) throws { try JSONEncoder().encode(self).write(to:file) }
 }
 
+private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
+    let sceneID=UUID(),cameraGeneration=UUID(),sessionGeneration:UInt64=42
+    let modelID:String,geometryID:String,mappingID:String
+    let createdAtMilliseconds:Double,oldestCapturedAtMilliseconds:Double,lastCapturedAtMilliseconds:Double
+    let voxelSizeMeters=0.025
+    var registrationID:String?="isolated synthetic measured registration"
+    var registrationUncertaintyMeters:Double?=0
+    var visualCalibrationScope:ROBWorkspaceVisualCalibrationMapScope?=nil
+    var targetSequence:UInt64?=nil
+    var observed=true,queries=0
+    var fingerprint:String {ROBGhostRobotModel.hash(Data("corkscrew-fixture-\(observed)-\(registrationID ?? "none")".utf8))}
+    init(model:ROBGhostRobotModel,now:Double) {
+        modelID=model.modelID;geometryID=model.geometryID;mappingID=model.selectedMappingID
+        createdAtMilliseconds=now;oldestCapturedAtMilliseconds=now;lastCapturedAtMilliseconds=now
+    }
+    func state(at point:SIMD3<Double>)->ROBWorkspaceVoxelState {queries+=1;return observed ? .free:.unknown}
+    func state(inBoundsLow low:SIMD3<Double>,high:SIMD3<Double>)->ROBWorkspaceVoxelState {queries+=1;return observed ? .free:.unknown}
+    func containsTargetObservation(sequence:UInt64,capturedAtMilliseconds:Double)->Bool {
+        sequence==targetSequence && capturedAtMilliseconds==createdAtMilliseconds
+    }
+}
+
 @main struct GhostMotionFixtures {
     static func expectBlocked(_ body: () throws -> Void) {
         do { try body(); preconditionFailure("Unsafe or changed proposal was admitted") }
@@ -15,6 +37,228 @@ private extension ROBLeftCanReachCalibration {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last=="grasp-hold" {
+            let arm=try ROBGhostRobotModel(directory:model.directory,physicalSide:"right"),now=Date().timeIntervalSince1970*1000
+            let can=ROBWorkspaceLocatedObject(target:.can,position:[0.45334,-0.17957,0.81673],confidence:0.9,capturedAt:now,sequence:100,
+                view:.init(panDegrees:0,upperTarget:6306))
+            let preview=try ROBCanGrabPreview.make(can:can,model:arm,baseline:arm.positions(vendorLeft:Array(repeating:0,count:7)),side:"right",now:now)
+            precondition(preview.reachesCan && preview.graspError<0.001)
+            let body=Array(preview.recyclingBodySteps),baseline=arm.vendorLeft(body.first!.pose)
+            let actions=Dictionary(uniqueKeysWithValues:body.enumerated().compactMap{i,s in s.jawAction.map{(i,$0)}})
+            let map=CorkscrewFixtureMap(model:arm,now:now),hash=String(repeating:"a",count:64)
+            map.registrationID=nil;map.registrationUncertaintyMeters=nil;map.targetSequence=100
+            map.visualCalibrationScope = .init(bodyMotionIdentity:"fixture-body",bodyContextIsCurrent:true,
+                estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,observedFrameCount:2)
+            let trial=ROBWorkspaceVisualCalibrationTrial(receiptID:"synthetic",receiptSHA256:hash,appSessionID:"fixture-app",
+                command:"right_recycle_cans",canCount:4,summarySHA256:hash,authorizationContextIdentity:"fixture-context",
+                sessionGeneration:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,modelID:arm.modelID,
+                geometryID:arm.geometryID,mappingID:arm.selectedMappingID,mapFingerprint:map.fingerprint,bodyMotionIdentity:"fixture-body",
+                estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,currentPoseIdentity:hash,baseline:baseline,
+                issuedAtMilliseconds:now-1,expiresAtMilliseconds:now+30_000,assumedSpatialErrorMeters:0.035)
+            let entry=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:baseline,
+                steps:[.init(positions:baseline,seconds:0.8)],map:map,model:arm,generation:42,sceneID:map.sceneID,
+                cameraGeneration:map.cameraGeneration,nowMilliseconds:now,trial:trial)
+            func compile(_ evidence:ROBWorkspaceVisualCalibrationTrial?,_ poses:[[String:Double]],_ jaw:[Int:ROBLeftGestureProposal.JawAction])throws->ROBLeftGestureProposal {
+                try ROBLeftGestureCompiler.compile(kind:"recycling_grasp_hold",name:"Synthetic terminal lift hold",poses:poses,model:arm,
+                    baseline:baseline,generation:42,recyclingActions:jaw,workspaceApproachPlan:entry,collisionMap:map,
+                    collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:evidence,nowMilliseconds:now)
+            }
+            expectBlocked{_=try compile(nil,body.map(\.pose),actions)}
+            let raw=try compile(trial,body.map(\.pose),actions)
+            precondition(raw.kind=="recycling_grasp_hold" && raw.steps.last?.stage=="Verification lift")
+            precondition(raw.steps.filter{$0.jawAction == .grip}.count==1 && !raw.steps.contains{$0.jawAction == .release})
+            var release=actions;release[body.count-1] = .release
+            expectBlocked{_=try compile(trial,body.map(\.pose),release)}
+            expectBlocked{_=try compile(trial,Array(body.dropLast()).map(\.pose),actions)}
+            let grip=raw.steps.firstIndex{$0.jawAction == .grip}!,prepared=raw.steps.firstIndex{$0.jawAction == .prepare}!
+            let payload=ROBWorkspaceCarriedObject(measurementID:"synthetic-shape-prior",centerInToolMeters:[0,0,0],halfExtentsMeters:[0.033,0.033,0.060])
+            let contact=ROBWorkspaceIntentionalContact(measurementID:payload.measurementID,observationSequence:100,capturedAtMilliseconds:now,
+                sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,mapFingerprint:map.fingerprint,modelID:arm.modelID,
+                geometryID:arm.geometryID,mappingID:arm.selectedMappingID,toolLink:arm.toolLink,
+                topCenterMeters:[can.point.x,can.point.y,can.point.z+0.060],bottomCenterMeters:[can.point.x,can.point.y,can.point.z-0.060],
+                diameterMeters:0.066,firstContactStepIndex:prepared+1,gripStepIndex:grip,releaseStepIndex:nil,stepCount:raw.steps.count,terminalGraspHold:true)
+            let proof=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:baseline,steps:raw.steps,map:map,model:arm,
+                generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now,trial:trial,payload:payload,intentionalContact:contact)
+            let frozen=try ROBLeftGestureCompiler.compile(kind:raw.kind,name:raw.name,poses:raw.poses,model:arm,baseline:baseline,generation:42,id:raw.id,
+                recyclingActions:actions,workspaceCollisionPlan:proof,workspaceApproachPlan:entry,collisionMap:map,
+                collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:trial,nowMilliseconds:now)
+            let decoded=try JSONDecoder().decode(ROBLeftGestureProposal.self,from:frozen.encoded())
+            expectBlocked{try ROBLeftGestureCompiler.validate(decoded,model:arm,collisionMap:map,collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,nowMilliseconds:now)}
+            try ROBLeftGestureCompiler.validate(decoded,model:arm,collisionMap:map,collisionSceneID:map.sceneID,
+                collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:trial,nowMilliseconds:now)
+            precondition(proof.checkedPoseCount>0 && map.queries>0 && contact.releaseStepIndex==nil)
+            print("Terminal grasp hold: actual RIGHT horizontal can reach, explicit trial+checked entry, one grip/6cm lift/no release, payload+full-hull review, decoded default authority/release/missing-lift negatives; synthetic free map only, no hardware")
+            return
+        }
+        if CommandLine.arguments.last == "corkscrew-entry" {
+            let now=Date().timeIntervalSince1970*1000
+            for side in ["left","right"] {
+                let armModel=try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
+                let start=armModel.positions(vendorLeft:Array(repeating:0,count:7))
+                let sign=ROBCanGrabPreview.rearwardJoint1Direction(model:armModel,baseline:start,side:side)
+                precondition(sign == (side=="left" ? 1 : -1))
+                var shifted=start;shifted[side+"_joint1",default:0]+=sign*0.1
+                let before=armModel.worldCollisionBounds(positions:start),after=armModel.worldCollisionBounds(positions:shifted)
+                for part in ["three","four","five","six","seven"] {
+                    let link=side+"_"+part+"_Link",a=before[link]!,b=after[link]!
+                    let dx=(b.low.x+b.high.x-a.low.x-a.high.x)/2
+                    precondition(dx < -0.005,"Rearward sign must move every distal hull, not only the tip")
+                    print("\(side) J1 \(sign*0.1): \(part) hull center X delta \(dx*1000) mm")
+                }
+                let frontPoint=armModel.toolPosition(armModel.positions(vendorLeft:armModel.recyclingFrontTarget))!
+                let can=ROBWorkspaceLocatedObject(target:.can,position:[frontPoint.x,frontPoint.y,frontPoint.z],confidence:0.9,
+                    capturedAt:now,sequence:10,view:.init(panDegrees:0,upperTarget:6160))
+                let preview=try ROBCanGrabPreview.make(can:can,model:armModel,baseline:start,side:side,now:now)
+                precondition(preview.steps[0].pose == start && preview.dynamicEntryStepCount==4)
+                let outward=ROBCanGrabPreview.outwardJoint2Direction(model:armModel,baseline:start,side:side)
+                precondition(outward == (side=="left" ? 1:-1))
+                precondition(preview.steps[1].pose[side+"_joint1"]==start[side+"_joint1"] &&
+                    preview.steps[1].pose[side+"_joint3"]==start[side+"_joint3"],"J2 must lift outward before J1/J3 begin")
+                precondition(abs(preview.steps[1].pose[side+"_joint2"]!-start[side+"_joint2"]!-outward*0.10)<1e-10)
+                let forward=ROBCanGrabPreview.forwardJoint3Direction(model:armModel,baseline:preview.steps[1].pose,side:side)
+                precondition(forward == (side=="left" ? -1:1))
+                precondition(abs(preview.steps[2].pose[side+"_joint1"]!-start[side+"_joint1"]!-sign*0.24)<1e-10)
+                precondition(abs(preview.steps[2].pose[side+"_joint3"]!-start[side+"_joint3"]!-forward*0.18)<1e-10)
+                let lifted=armModel.worldCollisionBounds(positions:preview.steps[1].pose)
+                var forwardProbe=preview.steps[1].pose;forwardProbe[side+"_joint3",default:0]+=forward*0.10
+                let advanced=armModel.worldCollisionBounds(positions:forwardProbe)
+                for part in ["four","five","six","seven"] {
+                    let link=side+"_"+part+"_Link",a=before[link]!,b=lifted[link]!,c=advanced[link]!
+                    precondition(abs((b.low.y+b.high.y)/2)>abs((a.low.y+a.high.y)/2) && b.low.z+b.high.z>a.low.z+a.high.z)
+                    precondition(c.low.x+c.high.x>b.low.x+b.high.x,"J3 must advance the full forearm after J2 lift")
+                }
+                precondition(preview.dynamicEntryWaypoints.count==4)
+                precondition(preview.recyclingBodySteps.first!.pose == preview.steps[preview.dynamicEntryStepCount].pose)
+                precondition(preview.steps.allSatisfy { step in armModel.joints.filter { !$0.name.hasPrefix(side+"_joint") }.allSatisfy { step.pose[$0.name]==start[$0.name] } })
+                let acceptedBounds=ROBWorkspaceCollisionPlan.jointBounds(model:armModel)
+                precondition(preview.steps.allSatisfy { step in zip(armModel.vendorLeft(step.pose),acceptedBounds).allSatisfy { $1.contains($0) } },
+                    "Every generated IK, corkscrew and equivalent wrist branch must fit the existing physical/raw bounds")
+                print("\(side) corkscrew preview: reached=\(preview.reachesCan), error=\(preview.graspError), tilt=\(preview.gripperTiltDegrees), steps=\(preview.steps.count), baseline tread gap=\(armModel.treadSeparation(vendorLeft:Array(repeating:0,count:7)))")
+                let map=CorkscrewFixtureMap(model:armModel,now:now)
+                do {
+                    _=try preview.plannedDynamicEntry(map:map,model:armModel,generation:42,
+                        sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now)
+                    preconditionFailure("The complete measured-hanging entry bypassed its existing tread clearance")
+                } catch {
+                    precondition(error.localizedDescription.contains("tread clearance"),"Expected the unchanged whole-entry start-clearance rejection")
+                    print("\(side) complete hanging entry truthfully blocked: \(error.localizedDescription)")
+                }
+                let held=armModel.positions(vendorLeft:armModel.recyclingFrontTarget)
+                var admitted=false
+                for offset in [0.0,-0.04,-0.08] where !admitted {
+                    let target=frontPoint+SIMD3(offset,0,(side=="right" ? 0.20:0)+offset)
+                    let heldCan=ROBWorkspaceLocatedObject(target:.can,position:[target.x,target.y,target.z],confidence:0.9,
+                        capturedAt:now,sequence:12,view:can.view)
+                    let bucket=ROBWorkspaceLocatedObject(target:.orangeBucket,position:[target.x,target.y+(side=="left" ? 0.06:-0.06),target.z-0.10],
+                        confidence:0.9,capturedAt:now,sequence:13,view:can.view,openingRadius:0.14)
+                    do {
+                        let full=try ROBCanGrabPreview.make(can:heldCan,model:armModel,baseline:held,side:side,now:now,bucket:bucket)
+                        let entry=try full.plannedDynamicEntry(map:map,model:armModel,generation:42,
+                            sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now)
+                        precondition(entry.baseline==armModel.vendorLeft(held) && ROBArmRoutinePlan.near(entry.goal,armModel.vendorLeft(full.recyclingBodySteps.first!.pose),tolerance:1e-9))
+                        precondition(!entry.steps.isEmpty && entry.checkedPoseCount>full.dynamicEntryWaypoints.count && map.queries>0)
+                        let body=Array(full.recyclingBodySteps)
+                        let actions=Dictionary(uniqueKeysWithValues:body.enumerated().compactMap { i,step in step.jawAction.map { (i,$0) } })
+                        let complete=try ROBLeftGestureCompiler.compile(kind:"recycling",name:"Complete generated entry fixture",poses:body.map(\.pose),
+                            model:armModel,baseline:armModel.vendorLeft(held),generation:42,recyclingActions:actions,
+                            workspaceApproachPlan:entry,collisionMap:map,collisionSceneID:map.sceneID,
+                            collisionCameraGeneration:map.cameraGeneration,nowMilliseconds:now)
+                        let payload=ROBWorkspaceCarriedObject(measurementID:"isolated measured fixture can",centerInToolMeters:[0,0,0],
+                            halfExtentsMeters:[0.035,0.035,0.06])
+                        let review=try ROBWorkspaceCollisionPlan.review(baseline:complete.baseline,steps:complete.steps,map:map,model:armModel,
+                            generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now,payload:payload)
+                        let frozen=try ROBLeftGestureCompiler.compile(kind:"recycling",name:complete.name,poses:body.map(\.pose),
+                            model:armModel,baseline:complete.baseline,generation:42,id:complete.id,recyclingActions:actions,
+                            workspaceCollisionPlan:review,workspaceApproachPlan:entry,collisionMap:map,
+                            collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,nowMilliseconds:now)
+                        try ROBLeftGestureCompiler.validate(frozen,model:armModel,collisionMap:map,
+                            collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,nowMilliseconds:now)
+                        precondition(frozen.steps.compactMap(\.jawAction)==[.prepare,.grip,.release])
+                        precondition(Array(frozen.steps.prefix(entry.steps.count))==entry.steps)
+                        map.observed=false
+                        expectBlocked {_ = try full.plannedDynamicEntry(map:map,model:armModel,generation:42,
+                            sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now)}
+                        map.observed=true;map.registrationID=nil
+                        expectBlocked {_ = try full.plannedDynamicEntry(map:map,model:armModel,generation:42,
+                            sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now)}
+                        map.registrationID="isolated synthetic measured registration"
+                        print("\(side) complete clear-held entry + horizontal body validated under synthetic registered/free scene: \(review.checkedPoseCount) checks; prepare/grip/release preserved")
+                        admitted=true
+                    } catch {print("\(side) clear-held candidate offset \(offset) rejected: \(error.localizedDescription)")}
+                }
+                precondition(admitted,"No complete clear-held corkscrew candidate survived the unchanged planner/compiler gates")
+                let moved=ROBWorkspaceLocatedObject(target:.can,position:[frontPoint.x+0.02,frontPoint.y,frontPoint.z+0.015],confidence:0.9,
+                    capturedAt:now,sequence:11,view:can.view)
+                let updated=try ROBCanGrabPreview.make(can:moved,model:armModel,baseline:start,side:side,now:now)
+                precondition(updated.steps[updated.dynamicEntryStepCount].pose != preview.steps[preview.dynamicEntryStepCount].pose,
+                    "Moving the can must recompute the pregrasp instead of preserving a taught front target")
+            }
+            print("Corkscrew entry: actual side-specific measured baseline, full distal-hull J2-outward then coupled J1-rearward/J3-forward signs, generated lift/pregrasp, changed-can replanning and unchanged other joints; no actuator or authorization services linked")
+            return
+        }
+        if CommandLine.arguments.last == "photo-origin-residual-scope" {
+            let suite="ROBPhotoResidualScope."+UUID().uuidString,defaults=UserDefaults(suiteName:suite)!
+            let folder=FileManager.default.temporaryDirectory.appendingPathComponent("rob-photo-residual-"+UUID().uuidString)
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+            defer {try? FileManager.default.removeItem(at:folder);defaults.removePersistentDomain(forName:suite)}
+            let alignment=ROBWorkspaceDepthAlignment.snapshot(defaults:defaults)!,pid=String(repeating:"a",count:64)
+            for side in ["left","right"] {
+                let testModel=try ROBGhostRobotModel(directory:root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"),physicalSide:side)
+                let file=folder.appendingPathComponent(side+"-reach.json")
+                var calibration=ROBLeftCanReachCalibration(modelID:testModel.modelID,referenceID:testModel.referenceID,
+                    mappingID:testModel.selectedMappingID,translationMeters:[0.02,-0.01,-0.03],source:"Legacy camera-only tuning fixture",
+                    bucketYawDegrees:18,bucketInwardMeters:0.035,recoveryGraspClearanceMeters:0.037,canOutwardMeters:0.01,
+                    tabletopCanBaseHeightMeters:0.80)
+                try calibration.saveFixture(to:file)
+                let sections=ROBWorkspaceCanSections(top:[0.5,0.1,0.98],middle:[0.5,0.1,0.92],bottom:[0.5,0.1,0.86],heightMeters:0.12,diameterMeters:0.066)
+                let can=ROBWorkspaceLocatedObject(target:.can,position:sections.middle,confidence:0.9,capturedAt:1000,sequence:1,
+                    view:.init(panDegrees:0,upperTarget:6160),sections:sections)
+                let legacy=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment)
+                precondition(legacy.x>0.02 && legacy.y != 0 && abs(legacy.z+0.06)<1e-10)
+                let yaw=try ROBLeftCanReachCalibration.loadBucketYaw(model:testModel,file:file)
+                let inward=try ROBLeftCanReachCalibration.loadBucketInward(model:testModel,file:file)
+                let base=try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:testModel,file:file)
+                let clearance=try ROBLeftCanReachCalibration.loadRecoveryGraspClearance(model:testModel,file:file)
+                precondition(yaw==18 && inward==0.035 && base==0.80 && clearance==0.037)
+                let fresh=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment,estimatedCameraProjectionIdentity:pid)
+                let freshYaw=try ROBLeftCanReachCalibration.loadBucketYaw(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                let freshInward=try ROBLeftCanReachCalibration.loadBucketInward(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                let freshBase=try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                precondition(fresh == .zero && freshYaw==0 && freshInward==0 && freshBase==nil,"Legacy camera tuning leaked into photo-origin coordinates")
+                calibration.tabletopCanBaseHeightMeters=nil;calibration.tabletopGraspHeightMeters=0.85;try calibration.saveFixture(to:file)
+                let oldHeight=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment)
+                let newHeight=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment,estimatedCameraProjectionIdentity:pid)
+                precondition(abs(oldHeight.z+0.07)<1e-10 && newHeight == .zero)
+                // Even a corrupt old camera file must not be opened/decoded
+                // merely to discover that its coordinate frame is obsolete.
+                try Data("Invalid legacy file, deliberately isolated fixture".utf8).write(to:file)
+                let noLegacyRead=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:nil,estimatedCameraProjectionIdentity:pid)
+                let noYawRead=try ROBLeftCanReachCalibration.loadBucketYaw(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                let noInwardRead=try ROBLeftCanReachCalibration.loadBucketInward(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                let noBaseRead=try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                precondition(noLegacyRead == .zero && noYawRead==0 && noInwardRead==0 && noBaseRead==nil)
+                expectBlocked {_ = try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment)}
+                let registration="measured-local-"+side
+                let scoped=try ROBLeftCanReachCalibration.saveRegisteredResidual(model:testModel,registrationID:registration,
+                    regionLowMeters:[0.2,-0.5,0.6],regionHighMeters:[0.8,0.5,1.2],translationMeters:[0.01,0.02,0.03],
+                    source:"Independently registered residual fixture",baseFile:file)
+                var registered=try JSONDecoder().decode(ROBLeftCanReachCalibration.self,from:Data(contentsOf:scoped))
+                registered.bucketYawDegrees = -12;registered.bucketInwardMeters=0.02;registered.tabletopCanBaseHeightMeters=0.78
+                try registered.saveFixture(to:scoped)
+                var registeredCan=can;registeredCan.registrationID=registration
+                let residual=try ROBLeftCanReachCalibration.load(model:testModel,can:registeredCan,file:file,depthAlignment:nil,estimatedCameraProjectionIdentity:pid)
+                let measuredYaw=try ROBLeftCanReachCalibration.loadBucketYaw(model:testModel,file:file,registrationID:registration,estimatedCameraProjectionIdentity:pid)
+                let measuredInward=try ROBLeftCanReachCalibration.loadBucketInward(model:testModel,file:file,registrationID:registration,estimatedCameraProjectionIdentity:pid)
+                let measuredBase=try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:testModel,file:file,registrationID:registration,estimatedCameraProjectionIdentity:pid)
+                precondition(residual==SIMD3(0.01,0.02,0.03) && measuredYaw == -12 && measuredInward==0.02 && measuredBase==0.78,
+                    "Photo-origin policy suppressed an independently matched measured-frame residual")
+                registeredCan.registrationID="unmatched-registration"
+                let unmatched=try ROBLeftCanReachCalibration.load(model:testModel,can:registeredCan,file:file,depthAlignment:nil,estimatedCameraProjectionIdentity:pid)
+                precondition(unmatched == .zero,"An unmatched registration inherited legacy tuning")
+            }
+            print("Photo-origin residual scope: both arms drop legacy translation/outward/table heights/bucket offsets before file read; nil identity preserves legacy behavior; matched registered residuals and physical recovery clearance remain independent")
+            return
+        }
         if CommandLine.arguments.last == "depth-reach-rebase" {
             let suite = "ROBDepthReachFixture."+UUID().uuidString
             let defaults = UserDefaults(suiteName:suite)!
@@ -183,6 +427,38 @@ private extension ROBLeftCanReachCalibration {
                     depth:source,view:view,model:model)
             }
             let measured = sections(detection,depth)!
+            precondition(measured.shapePriorEvidence==nil,"Ordinary RGB-D body bands acquired an assumed geometry label")
+            let assumed=ROBWorkspaceCanSections.localKnownEmptyCokeCylinder(base:SIMD3(0.6,0,base),axis:SIMD3(0,0,2),
+                planeRMSEMeters:0.004,planePointCount:100,planeSupportFraction:0.9,silhouetteIoU:0.88,silhouetteMaximumEdgeErrorPixels:3)!
+            precondition(assumed.valid && assumed.heightMeters==0.120 && assumed.diameterMeters==0.066 && assumed.surfaceToAxisOffsetMeters==nil)
+            precondition(assumed.shapePriorEvidence?.source=="fresh_RGB_base_ray_local_depth_table_plane_and_silhouette")
+            let decodedAssumed=try JSONDecoder().decode(ROBWorkspaceCanSections.self,from:JSONEncoder().encode(assumed))
+            precondition(decodedAssumed.shapePriorEvidence?.valid==true && decodedAssumed.valid)
+            precondition(ROBWorkspaceCanSections.localKnownEmptyCokeCylinder(base:SIMD3(0.6,0,base),axis:SIMD3(1,0,0),
+                planeRMSEMeters:0.004,planePointCount:100,planeSupportFraction:0.9,silhouetteIoU:0.88,silhouetteMaximumEdgeErrorPixels:3)==nil)
+            precondition(ROBWorkspaceCanSections.localKnownEmptyCokeCylinder(base:SIMD3(0.6,0,base),axis:SIMD3(0,0,1),
+                planeRMSEMeters:.nan,planePointCount:100,planeSupportFraction:0.9,silhouetteIoU:0.88,silhouetteMaximumEdgeErrorPixels:3)==nil)
+            func measuredDiagnostics(_ source:(Int,Int)->UInt16?)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+                ROBWorkspaceCanSections.measureWithDiagnostics(detection:detection,width:width,height:height,
+                    fx:fx,fy:fy,cx:cx,cy:cy,depth:source,view:view,model:model)
+            }
+            let acceptedDiagnostic=measuredDiagnostics(depth)
+            precondition(acceptedDiagnostic.sections?.valid==true && acceptedDiagnostic.diagnostics["status"] as? String=="accepted")
+            precondition((acceptedDiagnostic.diagnostics["bands"] as? [[String:Any]])?.count==3)
+            precondition(JSONSerialization.isValidJSONObject(acceptedDiagnostic.diagnostics))
+            let missingDiagnostic=measuredDiagnostics{_,_ in nil}
+            let missingBands=missingDiagnostic.diagnostics["bands"] as! [[String:Any]]
+            precondition(missingDiagnostic.sections==nil && missingBands.count==3 && missingDiagnostic.diagnostics["rejection_stage"] as? String=="band_depth_quality")
+            precondition(missingBands.allSatisfy{($0["missing_count"] as? Int ?? 0)>=9 && $0["valid_count"] as? Int==0 && ($0["raw_mm"] as! [Any]).count<=49},
+                "A failed first band must not suppress bounded raw evidence for the other bands")
+            let topBandPixel=minY+(maxY-minY)*0.18
+            let topZeroDiagnostic=measuredDiagnostics{x,y in abs(Double(y)-topBandPixel)<5 ? 0:depth(x,y)}
+            let topZeroBands=topZeroDiagnostic.diagnostics["bands"] as! [[String:Any]]
+            precondition(topZeroDiagnostic.sections==nil && (topZeroBands[0]["zero_count"] as! Int)>0)
+            precondition(topZeroBands.dropFirst().allSatisfy{$0["minimum_count_pass"] as? Bool==true && $0["median_xyz_m"] != nil})
+            let spreadDiagnostic=measuredDiagnostics{x,y in (x+y).isMultiple(of:2) ? 500:700}
+            precondition(spreadDiagnostic.sections==nil && (spreadDiagnostic.diagnostics["bands"] as! [[String:Any]]).allSatisfy{$0["spread_pass"] as? Bool==false})
+            precondition(JSONSerialization.isValidJSONObject(topZeroDiagnostic.diagnostics) && JSONSerialization.isValidJSONObject(missingDiagnostic.diagnostics))
             precondition(measured.valid && abs(measured.heightMeters-canHeight) < 0.006)
             precondition(abs(measured.diameterMeters-canDiameter) < 0.008)
             precondition(measured.top[2] > measured.middle[2] && measured.middle[2] > measured.bottom[2])
@@ -218,6 +494,10 @@ private extension ROBLeftCanReachCalibration {
             let clipped = ROBWorkspaceDetection(visible:true,confidence:0.9,box:[0.01,box[1],box[2],box[3]],
                 aim:center,depthPoint:center)
             precondition(sections(clipped,depth) == nil,"Clipped boxes cannot supply a measured full can height")
+            var invalidReads=0
+            let clippedDiagnostic=ROBWorkspaceCanSections.measureWithDiagnostics(detection:clipped,width:width,height:height,
+                fx:fx,fy:fy,cx:cx,cy:cy,depth:{x,y in invalidReads+=1;return depth(x,y)},view:view,model:model)
+            precondition(clippedDiagnostic.diagnostics["rejection_stage"] as? String=="clipped_box" && invalidReads==0)
             precondition(ROBWorkspaceCanSections.fit(topBand:SIMD3(0.6,0.04,0.86),middleBand:SIMD3(0.6,0,0.86),
                 bottomBand:SIMD3(0.6,-0.04,0.86),diameterMeters:canDiameter) == nil,
                 "A fallen can cannot be treated as upright")
@@ -266,6 +546,28 @@ private extension ROBLeftCanReachCalibration {
             precondition(search.next(confirmed:[.can,.orangeBucket]) == nil && search.attempted.count == completedViews,
                 "Both fresh confirmations must stop the search before another neck move")
             precondition(completedViews == 2)
+            let onlyCanRecall=ROBWorkspaceRecall(modelID:model.modelID,geometryID:model.geometryID,sightings:[canHint])
+            var sideSearch=ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:onlyCanRecall,now:now,
+                boundedPan:{max(-60,min(60,$0))})
+            precondition(sideSearch.next(confirmed:[])==canHint.centeredView)
+            var earlySides:[ROBWorkspaceView]=[]
+            for _ in 0..<8 {earlySides.append(sideSearch.next(confirmed:[.can])!)}
+            for pan in [-60.0,-55,55,60] {for upper in [5650,5300] {
+                precondition(earlySides.contains{ $0.panDegrees==pan && $0.upperTarget==upper },
+                    "A can-only recall hid the missing object's physical side-floor bearings behind the old front raster")
+            }}
+            for pan in [-55.0,55] {
+                let raw=6000+pan/0.03,physical=(raw-6015)*90/Double(7841-6015)
+                precondition(abs(abs(physical)-90)<2,"Early side views must actually cover the operator-calibrated physical90degree bearings")
+            }
+            precondition(sideSearch.next(confirmed:[.can,.orangeBucket])==nil)
+            var clampedSides=ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:onlyCanRecall,now:now,
+                boundedPan:{max(-50,min(50,$0))})
+            var clamped:[ROBWorkspaceView]=[]
+            for _ in 0..<4 {clamped.append(clampedSides.next(confirmed:[.can])!)}
+            precondition(clamped.count==4 && Set(clamped.map{ "\($0.panDegrees):\($0.upperTarget)" }).count==4)
+            precondition(clamped.allSatisfy{abs($0.panDegrees)==50 && [5300,5650].contains($0.upperTarget)},
+                "Native bounds must clamp side views without repeating equivalent55/60 requests")
             precondition(ROBWorkspaceSearchSchedule.recallQuality([0.4,0.4,0.6,0.7]) >
                 ROBWorkspaceSearchSchedule.recallQuality(canHint.box),"A clipped glimpse must not replace a better current-search recall view")
 
@@ -314,7 +616,7 @@ private extension ROBLeftCanReachCalibration {
             var hangingViews = 0
             while hanging.next(confirmed:[]) != nil { hangingViews += 1 }
             precondition(hangingViews == 3,"An empty object target list must retain the hanging inspection scan")
-            print("Search schedule: clipped can centered, missing bucket reached in2views, confirmed pair stops; fresh rotated scene gets6broadviews, all\(ROBWorkspaceView.sweep.count) fallback intervals retained, distinctcanNMS preserves2instances/max8, hanging scan retained")
+            print("Search schedule: recalls first, physical90degree side-floor coverage early with can-only recall, native bounds/dedup retained; confirmed pair stops; all original raster intervals and hanging scan retained")
             return
         }
         if CommandLine.arguments.last == "can-vector" {
@@ -449,14 +751,15 @@ private extension ROBLeftCanReachCalibration {
             precondition(corrected.reachesCan && corrected.can.position == rawCan)
             precondition(can.position == rawCan && bucket.position == rawBucket && bucket.openingRadius == rawRadius)
             precondition(abs(corrected.calibratedGraspPoint.z-(can.point.z-0.0508)) < 0.000001)
-            precondition(ROBArmRoutinePlan.near(model.vendorLeft(corrected.steps[0].pose),ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!,tolerance:0.001),"Hanging wrist residual leaked into the registered front target")
+            precondition(corrected.steps[0].pose == baseline,"Ghost entry must retain the measured hanging wrist before generating its own pregrasp")
             precondition(abs(corrected.calibratedGraspPoint.z-previousGrasp.calibratedGraspPoint.z-0.0635) < 0.000001,
                 "The table-contact correction must raise the grasp by 2.5 inches")
             precondition(corrected.calibratedGraspPoint.x == previousGrasp.calibratedGraspPoint.x &&
                 corrected.calibratedGraspPoint.y == previousGrasp.calibratedGraspPoint.y)
-            let actions = Dictionary(uniqueKeysWithValues:corrected.steps.enumerated().compactMap { i,s in s.jawAction.map { (i,$0) } })
-            let frozen = try ROBLeftGestureCompiler.compile(kind:"recycling",name:"Operator alignment regression",poses:corrected.steps.map(\.pose),
-                model:model,baseline:baselineQ,generation:77,recyclingActions:actions)
+            let body=Array(corrected.recyclingBodySteps)
+            let actions = Dictionary(uniqueKeysWithValues:body.enumerated().compactMap { i,s in s.jawAction.map { (i,$0) } })
+            let frozen = try ROBLeftGestureCompiler.compile(kind:"recycling",name:"Operator alignment regression",poses:body.map(\.pose),
+                model:model,baseline:model.vendorLeft(body[0].pose),generation:77,recyclingActions:actions)
             try ROBLeftGestureCompiler.validate(frozen,model:model)
             func release(_ plan:ROBCanGrabPreview) -> SIMD3<Double> { model.toolPosition(plan.steps.first { $0.jawAction == .release }!.pose)! }
             let pivot = model.frames(baseline)["left_one_Link"]!.columns.3
@@ -813,9 +1116,11 @@ private extension ROBLeftCanReachCalibration {
             capturedAt: previewNow, sequence: 74, view: view, openingRadius: 0.14)
         let recycling = try ROBCanGrabPreview.make(can: previewCan, model: model, baseline: model.positions(vendorLeft: zero),
             now: previewNow, bucket: recycleBucket)
-        let recyclingActions = Dictionary(uniqueKeysWithValues: recycling.steps.enumerated().compactMap { index, step in step.jawAction.map { (index,$0) } })
-        let physicalRecycle = try ROBLeftGestureCompiler.compile(kind: "recycling", name: "Horizontal recycling", poses: recycling.steps.map(\.pose),
-            model: model, baseline: zero, generation: 42, recyclingActions: recyclingActions)
+        let recyclingBody=Array(recycling.recyclingBodySteps)
+        let recyclingActions = Dictionary(uniqueKeysWithValues: recyclingBody.enumerated().compactMap { index, step in step.jawAction.map { (index,$0) } })
+        let recyclingBaseline=model.vendorLeft(recyclingBody[0].pose)
+        let physicalRecycle = try ROBLeftGestureCompiler.compile(kind: "recycling", name: "Horizontal recycling", poses: recyclingBody.map(\.pose),
+            model: model, baseline: recyclingBaseline, generation: 42, recyclingActions: recyclingActions)
         try ROBLeftGestureCompiler.validate(physicalRecycle, model: model)
         precondition(physicalRecycle.steps.compactMap(\.jawAction) == [.prepare,.grip,.release])
         precondition(physicalRecycle.steps.contains { abs($0.positions[6]) > 0.2 }, "Horizontal jaws require the reviewed wrist roll")
@@ -830,7 +1135,7 @@ private extension ROBLeftCanReachCalibration {
         let stoppedQ = zip(physicalRecycle.steps[stopIndex-1].positions,physicalRecycle.steps[stopIndex].positions).map { ($0+$1)/2 }
         let recovery = try ROBRecordedLeftRecovery.make(previous:physicalRecycle,samples:recorded,measured:stoppedQ,model:model,generation:43)
         precondition(recovery.kind == "recover" && recovery.sessionGeneration == 43 && recovery.baseline == stoppedQ)
-        precondition(recovery.steps.first!.positions == physicalRecycle.steps[stopIndex-1].positions && recovery.steps.last!.positions == center)
+        precondition(recovery.steps.first!.positions == physicalRecycle.steps[stopIndex-1].positions && recovery.steps.last!.positions == recyclingBaseline)
         precondition(recovery.steps.allSatisfy { $0.jawAction == nil }, "A recorded empty return must never replay gripper actions")
         expectBlocked { _ = try ROBRecordedLeftRecovery.make(previous:physicalRecycle,samples:recorded,measured:[Double](repeating:2.8,count:7),model:model,generation:43) }
         expectBlocked { _ = try ROBRecordedLeftRecovery.make(previous:physicalRecycle,samples:[],measured:stoppedQ,model:model,generation:43) }

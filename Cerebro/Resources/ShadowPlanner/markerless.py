@@ -34,12 +34,17 @@ def numerical_jacobian(function, x, step=1e-4):
 
 
 class MarkerlessEstimator:
-    def __init__(self, planner):
+    def __init__(self, planner, surface_samples_per_link=160):
+        if (type(surface_samples_per_link) is not int
+                or not 1 <= surface_samples_per_link <= 640):
+            raise ValueError("Saved CAD surface sampling must be an integer from 1 to 640 per link")
         self.p = planner
         self.surfaces = {}
         for s in planner.clearance.surfaces:
             count = len(s["points"])
-            ids = np.linspace(0, count - 1, min(count, 160), dtype=int)
+            # Select distinct existing rows; denser acquisition never invents
+            # interpolated surface references or independent depth evidence.
+            ids = np.linspace(0, count - 1, min(count, surface_samples_per_link), dtype=int)
             self.surfaces[s["link"]] = (np.array(s["points"])[ids], np.array(s["normals"])[ids])
         self.seed = planner.q0.copy()
         self.cameras = {}

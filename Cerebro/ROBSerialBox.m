@@ -3815,6 +3815,10 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 // send a string to the serial port
 - (void) writeString: (NSString *) str serialFileDescriptor:(int)serialFileDescriptor {
     if(serialFileDescriptor!=-1) {
+        if (serialFileDescriptor == serialFileDescriptor_base &&
+            [ROBFixedHeadBodyMotionIdentity baseCommandMayMove:str]) {
+            [ROBFixedHeadBodyMotionIdentity invalidate];
+        }
         NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
         NSUInteger byteCount = [str lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
         ssize_t written = write(serialFileDescriptor, [str cStringUsingEncoding:NSUTF8StringEncoding], byteCount);

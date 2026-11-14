@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "localDate": "2026-10-23",
+  "kind": "physical_camera_comparison_no_arm_motion",
+  "sameRawPoseAndIntrinsics": true,
+  "heldTargets": {
+    "pan": 6000,
+    "lower": 6011,
+    "upper": 5300
+  },
+  "depthDimensions": [
+    640,
+    400
+  ],
+  "samplesPerTreatment": 5,
+  "treatments": [
+    {
+      "faceDotRequested": null,
+      "nativeNonzeroFractions": [
+        0.21304296875,
+        0.2197265625,
+        0.23288671875,
+        0.21094140625,
+        0.22362890625
+      ],
+      "nativeNonzeroMean": 0.2200453125,
+      "localConsistencyMean": 0.20038593749999997,
+      "bodyROINonzeroMean": 0.020027221172022682,
+      "minimumValidMillimeters": 316,
+      "privateCaptureInputSHA256": "dbb275c47742bb47032eac981e1703d03d7d1510f0b9c34b705e6c046856e41f",
+      "rawDepthSHA256": [
+        "bf7ebb5ff6a7e553293264ead7a94bb82df8f1e38c403107218182e4790308d6",
+        "ad21c36e6a94e07adcc980571a4582471d4317f6d7a676f7560f149994972d7c",
+        "f9b57d7bcfaad7429d34fe3d39a98e310088f884941023cd255c8edf4bb8cbcf",
+        "2c29a2c8f203751c42c9d755dbcc9ed4eeaff1a0f230e1a0254f39318bbca3ab",
+        "1bd1ae5a927735cee94652bb873992514f12b883a24fc47c9da594242dded34c"
+      ],
+      "serviceEnabledIR": false
+    },
+    {
+      "faceDotRequested": 0.5,
+      "nativeNonzeroFractions": [
+        0.50869140625,
+        0.51831640625,
+        0.52434765625,
+        0.5165390625,
+        0.51642578125
+      ],
+      "nativeNonzeroMean": 0.5168640625,
+      "localConsistencyMean": 0.4726296875,
+      "bodyROINonzeroMean": 0.4969769376181475,
+      "minimumValidMillimeters": 316,
+      "privateCaptureInputSHA256": "c41e194b514ca729ac9348b710c4e7bbcb5a9462f299839f9c93f4d628313cdf",
+      "rawDepthSHA256": [
+        "a430990faffb49673e2b494d33b8d6a81638e857e35e4e3e566956652bd8c8aa",
+        "9563cda380451db0f1c9fc2bd6063a44cab6001c3381cd13705b5b2ec48559c2",
+        "efaac4c84660160fa115278a4e013d032da7c1ea891cdd3756bfc51b11256aff",
+        "f79d11bf2d72f94d0c71e06816513573a979e304b03a744ba9b51186f81ba32d",
+        "ec3b13b5d3010718daf7e40304890d4b880cc3d5d072b59135d948d3e054ed22"
+      ],
+      "serviceEnabledIR": true
+    }
+  ],
+  "sdkAcceptanceAfterSignedReload": {
+    "timestampUTC": "2026-10-24T02:23:27.397093+00:00",
+    "dotRequested": 0.5,
+    "dotResult": "accepted",
+    "floodRequested": 0.0,
+    "floodResult": "accepted",
+    "sdkAccepted": true
+  },
+  "signedDebugExecutableSHA256": "3fee6a61d215de9907687eb9cf327b1b44bd0a92ccbabc8b63e62c956ce3a7f7",
+  "registrationInstalled": false,
+  "physicalArmTrialExecuted": false,
+  "cansDelivered": 0,
+  "limitations": [
+    "Nonzero depth coverage does not establish depth accuracy or camera-to-arm registration.",
+    "Nearest valid depth remained 316 mm; extended disparity was not enabled.",
+    "Some floor pixels acquired implausibly near returns, so these data must not be treated as a calibrated collision map.",
+    "Known base/torso registration failed independent surface admission in both tested head views."
+  ],
+  "validation": "Focused IR, IPC, capture-generation, fixed-pose search/preview, native layout and existing robotics fixtures passed; signed optimized Debug app built and launched."
+}

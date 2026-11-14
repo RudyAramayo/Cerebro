@@ -24,7 +24,7 @@ for line in sys.stdin:
     assert len(depth)==240*160*2
     assert struct.unpack_from('<H',depth,0)[0]==900
     assert struct.unpack_from('<H',depth,len(depth)-2)[0]==1696
-    print(json.dumps(dict(schemaVersion=1,source='markerless_rgbd',capturedAtMilliseconds=frame['capturedAtMilliseconds'],sequence=frame['sequence'],status='unavailable',detail='Depth packing verified')),flush=True)
+    print(json.dumps(dict(schemaVersion=1,source='markerless_rgbd',capturedAtMilliseconds=frame['capturedAtMilliseconds'],sequence=frame['sequence'],camera=frame['camera'],streamID=frame['streamID'],status='unavailable',detail='Depth packing verified')),flush=True)
 """#
         try script.write(to: temporary.appendingPathComponent("markerless.py"), atomically: true, encoding: .utf8)
         var buffer: CMSampleBuffer?
@@ -64,6 +64,33 @@ for line in sys.stdin:
                    "Camera capture age changed during transport")
         service.stop()
         try expect(!FileManager.default.fileExists(atPath: path.path), "Stopping left a stale observation")
+
+        // Changing calibration while inference is busy must invalidate the
+        // exact prior stream immediately and discard its late worker result.
+        let delayedScript = #"""
+import sys,json,time
+for line in sys.stdin:
+    f=json.loads(line);time.sleep(.20)
+    print(json.dumps(dict(schemaVersion=1,source='markerless_rgbd',camera=f['camera'],streamID=f['streamID'],capturedAtMilliseconds=f['capturedAtMilliseconds'],sequence=f['sequence'],status='unavailable')),flush=True)
+"""#
+        try delayedScript.write(to: temporary.appendingPathComponent("markerless.py"), atomically: true, encoding: .utf8)
+        _ = service.start()
+        var invalidated = false
+        service.onObservation = { value in
+            if value["source"] as? String == "camera_context_invalidated",
+               value["camera"] as? String == "belly", value["streamID"] as? String == "old-calibration" {
+                invalidated = true
+            }
+        }
+        frame.capturedAtMilliseconds = Date().timeIntervalSince1970 * 1000 - 10
+        service.offer(frame, role: .belly, streamID: "old-calibration")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.04))
+        frame.capturedAtMilliseconds = Date().timeIntervalSince1970 * 1000 - 10
+        service.offer(frame, role: .belly, streamID: "new-calibration")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+        try expect(invalidated, "Known calibration change retained prior camera authority")
+        try expect(!FileManager.default.fileExists(atPath: path.path), "Late old-calibration fit was published")
+        service.stop()
 
         // A stalled reader must never leave the camera or main thread waiting
         // indefinitely on a full stdin pipe. No hardware is opened in this test.

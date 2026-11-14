@@ -34,6 +34,37 @@ Arm routines, main-camera live conversation/follow and belly navigation request
 zero. UVC still exists in DepthAI 3.8, but it exposes one image input and is not
 a transport for paired RGB plus metric RAW16 depth.
 
+## Active stereo illumination
+
+The face service requests the OAK Pro IR dot projector at normalized intensity
+**0.5**, after its pipeline starts. The belly projector remains off and the
+flood LED is explicitly kept at zero on both devices. `--ir-dot-intensity`
+accepts finite values from 0 through 1 for the face role; zero disables it.
+A nonzero belly override is rejected to avoid enabling a second projector.
+
+This uses the documented DepthAI 3.8.0 `setIrLaserDotProjectorIntensity` and
+`setIrFloodLightIntensity` controls. It does not modify EEPROM calibration,
+intrinsics, alignment, stereo matching settings or frame timestamps. The
+`CEREBRO_DEPTHCAM_IR` status records report the SDK's actual accepted, rejected,
+unsupported or error results. An accepted setting does not prove better depth;
+unsupported illumination leaves ordinary RGB-D streaming available.
+
+The latest actual SDK results are also written atomically to the private
+`~/Library/Application Support/Cerebro/DepthCamera/face-ir-status.json` (and
+`belly-ir-status.json`). They include UTC time, worker PID, role, requested dot
+and flood settings and accepted/rejected/error results, with no images or
+device credentials. Check the timestamp and worker before associating a record
+with a capture; stale diagnostics are not new acceptance evidence. A diagnostic
+write failure is reported without interrupting RGB-D streaming.
+
+Luxonis documents the emitters as off by default in
+[IR Perception](https://docs.luxonis.com/hardware/platform/features/ir-perception),
+and its [v3 projector example](https://docs.luxonis.com/software-v3/depthai/examples/misc/projectors)
+applies them after `pipeline.start()`. Run
+`python3 Tests/DepthCameraIRFixtureTests.py` for hardware-free configuration and
+startup-order tests, then compare fresh raw depth at the same physical pose
+before claiming an improvement.
+
 ## Runtime data path
 
 1. `AppDelegate` validates the selected Python environment and launches the
@@ -199,6 +230,18 @@ a USB 3 port/cable may permit higher belly frame rates, but was not changed here
 Run `python3 Tests/ROBCameraIngressRuntimeTests.py` for the stalled-session-queue
 regression, and `python3 Tests/DepthCameraIPCFixtureTests.py` for timestamp and
 packet validation without hardware.
+
+The native IPC reader caches a validated packet header while its fragmented
+image payload arrives, rather than decoding that same JSON header for every
+socket fragment. The cache clears when a packet is consumed, on invalid input
+and whenever the connection resets. Source timestamps and packet-length checks
+remain unchanged.
+
+The controller's SceneKit display separately coalesces incoming notifications
+into one latest head frame and one latest belly frame before handing work to
+the main queue. Trials, including neck-only scans, publish cloud updates at
+most twice per second while the scene continues rendering. This display
+backpressure does not change camera capture, vision admission or watchdogs.
 
 ### Application-side RGB conversion
 

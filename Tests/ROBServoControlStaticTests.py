@@ -15,6 +15,9 @@ SCHEME = (
     / "xcschemes"
     / "Cerebro.xcscheme"
 )
+SHARED_SCHEME = ROOT / "Cerebro.xcodeproj" / "xcshareddata" / "xcschemes" / "CerebroCommissioning.xcscheme"
+if SHARED_SCHEME.exists():
+    SCHEME = SHARED_SCHEME
 
 
 def require(condition: bool, message: str) -> None:

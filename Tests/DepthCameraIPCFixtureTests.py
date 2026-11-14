@@ -2,22 +2,26 @@
 """Dependency-free fixture test for Cerebro's DepthAI IPC v2 producer."""
 
 from datetime import timedelta
+import ast
 import importlib.util
 import contextlib
 import io
+import hashlib
 import json
 from pathlib import Path
 import socket
 import struct
 import tempfile
+import sys
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE_PATH = ROOT / "Cerebro" / "Webcam_color.py"
 
 
-def load_service():
-    spec = importlib.util.spec_from_file_location("cerebro_depth_camera_service", SERVICE_PATH)
+def load_service(path=SERVICE_PATH, name="cerebro_depth_camera_service"):
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load the bundled depth camera service")
     module = importlib.util.module_from_spec(spec)
@@ -131,8 +135,153 @@ def receive_exact(sock, length):
     return bytes(output)
 
 
+def running_worker_provenance_fixture():
+    original = SERVICE_PATH.read_bytes()
+    changed = original.replace(b"RGB_OUTPUT_UNDISTORTED = True", b"RGB_OUTPUT_UNDISTORTED = False", 1)
+    assert changed != original
+    # Camera request flags alone did not prove raster undistortion. All stream
+    # setup must now use the checked normalization helper, including NN input.
+    tree = ast.parse(original)
+    stream = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "stream_camera")
+    calls = [node for node in ast.walk(stream) if isinstance(node, ast.Call)]
+    assert sum(isinstance(node.func, ast.Name) and node.func.id == "configure_rgb_output" for node in calls) == 1
+    assert sum(isinstance(node.func, ast.Name) and node.func.id == "configure_face_nn_input" for node in calls) == 1
+    assert not any(isinstance(node.func, ast.Attribute) and node.func.attr == "requestOutput"
+                   and isinstance(node.func.value, ast.Name) and node.func.value.id == "rgb_camera" for node in calls)
+    with tempfile.TemporaryDirectory(prefix="cerebro-worker-provenance-") as directory:
+        path = Path(directory) / "worker.py"
+        path.write_bytes(original)
+        old_code = compile(original, str(path), "exec", dont_inherit=True, optimize=sys.flags.optimize)
+        old_worker = load_service(path, "old_running_camera_worker")
+        old_sha = old_worker.RUNNING_SERVICE_SOURCE_SHA256
+        path.write_bytes(changed)  # An app replacement while the old worker lives.
+        packet, *_ = old_worker.frame_payload(FakeRGBFrame(), FakeDepthFrame(), FakeMonoFrame((7,8)),
+            FakeMonoFrame((9,10)), [100.,0.,1.,0.,101.,0.5,0.,0.,1.])
+        header = json.loads(packet)
+        assert header["running_service_source_sha256"] == old_sha == hashlib.sha256(original).hexdigest()
+        assert header["rgb_output_undistorted"] is True
+        try:
+            exec(old_code, {"__file__":str(path), "__name__":"startup_swap_fixture"})
+        except RuntimeError as error:
+            assert "source changed" in str(error)
+        else:
+            raise AssertionError("Old executable code stamped a replacement file's hash during startup")
+        replacement = load_service(path, "replacement_camera_worker")
+        packet, *_ = replacement.frame_payload(FakeRGBFrame(), FakeDepthFrame(), FakeMonoFrame((7,8)),
+            FakeMonoFrame((9,10)), [100.,0.,1.,0.,101.,0.5,0.,0.,1.])
+        header = json.loads(packet)
+        assert header["running_service_source_sha256"] == hashlib.sha256(changed).hexdigest() != old_sha
+        assert header["rgb_output_undistorted"] is False
+
+
+def native_depth_geometry_fixtures(service):
+    matrix = [[125., 0., .75], [0., 126., .25], [0., 0., 1.]]
+    source = [[1250., 0., 7.5], [0., 1260., 2.5], [0., 0., 1.]]
+    crop = [[.1, 0., 0.], [0., .1, 0.], [0., 0., 1.]]
+
+    class ObservedTransformation(FakeSourceTransformation):
+        def __init__(self):
+            super().__init__([row[:] for row in matrix], [20, 10], [row[:] for row in source], crop)
+            self.valid, self.aligned, self.equal, self.size = True, True, True, (2, 1)
+            self.coefficients = [.1, -.02, .003, -.004, .005]
+        def isValid(self): return self.valid
+        def getSize(self): return self.size
+        def getDistortionCoefficients(self): return self.coefficients
+        def getDistortionModel(self): return "fixture_source_perspective"
+        def isAlignedTo(self, other):
+            assert other is rgb.transformation
+            return self.aligned
+        def isEqualTransformation(self, other):
+            assert other is rgb.transformation
+            return self.equal
+
+    class ObservedDepth(FakeDepthFrame):
+        def __init__(self): self.transformation = ObservedTransformation()
+        def getTransformation(self): return self.transformation
+
+    rgb = FakeTransformedRGBFrame(matrix)
+    rgb.transformation = ObservedTransformation()
+    depth = ObservedDepth()
+    flat = [item for row in matrix for item in row]
+    def inspect(): return service.depth_frame_geometry(depth, rgb, flat)
+    evidence = inspect()
+    assert evidence["depth_intrinsics"] == flat
+    assert evidence["depth_intrinsics_source"] == "transformed_frame"
+    assert evidence["depth_source_size"] == [20, 10]
+    assert evidence["depth_source_intrinsics"] == [item for row in source for item in row]
+    assert evidence["depth_image_transform"] == [item for row in crop for item in row]
+    assert evidence["rgb_transformation_size"] == evidence["depth_transformation_size"] == [2, 1]
+    assert evidence["rgb_source_distortion_coefficients"] == evidence["depth_source_distortion_coefficients"] == [.1, -.02, .003, -.004, .005]
+    assert evidence["rgb_source_distortion_model"] == evidence["depth_source_distortion_model"] == "fixture_source_perspective"
+    comparison = evidence["depth_rgb_geometry_correspondence"]
+    assert comparison == {"status": "matched", "dimensionsMatch": True, "intrinsicsMatch": True,
+        "maximumIntrinsicDifferencePixels": 0., "sdkAlignedToRGB": True,
+        "sdkEqualTransformationToRGB": True, "depthTransformationValid": True,
+        "rgbTransformationValid": True, "detail": None}
+    depth.transformation.equal = False
+    assert inspect()["depth_rgb_geometry_correspondence"]["sdkEqualTransformationToRGB"] is False
+    depth.transformation.aligned = False
+    assert inspect()["depth_rgb_geometry_correspondence"]["status"] == "mismatched"
+    depth.transformation = ObservedTransformation()
+    depth.transformation.matrix[1][2] += .2
+    depth.transformation.source_intrinsics[1][2] += 2
+    mismatch = inspect()["depth_rgb_geometry_correspondence"]
+    assert mismatch["status"] == "mismatched" and mismatch["intrinsicsMatch"] is False
+    assert abs(mismatch["maximumIntrinsicDifferencePixels"]-.2) < 1e-12
+    # A plausible K and matching dimensions cannot replace native SDK proof.
+    depth.transformation = FakeTransformation(matrix)
+    unknown = inspect()["depth_rgb_geometry_correspondence"]
+    assert unknown["status"] == "unavailable" and unknown["intrinsicsMatch"] is True
+    assert unknown["sdkAlignedToRGB"] is None and unknown["depthTransformationValid"] is None
+    depth.transformation = None
+    assert inspect()["depth_intrinsics"] is None
+    for malformed in ("source-crop", "invalid-sdk", "wrong-size", "nonboolean"):
+        depth.transformation = ObservedTransformation()
+        if malformed == "source-crop": depth.transformation.source_intrinsics[0][0] += 10
+        elif malformed == "invalid-sdk": depth.transformation.valid = False
+        elif malformed == "wrong-size": depth.transformation.size = (3, 1)
+        else: depth.transformation.aligned = "true"
+        bad = inspect()["depth_rgb_geometry_correspondence"]
+        assert bad["status"] == "invalid", (malformed, bad)
+    depth.transformation = ObservedTransformation()
+    left, right = FakeMonoFrame((7, 8)), FakeMonoFrame((9, 10))
+    packet, rgb_bytes, depth_bytes, *_ = service.frame_payload(rgb, depth, left, right, flat)
+    transmitted = json.loads(packet)
+    assert transmitted["depth_intrinsics"] == flat
+    assert transmitted["depth_rgb_geometry_correspondence"]["status"] == "matched"
+    assert rgb_bytes == FakeRGBFrame.bytes and depth_bytes == bytes((0x34, 0x12, 0xCD, 0xAB))
+    depth.transformation.valid = False
+    packet, unchanged_rgb, unchanged_depth, *_ = service.frame_payload(rgb, depth, left, right, flat)
+    assert json.loads(packet)["depth_rgb_geometry_correspondence"]["status"] == "invalid"
+    assert unchanged_rgb == rgb_bytes and unchanged_depth == depth_bytes, "Diagnostic failure blocked raw viewing or rewrote metric depth"
+
+
 def main():
     service = load_service()
+    assert service.RUNNING_SERVICE_SOURCE_SHA256 == hashlib.sha256(SERVICE_PATH.read_bytes()).hexdigest()
+    assert service.RGB_OUTPUT_UNDISTORTED is True
+    running_worker_provenance_fixture()
+    native_depth_geometry_fixtures(service)
+    class StereoReadback:
+        def __init__(self,extended,subpixel):self.extended,self.subpixel=extended,subpixel;self.initialConfig=self
+        def getExtendedDisparity(self):return self.extended
+        def getSubpixel(self):return self.subpixel
+    for extended,subpixel,mode in [(False,True,"standard"),(True,False,"near_field"),(False,False,None),(True,True,None)]:
+        config=service.observed_stereo_configuration(StereoReadback(extended,subpixel))
+        assert config["stereo_mode"]==mode and config["stereo_extended_disparity"] is extended and config["stereo_subpixel"] is subpixel
+        assert config["stereo_mode_source"]=="sdk_initial_config_readback"
+        frame_header,*_=service.frame_payload(FakeRGBFrame(),FakeDepthFrame(),FakeMonoFrame((7,8)),FakeMonoFrame((9,10)),
+            [100.,0.,1.,0.,101.,.5,0.,0.,1.],stereo_configuration=config)
+        actual=json.loads(frame_header)
+        assert all(actual[key]==value for key,value in config.items())
+        assert actual["depth_unit"]=="millimeter" and actual["rgb_intrinsics"]==[100.,0.,1.,0.,101.,.5,0.,0.,1.]
+    for missing in [object(),SimpleNamespace(initialConfig=object()),StereoReadback("true",False)]:
+        assert service.observed_stereo_configuration(missing)["stereo_mode"] is None,"CLI intent replaced missing/invalid SDK readback"
+    for unproved in [{"stereo_mode":"near_field","stereo_mode_source":None,"stereo_extended_disparity":None,"stereo_subpixel":None},
+                    {"stereo_mode":"near_field","stereo_mode_source":"sdk_initial_config_readback","stereo_extended_disparity":False,"stereo_subpixel":True}]:
+        try:service.validated_stereo_configuration(unproved)
+        except RuntimeError:pass
+        else:raise AssertionError("Unproved/inconsistent stereo mode metadata was accepted")
     class CapturedFrame:
         def __init__(self, seconds): self.seconds = seconds
         def getTimestamp(self): return timedelta(seconds=self.seconds)
@@ -151,10 +300,13 @@ def main():
         def __init__(self): self.links = []
         def link(self, node_input): self.links.append(node_input)
     class FakeStereo:
-        def __init__(self): self.depth = FakeOutput(); self.inputAlignTo = FakeInput()
+        def __init__(self): self.depth = FakeOutput(); self.inputAlignTo = FakeInput(); self.output_size = None
+        def setOutputSize(self, width, height): self.output_size = (width, height)
     class FakeAlign:
         def __init__(self):
             self.input = FakeInput(); self.inputAlignTo = FakeInput(); self.outputAligned = FakeOutput()
+            self.output_size = None
+        def setOutputSize(self, width, height): self.output_size = (width, height)
     class FakePipeline:
         def __init__(self): self.created = []
         def create(self, kind):
@@ -164,21 +316,42 @@ def main():
         RVC2 = "rvc2"; RVC3 = "rvc3"; RVC4 = "rvc4"
     class FakeNodes: ImageAlign = FakeAlign
     class FakeDai: Platform = FakePlatform; node = FakeNodes
-    for platform in (FakePlatform.RVC2, FakePlatform.RVC3):
+    for size in [(640, 400), (1280, 800), (1920, 1080)]:
+        for platform in (FakePlatform.RVC2, FakePlatform.RVC3):
+            pipeline, stereo, rgb = FakePipeline(), FakeStereo(), FakeOutput()
+            output, method = service.configure_rgb_depth_alignment(pipeline, FakeDai, platform, stereo, rgb, size)
+            assert output is stereo.depth and method == "stereo_input_align_to"
+            assert stereo.output_size == size, "Geometric alignment did not request matching SDK depth dimensions"
+            assert rgb.links == [stereo.inputAlignTo] and not stereo.depth.links
+            assert not pipeline.created, "Older platforms must not create an external alignment node"
+            assert stereo.inputAlignTo.size == 2 and stereo.inputAlignTo.blocking is False
         pipeline, stereo, rgb = FakePipeline(), FakeStereo(), FakeOutput()
-        output, method = service.configure_rgb_depth_alignment(pipeline, FakeDai, platform, stereo, rgb)
-        assert output is stereo.depth and method == "stereo_input_align_to"
-        assert rgb.links == [stereo.inputAlignTo] and not stereo.depth.links
-        assert not pipeline.created, "Older platforms must not create an external alignment node"
-        assert stereo.inputAlignTo.size == 2 and stereo.inputAlignTo.blocking is False
-    pipeline, stereo, rgb = FakePipeline(), FakeStereo(), FakeOutput()
-    output, method = service.configure_rgb_depth_alignment(pipeline, FakeDai, FakePlatform.RVC4, stereo, rgb)
-    assert len(pipeline.created) == 1
-    align = pipeline.created[0]
-    assert output is align.outputAligned and method == "image_align"
-    assert stereo.depth.links == [align.input] and rgb.links == [align.inputAlignTo]
-    assert align.input.size == align.inputAlignTo.size == 2
-    assert align.input.blocking is align.inputAlignTo.blocking is False
+        output, method = service.configure_rgb_depth_alignment(pipeline, FakeDai, FakePlatform.RVC4, stereo, rgb, size)
+        assert len(pipeline.created) == 1
+        align = pipeline.created[0]
+        assert output is align.outputAligned and method == "image_align"
+        assert align.output_size == size and stereo.output_size is None
+        assert stereo.depth.links == [align.input] and rgb.links == [align.inputAlignTo]
+        assert align.input.size == align.inputAlignTo.size == 2
+        assert align.input.blocking is align.inputAlignTo.blocking is False
+    for requested, expected in [((640, 400), (640, 400)), ((1280, 720), (1280, 720)),
+                                ((1280, 800), (1280, 800)), ((1920, 1080), (1280, 720)),
+                                ((1920, 1200), (1280, 800)), ((3840, 2160), (1280, 720))]:
+        actual = service.stereo_capture_size(requested)
+        assert actual == expected
+        assert actual[0] <= 1280 and actual[1] <= 800 and actual[0] % 16 == actual[1] % 2 == 0
+        assert actual[0] * requested[1] == actual[1] * requested[0], "Mono geometry changed aspect ratio"
+        assert service.capture_frame_rate_for_bandwidth(False, requested, actual) == service.FRAME_RATE
+    assert service.capture_frame_rate_for_bandwidth(True, (640, 400), (640, 400)) == 10.0
+    assert service.capture_frame_rate_for_bandwidth(True, (1280, 800), (1280, 800)) == 2.5
+    assert 2 <= service.capture_frame_rate_for_bandwidth(True, (1920, 1080), (1280, 720)) < 2.5
+    for dimensions in [(0, 400), (-16, 400), (True, 400), (640.0, 400), (640, 401)]:
+        try:
+            service.stereo_capture_size(dimensions)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Invalid/unrepresentable mono aspect admitted: " + str(dimensions))
     for platform in (None, "unknown"):
         try:
             service.configure_rgb_depth_alignment(FakePipeline(), FakeDai, platform, FakeStereo(), FakeOutput())
@@ -224,7 +397,14 @@ def main():
         left = receive_exact(receiver, header["left_length"])
         right = receive_exact(receiver, header["right_length"])
 
-        assert header == {
+        # The independent stereo-evidence fixture checks the additive optional
+        # observations. Keep the original IPC/pixel contract exact here.
+        evidence_keys = {"rgb_frame_exposure_microseconds", "rgb_frame_iso",
+                         "rgb_frame_color_temperature_kelvin", "rgb_frame_observation_errors",
+                         "rectified_left_geometry", "rectified_right_geometry",
+                         "rectified_left_source_to_right_source"}
+        assert evidence_keys <= header.keys()
+        assert {key: value for key, value in header.items() if key not in evidence_keys} == {
             "protocol_version": 2,
             "sequence": 42,
             "timestamp_ns": 3_250_000_000,
@@ -245,10 +425,31 @@ def main():
             "right_length": 2,
             "rgb_intrinsics": intrinsics,
             "rgb_intrinsics_source": "legacy_eeprom",
+            "running_service_source_sha256": service.RUNNING_SERVICE_SOURCE_SHA256,
+            "rgb_output_undistorted": service.RGB_OUTPUT_UNDISTORTED,
             "depth_alignment_method": None,
+            "stereo_mode":None,"stereo_mode_source":None,"stereo_extended_disparity":None,"stereo_subpixel":None,
             "rgb_source_size": None,
             "rgb_source_intrinsics": None,
             "rgb_image_transform": None,
+            "depth_intrinsics": None,
+            "depth_intrinsics_source": "unavailable",
+            "depth_source_size": None,
+            "depth_source_intrinsics": None,
+            "depth_image_transform": None,
+            "rgb_transformation_size": None,
+            "depth_transformation_size": None,
+            "rgb_source_distortion_coefficients": None,
+            "depth_source_distortion_coefficients": None,
+            "rgb_source_distortion_model": None,
+            "depth_source_distortion_model": None,
+            "depth_rgb_geometry_correspondence": {
+                "status": "unavailable", "dimensionsMatch": True, "intrinsicsMatch": None,
+                "maximumIntrinsicDifferencePixels": None, "sdkAlignedToRGB": None,
+                "sdkEqualTransformationToRGB": None, "depthTransformationValid": None,
+                "rgbTransformationValid": None,
+                "detail": "Native depth transformation metadata is unavailable",
+            },
             "imu": None,
             "rgb_calibrated_lens_position": None,
             "rgb_frame_lens_position": None,

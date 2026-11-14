@@ -1,6 +1,57 @@
 import AppKit
 import simd
 
+// Hardware-free workspace-gate fixtures do not fabricate pixel evidence.
+// Pure verifier fixtures separately exercise actual RGB-D tracking. Any legacy
+// travel-positive case reaching this adapter must stop instead of inventing it.
+enum ROBRecyclingVisualInspection {
+    enum TargetMoved:Error {case displacement(Double)}
+    static var fixedContext=false
+    @_optimize(none)
+    @MainActor static func fixedHeadContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {fixedContext}
+    struct VisualProjection {var cameraToModel=matrix_identity_double4x4}
+    enum Projection {case visualTrial(VisualProjection)}
+    struct Context {var projection=Projection.visualTrial(.init());var viewIdentity="fixture"
+        var scope=ROBFixedHeadRegistrationScope(modelID:"fixture",geometryID:"fixture",mappingID:"fixture",cameraGeneration:UUID(),
+            gatewaySessionGeneration:1,displayCorrectionIdentity:"fixture",panTarget:6015,lowerTarget:6011,upperTarget:6160,intrinsicsIdentity:"fixture")}
+    final class ServoContext {
+        var baseline=Context(),lastSequence:UInt64=0,targetBox:[Double]=[0.4,0.4,0.6,0.7]
+        var observations:[[String:Any]]=[]
+        var retainedFrames:[ROBGripperVisualServo.Frame]=[]
+        var provisionalCoMotion=false
+    }
+    struct ServoObservation {let frame:ROBGripperVisualServo.Frame;let decision:ROBGripperVisualServo.Decision;let canBox:[Double]}
+    @MainActor static func beginIncrementalVisualServo(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
+        map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
+        feedbackForFrame:@escaping(ROBArmRoutineVision.Frame)->ROBAmberGatewayTelemetry?,check:()throws->Void) async throws->ServoContext {
+        try check();throw ROBArmRoutineError.blocked("No actual jaw pixels were supplied to this hardware-free task seam.")
+    }
+    @MainActor static func observeIncrementalVisualServo(context:ServoContext,model:ROBGhostRobotModel,
+        frame:ROBArmRoutineVision.Frame,feedback:ROBAmberGatewayTelemetry,currentFeedback:ROBAmberGatewayTelemetry,
+        heldSinceMilliseconds:Double,openingCommandAtMilliseconds:Double?,requireTableSupport:Bool=true,check:()throws->Void)throws->ServoObservation {
+        try check();throw ROBArmRoutineError.blocked("No observed jaw pixels in fixture.")
+    }
+    @MainActor static func verifyIncrementalServoLift(context:ServoContext,beforeLift:ServoObservation,model:ROBGhostRobotModel,
+        heldSinceMilliseconds:Double,observe:()async throws->ServoObservation,check:()throws->Void) async throws->ROBVisualGraspVerifier.Evidence {
+        try check();throw ROBArmRoutineError.blocked("No observed jaw/can lift in fixture.")
+    }
+    @_optimize(none)
+    @MainActor static func begin(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,gatewayArm:String,check:() throws ->Void) async throws ->Context {
+        throw ROBArmRoutineError.blocked("No synthetic visual baseline has been supplied to this fixture.")
+    }
+    @_optimize(none)
+    @MainActor static func beginVisualCalibrationTrial(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
+        map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
+        check:() throws ->Void) async throws ->Context {
+        try check()
+        throw ROBArmRoutineError.blocked("No synthetic unmeasured visual baseline has been supplied to this fixture.")
+    }
+    @_optimize(none)
+    @MainActor static func verifyAfterLift(context:Context,model:ROBGhostRobotModel,gatewayArm:String,check:() throws ->Void) async throws ->ROBVisualGraspVerifier.Evidence {
+        throw ROBArmRoutineError.blocked("No synthetic visual motion evidence has been supplied to this fixture.")
+    }
+}
+
 final class ROBShowMotionCoordinator {
     static let shared = ROBShowMotionCoordinator()
     static let greetingSummary = "Fixture combined greeting"
@@ -25,6 +76,7 @@ final class ROBAmberArmMotionArbiter {
         guard owners[arm] == nil else { return false }; owners[arm] = owner; return true
     }
     func release(_ arm: ROBArmSide, owner: UUID) { if owners[arm] == owner { owners.removeValue(forKey: arm) } }
+    func isReserved(_ arm:ROBArmSide,owner:UUID)->Bool {owners[arm]==owner}
 }
 final class ROBAmberGestureExecutor {
     static let shared = ROBAmberGestureExecutor()
@@ -53,6 +105,9 @@ final class ROBAmberGatewayTunnel {
 }
 final class ROBAmberGatewayTelemetry {
     let arm = "right"
+    let receivedAt=Date(),receivedAtUptime=ProcessInfo.processInfo.systemUptime
+    let controllerSampleAgeMilliseconds=1.0,gripperFeedbackAgeMilliseconds=1.0
+    let jointFeedbackAgeMilliseconds=Array(repeating:NSNumber(value:1.0),count:7)
     var currents: [NSNumber] = Array(repeating: NSNumber(value: 0.2), count: 7)
     let sequence: UInt64
     let positionsRadians: [NSNumber]
@@ -151,6 +206,8 @@ final class ROBAmberGatewayClient: NSObject {
     }
     var onGhostStep: (() -> Void)?
     var beforeGhostAdmission: (() -> Void)?
+    var delayOneDegreeEndpoint = false
+    var oneDegreeSentAt: Double?, oneDegreeConvergedAt: Double?, oneDegreeFirstHoldAt: Double?
     func sendApprovedLeftGestureStep(proposalID: UUID, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
         beforeGhostAdmission?()
         guard let target = ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index,
@@ -159,11 +216,28 @@ final class ROBAmberGatewayClient: NSObject {
             generation: expectedSessionGeneration) == nil)
         precondition(ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index + 1, seconds: duration,
             generation: expectedSessionGeneration) == nil)
-        q["right"] = target
-        activeLeases.insert("right")
-        let id = ack("ghost_step_\(index)", "right"); onGhostStep?(); return id
+        let selected=ROBLeftArmTrial.shared.executionGatewayArm
+        q[selected] = target
+        activeLeases.insert(selected)
+        if delayOneDegreeEndpoint {
+            precondition(duration==4 && target==[0,-0.02,0,0,0,0,0])
+            oneDegreeSentAt=ProcessInfo.processInfo.systemUptime
+            // Match the observed49 failure: after the nominal4s the motor
+            // may still be at−1degree, inside the generic25mrad tolerance
+            // but outside the actual final3mm endpoint requirement.
+            q[selected]=[0,-Double.pi/180,0,0,0,0,0]
+            DispatchQueue.main.asyncAfter(deadline:.now()+4.45) { [self] in
+                precondition(activeLeases.contains(selected),"A current-pose hold cut off the calibration trajectory before endpoint convergence")
+                q[selected]=target;oneDegreeConvergedAt=ProcessInfo.processInfo.systemUptime
+            }
+        }
+        let id = ack("ghost_step_\(index)", selected); onGhostStep?(); return id
     }
     func priorityHold(forArm arm: String) -> UInt64 {
+        if delayOneDegreeEndpoint,oneDegreeSentAt != nil,oneDegreeFirstHoldAt==nil {
+            precondition(oneDegreeConvergedAt != nil,"The bounded calibration held early at−1degree before tight endpoint convergence")
+            oneDegreeFirstHoldAt=ProcessInfo.processInfo.systemUptime
+        }
         if !rejectHold { activeLeases.remove(arm) }
         return ack("priority_hold", arm, accepted: !rejectHold, holdConfirmed: confirmHold)
     }
@@ -215,6 +289,33 @@ final class ROBAmberGatewayClient: NSObject {
     }
 }
 
+enum ROBNeckRGBPoseDisplay {
+    static var projectionIdentity:String? = nil
+    static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {projectionIdentity}
+    static var nominalCameraToModel=matrix_identity_double4x4
+    static func provisionalCameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
+        projectionIdentity==nil ? nil:nominalCameraToModel
+    }
+}
+
+final class ROBFixedHeadCalibrationWindowController {
+    static let shared=ROBFixedHeadCalibrationWindowController()
+    var readNeck:(()->NSDictionary)? = { ["known":true,"stationary":true,"pan":6015,"pan_degrees":0.0,"lower":6011,"upper":6160,"ready_at":0.0] }
+    func scope(model:ROBGhostRobotModel,frame:ROBArmRoutineVision.Frame)throws->ROBFixedHeadRegistrationScope {
+        let n=readNeck?() ?? [:]
+        return .init(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
+            cameraGeneration:frame.cameraGeneration,gatewaySessionGeneration:ROBAmberGatewayClient.shared.generation,
+            displayCorrectionIdentity:"synthetic-fixture",panTarget:n["pan"] as?Int ?? 0,lowerTarget:n["lower"] as?Int ?? 0,
+            upperTarget:n["upper"] as?Int ?? 0,intrinsicsIdentity:String(repeating:"a",count:64))
+    }
+}
+
+struct ROBWorkspaceCanSelection {
+    let object:ROBWorkspaceLocatedObject?
+    let preview:ROBCanGrabPreview?
+    let diagnostics:[[String:Any]]
+}
+
 final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
     var announce: ((String) -> Void)?
@@ -223,6 +324,23 @@ final class ROBWorkspaceSearch {
     var collisionScanCalls = 0
     var failCollisionScan = false
     var syntheticDistantPlane = false
+    var estimatedContext = false
+    var nearestSelectionCalls=0
+    var prepareView:((Double,Int)->Bool)? = {_,_ in true}
+    var viewReady:((Double,Int)->Bool)? = {_,_ in true}
+    @MainActor func nearestReachableCan(model:ROBGhostRobotModel,baseline:[String:Double],map:ROBWorkspaceCollisionSnapshot,
+        calibrationFile:URL?=nil,nowMilliseconds:Double=Date().timeIntervalSince1970*1000) async ->ROBWorkspaceCanSelection {
+        nearestSelectionCalls += 1
+        return .init(object:objects[.can],preview:nil,diagnostics:[["fixture":true,"path_admitted":false]])
+    }
+    func estimatedContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {estimatedContext}
+    func estimatedCameraProjectionIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {
+        map.estimatedCameraProjectionIdentity==ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
+    }
+    @MainActor func captureEstimatedOrRegisteredCurrentScene(model:ROBGhostRobotModel,generation:UInt64,
+        check:() throws->Void,progress:(String)->Void) async throws->ROBWorkspaceCollisionSnapshot {
+        try await captureRegisteredCurrentScene(model:model,generation:generation,check:check,progress:progress)
+    }
     var onCollisionScan: (() -> Void)?
     var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
         guard let value = collisionSnapshotValue,
@@ -230,6 +348,10 @@ final class ROBWorkspaceSearch {
               value.sessionGeneration == ROBAmberGatewayClient.shared.generation,
               (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
         return value
+    }
+    @MainActor func captureRegisteredCurrentScene(model:ROBGhostRobotModel,generation:UInt64,
+        check:() throws->Void,progress:(String)->Void) async throws->ROBWorkspaceCollisionSnapshot {
+        try await scanCollisionScene(model:model,generation:generation,check:check,progress:progress)
     }
     func clearCollisionScene() { collisionSnapshotValue = nil }
     @MainActor func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
@@ -240,8 +362,9 @@ final class ROBWorkspaceSearch {
         let now = Date().timeIntervalSince1970 * 1000
         let camera = ROBArmRoutineVision.shared.cameraGeneration
         var map = ROBWorkspaceDepthMap(modelID: model.modelID, geometryID: model.geometryID,
-            mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: generation,
-            cameraGeneration: camera, nowMilliseconds: now - 200)
+            mappingID: model.selectedMappingID, sessionGeneration: generation,
+            cameraGeneration: camera, nowMilliseconds: now - 200,
+            estimatedCameraProjectionIdentity:ROBNeckRGBPoseDisplay.projectionIdentity)
         var transform = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306).cameraFrame(model: model)!
         // Explicit synthetic scene for the estimated-runtime fixture only:
         // distant occupied returns leave the arm's local volume UNKNOWN. This
@@ -251,7 +374,8 @@ final class ROBWorkspaceSearch {
             try map.append(width: 24, height: 24, fx: 24, fy: 24, cx: 12, cy: 12,
                 depth: { _, _ in 900 }, cameraToRobot: transform, capturedAtMilliseconds: now-age,
                 sequence: sequence, cameraGeneration: camera, nowMilliseconds: now,
-                recordedPanDegrees: 0, recordedUpperTarget: 6306)
+                recordedPanDegrees: 0, recordedUpperTarget: 6306,recordedLowerTarget:6011,
+                estimatedCameraProjectionIdentity:ROBNeckRGBPoseDisplay.projectionIdentity)
         }
         let snapshot = map.snapshot(nowMilliseconds: now)!
         precondition(snapshot.observedFrameCount == 2 && snapshot.occupiedVoxelCount > 0 && snapshot.freeVoxelCount > 0)
@@ -266,11 +390,17 @@ final class ROBWorkspaceSearch {
 
     var fail = false
     var requiredDepth = true
+    var requestedTargets: [ROBWorkspaceTarget] = []
+    var localCanShapePriorPermissions:[Bool]=[]
     var objects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
     var onInspect: (() -> Void)?
     var afterInspect: (() -> Void)?
-    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
+        permitsLocalCanShapePrior:() throws ->Bool={false},canReachBaseline:[String:Double]?=nil,
+        check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
+        localCanShapePriorPermissions.append(try permitsLocalCanShapePrior())
+        requestedTargets = targets
         onInspect?()
         if fail { throw ROBArmRoutineError.blocked("Fixture observation unavailable") }
         if requireDepth {
@@ -287,9 +417,44 @@ final class ROBArmRoutineVision {
     var cameraGeneration = UUID()
     var observationCount = 0
     var activationHistory: [Bool] = []
+    var runtimeIdentity=String(repeating:"a",count:64)
+    var stereoPolicyIdentity=String(repeating:"c",count:64)
+    var clearsFramesOnSetActive=false,frameAvailable=true
+    struct RuntimeCalibration {let identity:String;let stereoPolicySHA256:String}
+    struct Correspondence {let status="matched"}
+    struct Intrinsics {
+        let runtimeCalibration:RuntimeCalibration?
+        var fx=24.0,fy=24.0,cx=12.0,cy=12.0
+        let rgbOutputUndistorted:Bool?=true,depthRGBGeometryCorrespondence:Correspondence?=Correspondence()
+        func isValid(forWidth:Int,height:Int)->Bool {forWidth==24 && height==24 && fx>0 && fy>0}
+    }
+    struct Depth {var width=24,height=24;func distanceMillimeters(x:Int,y:Int)->UInt16?{900}}
+    struct Frame {let cameraGeneration:UUID;let intrinsics:Intrinsics?;let capturedAt:Double;let sequence:UInt64;var depth:Depth?=Depth();var handsClear=true}
+    var frameSequence:UInt64=10,captureFocalLength=24.0
+    var captureWidth=24,captureHeight=24
+    func snapshot()->[String:Frame] {
+        frameSequence+=1
+        var k=Intrinsics(runtimeCalibration:.init(identity:runtimeIdentity,stereoPolicySHA256:stereoPolicyIdentity));k.fx=captureFocalLength;k.fy=captureFocalLength
+        return frameAvailable ? ["face":.init(cameraGeneration:cameraGeneration,intrinsics:k,
+            capturedAt:Date().timeIntervalSince1970*1000,sequence:frameSequence,depth:.init(width:captureWidth,height:captureHeight))] : [:]
+    }
+    @MainActor func settledDepthFrame(deadlineUptime:Double?=nil)async throws->Frame {
+        try await Task.sleep(nanoseconds:10_000_000)
+        guard fresh,let f=snapshot()["face"] else {throw ROBArmRoutineError.blocked("Synthetic camera unavailable")}
+        return f
+    }
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
-    func setActive(_ active: Bool, teaching: Bool = false) { activationHistory.append(active) }
+    func observeWorkspace() async throws->(ROBWorkspaceObservation,Frame) {
+        let absent=ROBWorkspaceDetection(visible:false,confidence:0,box:[],aim:[],depthPoint:[])
+        guard let frame=snapshot()["face"] else {throw ROBArmRoutineError.blocked("No synthetic workspace pixels")}
+        return(.init(can:absent,orangeBucket:absent,leftArmHanging:false,rightArmHanging:false,hangingConfidence:0,cans:[]),frame)
+    }
+    func ensureActiveForTaskObservation() {if !frameAvailable {setActive(true)}}
+    func setActive(_ active: Bool, teaching: Bool = false) {
+        activationHistory.append(active)
+        if clearsFramesOnSetActive {frameAvailable=false}
+    }
     func observe(target: String, grippers: Bool = true, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
         observationCount += 1
         return ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: !blocked,
@@ -314,16 +479,19 @@ final class ROBArmRoutineCoordinator {
 }
 
 @main struct LeftArmTrialFixtures {
+    @_optimize(none)
     @MainActor static func run(_ proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel) async -> NSDictionary {
         await withCheckedContinuation { continuation in
             ROBLeftArmTrial.shared.perform(proposal: proposal, model: model) { continuation.resume(returning: $0) }
         }
     }
-    @MainActor static func run(_ command: String) async -> NSDictionary {
+    @_optimize(none)
+    @MainActor static func run(_ command: String, target: String = "") async -> NSDictionary {
         await withCheckedContinuation { continuation in
-            ROBLeftArmTrial.shared.perform(command) { continuation.resume(returning: $0) }
+            ROBLeftArmTrial.shared.perform(command, target: target) { continuation.resume(returning: $0) }
         }
     }
+    @_optimize(none)
     @MainActor static func estimatedCalibrationTests(model: ROBGhostRobotModel, folder: URL) async throws {
         let trial = ROBLeftArmTrial.shared, gateway = ROBAmberGatewayClient.shared
         let search = ROBWorkspaceSearch.shared, vision = ROBArmRoutineVision.shared
@@ -440,51 +608,99 @@ final class ROBArmRoutineCoordinator {
         print("Estimated runtime rejection: decline, Stop before approval/during motion, lost/replaced map, camera/session change, >2mm start/dispatch drift and missing/consumed proof never admit another step or any jaw/encoder/deactivation command")
     }
 
+    @MainActor static func trialFreeRecoveryBlocked()->Bool {
+        guard let model=try? ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner")) else{return false}
+        do {_ = try ROBLeftArmTrial.shared.recoveryProposal(model:model);return false}catch{return true}
+    }
+
+    @_optimize(none)
     @MainActor static func delayedTelemetryTests() async throws {
         let g = ROBAmberGatewayClient.shared
-        for scenario in ["delivery", "source", "live_loss", "malformed", "current_jump"] {
+        for scenario in ["delivery", "source", "live_loss", "malformed", "current_jump", "current_jump_hold_rejected", "current_jump_hold_unconfirmed", "record_only_jump"] {
+            let currentTrip=scenario.hasPrefix("current_jump")
+            g.rejectHold=false;g.confirmHold=true
+            var commandsAtTrip:Int?
             g.q["right"] = ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!; g.mode["right"] = 2
             g.calibrated = ["right"]
             g.stale = false; g.commands = []; g.activeLeases = []
             ROBArmRoutineVision.shared.fresh = true
-            UserDefaults.standard.set(scenario == "current_jump" ? 0.5 : 0, forKey: ROBLeftArmTrial.currentLimitKey)
+            UserDefaults.standard.set(currentTrip ? 0.5:0,forKey:ROBLeftArmTrial.currentLimitKey)
             g.afterStateQuery = {
                 g.afterStateQuery = nil
                 let initial = g.sequence
-                if scenario == "current_jump" {
+                if currentTrip || scenario=="record_only_jump" {
                     let fresh = ROBAmberGatewayTelemetry(sequence: initial + 1, positions: g.q["right"]!, stale: false, status: 2)
                     NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g, userInfo: ["telemetry": fresh])
                 }
                 let queued = ROBAmberGatewayTelemetry(sequence: initial + 2, positions: g.q["right"]!,
                     stale: scenario == "source", status: 2, queuedMilliseconds: 700)
                 if scenario == "malformed" { queued.currents[3] = NSNumber(value: Double.nan) }
-                if scenario == "current_jump" { queued.currents = Array(repeating: NSNumber(value: 5), count: 7) }
+                if currentTrip || scenario=="record_only_jump" { queued.currents = Array(repeating: NSNumber(value: 5), count: 7) }
                 g.sequence = initial + 3 // a strictly newer cache exists while the UI drains its older notification
                 g.stale = scenario == "live_loss"
+                if currentTrip {
+                    commandsAtTrip=g.commands.count
+                    g.rejectHold=scenario=="current_jump_hold_rejected";g.confirmHold=scenario != "current_jump_hold_unconfirmed"
+                }
                 NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g,
                     userInfo: ["telemetry": queued])
+                if currentTrip {
+                    for index in 1...4 {
+                        DispatchQueue.main.asyncAfter(deadline:.now()+Double(index)*0.12) {
+                            g.sequence+=1
+                            let after=ROBAmberGatewayTelemetry(sequence:g.sequence,positions:g.q["right"]!,stale:false,status:2)
+                            after.currents=Array(repeating:NSNumber(value:0.3+Double(index)*0.01),count:7)
+                            NotificationCenter.default.post(name:.ROBAmberGatewayTelemetryDidUpdate,object:g,userInfo:["telemetry":after])
+                        }
+                    }
+                }
             }
             let result = await run("left_grip")
             g.afterStateQuery = nil; g.stale = false
-            if scenario == "delivery" {
+            if scenario == "delivery" || scenario=="record_only_jump" {
                 precondition(result["status"] as? String == "accepted_unverified", result.description)
                 precondition(result["delayed_telemetry_samples"] as? Int == 1)
                 precondition((result["max_delayed_telemetry_age_ms"] as? Double ?? 0) >= 700)
                 let csv = try String(contentsOfFile: result["current_recording"] as! String)
                 precondition(csv.contains(",701.0,"), "Queued history must retain its actual delivery age")
+                precondition(result["current_spike_latched"]==nil,"Default zero threshold acquired an automatic cutoff")
             } else {
                 precondition(result["status"] as? String == "blocked", "\(scenario): \(result)")
                 precondition(g.commands.contains("priority_hold:right"), "A genuine feedback/current fault did not request hold")
+            }
+            if currentTrip {
+                precondition(result["current_spike_latched"]as?Bool==true && result["automatic_recovery_eligible"]as?Bool==false)
+                precondition(result["requires_intervention"]as?Bool==true && result["old_waypoint_resumption_permitted"]as?Bool==false)
+                let path=result["current_spike_evidence_path"]as!String
+                let event=try JSONDecoder().decode(ROBArmCurrentSpikeRecording.Event.self,from:Data(contentsOf:URL(fileURLWithPath:path)))
+                precondition(event.configuredJumpLimitRaw==0.5 && abs(event.peakJumpRaw-4.8)<1e-9)
+                precondition(event.before?.currentsRaw==Array(repeating:0.2,count:7) && event.trigger.currentsRaw==Array(repeating:5.0,count:7))
+                precondition(event.currentDeltaRaw==Array(repeating:4.8,count:7) && event.triggerJointIndices==Array(1...7))
+                precondition(event.trigger.positionsRadians==g.q["right"]! && event.trigger.effectiveSampleAgeMilliseconds==701)
+                precondition(event.trigger.sampleAgeAtReceiptMilliseconds==1 && event.trigger.jointFeedbackAgeMilliseconds.count==7)
+                precondition(event.postStopCollectionCompleted && event.postStopSamples.count==4 && event.holds.count==1)
+                precondition((event.postStopCollectionCompletedAtMilliseconds ?? 0)-event.holds[0].requestedAtMilliseconds>=900)
+                precondition(event.holds[0].accepted==(scenario != "current_jump_hold_rejected"))
+                precondition(result["current_spike_hold_confirmed"]as?Bool==(scenario=="current_jump"))
+                precondition(event.postStopSamples.allSatisfy{$0.sequence>event.trigger.sequence && $0.gatewaySessionGeneration==g.generation})
+                precondition(!event.motionAuthority && !event.calibratedForceProtection && !event.automaticReversePermitted)
+                precondition(Array(g.commands.dropFirst(commandsAtTrip!))==["priority_hold:right"],"Spike cleanup sent more than its one hold, repeated or reversed")
+                let permissions=(try FileManager.default.attributesOfItem(atPath:path)[.posixPermissions]as!NSNumber).intValue
+                precondition(permissions==0o600)
+                precondition(trialFreeRecoveryBlocked(),"Current trip exposed an old recovery route")
             }
             precondition(g.commands.allSatisfy { ["mode_query:right", "priority_hold:right", "gripper_state:right", "gripper_hold:right"].contains($0) },
                 "A stationary recording check activated, moved or deactivated an arm")
             precondition(g.q["right"] == ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!)
             precondition(!ROBControllerArmApproval.shared.authorizesLeftArmTrial("invented"),
                 "Recovered feedback restored an old motion grant")
+            g.rejectHold=false;g.confirmHold=true
         }
         UserDefaults.standard.set(0, forKey: ROBLeftArmTrial.currentLimitKey)
         print("Delayed telemetry: 700 ms queued history retained only with newer live feedback; stale source, true feedback loss, malformed currents and historical current jumps still stop; stationary jaws only after valid live feedback; no travel or grant recovery")
+        print("Raw spike evidence: exact before/trigger/delta/q/source ages, one latching hold, one-second passive samples and ACK truth, private0600 JSON; rejected/unconfirmed holds never become confirmed; zero cutoff stays record-only, no reverse/target/reconnect or old recovery")
     }
+    @_optimize(none)
     @MainActor static func tests() async throws {
         let dispatchID = UUID(), dispatchMap = String(repeating:"a",count:64)
         let reviewed = ROBReviewedArmDispatchStart(proposalID:dispatchID,index:3,generation:42,mapFingerprint:dispatchMap,
@@ -527,10 +743,13 @@ final class ROBArmRoutineCoordinator {
         precondition(plan.stationaryFrontTarget(plan.target(index: plan.waveIndex)!) == nil)
         print("Interaction plan: tested approach unchanged, one joint at a time at front, reverse unwinds before descent, off-route poses rejected")
         let trial = ROBLeftArmTrial.shared, g = ROBAmberGatewayClient.shared
+        precondition(!trial.nominalEmptyCommissioningStepEnabled && !trial.oneDegreeEmptyCalibrationStepEnabled)
         precondition(!trial.authorizesTaughtWaypoint(arm: "right", expectedSessionGeneration: g.generation))
         precondition(!trial.continueOperation(stage: "object_placed"), "Idle readiness admitted an operation")
         let broker = ROBControllerArmApproval.shared
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("left-arm-fixture-" + UUID().uuidString)
+        broker.standingCanCampaignDirectory=folder.appendingPathComponent("isolated-standing-state")
+        broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("isolated-local-audit")
         trial.recordingDirectory = folder
         trial.canReachCalibrationFile = folder.appendingPathComponent("isolated-can-calibration.json")
         trial.recyclingTestParametersFile = folder.appendingPathComponent("isolated-recycling-parameters.json")
@@ -544,6 +763,296 @@ final class ROBArmRoutineCoordinator {
         let device = UUID(), session = UUID()
         let hello = ROBRobotActionMessage.controllerHello(senderID: "fixture-controller", acceptsActions: true, capabilities: ["arm_operation"])
         _ = broker.receive(hello, device: device, session: session)
+        if CommandLine.arguments.last=="local-counts" {
+            var requests=0,prompts=0
+            broker.send={message,_,_ in if message.kind == .actionRequest {requests+=1};return true}
+            broker.announceApproval={_ in prompts+=1}
+            ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64)
+            let vision=ROBArmRoutineVision.shared,search=ROBWorkspaceSearch.shared
+            vision.frameAvailable=true;vision.fresh=true;search.objects=[:]
+            g.ready=true;g.stale=false;g.mode=["left":0,"right":0];g.calibrated=["left","right"]
+            for count in [1,5,8] {
+                g.commands=[]
+                var result:NSDictionary?
+                Task { @MainActor in
+                    trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:String(count)){result=$0}
+                }
+                let pendingEnd=ProcessInfo.processInfo.systemUptime+2
+                while broker.pendingLocalRecyclingApprovalScope==nil && ProcessInfo.processInfo.systemUptime<pendingEnd {try await Task.sleep(nanoseconds:10_000_000)}
+                precondition((broker.pendingLocalRecyclingApprovalScope?["canCount"]as?NSNumber)?.intValue==count)
+                var receipt=broker.localRecyclingReceiptTemplate as! [String:Any]
+                receipt["sourceMessage"]="Synthetic count fixture only; no real operator authorization."
+                receipt["sourceMessageSHA256"]=ROBGhostRobotModel.hash(Data((receipt["sourceMessage"]as!String).utf8))
+                receipt["additionalUserInstruction"]="Synthetic exact bounded count and source-context test."
+                receipt["additionalUserInstructionSHA256"]=ROBGhostRobotModel.hash(Data((receipt["additionalUserInstruction"]as!String).utf8))
+                try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+                let url=folder.appendingPathComponent("synthetic-count-\(count).json")
+                var mismatch=receipt
+                var scope=mismatch["scope"]as![String:Any];scope["canCount"]=count==8 ? 1:count+1;mismatch["scope"]=scope
+                try JSONSerialization.data(withJSONObject:mismatch,options:.sortedKeys).write(to:url)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+                do {try broker.importLocalRecyclingSessionApproval(fromReceiptURL:url);preconditionFailure("Mismatched exact count imported")}catch{}
+                try JSONSerialization.data(withJSONObject:receipt,options:.sortedKeys).write(to:url)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+                try broker.importLocalRecyclingSessionApproval(fromReceiptURL:url)
+                let end=ProcessInfo.processInfo.systemUptime+12
+                while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
+                guard let result else{fatalError("Bounded local count did not finish")}
+                precondition(result["status"]as?String=="not_found",result.description)
+                precondition((result["authorized_can_count"]as?NSNumber)?.intValue==count)
+                precondition((result["batch_requested"]as?NSNumber)?.intValue==count && (result["batch_completed"]as?NSNumber)?.intValue==0)
+                precondition(result["arm_motion_sent"]as?Bool==false && result["jaw_command_sent"]as?Bool==false)
+                precondition(result["perception_only_rejection"]as?Bool==true && broker.localRecyclingApprovalState != nil)
+                broker.cancel(reason:"Synthetic bounded-count scenario complete")
+                precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
+            }
+            for (command,target) in [("right_recycle_cans","0"),("right_recycle_cans","9"),("right_recycle_cans",""),
+                ("left_wave","5"),("right_scan_clearance","5"),("right_recycle_can","1")] {
+                g.commands=[]
+                let result:NSDictionary=await withCheckedContinuation{done in trial.performUsingLocalRecyclingReceipt(command,target:target){done.resume(returning:$0)}}
+                precondition(result["status"]as?String=="rejected" && g.commands.isEmpty && broker.pendingLocalRecyclingApprovalScope==nil)
+            }
+            precondition(requests==0 && prompts==0)
+            print("PASS actual local1/5/8 exact scope/import/context/task counts;0/9/empty and non-can commands rejected, count mismatch rejected, partial holds/not-found earn0, no hardware motion or extra spoken grant")
+            return
+        }
+        if ["standing-camera-start","standing-auto-recovery"].contains(CommandLine.arguments.last ?? "") {
+            let recovering=CommandLine.arguments.last=="standing-auto-recovery"
+            broker.standingCanCampaignDirectory=folder.appendingPathComponent("standing-camera-campaign")
+            broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("standing-camera-audit")
+            let source="Synthetic fixture only: one authorized four-can campaign, not a real operator instruction."
+            let instruction="Synthetic fixture only: automatically prepare fresh camera and source context."
+            let value:[String:Any]=["schemaVersion":1,"kind":"local_user_standing_can_campaign_authorization","campaignID":UUID().uuidString,
+                "issuedAtMilliseconds":Date().timeIntervalSince1970*1000,"source":"explicit_user_session_instruction",
+                "sourceMessage":source,"sourceMessageSHA256":ROBGhostRobotModel.hash(Data(source.utf8)),
+                "additionalUserInstruction":instruction,"additionalUserInstructionSHA256":ROBGhostRobotModel.hash(Data(instruction.utf8)),
+                "scope":["canCount":4,"targetObject":"empty_coke_can","destination":"orange_bucket","arms":["left","right"],
+                    "treads":false,"torso":false,"manualGestures":false,"permitsUnmeasuredVisualCalibrationTrial":true,
+                    "automaticConnectionRecovery":true,"validUntil":"four_transfers_or_user_intervention"]]
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            let file=folder.appendingPathComponent("synthetic-standing-camera.json")
+            try JSONSerialization.data(withJSONObject:value,options:.sortedKeys).write(to:file)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+            try broker.importLocalCanCampaignAuthorization(fromReceiptURL:file)
+            ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64)
+            let v=ROBArmRoutineVision.shared;v.frameAvailable=false;v.fresh=false;v.captureWidth=640;v.captureHeight=400
+            g.mode=["left":0,"right":0];g.calibrated=["left","right"];g.commands=[]
+            var result:NSDictionary?,second:NSDictionary?
+            var observedGenerations:[UInt64]=[],pendingIDs:[String]=[]
+            if recovering {ROBWorkspaceSearch.shared.onInspect={
+                observedGenerations.append(g.generation)
+                if let id=broker.activeLocalRecyclingApprovalEvidence?["pendingID"] as?String {pendingIDs.append(id)}
+                if observedGenerations.count==1 {
+                    g.ready=false
+                    DispatchQueue.main.asyncAfter(deadline:.now()+1.5){g.generation+=1;g.ready=true}
+                }
+            }}
+            trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){result=$0}
+            trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){second=$0}
+            precondition(second?["status"] as?String=="busy")
+            try await Task.sleep(nanoseconds:150_000_000)
+            precondition(g.commands.isEmpty && !trial.isRunning && result==nil)
+            v.frameAvailable=true;v.fresh=true
+            try await Task.sleep(nanoseconds:150_000_000)
+            precondition(g.commands.isEmpty && !trial.isRunning && result==nil,"An old640x400frame froze a standing task context")
+            v.captureHeight=480;v.cameraGeneration=UUID()
+            let end=ProcessInfo.processInfo.systemUptime+15
+            while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
+            guard let output=result else{fatalError("Standing camera warmup did not start a fresh can-only perception task")}
+            if recovering {
+                precondition(output["status"] as?String=="blocked" && output["requires_new_plan"] as?Bool==true,output.description)
+                precondition(output["interruption_reason"] as?String=="transportLost" && output["possible_payload_held"] as?Bool==false)
+                let retryEnd=ProcessInfo.processInfo.systemUptime+12
+                while (observedGenerations.count<2 || trial.isRunning) && ProcessInfo.processInfo.systemUptime<retryEnd {try await Task.sleep(nanoseconds:50_000_000)}
+                precondition(observedGenerations==[1,2],"No automatic fresh-generation can task after telemetry reconnect")
+                precondition(pendingIDs.count==2 && pendingIDs[0] != pendingIDs[1],"Recovery reused an old receipt/proof scope")
+                precondition(ROBAmberGatewayTunnel.shared.connections>=1)
+                ROBWorkspaceSearch.shared.onInspect=nil
+                print("PASS actual standing AUTO recovery:typedtransportloss stopsoldjob, nativepassivereconnect, advancingBOTH-armstablefeedback/new480image, NEWpendingID/gatewaygeneration/canplan, no oldwaypoint or manualretry")
+            }else{precondition(output["status"] as?String=="not_found",output.description)}
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can])
+            precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("position_mode") || $0.hasPrefix("gripper") || $0.hasPrefix("activate")})
+            broker.cancel(reason:"Synthetic camera-start fixture complete")
+            print("PASS actual standing Trial camera startup: serializedpassive enrollment, rejectsold400frame, waitsadvancing640480source, freshnormalcan-onlyjob withoutcalibrationcapture or arm/jaw outputs")
+            return
+        }
+        if ["one-degree-empty","one-degree-empty-delayed-endpoint"].contains(CommandLine.arguments.last ?? "") {
+            let delayedEndpoint=CommandLine.arguments.last=="one-degree-empty-delayed-endpoint"
+            g.delayOneDegreeEndpoint=delayedEndpoint
+            precondition(!trial.oneDegreeEmptyCalibrationStepEnabled)
+            let model=try ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"),physicalSide:"right")
+            let frame=model.frames(model.positions(vendorLeft:Array(repeating:0,count:7)))[model.toolLink]!
+            let text=try String(contentsOf:model.directory.appendingPathComponent(model.hulls[model.toolLink]!),encoding:.utf8)
+            let points=text.split(separator:"\n").compactMap { line -> SIMD3<Double>? in
+                let a=line.split(whereSeparator:\.isWhitespace);guard a.first=="v",a.count>=4,let x=Double(a[1]),let y=Double(a[2]),let z=Double(a[3])else{return nil}
+                let p=frame*SIMD4(x,y,z,1);return SIMD3(p.x,p.y,p.z)
+            }
+            // Deliberately retain a synthetic raw return at the tool surface: this
+            // experiment reports contact predictions rather than certifying clearance.
+            let rawPoint=points.max{$0.y<$1.y}!+SIMD3(0,0.001,0)
+            var camera=matrix_identity_double4x4;camera.columns.3=SIMD4(rawPoint-SIMD3(0,0,0.9),1)
+            ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64);ROBNeckRGBPoseDisplay.nominalCameraToModel=camera
+            ROBArmRoutineVision.shared.captureFocalLength=10000;ROBArmRoutineVision.shared.frameAvailable=true
+            ROBArmRoutineVision.shared.clearsFramesOnSetActive=true
+            var neck:NSDictionary=["known":true,"stationary":true,"pan":6015,"pan_degrees":0.0,"lower":6011,"upper":6160,"ready_at":0.0]
+            ROBFixedHeadCalibrationWindowController.shared.readNeck={neck}
+            ROBWorkspaceSearch.shared.prepareView={p,u in neck=["known":true,"stationary":true,"pan":Int((6000+p/0.03).rounded()),"pan_degrees":p,"lower":6011,"upper":u,"ready_at":0.0];return true}
+            ROBWorkspaceSearch.shared.viewReady={p,u in neck["upper"] as?Int==u && neck["pan_degrees"] as?Double==p}
+            ROBArmRoutineCoordinator.shared.viewIsStationary={true}
+            trial.oneDegreeEmptyCalibrationStepEnabled=true;trial.localVisualTrialAssumedSpatialErrorMeters=0.035
+            g.mode=["left":0,"right":0];g.q=["left":Array(repeating:0,count:7),"right":Array(repeating:0,count:7)];g.calibrated=[];g.commands=[]
+            var requests=0,prompts=0
+            broker.send={m,_,_ in if m.kind == .actionRequest {requests+=1};return true};broker.announceApproval={_ in prompts+=1}
+            broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("one-degree-private-audit")
+            var result:NSDictionary?
+            Task{@MainActor in trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){result=$0}}
+            let pendingEnd=ProcessInfo.processInfo.systemUptime+2
+            while broker.pendingLocalRecyclingApprovalScope==nil && ProcessInfo.processInfo.systemUptime<pendingEnd {try await Task.sleep(nanoseconds:10_000_000)}
+            precondition(broker.pendingLocalRecyclingApprovalScope?["oneDegreeEmptyCalibrationStepEnabled"] as?Bool==true)
+            precondition((broker.pendingLocalRecyclingApprovalScope?["summary"] as?String)?.contains("NOT verified motion clearance")==true)
+            precondition(!broker.authorizesLocalRecyclingOneDegreeEmptyCalibrationStep(summary:broker.pendingLocalRecyclingApprovalScope?["summary"] as?String ?? "",arm:"right"))
+            precondition(g.commands.isEmpty && requests==0 && prompts==0)
+            var receipt=broker.localRecyclingReceiptTemplate as! [String:Any]
+            receipt["sourceMessage"]="Synthetic fixture only: one bounded one-degree EMPTY experiment, not a real user instruction."
+            receipt["sourceMessageSHA256"]=ROBGhostRobotModel.hash(Data((receipt["sourceMessage"] as!String).utf8))
+            receipt["additionalUserInstruction"]="Synthetic fixture: permit exact one-degree flag with contact diagnostics and35mm unverified uncertainty."
+            receipt["additionalUserInstructionSHA256"]=ROBGhostRobotModel.hash(Data((receipt["additionalUserInstruction"] as!String).utf8))
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            let url=folder.appendingPathComponent("one-degree-receipt.json");try JSONSerialization.data(withJSONObject:receipt,options:.sortedKeys).write(to:url)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+            try broker.importLocalRecyclingSessionApproval(fromReceiptURL:url)
+            let end=ProcessInfo.processInfo.systemUptime+30
+            while result==nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
+            guard let value=result else {fatalError("One-degree synthetic integration did not complete")}
+            precondition(value["status"] as?String=="partial_empty_calibration_step_held",value.description)
+            precondition(value["batch_completed"] as?Int==0 && value["jaw_command_sent"] as?Bool==false && value["reach_sent"] as?Bool==false)
+            precondition(value["arm_motion_sent"] as?Bool==true && value["collision_protection_certified"] as?Bool==false)
+            precondition(g.commands.filter{$0.hasPrefix("ghost_step")}.count==1 && !g.commands.contains{$0.hasPrefix("calibrate") || $0.hasPrefix("gripper") || $0.hasPrefix("deactivate")})
+            precondition(ROBGripperStartupCalibration.shared.setupCalls==0 && g.q["left"]==[0,-0.02,0,0,0,0,0] && g.q["right"]==Array(repeating:0,count:7))
+            precondition(g.activeLeases.isEmpty && neck["pan_degrees"] as?Double == -55 && neck["upper"] as?Int==5650)
+            if delayedEndpoint {
+                guard let sent=g.oneDegreeSentAt,let arrived=g.oneDegreeConvergedAt,let held=g.oneDegreeFirstHoldAt else {fatalError("Missing advancing delayed endpoint/hold evidence")}
+                precondition(arrived-sent>=4.45 && held>=arrived+0.14,"Priority hold preceded distinct tightly converged stable samples")
+                print("PASS delayed actuator endpoint:−1degree remains outside unchanged3mm endpoint past4s; no early priority hold; advancing converged samples then hold")
+            }
+            precondition(ROBWorkspaceSearch.shared.collisionScanCalls==0 && ROBArmRoutineVision.shared.observationCount==0)
+            precondition(broker.localRecyclingApprovalState==nil && !trial.isRunning)
+            let evidence=URL(fileURLWithPath:trial.lastRecordingPath).deletingPathExtension().appendingPathExtension("one-degree-empty-evidence")
+            let map=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:Data(contentsOf:evidence.appendingPathComponent("collision-map.json")))
+            let proof=try JSONDecoder().decode(ROBWorkspaceOneDegreeEmptyCalibrationStep.self,from:Data(contentsOf:evidence.appendingPathComponent("proof.json")))
+            precondition(proof.environmentPredictionIsDiagnosticOnly && !proof.collisionCertificate)
+            precondition(proof.environmentDiagnostics.predictedNominalContact,"Synthetic surface return must remain diagnostic evidence")
+            precondition(map.registrationID==nil && map.observedFrameCount==3 && map.observations.allSatisfy{$0.recordedPanDegrees == -55 && $0.recordedUpperTarget==5650 && !$0.measuredSelfMaskApplied})
+            print("PASS one-degree EMPTY actual Trial+broker+core: defaultOFF exactreceipt,3advancing synthetic raw frames retained including predictedcontact, ONE4sminus.02step/no jaw/detector/return/autochain, fresh endpointheld,0transfers,private diagnosticproof; no hardware transport")
+            return
+        }
+        if CommandLine.arguments.last == "local-receipt" {
+            var requests=0,prompts=0
+            broker.send={message,_,_ in if message.kind == .actionRequest {requests += 1};return true}
+            broker.announceApproval={_ in prompts += 1}
+            broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("local-audit")
+            ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64)
+            ROBArmRoutineVision.shared.clearsFramesOnSetActive=true
+            ROBArmRoutineVision.shared.frameAvailable=true
+            g.ready=true;g.stale=false;g.mode=["left":1,"right":1];g.calibrated=["left","right"];g.commands=[]
+            ROBWorkspaceSearch.shared.objects=[:]
+            // A source frame may age while stationary perception is running.
+            // It must not alter the exact receipt's source/runtime identity,
+            // and it never permits preparation or arm travel while stale.
+            ROBWorkspaceSearch.shared.afterInspect={
+                ROBArmRoutineVision.shared.fresh=false
+                broker.tick()
+                precondition(broker.activeLocalRecyclingApprovalEvidence != nil)
+                precondition(!trial.authorizesTaughtWaypoint(arm:"left",expectedSessionGeneration:g.generation))
+            }
+            func local() async ->NSDictionary {
+                await withCheckedContinuation { continuation in
+                    trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){continuation.resume(returning:$0)}
+                }
+            }
+            var result:NSDictionary?
+            Task { @MainActor in result=await local() }
+            let pendingEnd=ProcessInfo.processInfo.systemUptime+2
+            while broker.pendingLocalRecyclingApprovalScope == nil && ProcessInfo.processInfo.systemUptime<pendingEnd {
+                try await Task.sleep(nanoseconds:10_000_000)
+            }
+            precondition(broker.pendingLocalRecyclingApprovalScope?["command"] as? String == "right_recycle_cans")
+            precondition(requests==0 && prompts==0 && g.commands.isEmpty && !trial.isRunning)
+            precondition(!broker.receiveSpokenAuthorization("yes proceed"),"Voice cannot impersonate a local imported receipt")
+            var receipt=broker.localRecyclingReceiptTemplate as! [String:Any]
+            receipt["sourceMessage"]="Synthetic fixture: exactly four cans under one local session instruction."
+            receipt["sourceMessageSHA256"]=ROBGhostRobotModel.hash(Data((receipt["sourceMessage"] as! String).utf8))
+            receipt["additionalUserInstruction"]="Synthetic fixture: permit best-estimate visual calibration for this exact job."
+            receipt["additionalUserInstructionSHA256"]=ROBGhostRobotModel.hash(Data((receipt["additionalUserInstruction"] as! String).utf8))
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            let url=folder.appendingPathComponent("synthetic-local-receipt.json")
+            try JSONSerialization.data(withJSONObject:receipt,options:.sortedKeys).write(to:url)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+            try broker.importLocalRecyclingSessionApproval(fromReceiptURL:url)
+            let end=ProcessInfo.processInfo.systemUptime+12
+            while result == nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
+            guard let first=result else {fatalError("Local receipt fixture did not finish")}
+            precondition(first["status"] as? String=="not_found",first.description)
+            precondition(first["arm_motion_sent"] as? Bool==false && first["reach_sent"] as? Bool==false && first["jaw_command_sent"] as? Bool==false)
+            precondition(first["perception_only_rejection"] as? Bool==true && broker.localRecyclingApprovalState?["state"] as? String=="available",first.description)
+            precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==1)
+            precondition(ROBWorkspaceSearch.shared.localCanShapePriorPermissions==[true],"Dedicated actual receipt did not explicitly authorize its optional shape prior")
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == [.can],"Local single-can entry must not wait for the future bucket search")
+            precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("waypoint") || $0.hasPrefix("gripper") || $0.hasPrefix("calibrate")})
+            precondition(trial.localRecyclingContextDiagnostics["status"] as? String=="current")
+            precondition(trial.localRecyclingContextDiagnostics["camera_frame_fresh"] as? Bool==false)
+            broker.tick()
+            precondition(broker.localRecyclingApprovalState?["state"] as? String=="available")
+            let stalePreparation=await local()
+            precondition(stalePreparation["status"] as? String=="blocked" && broker.localRecyclingApprovalState != nil)
+            precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==1,"Stale camera was admitted to a new motion operation")
+            ROBWorkspaceSearch.shared.afterInspect=nil;ROBArmRoutineVision.shared.fresh=true
+            let second=await local()
+            precondition(second["status"] as? String=="not_found" && requests==0 && prompts==0,second.description)
+            precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==2 && broker.localRecyclingApprovalState?["state"] as? String=="available")
+            // An unsafe failure with no trajectory must still revoke, rather
+            // than exploiting the perception-only retry exception.
+            ROBWorkspaceSearch.shared.afterInspect={g.stale=true}
+            let lost=await local()
+            precondition(lost["status"] as? String=="blocked" && lost["perception_only_rejection"] as? Bool==false,lost.description)
+            precondition(broker.localRecyclingApprovalState == nil && !trial.isRunning)
+            ROBWorkspaceSearch.shared.afterInspect=nil;g.stale=false
+            // New source generation, actual runtime or HOST stereo policy
+            // must revoke an idle receipt; no prior pixels/receipt are reused.
+            for change in ["source_generation","runtime","stereo_policy"] {
+                ROBArmRoutineVision.shared.frameAvailable=true;ROBArmRoutineVision.shared.fresh=true
+                var next:NSDictionary?
+                Task { @MainActor in next=await local() }
+                let pendingEnd=ProcessInfo.processInfo.systemUptime+2
+                while broker.pendingLocalRecyclingApprovalScope==nil && ProcessInfo.processInfo.systemUptime<pendingEnd {
+                    try await Task.sleep(nanoseconds:10_000_000)
+                }
+                var receipt=broker.localRecyclingReceiptTemplate as! [String:Any]
+                receipt["sourceMessage"]="Synthetic fixture scoped source identity test."
+                receipt["sourceMessageSHA256"]=ROBGhostRobotModel.hash(Data((receipt["sourceMessage"] as! String).utf8))
+                receipt["additionalUserInstruction"]="Synthetic fixture explicitly permits this exact unmeasured job."
+                receipt["additionalUserInstructionSHA256"]=ROBGhostRobotModel.hash(Data((receipt["additionalUserInstruction"] as! String).utf8))
+                let receiptURL=folder.appendingPathComponent(change+"-receipt.json")
+                try JSONSerialization.data(withJSONObject:receipt,options:.sortedKeys).write(to:receiptURL)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:receiptURL.path)
+                try broker.importLocalRecyclingSessionApproval(fromReceiptURL:receiptURL)
+                let finishEnd=ProcessInfo.processInfo.systemUptime+12
+                while next==nil && ProcessInfo.processInfo.systemUptime<finishEnd {try await Task.sleep(nanoseconds:10_000_000)}
+                precondition(next?["perception_only_rejection"] as? Bool==true && broker.localRecyclingApprovalState != nil)
+                switch change {
+                case "source_generation":ROBArmRoutineVision.shared.cameraGeneration=UUID()
+                case "runtime":ROBArmRoutineVision.shared.runtimeIdentity=String(repeating:"d",count:64)
+                default:ROBArmRoutineVision.shared.stereoPolicyIdentity=String(repeating:"e",count:64)
+                }
+                broker.tick()
+                precondition(broker.localRecyclingApprovalState==nil,"Changed source/runtime/mode retained an old receipt")
+                precondition(trial.localRecyclingContextDiagnostics["status"] as? String=="changed")
+            }
+            ROBNeckRGBPoseDisplay.projectionIdentity=nil
+            broker.cancel(reason:"Synthetic local fixture complete")
+            print("Local receipt runtime: exact4 private import; transient stale stationary perception retains source identity/receipt but rejects new preparation and motion; actual source generation/runtime/stereo-policy changes and feedback loss revoke; no fake registration or arm trajectory")
+            return
+        }
         let heartbeat = Timer(timeInterval: 1, repeats: true) { _ in _ = broker.receive(hello, device: device, session: session) }
         RunLoop.main.add(heartbeat, forMode: .common)
         defer { heartbeat.invalidate() }
@@ -562,6 +1071,108 @@ final class ROBArmRoutineCoordinator {
             }
             return true
         }
+        if ["right-estimated","right-estimated-bundle"].contains(CommandLine.arguments.last ?? "") {
+            let estimatedBundle = CommandLine.arguments.last == "right-estimated-bundle"
+            ROBRecyclingVisualInspection.fixedContext = !estimatedBundle
+            ROBWorkspaceSearch.shared.estimatedContext = estimatedBundle
+            defer {ROBRecyclingVisualInspection.fixedContext=false;ROBWorkspaceSearch.shared.estimatedContext=false}
+            g.ready=true;g.stale=false;g.commands=[];g.mode=["left":1,"right":1]
+            g.q=["left":Array(repeating:0,count:7),"right":Array(repeating:0,count:7)]
+            ROBWorkspaceSearch.shared.syntheticDistantPlane=true
+            ROBWorkspaceSearch.shared.clearCollisionScene()
+            ROBArmRoutineCoordinator.shared.prepareView={true};ROBArmRoutineCoordinator.shared.viewIsStationary={true}
+            var sides:[String]=[]
+            broker.send = { message,_,_ in
+                if message.kind == .actionRequest {
+                    sides.append(message.arguments["arm"] as! String)
+                    precondition(message.arguments["arm"] as? String=="right")
+                    precondition((message.arguments["summary"] as? String)?.contains("physical RIGHT-arm") == true)
+                    DispatchQueue.main.async {
+                        _ = broker.receive(.actionStatus(callID:message.callID!,state:.accepted,
+                            detail:"Isolated right nudge decision",result:[:],senderID:"fixture-controller",recipientID:message.senderID),
+                            device:device,session:session)
+                    }
+                }
+                return true
+            }
+            let noProof=await run("right_estimated_trial")
+            precondition(noProof["status"] as? String=="blocked" && sides.isEmpty && g.commands.isEmpty)
+            let preview=await run("right_estimated_preview")
+            precondition(preview["status"] as? String=="accepted_unverified",preview.description)
+            precondition(sides.isEmpty && g.commands.isEmpty,"Passive preview actuated or asked for authority")
+            let proof=trial.collisionReviewProposal!
+            precondition(proof.baseline==Array(repeating:0,count:7) && proof.steps.count==1)
+            precondition(proof.steps[0].positions==[-0.03,-0.03,0,0,0,0,0] && proof.steps[0].jawAction==nil)
+            let result=await run("right_estimated_trial")
+            precondition(result["status"] as? String=="completed",result.description)
+            precondition(sides==["right"] && g.commands.filter{$0=="ghost_step_0:left"}.count==1)
+            precondition(g.q["left"]==[-0.03,-0.03,0,0,0,0,0] && g.q["right"]==Array(repeating:0,count:7))
+            precondition(g.mode==["left":2,"right":1] && g.activeLeases.isEmpty)
+            precondition(!g.commands.contains{$0.hasPrefix("calibrate") || $0.hasPrefix("gripper") || $0.hasPrefix("deactivate") || $0.hasPrefix("waypoint")})
+            let csv=try String(contentsOfFile:result["current_recording"] as! String,encoding:.utf8)
+            precondition(csv.contains(",right,left,"))
+            g.commands=[]
+            let replay=await run("right_estimated_trial")
+            precondition(replay["status"] as? String=="blocked" && g.commands.isEmpty && sides.count==1)
+            print("Right estimated runtime: passive active-mode preview, one explicit physical-right approval, one 4s immutable two-joint outward retreat on gateway left, other arm unchanged, no jaw/return/replay; actual pixel/depth acquisition is separately covered, never fabricated here.")
+            return
+        }
+        if ["right-scope","right-three-scope","right-four-scope"].contains(CommandLine.arguments.last ?? "") {
+            var requestArms:[String]=[]
+            var requestSummaries:[String]=[]
+            broker.send = { message,_,_ in
+                if message.kind == .actionRequest {
+                    requestArms.append(message.arguments["arm"] as! String)
+                    requestSummaries.append(message.arguments["summary"] as! String)
+                    DispatchQueue.main.async {
+                        _ = broker.receive(.actionStatus(callID:message.callID!,state:.accepted,
+                            detail:"Isolated scope decision",result:[:],senderID:"fixture-controller",recipientID:message.senderID),
+                            device:device,session:session)
+                    }
+                }
+                return true
+            }
+            _ = await withCheckedContinuation { continuation in broker.beginArmSession {continuation.resume(returning:$0)} }
+            precondition(broker.armSessionActive && requestArms == ["left"])
+            g.commands=[];g.ready=true;g.stale=false;g.mode=["left":1,"right":1];g.calibrated=["left","right"]
+            ROBArmRoutineCoordinator.shared.prepareView={true}; ROBArmRoutineCoordinator.shared.viewIsStationary={true}
+            ROBWorkspaceSearch.shared.clearCollisionScene()
+            let three = CommandLine.arguments.last == "right-three-scope"
+            let four = CommandLine.arguments.last == "right-four-scope"
+            if four {
+                let originalSide = trial.physicalSide
+                for target in ["", "0", "9", "-1", "4.5", "all", "999999999999999999999999999999"] {
+                    let rejected = await run("right_recycle_cans", target:target)
+                    precondition(rejected["status"] as? String == "rejected", rejected.description)
+                    precondition(requestArms == ["left"] && g.commands.isEmpty,
+                                 "Invalid batch count requested approval or dispatched a command")
+                    precondition(trial.physicalSide == originalSide,
+                                 "Invalid batch count changed the selected physical arm")
+                }
+            }
+            let count = four ? 4 : three ? 3 : 1
+            let result=await run(four ? "right_recycle_cans" : three ? "right_recycle_three_cans" : "right_recycle_can",
+                                 target:four ? " 4\n" : "")
+            if count > 1 {
+                precondition(result["batch_requested"] as? Int == count && result["batch_completed"] as? Int == 0)
+                precondition((result["batch_results"] as? [[String:Any]])?.count == 1,
+                             "An unconfirmed first grasp must stop the complete batch")
+                precondition(requestSummaries.last?.contains("One approval covers all \(count) complete transfers.") == true,
+                             "The approved scope omitted the frozen batch count")
+            }
+            precondition(requestArms == ["left","both"],"A left-only rehearsal grant was incorrectly reused for the right task")
+            precondition(trial.physicalSide=="right" && trial.executionGatewayArm=="left")
+            precondition(!broker.authorizesRightArmTrial("invented"))
+            precondition(g.mode==["left":2,"right":2],"Both active arms were not held before neck scanning")
+            precondition(g.commands.contains("position_mode:left") && g.commands.contains("position_mode:right"))
+            precondition(!g.commands.contains {$0.hasPrefix("waypoint_") || $0.hasPrefix("ghost_step_") || $0.hasPrefix("gripper_") || $0.hasPrefix("calibrate:")})
+            precondition(g.q.values.allSatisfy {$0==Array(repeating:0.0,count:7)})
+            precondition(result["arm_motion_sent"] as? Bool==false && ["not_reachable","not_localized","not_found","needs_help"].contains(result["status"] as? String ?? ""),result.description)
+            precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty && !broker.isPending)
+            broker.cancel(reason:"Isolated right-scope fixture finished")
+            print("Right task scope (\(count) cans): one complete-task approval includes the frozen count; invalid count cannot request authority or change arms; an unconfirmed first item stops the batch; active arms hold without parking or jaw motion and an unregistered map still blocks travel.")
+            return
+        }
         if CommandLine.arguments.last == "estimated-calibration" {
             let model = try ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
             try await estimatedCalibrationTests(model:model,folder:folder)
@@ -579,13 +1190,32 @@ final class ROBArmRoutineCoordinator {
             precondition(searched["status"] as? String == "accepted_unverified", searched.description)
             precondition(approvals == 0 && g.commands.isEmpty)
             precondition(!ROBWorkspaceSearch.shared.requiredDepth, "A visual search must not wait for bucket release geometry")
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == (command == "left_check_hanging" ? [] : ROBWorkspaceTarget.allCases))
+        }
+        for (command,target,expected) in [
+            ("left_search_workspace","can",[ROBWorkspaceTarget.can]),
+            ("left_search_workspace"," Can \n",[ROBWorkspaceTarget.can]),
+            ("right_search_workspace","can",[ROBWorkspaceTarget.can]),
+            ("left_search_workspace","",ROBWorkspaceTarget.allCases),
+            ("left_search_workspace","can and bucket",ROBWorkspaceTarget.allCases),
+            ("left_search_workspace","unrecognized",ROBWorkspaceTarget.allCases)] {
+            let searched = await run(command,target:target)
+            precondition(searched["status"] as? String == "accepted_unverified",searched.description)
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == expected,
+                "Only an explicit can search may skip waiting for the bucket")
+            precondition(!ROBWorkspaceSearch.shared.requiredDepth && approvals == 0 && g.commands.isEmpty)
+            precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         }
         ROBWorkspaceSearch.shared.fail = true
-        let failedSearch = await run("left_search_workspace")
+        let failedSearch = await run("left_search_workspace",target:"can")
         precondition(failedSearch["status"] as? String == "blocked")
         precondition(approvals == 0 && g.commands.isEmpty && ROBAmberGatewayTunnel.shared.connections == 0)
         ROBWorkspaceSearch.shared.fail = false; ROBWorkspaceSearch.shared.onInspect = nil; g.ready = true
         print("Neck-only search and hanging checks: no arm approval, gateway connection, motor or hold commands, including failure")
+        if CommandLine.arguments.last == "can-only-search" {
+            print("Can-only neck search: recognized can target exits without bucket work; empty/unknown defaults retain both targets; left/right neck lanes and failed search preserve ownership/no-actuation guards")
+            return
+        }
         let legacyExecutor = CommandLine.arguments.contains("legacy-executor")
         if !legacyExecutor && CommandLine.arguments.last != "telemetry" {
             let search = ROBWorkspaceSearch.shared
@@ -593,7 +1223,7 @@ final class ROBArmRoutineCoordinator {
             let model = try ROBGhostRobotModel(directory: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
             let legacyURL = URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/first-confirmed-recycle.proposal.json")
             let legacyCarry = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:legacyURL))
-            try ROBLeftGestureCompiler.validate(legacyCarry,model:model)
+            precondition(legacyCarry.validForReplay(model:model),"Historical route must remain viewable without replaying a taught entry")
             precondition(legacyCarry.workspaceCollisionPlan?.payload == nil && legacyCarry.steps.contains(where:{ $0.jawAction == .grip }))
             g.commands = []; let beforeLegacyApproval = approvals, beforeLegacyScan = search.collisionScanCalls
             let missingPayload = await run(legacyCarry,model:model)
@@ -601,7 +1231,7 @@ final class ROBArmRoutineCoordinator {
             precondition((missingPayload["detail"] as? String)?.contains("Measure the carried object") == true,missingPayload.description)
             precondition(approvals == beforeLegacyApproval && search.collisionScanCalls == beforeLegacyScan && g.commands.isEmpty,
                 "A legacy carry without measured payload requested authority or attempted capture/actuation")
-            print("Imported carrying proposal: archive still compiles for preview, but missing measured payload rejects before approval, scene capture or actuator commands")
+            print("Imported carrying proposal: archive remains structurally replayable for preview, but missing measured payload rejects before approval, scene capture or actuator commands")
             let hand = model.toolPosition(model.positions(vendorLeft: front))!
             let now = Date().timeIntervalSince1970 * 1000, view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306)
             search.objects = [
@@ -812,6 +1442,12 @@ final class ROBArmRoutineCoordinator {
         g.q["left"]![6] = 0.5 // unrelated arm is neither read for admission nor moved
         ROBArmRoutineVision.shared.handsClear = false
         ROBArmRoutineVision.shared.blocked = true
+        let humanBlocked = await run("left_wave")
+        precondition(humanBlocked["status"] as? String == "blocked", humanBlocked.description)
+        precondition(!g.commands.contains { $0.hasPrefix("waypoint_") || $0.hasPrefix("ghost_step_") },
+            "A visible hand/person permitted the initial arm target")
+        g.commands = []
+        ROBArmRoutineVision.shared.handsClear = true
         let rightBefore = g.q["left"]!
         let wave = await run("left_wave")
         precondition(wave["status"] as? String == "completed", wave.description)
@@ -991,7 +1627,7 @@ final class ROBArmRoutineCoordinator {
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         }
         print("Stop/faults: stale feedback, replaced session, camera loss and operator cancellation prevent any subsequent waypoint and retain torque")
-        precondition(approvals == 19)
+        precondition(approvals == 20) // Includes the human-vetoed initial-travel request.
 
         // One authenticated approval covers the complete, bounded interaction.
         // Local readiness cannot be queued early or skip any physical step.
@@ -1119,5 +1755,6 @@ final class ROBArmRoutineCoordinator {
         print("Recycling assistance: one short request before motion for a distant can, even without bucket depth; reachable can never substitutes for missing release geometry")
         try await delayedTelemetryTests()
     }
+    @_optimize(none)
     static func main() async throws { setbuf(stdout, nil); try await tests(); print("Left-arm trial fixtures passed; no hardware transport exists in this executable") }
 }

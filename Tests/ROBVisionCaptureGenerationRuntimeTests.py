@@ -36,6 +36,22 @@ FIXTURE = r'''
         precondition(!standaloneAnchor.accept(frameGeneration:restartedGeneration,currentGeneration:restartedGeneration))
         precondition(!searchAnchor.accept(frameGeneration:restartedGeneration,currentGeneration:restartedGeneration))
         precondition(standaloneAnchor.cameraGeneration == liveGeneration && searchAnchor.cameraGeneration == liveGeneration)
+        // Project the detector's exact source before inference. Completion
+        // must not freshen it, reorder captures or enroll duplicate pixels.
+        var enrollment = ROBWorkspaceFrameEnrollment()
+        precondition(enrollment.decision(sequence:1,capturedAtMilliseconds:1000,nowMilliseconds:1100) == .fresh)
+        enrollment.record(sequence:1,capturedAtMilliseconds:1000)
+        precondition(enrollment.decision(sequence:1,capturedAtMilliseconds:1000,nowMilliseconds:1200) == .alreadyEnrolled)
+        precondition(enrollment.decision(sequence:1,capturedAtMilliseconds:1001,nowMilliseconds:1200) == .invalid)
+        precondition(enrollment.decision(sequence:2,capturedAtMilliseconds:1000,nowMilliseconds:1200) == .invalid)
+        precondition(enrollment.decision(sequence:0,capturedAtMilliseconds:1100,nowMilliseconds:1200) == .invalid)
+        precondition(enrollment.decision(sequence:2,capturedAtMilliseconds:1100,nowMilliseconds:1099) == .invalid)
+        precondition(enrollment.decision(sequence:2,capturedAtMilliseconds:1100,nowMilliseconds:1801) == .invalid)
+        precondition(enrollment.decision(sequence:1,capturedAtMilliseconds:1000,nowMilliseconds:4000) == .invalid)
+        precondition(enrollment.sequence == 1 && enrollment.capturedAtMilliseconds == 1000)
+        precondition(enrollment.decision(sequence:2,capturedAtMilliseconds:1100,nowMilliseconds:1200) == .fresh)
+        enrollment.record(sequence:2,capturedAtMilliseconds:1100)
+        precondition(enrollment.sequence == 2 && enrollment.capturedAtMilliseconds == 1100)
         var identity = ROBVisionCaptureIdentity()
         var sequence: UInt64 = 10
         var nanos: UInt64 = 100
@@ -92,6 +108,13 @@ def main():
     workspace = vision[vision.index("    func observeWorkspace("):vision.index("/// Repeatable local search")]
     assert workspace.index("ROBWorkspaceObjectDetector.shared.warmUp()") < workspace.index("let token = try inspectionEpoch()")
     assert workspace.index("ROBMLXEngine.shared.observeWorkspaceSearch") < workspace.index("let token = try self.inspectionEpoch()")
+    object_branch = workspace[:workspace.index("        var diagnostics: [[String: Any]] = []")]
+    assert object_branch.index("let frame = try await settledInspectionFrame") < object_branch.index("try await onCaptured(frame)") < object_branch.index("ROBWorkspaceObjectDetector.shared.detect")
+    mlx_branch = workspace[workspace.index("        var diagnostics: [[String: Any]] = []"):]
+    assert mlx_branch.index("let frame = try await self.settledInspectionFrame") < mlx_branch.index("try await onCaptured(frame)") < mlx_branch.index("return (jpeg: jpeg, evidence: frame)")
+    assert "try await accumulateCollisionDepth(view,capturedFrame:sourceFrame)" in vision
+    assert "try await accumulateCollisionDepth(view)\n" not in vision
+    assert "else if measurement == nil, tabletopCanBaseHeight == nil" in vision, "Generic center grounding must not overwrite measured top/middle/base sections"
     assert "var observationCaptureAnchor = ROBWorkspaceCaptureAnchor()" in vision
     assert "observationCaptureAnchor.permitsCurrent(vision.cameraGeneration)" in vision
     manager = (ROOT / "Cerebro/CameraManager.swift").read_text()

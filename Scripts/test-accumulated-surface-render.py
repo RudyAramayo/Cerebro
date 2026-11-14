@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Exercise the production accumulator, renderer and controller scan methods.
+
+Robot services are inert substitutes; this fixture has no camera/actuator IO.
+Exercises explicit camera-pose admission independently of a floor-fit result.
+"""
+from pathlib import Path
+import re
+import struct
+import subprocess
+import sys
+import tempfile
+
+root = Path(__file__).resolve().parents[1]
+source = (root / "Cerebro/ROBSCNViewController.m").read_text()
+properties_start = source.index("@property (readwrite, assign) BOOL cloudUpdatePending;")
+properties = source[properties_start:source.index("\n@end", properties_start)]
+context_names = ["headFloorCloudContext", "bellyFloorCloudContext", "lastHeadCloudSubmission", "lastBellyCloudSubmission",
+                 "headFloorAlignmentEstablished", "bellyFloorAlignmentEstablished", "headFloorHoldingAcceptedFrame",
+                 "bellyFloorHoldingAcceptedFrame", "headCloudHasCalibratedIntrinsics", "lastHeadCloudUptime",
+                 "lastBellyCloudUptime", "bellyCloudDisplayUntil", "headFloorSummary", "bellyFloorSummary"]
+context_properties = "\n".join(dict.fromkeys(re.search(r"^@property[^\n]*\b" + name + r"\b[^\n]*;", source, re.M).group()
+                                          for name in context_names))
+methods = source[source.index("- (void)surfaceModeChanged:"):source.index("- (void)refreshFloorStatus\n")]
+fixture = (root / "Tests/ROBAccumulatedSurfaceRenderFixture.m").read_text()
+fixture = fixture.replace("__CONTROLLER_PROPERTIES__", properties).replace("__SOURCE_CONTEXT_PROPERTIES__", context_properties).replace("__CONTROLLER_METHODS__", methods)
+render_path = Path(sys.argv[1] if len(sys.argv) > 1 else "/private/tmp/rob-accumulated-surface-render.png").resolve()
+render_path.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory(prefix="rob-surface-render-", dir="/private/tmp") as temporary:
+    temporary = Path(temporary)
+    path = temporary / "fixture.m"
+    path.write_text(fixture)
+    executable = temporary / "fixture"
+    subprocess.run(["xcrun", "clang", "-fobjc-arc", "-O2", "-Wall", "-Wextra", "-Werror",
+                    "-Wno-unused-parameter", "-I", str(root / "Cerebro"), str(path),
+                    str(root / "Cerebro/ROBAccumulatedSurfaceRenderer.m"),
+                    "-framework", "AppKit", "-framework", "SceneKit", "-framework", "CoreVideo", "-o", str(executable)], check=True)
+    subprocess.run([str(executable), str(render_path)], check=True)
+    photo = temporary / "photo"
+    subprocess.run(["xcrun", "clang", "-fobjc-arc", "-O2", "-Wall", "-Wextra", "-Werror", "-I", str(root / "Cerebro"),
+                    str(root / "Tests/ROBAccumulatedSurfacePhotoFixture.m"), str(root / "Cerebro/ROBAccumulatedSurfaceRenderer.m"),
+                    "-framework", "AppKit", "-framework", "SceneKit", "-framework", "CoreVideo", "-framework", "CoreImage", "-framework", "Vision",
+                    "-o", str(photo)], check=True)
+    subprocess.run([str(photo), str(render_path.with_name(render_path.stem + "-qr.png"))], check=True)
+image = render_path.read_bytes()
+assert image[:8] == b"\x89PNG\r\n\x1a\n", "The production renderer must produce a PNG artifact"
+assert struct.unpack(">II", image[16:24]) == (1100, 800), "Unexpected production render dimensions"
+print(f"Production renderer PNG: {render_path}")

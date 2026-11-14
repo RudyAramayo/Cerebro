@@ -6,6 +6,10 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = r'''
+final class ROBControllerArmApproval {
+    static let shared = ROBControllerArmApproval()
+    var standingCanCampaignMayHoldPayload = false
+}
 enum ROBArmRoutineError: LocalizedError {
     case blocked(String)
     var errorDescription: String? { if case .blocked(let reason) = self { return reason }; return nil }
@@ -141,9 +145,10 @@ extension ROBGripperStartupCalibration {
         expect(client.fixturePhysical.count == 7, "Trivial reconnect replayed physical setup")
         client.fixtureDisconnect()
 
-        for kind in ["stale", "held", "active", "stop", "disconnect", "ownership", "legacy"] {
+        for kind in ["stale", "held", "active", "stop", "disconnect", "ownership", "legacy", "possible_payload"] {
             let next = ROBAmberGatewayClient()
             let policy = ROBGripperStartupCalibration(gateway: next)
+            ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload = kind == "possible_payload"
             next.fixtureReady(supported: kind != "legacy"); policy.gatewayBecameReady()
             if kind == "stale" {
                 next.fixtureFresh(sequence: 1000); pump(next, seconds: 0.8, fresh: false)
@@ -153,6 +158,9 @@ extension ROBGripperStartupCalibration {
             } else if kind == "active" {
                 pump(next, seconds: 0.8, active: true)
                 expect(!policy.isRunning && policy.status.contains("deferred"), "Known active pose did not promptly defer setup")
+            } else if kind == "possible_payload" {
+                pump(next, seconds: 0.8)
+                expect(!policy.isRunning && policy.status.contains("possible held object"), "Durable possible payload did not defer startup despite fresh hanging zeros")
             } else {
                 pump(next, seconds: 0.8)
                 if kind == "stop" { policy.stop(reason: "Operator Stop") }
@@ -167,7 +175,7 @@ extension ROBGripperStartupCalibration {
                     expect(next.fixturePhysical.count == 1, "Manual retry overlapped an already dispatched calibration's settle interval")
                 }
             }
-            if ["stale", "held", "active", "legacy"].contains(kind) {
+            if ["stale", "held", "active", "legacy", "possible_payload"].contains(kind) {
                 expect(next.fixturePhysical.isEmpty, "\(kind) startup dispatched a calibration")
             } else {
                 expect(next.fixturePhysical.count == 1, "\(kind) allowed a jaw initialization after cancellation")
@@ -178,6 +186,7 @@ extension ROBGripperStartupCalibration {
             expect(!ROBAmberArmMotionArbiter.shared.isReserved(.left), "Cancelled startup leaked arm ownership")
             expect(next.fixtureArmMotion.isEmpty, "\(kind) startup moved an arm")
             next.fixtureDisconnect(); pump(next, seconds: 0.03, fresh: false)
+            ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload = false
         }
         print("Startup gripper fixtures passed: hanging/inactive/fresh admission; serialized calibration and close2/open10; no arm activation, duplicate or reconnect replay; rejection needs explicit manual retry; Stop/disconnect/ownership cancellation, retry settle cooldown and unverified readiness")
     }

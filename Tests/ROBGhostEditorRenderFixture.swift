@@ -1,16 +1,28 @@
 import AppKit
 import SceneKit
 
+private extension SCNNode {
+    var fixtureDescendants:[SCNNode] {
+        var nodes:[SCNNode]=[];enumerateChildNodes{node,_ in nodes.append(node)};return nodes
+    }
+}
+
 // Deliberately no transport, arm driver, credential or real approval broker.
 final class ROBAmberGatewayClient {
     static let shared = ROBAmberGatewayClient()
-    func isReady() -> Bool { false }
-    func telemetry(forArm: String) -> FixtureTelemetry? { nil }
-    func connectionSnapshot() -> NSDictionary { [:] }
+    var ready = false
+    var samples: [String:FixtureTelemetry] = [:]
+    var requestedArms: [String] = []
+    func isReady() -> Bool { ready }
+    func telemetry(forArm arm:String) -> FixtureTelemetry? { requestedArms.append(arm);return samples[arm] }
+    func connectionSnapshot() -> NSDictionary { ready ? ["sessionGeneration":NSNumber(value:UInt64(17))] : [:] }
 }
 final class FixtureTelemetry {
-    let effectiveSampleAgeMilliseconds = 1000.0
-    let positionsRadians: [NSNumber] = []
+    let effectiveSampleAgeMilliseconds: Double
+    let positionsRadians: [NSNumber]
+    init(age:Double=1000,positions:[Double]=[]) {
+        effectiveSampleAgeMilliseconds=age;positionsRadians=positions.map(NSNumber.init(value:))
+    }
 }
 final class ROBAmberGatewayTunnel {
     static let shared = ROBAmberGatewayTunnel()
@@ -24,9 +36,12 @@ final class ROBControllerArmApproval {
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     let isRunning = false
+    var searchRequests = 0
     func cancel(reason: String) {}
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(command == "left_search_workspace", "Ghost can search attempted a motion command")
+        precondition(target == "can", "Ghost can preview waited for unrelated bucket search")
+        searchRequests += 1
         completion(["detail":"Fixture camera only"])
     }
 }
@@ -46,6 +61,7 @@ final class ROBAmberGestureExecutor {
 }
 final class ROBLeftArmTrial {
     static let shared = ROBLeftArmTrial()
+    var physicalSide = "left"
     var isRunning = false
     var isNeckOnlyInspection = false
     let status = "Fixture only", lastRecordingPath = ""
@@ -74,6 +90,12 @@ final class GhostFixtureSnapshotView: NSView {
     @MainActor static func main() throws {
         setbuf(stdout, nil)
         _ = NSApplication.shared
+        let previousProfile=ProcessInfo.processInfo.environment["ROB_NECK_RGB_DISPLAY_PROFILE"]
+        setenv("ROB_NECK_RGB_DISPLAY_PROFILE","/private/tmp/no-installed-render-profile-\(UUID().uuidString)",1)
+        defer {
+            if let previousProfile {setenv("ROB_NECK_RGB_DISPLAY_PROFILE",previousProfile,1)}
+            else {unsetenv("ROB_NECK_RGB_DISPLAY_PROFILE")}
+        }
         NSApp.appearance = NSAppearance(named: .darkAqua)
         let defaults = UserDefaults.standard
         let previousDepthAlignment = defaults.object(forKey: ROBWorkspaceDepthAlignment.preferenceKey)
@@ -98,16 +120,24 @@ final class GhostFixtureSnapshotView: NSView {
         let editor = ROBGhostGestureEditor(sceneView: view, originalRobot: original)
         defer { editor.invalidate(); UserDefaults.standard.removeObject(forKey: "ROBGhostSavedGestures.v1") }
         precondition(original.isHidden, "Canonical URDF model did not load")
+        let meshGroup=scene.rootNode.childNode(withName:"Robot mesh display offset · not registration",recursively:true)!
+        let markerGroup=scene.rootNode.childNode(withName:"Workspace can overlay",recursively:true)!
+        let obstacleGroup=scene.rootNode.childNode(withName:"Observed depth obstacles · provisional registration",recursively:true)!
+        let routeGroup=scene.rootNode.childNode(withName:"Read-only collision route",recursively:true)!
+        precondition(markerGroup.parent===meshGroup.parent && obstacleGroup.parent===meshGroup.parent && routeGroup.parent===meshGroup,
+            "Mesh presentation lift moved measured target/obstacle overlays or detached the modeled tool route")
         precondition(editor.depthCloudCameraTransform(false).isEmpty)
         editor.setHeadCommand(pan: 0, lowerPitch: 0, upperPitch: 0, known: true)
         let levelCamera = editor.depthCloudCameraTransform(false)
-        let originalHead = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Original URDF oak_link" }!
+        let originalHead = scene.rootNode.fixtureDescendants.first { $0.name == "Original URDF oak_link" }!
         let levelHead = originalHead.simdTransform
         editor.setHeadCommand(pan: .pi / 12, lowerPitch: 0, upperPitch: -.pi / 10, known: true)
         let downCamera = editor.depthCloudCameraTransform(false)
         precondition(levelCamera.count == 12 && downCamera != levelCamera && originalHead.simdTransform != levelHead)
-        let headGhost = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Blue ghost oak_link" }!
+        let headGhost = scene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost oak_link" }!
         precondition(headGhost.simdTransform == originalHead.simdTransform, "Untouched ghost neck differs from live model")
+        precondition(headGhost.isHidden && !originalHead.isHidden,
+            "An unchanged camera must show the normal model without a coincident blue overlay")
         let model = try ROBGhostRobotModel(directory: Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil)!)
         let opticalInHead = simd_inverse(model.frames(model.reference)["oak_link"]!) * model.frames(model.reference)["oak_optical_frame"]!
         let origin = originalHead.simdWorldTransform * SIMD4<Float>(opticalInHead.columns.3)
@@ -120,7 +150,7 @@ final class GhostFixtureSnapshotView: NSView {
         // articulated pose rather than silently becoming the display zero.
         let headLinks = ["lower_neck_link", "neck_pan_link", "upper_neck_link", "insta360_link", "oak_link"]
         func headNode(_ prefix: String, _ link: String) -> SCNNode {
-            scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "\(prefix) \(link)" }!
+            scene.rootNode.fixtureDescendants.first { $0.name == "\(prefix) \(link)" }!
         }
         func estimate(_ lower: Int, _ upper: Int, pan: Double = 0) -> ROBHeadCameraPoseEstimator {
             ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: pan, lowerTarget: lower,
@@ -166,6 +196,8 @@ final class GhostFixtureSnapshotView: NSView {
                 precondition(originalNode.geometry == nil && !originalNode.childNodes.isEmpty,
                     "Normal \(link) still displays a captured scan fragment instead of the corrected reference")
                 assertReferenceGeometry(originalNode, ghostNode)
+                precondition(!originalNode.isHidden && ghostNode.isHidden,
+                    "Accepted live head motion must keep the original visible and hide its coincident ghost")
                 let frame = frames[link]!
                 for col in 0..<4 {
                     precondition(simd_distance(originalNode.simdTransform[col], SIMD4<Float>(frame[col])) < 1e-6,
@@ -197,6 +229,41 @@ final class GhostFixtureSnapshotView: NSView {
             }
         }
         assertAcceptedHead(6011, 6906)
+        let paletteData = try Data(contentsOf: Bundle.main.url(forResource: "rob-visual", withExtension: "json")!)
+        let sourcePalette = (try JSONSerialization.jsonObject(with: paletteData) as! [String: Any])["materials"] as! [String: Any]
+        for (link, primitive, surface) in [
+            ("insta360_link", "reference-insta-body", "polymer"),
+            ("oak_link", "reference-oak-body", "polymer"),
+            ("upper_neck_link", "reference-upper-servo", "polymer"),
+            ("upper_neck_link", "reference-upper-pitch-axis", "aluminum"),
+            ("lower_neck_link", "reference-lower-stem", "aluminum"),
+            ("insta360_link", "reference-insta-lens-0", "lens"),
+            ("oak_link", "reference-oak-lens-0", "lens"),
+            ("insta360_link", "reference-insta-antenna-1.0", "rubber")
+        ] {
+            let normal = headNode("Original URDF", link).childNode(withName: primitive, recursively: true)!
+            let ghost = headNode("Blue ghost", link).childNode(withName: primitive, recursively: true)!
+            let material = normal.geometry!.firstMaterial!
+            let color = (material.diffuse.contents as! NSColor).usingColorSpace(.sRGB)!
+            let expected = (sourcePalette[surface] as! [String: Any])["color"] as! [Double]
+            for (actual, expected) in zip([color.redComponent, color.greenComponent, color.blueComponent], expected) {
+                precondition(abs(Double(actual) - expected) < 1e-6,
+                    "Normal \(primitive) lost the existing \(surface) source appearance")
+            }
+            let expectedLighting: SCNMaterial.LightingModel = surface == "polymer" || surface == "rubber" ? .constant : .physicallyBased
+            precondition(material.lightingModel == expectedLighting && material.transparency == 1 &&
+                material.writesToDepthBuffer && material !== ghost.geometry!.firstMaterial,
+                "Normal hardware appearance must stay opaque and separate from blue movement overlays")
+            if surface == "lens" {
+                precondition(max(color.redComponent, color.greenComponent, color.blueComponent) < 0.2 &&
+                    (material.roughness.contents as! NSNumber).doubleValue < 0.2,
+                    "Normal camera lenses must remain dark and glossy")
+            } else if surface == "polymer" {
+                precondition(max(color.redComponent, color.greenComponent, color.blueComponent) < 0.3,
+                    "The normal camera/servo housing must not become a white merged sphere")
+            }
+        }
+        print("Normal head appearance: original hardware palette retained for dark polymer camera/servo housings, glossy dark lenses, aluminum brackets and rubber antennas; geometry and poses unchanged")
         for prefix in ["Original URDF", "Blue ghost"] {
             let stem = headNode(prefix, "lower_neck_link").childNode(withName: "reference-lower-stem", recursively: true)!
             let stemMatrix = stem.simdWorldTransform
@@ -307,8 +374,52 @@ final class GhostFixtureSnapshotView: NSView {
         assertAcceptedHead(6011, 6306, pan: .pi / 12)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let controls = descendants(editor.panelView)
+        let findCan = controls.compactMap { $0 as? NSButton }.first { $0.title == "Find Coke can + ghost grab" }!
+        NSApp.sendAction(findCan.action!, to: findCan.target, from: findCan)
+        precondition(ROBArmRoutineCoordinator.shared.searchRequests == 1,
+            "Ghost preview did not enter the existing neck-only coordinator lane")
         let jointPicker = controls.compactMap { $0 as? NSPopUpButton }.first { $0.itemTitles.contains("lower_neck") }!
         let jointAngle = controls.compactMap { $0 as? NSSlider }.first { $0.action == NSSelectorFromString("changeAngle") }!
+        func setGhostJoint(_ name: String, radians: Double) {
+            jointPicker.selectItem(withTitle: name)
+            NSApp.sendAction(jointPicker.action!, to: jointPicker.target, from: jointPicker)
+            jointAngle.doubleValue = radians * 180 / .pi
+            NSApp.sendAction(jointAngle.action!, to: jointAngle.target, from: jointAngle)
+        }
+        let allRobotNodes = scene.rootNode.fixtureDescendants
+        let allGhostNodes = allRobotNodes.filter { $0.name?.hasPrefix("Blue ghost ") == true }
+        let allOriginalNodes = allRobotNodes.filter { $0.name?.hasPrefix("Original URDF ") == true }
+        for joint in 1...7 {
+            let name = "left_joint\(joint)"
+            setGhostJoint(name, radians: model.reference[name]!)
+        }
+        precondition(allGhostNodes.count >= 40 && allGhostNodes.allSatisfy(\.isHidden),
+            "A fully coincident baseline must hide every blue link, including cameras and torso")
+        precondition(allOriginalNodes.allSatisfy { !$0.isHidden },
+            "Ghost masking must preserve every normal robot link")
+        let originalFramesBeforeDelta = allOriginalNodes.map(\.simdTransform)
+        setGhostJoint("left_joint4", radians: model.reference["left_joint4"]! + 0.1)
+        let expectedMovingLinks: Set<String> = ["left_four_Link", "left_five_Link", "left_six_Link", "left_seven_Link", "left_tool"]
+        let visibleMovingLinks = Set(allGhostNodes.filter { !$0.isHidden }.map {
+            String($0.name!.dropFirst("Blue ghost ".count))
+        })
+        precondition(visibleMovingLinks == expectedMovingLinks,
+            "A J4 edit must show only its physical link and downstream descendants; got \(visibleMovingLinks)")
+        precondition(allOriginalNodes.map(\.simdTransform) == originalFramesBeforeDelta &&
+            allOriginalNodes.allSatisfy { !$0.isHidden }, "A proposed delta changed or hid the normal model")
+        for link in expectedMovingLinks {
+            let material = headNode("Blue ghost", link).geometry!.firstMaterial!
+            precondition(material.transparency > 0 && material.transparency < 0.5 &&
+                material.blendMode == .alpha && material.transparencyMode == .singleLayer &&
+                !material.writesToDepthBuffer && material.readsFromDepthBuffer,
+                "Blue movement overlays must remain translucent and respect the normal model's depth")
+        }
+        precondition(headLinks.allSatisfy { headNode("Blue ghost", $0).isHidden },
+            "An arm-only edit must not tint a coincident camera sphere or neck")
+        setGhostJoint("left_joint4", radians: model.reference["left_joint4"]!)
+        precondition(allGhostNodes.allSatisfy(\.isHidden),
+            "Returning the ghost to its baseline must immediately remove every coincident overlay")
+        print("Ghost deltas: coincident baseline hidden, original model visible, J4-only descendants blue, opaque normal/translucent depth-respecting ghost materials and untinted unchanged camera passed")
         let acceptedHeadFrames = headLinks.map { headNode("Original URDF", $0).simdTransform }
         let acceptedHeadCloud = editor.depthCloudCameraTransform(false)
         jointPicker.selectItem(withTitle: "lower_neck")
@@ -317,6 +428,8 @@ final class GhostFixtureSnapshotView: NSView {
         NSApp.sendAction(jointAngle.action!, to: jointAngle.target, from: jointAngle)
         precondition(headNode("Blue ghost", "lower_neck_link").simdTransform != acceptedHeadFrames[0],
             "Explicit ghost neck edit did not update its preview")
+        precondition(headLinks.allSatisfy { !headNode("Blue ghost", $0).isHidden },
+            "A proposed lower-neck change must show its moved downstream cameras as blue deltas")
         precondition(headLinks.map { headNode("Original URDF", $0).simdTransform } == acceptedHeadFrames &&
             editor.depthCloudCameraTransform(false) == acceptedHeadCloud,
             "Explicit ghost neck edit changed the normal accepted model or cloud pose")
@@ -331,7 +444,7 @@ final class GhostFixtureSnapshotView: NSView {
         editor.setPreviewFrozen(true)
         precondition(!view.isHidden && view.rendersContinuously && view.isPlaying && pauseHost.subviews.count == 1)
         let frozenHead = originalHead.simdTransform
-        let originalArm = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Original URDF left_two_Link" }!
+        let originalArm = scene.rootNode.fixtureDescendants.first { $0.name == "Original URDF left_two_Link" }!
         let frozenArm = originalArm.simdTransform
         editor.setHeadCommand(pan: 0, lowerPitch: 0, upperPitch: -.pi / 10, known: true)
         precondition(originalHead.simdTransform != frozenHead && originalArm.simdTransform == frozenArm,
@@ -370,7 +483,8 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(!view.isHidden && view.isPlaying && view.preferredFramesPerSecond == 15)
         trial.isNeckOnlyInspection = true
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-        precondition(!view.isHidden && view.preferredFramesPerSecond == 30)
+        precondition(!view.isHidden && view.preferredFramesPerSecond == 15,
+            "Neck-only trials must retain the existing busy-trial render budget")
         trial.isNeckOnlyInspection = false
         for (stage, title) in [("object_placed", "Object placed; fingers clear → grip"),
                                ("receiver_supporting", "Hand supporting → release"),
@@ -388,7 +502,7 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(trial.continuedStages.count == confirmedCount, "A stale continuation button advanced another stage")
         trial.interactionStage = ""; trial.isRunning = false
         awaitContinuation(nil)
-        let blue = scene.rootNode.childNodes.flatMap(\.childNodes).filter { $0.name?.hasPrefix("Blue ghost ") == true }
+        let blue = scene.rootNode.fixtureDescendants.filter { $0.name?.hasPrefix("Blue ghost ") == true }
         precondition(blue.count >= 40)
         let canTarget = ROBWorkspaceLocatedObject(target: .can, position: [0.589,-0.300,0.873], confidence: 0.6,
             capturedAt: Date().timeIntervalSince1970 * 1000, sequence: 1234,
@@ -510,6 +624,62 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(collisionStatus.stringValue.contains("Stored scan preview; rescan before motion.") &&
             ROBWorkspaceSearch.shared.collisionSnapshot == nil)
         print("Collision overlay: real provisional RGB-D cloud capped at 2500 points, unchanged-capture caching, retained stale-camera preview with rescan label, obstacle/path visibility, unverified registration, read-only path FK and continuous rendering passed; execution unavailable")
+
+        // Physical RIGHT uses its own mapping and gateway `left` (L10). An old
+        // physical-left artifact cannot be silently rendered as a right path.
+        trial.physicalSide="right"
+        editor.reviewPresetNamed("collision")
+        precondition(controls.compactMap{$0 as? NSTextField}.contains{$0.stringValue=="Path preview unavailable for this robot model"})
+        precondition(!execute.isEnabled,"Changing physical side must not grant execution")
+        let rightModel=try ROBGhostRobotModel(directory:model.directory,physicalSide:"right")
+        let rightStart=Array(repeating:0.0,count:7),rightEnd=[0.1,-0.03,0.08,0.01,-0.02,0.02,0.04]
+        let rightReadOnly=ROBLeftGestureProposal(id:UUID(),name:"Fixture estimated right preview",kind:"estimated_calibration",
+            modelID:rightModel.modelID,referenceID:rightModel.referenceID,geometryID:rightModel.geometryID,
+            mappingID:rightModel.selectedMappingID,sessionGeneration:17,baseline:rightStart,poses:[],
+            steps:[.init(positions:rightEnd,seconds:4,stage:"Read-only estimated fixture")])
+        trial.collisionReviewProposal=rightReadOnly
+        let normalRightBefore=headNode("Original URDF","right_two_Link").simdTransform
+        let normalLeftBefore=headNode("Original URDF","left_two_Link").simdTransform
+        editor.reviewPresetNamed("collision")
+        precondition(controls.compactMap{$0 as? NSTextField}.contains{
+            $0.stringValue.contains("ESTIMATED EMPTY-ARM TRIAL") && $0.stringValue.contains("Physical right arm") && $0.stringValue.contains("no actuator authority")
+        },"Estimated right artifact must be identified as read-only and physically right")
+        timeline.doubleValue=timeline.maxValue;NSApp.sendAction(timeline.action!,to:timeline.target,from:timeline)
+        let rightFrames=rightModel.frames(rightModel.positions(vendorLeft:rightEnd))
+        for link in ["right_two_Link","right_four_Link","right_tool","left_two_Link"] {
+            let actual=headNode("Blue ghost",link).simdTransform,expected=rightFrames[link]!
+            for col in 0..<4 {precondition(simd_distance(actual[col],SIMD4<Float>(expected[col]))<1e-6,
+                "Right collision preview updated the wrong physical arm or mapping: \(link)")}
+        }
+        precondition(headNode("Original URDF","right_two_Link").simdTransform==normalRightBefore &&
+            headNode("Original URDF","left_two_Link").simdTransform==normalLeftBefore && !execute.isEnabled)
+        NSApp.sendAction(execute.action!,to:execute.target,from:execute)
+
+        // Fresh original feedback must come from L10/gateway-left, while the
+        // unrelated R11 sample is deliberately a different physical pose.
+        let gateway=ROBAmberGatewayClient.shared
+        gateway.ready=true
+        let measuredRight=[0.17,-0.07,0.03,0.01,-0.01,0.02,0.04]
+        gateway.samples=["left":FixtureTelemetry(age:1,positions:measuredRight),
+                         "right":FixtureTelemetry(age:1,positions:[-0.7,0.9,-0.5,0,-0.4,0,0])]
+        gateway.requestedArms=[]
+        let rightScene=SCNScene(),rightOriginal=SCNNode();rightScene.rootNode.addChildNode(rightOriginal)
+        let rightView=SCNView(frame:NSRect(x:0,y:0,width:320,height:240));rightView.scene=rightScene
+        let rightEditor=ROBGhostGestureEditor(sceneView:rightView,originalRobot:rightOriginal)
+        let measuredFrames=rightModel.frames(rightModel.positions(vendorLeft:measuredRight))
+        for link in ["right_two_Link","left_two_Link"] {
+            let actual=rightScene.rootNode.fixtureDescendants.first{$0.name=="Original URDF \(link)"}!.simdTransform
+            for col in 0..<4 {precondition(simd_distance(actual[col],SIMD4<Float>(measuredFrames[link]![col]))<1e-6,
+                "Original model used the wrong gateway arm for \(link)")}
+        }
+        precondition(!gateway.requestedArms.isEmpty && gateway.requestedArms.allSatisfy{$0=="left"},
+            "Physical-right initialization read R11 rather than L10")
+        let rightExecute=descendants(rightEditor.panelView).first{$0.identifier?.rawValue=="ghost-execute"} as! NSButton
+        precondition(!rightExecute.isEnabled,"Live-shaped fixture data must not create actuator authority")
+        rightEditor.invalidate();gateway.ready=false;gateway.samples=[:]
+        trial.physicalSide="left";trial.collisionReviewProposal=historical
+        editor.reviewPresetNamed("collision")
+        print("Right preview: side-mismatch rejected, all-right FK with unchanged originals, explicit estimated/read-only label, L10-only fresh baseline and disabled execution passed")
         trial.collisionReviewProposal = nil; trial.collisionReviewStatus = [:]
         if CommandLine.arguments.last != "can" {
             presets.selectItem(at: selection); NSApp.sendAction(presets.action!, to: presets.target, from: presets)

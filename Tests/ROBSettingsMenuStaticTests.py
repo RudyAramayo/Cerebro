@@ -380,8 +380,10 @@ def main() -> None:
     require("liveBaseline = false" in collision_review and "executeButton.isEnabled = false" in collision_review
             and "performCommand" not in collision_review and "requestLeft" not in collision_review,
             "Inspecting a depth map or collision route must never request physical execution")
-    require('command: "left_scan_clearance"' in sandbox and '"left_scan_clearance"].contains(command)' in sandbox,
-            "Neck-only geometry scan must be available without saving task parameters")
+    parameter_free_searches = '["left_search_workspace", "left_scan_clearance", "right_search_workspace", "right_scan_clearance"].contains(command)'
+    require('command: "left_scan_clearance"' in sandbox and 'command: "right_scan_clearance"' in sandbox
+            and parameter_free_searches in sandbox,
+            "Both physical arms' neck-only search/geometry actions must bypass task-parameter saving")
     require("snapshot.isTruncated" in sandbox and "Coverage incomplete" in sandbox,
             "Sandbox must identify incomplete depth coverage")
     require('name == "collision"' in ghost and 'command: "ghost:collision"' in sandbox,

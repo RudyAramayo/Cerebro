@@ -386,6 +386,17 @@ struct GatewayCompatibilityFixtures {
         try motorFeedback()
         trial.approved = false
         expect(waypoint() == 0, "Revoked trial could still dispatch")
+        // The selected physical-right proposal reaches gateway left, but
+        // cannot borrow the legacy physical-left taught waypoint adapter.
+        trial.physicalSide = "right"; trial.approved = true
+        trial.ghostTarget = [0,-0.039,0,0,0,0,0]
+        try motorFeedback()
+        expect(ghost() > 0, "A physical-right immutable proposal did not reach its selected gateway arm")
+        expect(waypoint("left") == 0, "A right task borrowed the legacy left-only taught corridor")
+        expect(waypoint("right") == 0, "A right task admitted a waypoint on the other physical arm")
+        trial.approved = false
+        expect(ghost() == 0, "A revoked physical-right proposal retained transport authority")
+        trial.physicalSide = "left"
         print("Taught-waypoint admission: fixed five-leg handoff/eleven-leg wave, smooth midpoint recovery and legacy fallback retain corners, reversals, tolerance, timing, side, session and freshness bounds; paired adjacency unchanged")
         print("Amber gateway compatibility fixtures passed")
     }

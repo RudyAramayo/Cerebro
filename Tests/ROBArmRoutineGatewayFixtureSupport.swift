@@ -1,6 +1,8 @@
 // No hardware authority in isolated gateway protocol fixtures.
 final class ROBLeftArmTrial {
     static let shared = ROBLeftArmTrial()
+    var physicalSide = "left"
+    var executionGatewayArm:String {physicalSide == "left" ? "right" : "left"}
     var approved = false
     var generation: UInt64 = 0
     var ghostID: UUID?
@@ -9,11 +11,11 @@ final class ROBLeftArmTrial {
     var ghostTarget = [Double](repeating: 0, count: 7)
     func approvedGestureTarget(id: UUID, index: Int, seconds: Double, generation: UInt64) -> [Double]? {
         guard id == ghostID, index == ghostIndex, abs(seconds - ghostSeconds) < 0.000001,
-              authorizesTaughtWaypoint(arm: "right", expectedSessionGeneration: generation) else { return nil }
+              authorizesTaughtWaypoint(arm: executionGatewayArm, expectedSessionGeneration: generation) else { return nil }
         return ghostTarget
     }
     func authorizesTaughtWaypoint(arm: String, expectedSessionGeneration: UInt64) -> Bool {
-        approved && arm == "right" && generation > 0 && generation == expectedSessionGeneration
+        approved && arm == executionGatewayArm && generation > 0 && generation == expectedSessionGeneration
     }
 }
 

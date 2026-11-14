@@ -100,6 +100,7 @@ import Foundation
         let transport = ROBTicVelocityTransport(execute: fake.execute)
         var ready = false
         transport.onState = { value, _ in ready = value }
+        transport.onMotionDispatch = { fake.recordMotionDispatch() }
         transport.arm(profile: profile)
         try wait { ready }
         try expect(!fake.energized && !fake.calls.contains(where: { $0.contains("--energize") }),
@@ -113,8 +114,10 @@ import Foundation
         try expect(ready && !fake.energized && !fake.calls.contains(where: { $0.contains("--energize") }),
                    "An idle zero demand energized or disarmed the torso")
 
+        try expect(fake.motionDispatchCount==0,"Idle arming/zero invalidated a measured body frame")
         transport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
         try wait { fake.currentVelocity > 0 }
+        try expect(fake.motionDispatchCount==1,"Actual nonzero Tic dispatch did not invalidate the measured body frame")
         let firstWake = fake.calls.firstIndex(where: { $0.contains("--energize") })!
         let firstMotion = fake.calls.firstIndex(where: { FakeTic.velocity($0).map { $0 != 0 } == true })!
         try expect(FakeTic.velocity(fake.calls[firstWake]) == 0 && fake.calls[firstWake].contains("--exit-safe-start"),
@@ -154,6 +157,8 @@ import Foundation
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         try expect(fake.calls.count == stoppedCount && !fake.releasedWhileMoving,
                    "An explicit stop auto-resumed or released the motor while moving")
+        try expect(fake.motionDispatchCount==fake.calls.filter({FakeTic.velocity($0).map({$0 != 0}) == true}).count,
+                   "Body invalidation did not exactly match admitted nonzero velocity writes")
         try expect(!fake.movedWithoutPower, "A nonzero demand was sent before the motor was energized and ready")
         try expect(!fake.calls.contains(where: { $0.contains("--home") || $0.contains("--halt-and-set-position") || $0.contains("--reset") || $0.contains("-p") }), "Velocity path emitted a home/reset/position command")
 
@@ -266,6 +271,9 @@ import Foundation
 private final class FakeTic {
     private let lock = NSLock()
     private var recorded: [[String]] = []
+    private var motionDispatches=0
+    var motionDispatchCount:Int {lock.lock();defer {lock.unlock()};return motionDispatches}
+    func recordMotionDispatch() {lock.lock();motionDispatches+=1;lock.unlock()}
     private var isEnergized = false
     private var safeStart = true
     private var measuredVelocity: Int32 = 0

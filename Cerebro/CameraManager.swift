@@ -10,6 +10,7 @@
 import AVFoundation
 import Accelerate
 import Cocoa
+import CryptoKit
 import Darwin
 import Network
 
@@ -117,6 +118,106 @@ struct CameraInertialObservation: Codable, Sendable {
     }
 }
 
+/// Actual SDK transformation observations. Equal dimensions alone do not
+/// establish that a depth sample and an RGB pixel share a projection ray.
+struct CameraDepthRGBGeometryCorrespondence: Codable, Sendable {
+    let status: String
+    let dimensionsMatch: Bool
+    let intrinsicsMatch: Bool?
+    let maximumIntrinsicDifferencePixels: Double?
+    let sdkAlignedToRGB: Bool?
+    let sdkEqualTransformationToRGB: Bool?
+    let depthTransformationValid: Bool?
+    let rgbTransformationValid: Bool?
+    let detail: String?
+}
+
+/// Identifies the actual nonpersistent camera calibration and stereo policy.
+/// This is provenance only; it does not verify metric accuracy or arm registration.
+struct CameraRuntimeCalibration: Codable, Sendable, Equatable {
+    let schemaVersion: Int
+    let actualDeviceMXID: String
+    let cameraRole: String
+    let sdkVersion: String
+    let factoryEEPROMSHA256: String
+    let effectiveRuntimeCalibrationSHA256: String
+    let stereoPolicySHA256: String
+    let candidateSHA256: String?
+    let profileSHA256: String?
+
+    var identity: String {
+        let text = ["runtime-camera-calibration-v1", actualDeviceMXID, cameraRole, sdkVersion,
+            factoryEEPROMSHA256, effectiveRuntimeCalibrationSHA256, stereoPolicySHA256,
+            candidateSHA256 ?? "-", profileSHA256 ?? "-"].joined(separator: "\n")
+        return SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, actualDeviceMXID, cameraRole, sdkVersion, factoryEEPROMSHA256
+        case effectiveRuntimeCalibrationSHA256, stereoPolicySHA256, candidateSHA256, profileSHA256
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        actualDeviceMXID = try c.decode(String.self, forKey: .actualDeviceMXID)
+        cameraRole = try c.decode(String.self, forKey: .cameraRole)
+        sdkVersion = try c.decode(String.self, forKey: .sdkVersion)
+        factoryEEPROMSHA256 = try c.decode(String.self, forKey: .factoryEEPROMSHA256)
+        effectiveRuntimeCalibrationSHA256 = try c.decode(String.self, forKey: .effectiveRuntimeCalibrationSHA256)
+        stereoPolicySHA256 = try c.decode(String.self, forKey: .stereoPolicySHA256)
+        guard c.contains(.candidateSHA256), c.contains(.profileSHA256) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                debugDescription: "Runtime calibration nullable fields must be present."))
+        }
+        candidateSHA256 = try c.decodeIfPresent(String.self, forKey: .candidateSHA256)
+        profileSHA256 = try c.decodeIfPresent(String.self, forKey: .profileSHA256)
+        func identifier(_ value: String) -> Bool {
+            !value.isEmpty && value.utf8.count <= 128 && value.utf8.allSatisfy {
+                (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [43,45,46,95].contains($0)
+            }
+        }
+        func hash(_ value: String) -> Bool {
+            value.utf8.count == 64 && value.utf8.allSatisfy {
+                (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+            }
+        }
+        guard schemaVersion == 1, identifier(actualDeviceMXID), identifier(sdkVersion),
+              ["face", "belly"].contains(cameraRole), hash(factoryEEPROMSHA256),
+              hash(effectiveRuntimeCalibrationSHA256), hash(stereoPolicySHA256),
+              (candidateSHA256 == nil) == (profileSHA256 == nil),
+              candidateSHA256.map(hash) ?? true, profileSHA256.map(hash) ?? true else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                debugDescription: "Invalid runtime camera calibration provenance."))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(actualDeviceMXID, forKey: .actualDeviceMXID)
+        try c.encode(cameraRole, forKey: .cameraRole)
+        try c.encode(sdkVersion, forKey: .sdkVersion)
+        try c.encode(factoryEEPROMSHA256, forKey: .factoryEEPROMSHA256)
+        try c.encode(effectiveRuntimeCalibrationSHA256, forKey: .effectiveRuntimeCalibrationSHA256)
+        try c.encode(stereoPolicySHA256, forKey: .stereoPolicySHA256)
+        try c.encode(candidateSHA256, forKey: .candidateSHA256)
+        try c.encode(profileSHA256, forKey: .profileSHA256)
+    }
+}
+
+/// The first enrollment preserves startup; every later change, including
+/// legacy nil -> explicit calibration -> nil, starts a new capture stream.
+struct CameraRuntimeCalibrationStreamIdentity {
+    private var enrolled = false
+    private var identity: String?
+    mutating func observe(_ value: String?) -> Bool {
+        let changed = enrolled && identity != value
+        enrolled = true; identity = value
+        return changed
+    }
+}
+
 struct CameraIntrinsics: Sendable {
     let fx: Double
     let fy: Double
@@ -130,6 +231,30 @@ struct CameraIntrinsics: Sendable {
     var imageTransform: [Double]? = nil
     var depthAlignmentMethod: String? = nil
     var inertial: CameraInertialObservation? = nil
+    var cameraServiceSourceSHA256: String? = nil
+    var runtimeCalibration: CameraRuntimeCalibration? = nil
+    var rgbOutputUndistorted: Bool? = nil
+    var depthIntrinsics: [Double]? = nil
+    var depthIntrinsicsSource: String? = nil
+    var depthSourceSize: [Int]? = nil
+    var depthSourceIntrinsics: [Double]? = nil
+    var depthImageTransform: [Double]? = nil
+    var depthRGBGeometryCorrespondence: CameraDepthRGBGeometryCorrespondence? = nil
+    var rgbTransformationSize: [Int]? = nil
+    var depthTransformationSize: [Int]? = nil
+    var rgbSourceDistortionCoefficients: [Double]? = nil
+    var depthSourceDistortionCoefficients: [Double]? = nil
+    var rgbSourceDistortionModel: String? = nil
+    var depthSourceDistortionModel: String? = nil
+    var stereoMode: String? = nil
+    var stereoModeSource: String? = nil
+    var stereoExtendedDisparity: Bool? = nil
+    var stereoSubpixel: Bool? = nil
+    /// Observed on this RGB frame; absent values are never camera defaults.
+    var frameExposureMicroseconds: Double? = nil
+    var frameISO: Int? = nil
+    var frameColorTemperatureKelvin: Int? = nil
+    var frameObservationErrors: [String]? = nil
 
     func isValid(forWidth width: Int, height: Int) -> Bool {
         fx.isFinite && fy.isFinite && cx.isFinite && cy.isFinite
@@ -138,12 +263,55 @@ struct CameraIntrinsics: Sendable {
     }
 }
 
+/// Optional SDK source-coordinate evidence, retained without calibration authority.
+struct CameraStereoSourceExtrinsics: Codable, Sendable {
+    let source: String
+    let toCameraSocket: String?
+    let sourceLengthUnit: String?
+    let lengthUnit: String
+    let useSpecTranslation: Bool
+    let matrix: [Double]?
+    let evidenceErrors: [String]
+}
+
+/// These matrices describe SOURCE coordinates, not a verified rectified-ray
+/// triangulation. Preserve the SDK convention for independent offline review.
+struct CameraStereoPairExtrinsics: Codable, Sendable {
+    let source: String
+    let from: String
+    let to: String
+    let translationUnit: String
+    let useSpecTranslation: Bool
+    let matrix: [Double]?
+    let evidenceErrors: [String]
+}
+
+struct CameraStereoGeometry: Codable, Sendable {
+    let source: String
+    let sequence: UInt64?
+    let timestampNanoseconds: UInt64?
+    let timestampDeviceNanoseconds: UInt64?
+    let width: Int
+    let height: Int
+    let intrinsics: [Double]?
+    let sourceSize: [Int]?
+    let sourceIntrinsics: [Double]?
+    let imageTransform: [Double]?
+    let transformationSize: [Int]?
+    let transformationValid: Bool?
+    let sourceDistortionCoefficients: [Double]?
+    let sourceDistortionModel: String?
+    let extrinsicsToCommon: CameraStereoSourceExtrinsics?
+    let evidenceErrors: [String]
+}
+
 /// Rectified grayscale views from the OAK stereo pair. These remain useful
 /// when tuning IR illumination, validating calibration, and debugging depth.
-struct CameraStereoFrame {
+struct CameraStereoFrame: Sendable {
     let width: Int
     let height: Int
     let pixels: Data
+    var geometry: CameraStereoGeometry? = nil
 }
 
 /// The common frame contract used by RGB-only and RGB-D camera providers.
@@ -156,6 +324,7 @@ struct CameraFrameSet {
     var intrinsics: CameraIntrinsics? = nil
     var rectifiedLeft: CameraStereoFrame? = nil
     var rectifiedRight: CameraStereoFrame? = nil
+    var stereoSourceExtrinsics: CameraStereoPairExtrinsics? = nil
     var sidewalkCenterDeviation: Double? = nil
     var sidewalkConfidence: Double? = nil
     var chessPieces: [ROBChessPieceDetection]? = nil
@@ -198,6 +367,8 @@ protocol CameraManagerProtocol: AnyObject {
     /// Temporarily changes the hardware capture size for explicit footage
     /// recording. Nil restores the autonomy/default capture configuration.
     func setCaptureResolutionOverride(_ resolution: String?)
+    func setCalibrationCaptureOverride(token: UUID, resolution: String, stereoMode: String)
+    func clearCalibrationCaptureOverride(token: UUID)
     /// Cameras eligible for the RGB-only AVFoundation fallback. DepthAI
     /// devices stay on their dedicated RGB-D path unless legacy UVC mode is
     /// explicitly enabled.
@@ -262,6 +433,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var lifecycleGeneration: UInt64 = 0
     private let markerlessStreamID = UUID()
     private var acceptedDeliveryGeneration: UInt64 = 0
+    private var runtimeCalibrationStreamIdentity = CameraRuntimeCalibrationStreamIdentity()
     private var fallbackSequence: UInt64 = 0
     private var cameraAuthorizationRequestInFlight = false
     private var expectedDepthRunGeneration: UInt64?
@@ -269,6 +441,9 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var acceptedFallbackOutputID: ObjectIdentifier?
     private var acceptedFallbackOutputGeneration: UInt64?
     private var captureResolutionOverride: String?
+    private var calibrationCaptureOverride: (token: UUID, resolution: String, stereoMode: String)?
+    private var appliedCaptureResolutionOverride: String?
+    private var appliedStereoModeOverride: String?
     private let depthIngressLock = NSLock()
     private var pendingDepthFrame: (CameraFrameSet, UInt64, UInt64)?
     private var depthIngressScheduled = false
@@ -397,13 +572,42 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         sessionQueue.async { [weak self] in
             guard let self, self.captureResolutionOverride != normalized else { return }
             self.captureResolutionOverride = normalized
-            self.depthClient?.updateCaptureResolutionOverride(normalized)
-            if let session = self.videoSession {
-                session.beginConfiguration()
-                let preset = Self.capturePreset(for: normalized)
-                if session.canSetSessionPreset(preset) { session.sessionPreset = preset }
-                session.commitConfiguration()
-            }
+            self.applyCaptureConfiguration()
+        }
+    }
+
+    func setCalibrationCaptureOverride(token: UUID, resolution: String, stereoMode: String) {
+        guard role == .face, ["640x400", "640x480"].contains(resolution), ["standard", "near_field"].contains(stereoMode) else { return }
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.calibrationCaptureOverride = (token, resolution, stereoMode)
+            self.applyCaptureConfiguration()
+        }
+    }
+
+    func clearCalibrationCaptureOverride(token: UUID) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.calibrationCaptureOverride?.token == token else { return }
+            self.calibrationCaptureOverride = nil
+            self.applyCaptureConfiguration()
+        }
+    }
+
+    private func applyCaptureConfiguration() {
+        let resolution = calibrationCaptureOverride?.resolution ?? captureResolutionOverride
+        let mode = calibrationCaptureOverride?.stereoMode
+        if resolution != appliedCaptureResolutionOverride || mode != appliedStereoModeOverride {
+            appliedCaptureResolutionOverride = resolution; appliedStereoModeOverride = mode
+            // An actual hardware configuration restart owns a new native
+            // stream identity even when its K and image dimensions stay equal.
+            if wantsRunning, activeSource == .depthAIService { advanceDeliveryGeneration() }
+        }
+        depthClient?.updateCaptureConfiguration(resolution: resolution, stereoMode: mode)
+        if let session = videoSession {
+            session.beginConfiguration()
+            let preset = Self.capturePreset(for: resolution)
+            if session.canSetSessionPreset(preset) { session.sessionPreset = preset }
+            session.commitConfiguration()
         }
     }
 
@@ -614,6 +818,18 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             self.installDepthPreviewLayer(generation: deliveryGeneration)
             self.report(.streamingRGBD, detail: "Receiving synchronized RGB and aligned depth.")
         }
+        let runtimeIdentity = frameSet.intrinsics?.runtimeCalibration?.identity
+        if runtimeCalibrationStreamIdentity.observe(runtimeIdentity) {
+            // Source K and worker bytes may be unchanged while stereo R/T or
+            // policy changes. Reject already queued callbacks and projections.
+            self.advanceDeliveryGeneration()
+            _ = runtimeCalibrationStreamIdentity.observe(runtimeIdentity)
+            deliveryGeneration = self.currentDeliveryGeneration()
+            self.installDepthPreviewLayer(generation: deliveryGeneration)
+        }
+        if role == .face {
+            ROBArmRoutineVision.shared.updateRuntimeCalibrationContext(runtimeIdentity)
+        }
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastDepthTimingLog >= 5, let captured = frameSet.capturedAtMilliseconds {
             lastDepthTimingLog = now
@@ -746,8 +962,8 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         // latency of the synchronous Vision work performed by the UI delegate.
         videoSampleHandler?(frameSet.rgbSampleBuffer)
         recordingFrameHandler?(identifiedFrame)
-        ROBMarkerlessVisionService.shared.offer(frameSet, role: role, streamID: "\(markerlessStreamID)-\(generation)")
-        ROBTorsoControlCenter.shared.vision.offer(frameSet, role: role, streamID: "\(markerlessStreamID)-\(generation)")
+        ROBMarkerlessVisionService.shared.offer(identifiedFrame, role: role, streamID: identifiedFrame.captureStreamID!)
+        ROBTorsoControlCenter.shared.vision.offer(identifiedFrame, role: role, streamID: identifiedFrame.captureStreamID!)
         guard shouldDeliverToPerception else { return }
 
         deliveryQueue.async { [weak self] in
@@ -768,6 +984,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     /// moves between the RGB-only and RGB-D providers. Called on sessionQueue.
     private func advanceDeliveryGeneration() {
         lifecycleGeneration &+= 1
+        runtimeCalibrationStreamIdentity = CameraRuntimeCalibrationStreamIdentity()
         deliveryLock.lock()
         acceptedDeliveryGeneration = lifecycleGeneration
         acceptedFallbackOutputID = nil
@@ -1136,6 +1353,12 @@ private final class DepthCameraServiceClient {
     private var socketPath: String?
     private var connection: NWConnection?
     private var receiveBuffer = Data()
+    private struct PendingPacket {
+        let header: DepthCameraPacketHeader
+        let headerLength: Int
+        let packetLength: Int
+    }
+    private var pendingPacket: PendingPacket?
     private var shouldRun = false
     private var reconnectAttempt = 0
     private var reconnectWorkItem: DispatchWorkItem?
@@ -1157,6 +1380,7 @@ private final class DepthCameraServiceClient {
     private let shouldLaunchPython: Bool
     private let role: CameraRole
     private var captureResolutionOverride: String?
+    private var captureStereoModeOverride: String?
 
     var onFrame: ((CameraFrameSet, UInt64) -> Void)?
     var onStateChange: ((CameraSourceState, String?, UInt64) -> Void)?
@@ -1181,10 +1405,11 @@ private final class DepthCameraServiceClient {
         }
     }
 
-    func updateCaptureResolutionOverride(_ resolution: String?) {
+    func updateCaptureConfiguration(resolution: String?, stereoMode: String?) {
         queue.async { [weak self] in
-            guard let self, self.captureResolutionOverride != resolution else { return }
+            guard let self, self.captureResolutionOverride != resolution || self.captureStereoModeOverride != stereoMode else { return }
             self.captureResolutionOverride = resolution
+            self.captureStereoModeOverride = stereoMode
             guard self.shouldLaunchPython, self.shouldRun else { return }
             self.reconnectWorkItem?.cancel()
             self.reconnectWorkItem = nil
@@ -1213,6 +1438,7 @@ private final class DepthCameraServiceClient {
         let height = parts.last ?? "720"
         
         var args = [scriptPath, "--socket", socketPath, "--parent-pid", parentPid, "--role", role.rawValue, "--width", width, "--height", height]
+        if let stereoMode = captureStereoModeOverride { args.append(contentsOf: ["--stereo-mode", stereoMode]) }
         if let mxid = mxid, !mxid.isEmpty {
             args.append(contentsOf: ["--mxid", mxid])
         }
@@ -1402,18 +1628,21 @@ private final class DepthCameraServiceClient {
             case .ready:
                 self.reconnectAttempt = 0
                 self.reportedStreaming = false
-                self.receiveBuffer.removeAll(keepingCapacity: true)
+                self.resetPacketBuffer()
                 self.receiveNext(on: newConnection)
             case .failed(let error):
                 self.connection = nil
+                self.resetPacketBuffer()
                 newConnection.cancel()
                 self.scheduleReconnect(detail: "Depth camera IPC failed: \(error.localizedDescription)")
             case .cancelled:
                 if self.connection === newConnection {
                     self.connection = nil
+                    self.resetPacketBuffer()
                 }
             case .waiting(let error):
                 self.connection = nil
+                self.resetPacketBuffer()
                 newConnection.cancel()
                 self.scheduleReconnect(detail: "Depth camera IPC is waiting: \(error.localizedDescription)")
             default:
@@ -1459,54 +1688,78 @@ private final class DepthCameraServiceClient {
     }
 
     private func drainPackets() throws {
+        do {
+            try drainBufferedPackets()
+        } catch {
+            pendingPacket = nil
+            throw error
+        }
+    }
+
+    private func drainBufferedPackets() throws {
         while receiveBuffer.count >= 8 {
-            guard receiveBuffer.prefix(4) == Self.protocolMagic else {
-                throw DepthCameraIPCError.invalidMagic
-            }
-            let headerLength = try integer32BigEndian(in: receiveBuffer, offset: 4)
-            guard headerLength > 0, headerLength <= Self.maximumHeaderBytes else {
-                throw DepthCameraIPCError.invalidLength
-            }
-            guard receiveBuffer.count >= 8 + headerLength else { return }
+            let packet: PendingPacket
+            if let pendingPacket {
+                packet = pendingPacket
+            } else {
+                guard receiveBuffer.prefix(4) == Self.protocolMagic else {
+                    throw DepthCameraIPCError.invalidMagic
+                }
+                let headerLength = try integer32BigEndian(in: receiveBuffer, offset: 4)
+                guard headerLength > 0, headerLength <= Self.maximumHeaderBytes else {
+                    throw DepthCameraIPCError.invalidLength
+                }
+                guard receiveBuffer.count >= 8 + headerLength else { return }
 
-            let headerData = Data(receiveBuffer[8..<(8 + headerLength)])
-            let header = try JSONDecoder().decode(DepthCameraPacketHeader.self, from: headerData)
-            let expectedRGBLength = Self.expectedPayloadLength(
-                width: header.rgbWidth,
-                height: header.rgbHeight,
-                bytesPerPixel: 3
-            )
-            let expectedDepthLength = Self.expectedPayloadLength(
-                width: header.depthWidth,
-                height: header.depthHeight,
-                bytesPerPixel: 2
-            )
-            let expectedStereoLength = Self.expectedPayloadLength(
-                width: header.stereoWidth,
-                height: header.stereoHeight,
-                bytesPerPixel: 1
-            )
-            guard header.protocolVersion == Self.protocolVersion,
-                  header.rgbFormat == "RGB888",
-                  header.depthFormat == "DEPTH16LE",
-                  header.depthUnit == "millimeter",
-                  header.stereoFormat == "GRAY8",
-                  header.rgbWidth == header.depthWidth,
-                  header.rgbHeight == header.depthHeight,
-                  let expectedRGBLength,
-                  let expectedDepthLength,
-                  let expectedStereoLength,
-                  header.rgbLength == expectedRGBLength,
-                  header.depthLength == expectedDepthLength,
-                  header.rgbLength <= Self.maximumPayloadBytes,
-                  header.leftLength == expectedStereoLength,
-                  header.rightLength == expectedStereoLength,
-                  header.rgbLength + header.depthLength + header.leftLength + header.rightLength <= Self.maximumPayloadBytes else {
-                throw DepthCameraIPCError.invalidHeader
-            }
+                let headerData = Data(receiveBuffer[8..<(8 + headerLength)])
+                let header = try JSONDecoder().decode(DepthCameraPacketHeader.self, from: headerData)
+                guard header.runtimeCalibration.map({ $0.cameraRole == role.rawValue }) ?? true else {
+                    throw DepthCameraIPCError.invalidHeader
+                }
+                let expectedRGBLength = Self.expectedPayloadLength(
+                    width: header.rgbWidth,
+                    height: header.rgbHeight,
+                    bytesPerPixel: 3
+                )
+                let expectedDepthLength = Self.expectedPayloadLength(
+                    width: header.depthWidth,
+                    height: header.depthHeight,
+                    bytesPerPixel: 2
+                )
+                let expectedStereoLength = Self.expectedPayloadLength(
+                    width: header.stereoWidth,
+                    height: header.stereoHeight,
+                    bytesPerPixel: 1
+                )
+                guard header.protocolVersion == Self.protocolVersion,
+                      header.rgbFormat == "RGB888",
+                      header.depthFormat == "DEPTH16LE",
+                      header.depthUnit == "millimeter",
+                      header.stereoFormat == "GRAY8",
+                      header.rgbWidth == header.depthWidth,
+                      header.rgbHeight == header.depthHeight,
+                      let expectedRGBLength,
+                      let expectedDepthLength,
+                      let expectedStereoLength,
+                      header.rgbLength == expectedRGBLength,
+                      header.depthLength == expectedDepthLength,
+                      header.rgbLength <= Self.maximumPayloadBytes,
+                      header.leftLength == expectedStereoLength,
+                      header.rightLength == expectedStereoLength,
+                      header.rgbLength + header.depthLength + header.leftLength + header.rightLength <= Self.maximumPayloadBytes else {
+                    throw DepthCameraIPCError.invalidHeader
+                }
 
-            let packetLength = 8 + headerLength + header.rgbLength + header.depthLength
-                + header.leftLength + header.rightLength
+                let packetLength = 8 + headerLength + header.rgbLength + header.depthLength
+                    + header.leftLength + header.rightLength
+                // Decode and validate once while fragmented RGB/depth bytes arrive.
+                // The buffer prefix stays unchanged until this whole packet is consumed.
+                packet = PendingPacket(header: header, headerLength: headerLength, packetLength: packetLength)
+                pendingPacket = packet
+            }
+            let header = packet.header
+            let headerLength = packet.headerLength
+            let packetLength = packet.packetLength
             guard receiveBuffer.count >= packetLength else { return }
 
             let rgbStart = 8 + headerLength
@@ -1518,6 +1771,7 @@ private final class DepthCameraServiceClient {
             let leftData = Data(receiveBuffer[leftStart..<rightStart])
             let rightData = Data(receiveBuffer[rightStart..<packetLength])
             receiveBuffer.removeSubrange(0..<packetLength)
+            pendingPacket = nil
 
             // Preserve normal streaming capacity. Compact only after an unusually
             // large packet leaves little live data relative to consumed storage.
@@ -1563,13 +1817,39 @@ private final class DepthCameraServiceClient {
                         sourceIntrinsics: header.rgbSourceIntrinsics,
                         imageTransform: header.rgbImageTransform,
                         depthAlignmentMethod: header.depthAlignmentMethod,
-                        inertial: header.imu.flatMap { $0.isValid ? $0 : nil }
+                        inertial: header.imu.flatMap { $0.isValid ? $0 : nil },
+                        cameraServiceSourceSHA256: header.runningServiceSourceSHA256,
+                        runtimeCalibration: header.runtimeCalibration,
+                        rgbOutputUndistorted: header.rgbOutputUndistorted,
+                        depthIntrinsics: header.depthIntrinsics,
+                        depthIntrinsicsSource: header.depthIntrinsicsSource,
+                        depthSourceSize: header.depthSourceSize,
+                        depthSourceIntrinsics: header.depthSourceIntrinsics,
+                        depthImageTransform: header.depthImageTransform,
+                        depthRGBGeometryCorrespondence: header.depthRGBGeometryCorrespondence,
+                        rgbTransformationSize: header.rgbTransformationSize,
+                        depthTransformationSize: header.depthTransformationSize,
+                        rgbSourceDistortionCoefficients: header.rgbSourceDistortionCoefficients,
+                        depthSourceDistortionCoefficients: header.depthSourceDistortionCoefficients,
+                        rgbSourceDistortionModel: header.rgbSourceDistortionModel,
+                        depthSourceDistortionModel: header.depthSourceDistortionModel,
+                        stereoMode: header.stereoMode,
+                        stereoModeSource: header.stereoModeSource,
+                        stereoExtendedDisparity: header.stereoExtendedDisparity,
+                        stereoSubpixel: header.stereoSubpixel,
+                        frameExposureMicroseconds: header.rgbFrameExposureMicroseconds,
+                        frameISO: header.rgbFrameISO,
+                        frameColorTemperatureKelvin: header.rgbFrameColorTemperatureKelvin,
+                        frameObservationErrors: header.rgbFrameObservationErrors
                     )
                     return result.isValid(forWidth: header.rgbWidth, height: header.rgbHeight)
                         ? result : nil
                 },
-                rectifiedLeft: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: leftData),
-                rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: rightData),
+                rectifiedLeft: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight,
+                    pixels: leftData, geometry: header.rectifiedLeftGeometry),
+                rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight,
+                    pixels: rightData, geometry: header.rectifiedRightGeometry),
+                stereoSourceExtrinsics: header.rectifiedLeftSourceToRightSource,
                 sidewalkCenterDeviation: header.sidewalkCenterDeviation,
                 sidewalkConfidence: header.sidewalkConfidence,
                 chessPieces: header.chessPieces,
@@ -1704,6 +1984,11 @@ private final class DepthCameraServiceClient {
         connection?.cancel()
         connection = nil
         reportedStreaming = false
+        resetPacketBuffer()
+    }
+
+    private func resetPacketBuffer() {
+        pendingPacket = nil
         receiveBuffer.removeAll(keepingCapacity: true)
     }
 
@@ -1744,12 +2029,39 @@ private struct DepthCameraPacketHeader: Decodable {
     let rightLength: Int
     let rgbIntrinsics: [Double]?
     let rgbIntrinsicsSource: String?
+    let runningServiceSourceSHA256: String?
+    let runtimeCalibration: CameraRuntimeCalibration?
+    let runtimeCalibrationIdentity: String?
+    let rgbOutputUndistorted: Bool?
     let rgbCalibratedLensPosition: Int?
     let rgbFrameLensPosition: Int?
+    let rgbFrameExposureMicroseconds: Double?
+    let rgbFrameISO: Int?
+    let rgbFrameColorTemperatureKelvin: Int?
+    let rgbFrameObservationErrors: [String]?
+    let rectifiedLeftGeometry: CameraStereoGeometry?
+    let rectifiedRightGeometry: CameraStereoGeometry?
+    let rectifiedLeftSourceToRightSource: CameraStereoPairExtrinsics?
     let rgbSourceSize: [Int]?
     let rgbSourceIntrinsics: [Double]?
     let rgbImageTransform: [Double]?
     let depthAlignmentMethod: String?
+    let depthIntrinsics: [Double]?
+    let depthIntrinsicsSource: String?
+    let depthSourceSize: [Int]?
+    let depthSourceIntrinsics: [Double]?
+    let depthImageTransform: [Double]?
+    let depthRGBGeometryCorrespondence: CameraDepthRGBGeometryCorrespondence?
+    let rgbTransformationSize: [Int]?
+    let depthTransformationSize: [Int]?
+    let rgbSourceDistortionCoefficients: [Double]?
+    let depthSourceDistortionCoefficients: [Double]?
+    let rgbSourceDistortionModel: String?
+    let depthSourceDistortionModel: String?
+    let stereoMode: String?
+    let stereoModeSource: String?
+    let stereoExtendedDisparity: Bool?
+    let stereoSubpixel: Bool?
     let imu: CameraInertialObservation?
     let sidewalkCenterDeviation: Double?
     let sidewalkConfidence: Double?
@@ -1776,16 +2088,117 @@ private struct DepthCameraPacketHeader: Decodable {
         case rightLength = "right_length"
         case rgbIntrinsics = "rgb_intrinsics"
         case rgbIntrinsicsSource = "rgb_intrinsics_source"
+        case runningServiceSourceSHA256 = "running_service_source_sha256"
+        case runtimeCalibration = "runtime_calibration"
+        case runtimeCalibrationIdentity = "runtime_calibration_identity"
+        case rgbOutputUndistorted = "rgb_output_undistorted"
         case rgbCalibratedLensPosition = "rgb_calibrated_lens_position"
         case rgbFrameLensPosition = "rgb_frame_lens_position"
+        case rgbFrameExposureMicroseconds = "rgb_frame_exposure_microseconds"
+        case rgbFrameISO = "rgb_frame_iso"
+        case rgbFrameColorTemperatureKelvin = "rgb_frame_color_temperature_kelvin"
+        case rgbFrameObservationErrors = "rgb_frame_observation_errors"
+        case rectifiedLeftGeometry = "rectified_left_geometry"
+        case rectifiedRightGeometry = "rectified_right_geometry"
+        case rectifiedLeftSourceToRightSource = "rectified_left_source_to_right_source"
         case rgbSourceSize = "rgb_source_size"
         case rgbSourceIntrinsics = "rgb_source_intrinsics"
         case rgbImageTransform = "rgb_image_transform"
         case depthAlignmentMethod = "depth_alignment_method"
+        case depthIntrinsics = "depth_intrinsics"
+        case depthIntrinsicsSource = "depth_intrinsics_source"
+        case depthSourceSize = "depth_source_size"
+        case depthSourceIntrinsics = "depth_source_intrinsics"
+        case depthImageTransform = "depth_image_transform"
+        case depthRGBGeometryCorrespondence = "depth_rgb_geometry_correspondence"
+        case rgbTransformationSize = "rgb_transformation_size"
+        case depthTransformationSize = "depth_transformation_size"
+        case rgbSourceDistortionCoefficients = "rgb_source_distortion_coefficients"
+        case depthSourceDistortionCoefficients = "depth_source_distortion_coefficients"
+        case rgbSourceDistortionModel = "rgb_source_distortion_model"
+        case depthSourceDistortionModel = "depth_source_distortion_model"
+        case stereoMode = "stereo_mode"
+        case stereoModeSource = "stereo_mode_source"
+        case stereoExtendedDisparity = "stereo_extended_disparity"
+        case stereoSubpixel = "stereo_subpixel"
         case imu
         case sidewalkCenterDeviation = "sidewalk_center_deviation"
         case sidewalkConfidence = "sidewalk_confidence"
         case chessPieces = "chess_pieces"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        protocolVersion = try c.decode(Int.self, forKey: .protocolVersion)
+        sequence = try c.decode(UInt64.self, forKey: .sequence)
+        timestampNanoseconds = try c.decode(UInt64.self, forKey: .timestampNanoseconds)
+        capturedAtMilliseconds = try c.decodeIfPresent(Double.self, forKey: .capturedAtMilliseconds)
+        rgbWidth = try c.decode(Int.self, forKey: .rgbWidth)
+        rgbHeight = try c.decode(Int.self, forKey: .rgbHeight)
+        rgbFormat = try c.decode(String.self, forKey: .rgbFormat)
+        rgbLength = try c.decode(Int.self, forKey: .rgbLength)
+        depthWidth = try c.decode(Int.self, forKey: .depthWidth)
+        depthHeight = try c.decode(Int.self, forKey: .depthHeight)
+        depthFormat = try c.decode(String.self, forKey: .depthFormat)
+        depthUnit = try c.decode(String.self, forKey: .depthUnit)
+        depthLength = try c.decode(Int.self, forKey: .depthLength)
+        stereoWidth = try c.decode(Int.self, forKey: .stereoWidth)
+        stereoHeight = try c.decode(Int.self, forKey: .stereoHeight)
+        stereoFormat = try c.decode(String.self, forKey: .stereoFormat)
+        leftLength = try c.decode(Int.self, forKey: .leftLength)
+        rightLength = try c.decode(Int.self, forKey: .rightLength)
+        rgbIntrinsics = try c.decodeIfPresent([Double].self, forKey: .rgbIntrinsics)
+        rgbIntrinsicsSource = try c.decodeIfPresent(String.self, forKey: .rgbIntrinsicsSource)
+        runningServiceSourceSHA256 = try c.decodeIfPresent(String.self, forKey: .runningServiceSourceSHA256)
+        rgbOutputUndistorted = try c.decodeIfPresent(Bool.self, forKey: .rgbOutputUndistorted)
+        rgbCalibratedLensPosition = try c.decodeIfPresent(Int.self, forKey: .rgbCalibratedLensPosition)
+        rgbFrameLensPosition = try c.decodeIfPresent(Int.self, forKey: .rgbFrameLensPosition)
+        rgbFrameExposureMicroseconds = try c.decodeIfPresent(Double.self, forKey: .rgbFrameExposureMicroseconds)
+        rgbFrameISO = try c.decodeIfPresent(Int.self, forKey: .rgbFrameISO)
+        rgbFrameColorTemperatureKelvin = try c.decodeIfPresent(Int.self, forKey: .rgbFrameColorTemperatureKelvin)
+        rgbFrameObservationErrors = try c.decodeIfPresent([String].self, forKey: .rgbFrameObservationErrors)
+        rectifiedLeftGeometry = try c.decodeIfPresent(CameraStereoGeometry.self, forKey: .rectifiedLeftGeometry)
+        rectifiedRightGeometry = try c.decodeIfPresent(CameraStereoGeometry.self, forKey: .rectifiedRightGeometry)
+        rectifiedLeftSourceToRightSource = try c.decodeIfPresent(CameraStereoPairExtrinsics.self, forKey: .rectifiedLeftSourceToRightSource)
+        rgbSourceSize = try c.decodeIfPresent([Int].self, forKey: .rgbSourceSize)
+        rgbSourceIntrinsics = try c.decodeIfPresent([Double].self, forKey: .rgbSourceIntrinsics)
+        rgbImageTransform = try c.decodeIfPresent([Double].self, forKey: .rgbImageTransform)
+        depthAlignmentMethod = try c.decodeIfPresent(String.self, forKey: .depthAlignmentMethod)
+        depthIntrinsics = try c.decodeIfPresent([Double].self, forKey: .depthIntrinsics)
+        depthIntrinsicsSource = try c.decodeIfPresent(String.self, forKey: .depthIntrinsicsSource)
+        depthSourceSize = try c.decodeIfPresent([Int].self, forKey: .depthSourceSize)
+        depthSourceIntrinsics = try c.decodeIfPresent([Double].self, forKey: .depthSourceIntrinsics)
+        depthImageTransform = try c.decodeIfPresent([Double].self, forKey: .depthImageTransform)
+        depthRGBGeometryCorrespondence = try c.decodeIfPresent(CameraDepthRGBGeometryCorrespondence.self, forKey: .depthRGBGeometryCorrespondence)
+        rgbTransformationSize = try c.decodeIfPresent([Int].self, forKey: .rgbTransformationSize)
+        depthTransformationSize = try c.decodeIfPresent([Int].self, forKey: .depthTransformationSize)
+        rgbSourceDistortionCoefficients = try c.decodeIfPresent([Double].self, forKey: .rgbSourceDistortionCoefficients)
+        depthSourceDistortionCoefficients = try c.decodeIfPresent([Double].self, forKey: .depthSourceDistortionCoefficients)
+        rgbSourceDistortionModel = try c.decodeIfPresent(String.self, forKey: .rgbSourceDistortionModel)
+        depthSourceDistortionModel = try c.decodeIfPresent(String.self, forKey: .depthSourceDistortionModel)
+        stereoMode = try c.decodeIfPresent(String.self, forKey: .stereoMode)
+        stereoModeSource = try c.decodeIfPresent(String.self, forKey: .stereoModeSource)
+        stereoExtendedDisparity = try c.decodeIfPresent(Bool.self, forKey: .stereoExtendedDisparity)
+        stereoSubpixel = try c.decodeIfPresent(Bool.self, forKey: .stereoSubpixel)
+        imu = try c.decodeIfPresent(CameraInertialObservation.self, forKey: .imu)
+        sidewalkCenterDeviation = try c.decodeIfPresent(Double.self, forKey: .sidewalkCenterDeviation)
+        sidewalkConfidence = try c.decodeIfPresent(Double.self, forKey: .sidewalkConfidence)
+        chessPieces = try c.decodeIfPresent([ROBChessPieceDetection].self, forKey: .chessPieces)
+        if c.contains(.runtimeCalibration) || c.contains(.runtimeCalibrationIdentity) {
+            guard c.contains(.runtimeCalibration), c.contains(.runtimeCalibrationIdentity),
+                  try !c.decodeNil(forKey: .runtimeCalibration), try !c.decodeNil(forKey: .runtimeCalibrationIdentity) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                    debugDescription: "Partial runtime camera calibration provenance."))
+            }
+            let value = try c.decode(CameraRuntimeCalibration.self, forKey: .runtimeCalibration)
+            let claimed = try c.decode(String.self, forKey: .runtimeCalibrationIdentity)
+            guard claimed == value.identity else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                    debugDescription: "Runtime camera calibration identity mismatch."))
+            }
+            runtimeCalibration = value; runtimeCalibrationIdentity = claimed
+        } else {
+            runtimeCalibration = nil; runtimeCalibrationIdentity = nil
+        }
     }
 }
 

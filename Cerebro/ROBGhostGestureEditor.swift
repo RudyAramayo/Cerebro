@@ -13,10 +13,15 @@ import simd
     private var previewFrozen = false
     private let headLinks: Set<String> = ["lower_neck_link", "neck_pan_link", "upper_neck_link", "insta360_link", "oak_link"]
     private var acceptedHeadTargets: ROBHeadCameraPoseEstimator?
+    private var rawHeadTargets: (pan:Int,lower:Int,upper:Int)?
+    private var displayedRGBProfileID: String?
     @nonobjc private var model: ROBGhostRobotModel?
     @nonobjc private var originalNodes: [String: SCNNode] = [:]
     @nonobjc private var ghostNodes: [String: SCNNode] = [:]
+    @nonobjc private lazy var normalHeadMaterials = Self.loadNormalHeadMaterials()
     @nonobjc private let renderRoot = SCNNode()
+    @nonobjc private let robotPresentationRoot = SCNNode()
+    @nonobjc private let canMotionOverlay = SCNNode()
     @nonobjc private var modelBasis = matrix_identity_float4x4
     @nonobjc private var ghost: [String: Double] = [:]
     @nonobjc private var headEstimate: [String: Double]?
@@ -56,7 +61,7 @@ import simd
     private let angleText = NSTextField(labelWithString: "")
     private let xyz = (0..<3).map { _ in NSTextField(string: "0") }
     private let poseCount = NSTextField(labelWithString: "No custom poses")
-    private let referenceInfo = NSTextField(wrappingLabelWithString: "Original model: waiting for left-arm feedback")
+    private let referenceInfo = NSTextField(wrappingLabelWithString: "Original model: waiting for selected-arm feedback")
     private let headInfo = NSTextField(wrappingLabelWithString: "Head: waiting for accepted neck commands")
     private let continueButton = NSButton()
     private var displayedInteractionStage = ""
@@ -78,7 +83,7 @@ import simd
             guard let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
                 throw ROBGhostMotionError.blocked("Bundled robot model is missing.")
             }
-            let model = try ROBGhostRobotModel(directory: directory)
+            let model = try ROBGhostRobotModel(directory: directory, physicalSide:ROBLeftArmTrial.shared.physicalSide)
             self.model = model; ghost = model.reference
             // ROB X-forward/Y-left/Z-up -> the existing scene's Y-up/-Z-forward.
             let scale = ROBScanVisualModel.presentationScale
@@ -86,32 +91,37 @@ import simd
                 SIMD4(-scale, 0, 0, 0), SIMD4(0, scale, 0, 0), SIMD4(0, 0, 0, 1)))
             renderRoot.simdTransform = capturedRobot.presentation.simdWorldTransform * modelBasis
             scene.rootNode.addChildNode(renderRoot)
+            robotPresentationRoot.name="Robot mesh display offset · not registration"
+            renderRoot.addChildNode(robotPresentationRoot)
+            canMotionOverlay.name="Simulated can motion"
+            robotPresentationRoot.addChildNode(canMotionOverlay)
             canOverlay.name = "Workspace can overlay"
             renderRoot.addChildNode(canOverlay)
             collisionMapOverlay.name = "Observed depth obstacles · provisional registration"
             collisionPathOverlay.name = "Read-only collision route"
-            renderRoot.addChildNode(collisionMapOverlay); renderRoot.addChildNode(collisionPathOverlay)
+            renderRoot.addChildNode(collisionMapOverlay); robotPresentationRoot.addChildNode(collisionPathOverlay)
             for (link, geometry, ghostGeometry) in try capturedGeometry(model) {
                 let originalMaterial = SCNMaterial()
-                originalMaterial.diffuse.contents = headLinks.contains(link) ? NSColor.lightGray : NSColor.white
+                originalMaterial.diffuse.contents = NSColor.white
                 originalMaterial.lightingModel = .constant; originalMaterial.isDoubleSided = true
                 let original = referenceHeadNode(link: link, material: originalMaterial, renderingOrder: 0)
                     ?? SCNNode(geometry: geometry)
                 original.geometry?.materials = [originalMaterial]; original.name = "Original URDF \(link)"
-                renderRoot.addChildNode(original); originalNodes[link] = original
+                robotPresentationRoot.addChildNode(original); originalNodes[link] = original
                 let blue = SCNMaterial(); blue.diffuse.contents = NSColor.systemBlue
-                blue.transparency = 0.12
+                blue.transparency = 0.24; blue.blendMode = .alpha
+                blue.transparencyMode = .singleLayer
                 blue.lightingModel = .constant
-                blue.isDoubleSided = true; blue.writesToDepthBuffer = false; blue.readsFromDepthBuffer = false
+                blue.isDoubleSided = true; blue.writesToDepthBuffer = false; blue.readsFromDepthBuffer = true
                 let proposed = referenceHeadNode(link: link, material: blue, renderingOrder: 10) ?? SCNNode(geometry: ghostGeometry)
                 proposed.geometry?.materials = [blue]; proposed.renderingOrder = 10; proposed.name = "Blue ghost \(link)"
-                renderRoot.addChildNode(proposed); ghostNodes[link] = proposed
+                robotPresentationRoot.addChildNode(proposed); ghostNodes[link] = proposed
             }
             capturedRobot.isHidden = true
             let initial = freshBaseline()
             updateOriginal(initial.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
-            referenceInfo.stringValue = initial == nil ? "Original: scan reference; fresh left feedback unavailable."
-                : "Original left: fresh encoders with upright mapping prior. Other joints: scan reference."
+            referenceInfo.stringValue = initial == nil ? "Original: scan reference; fresh \(model.physicalSide) feedback unavailable."
+                : "Original physical \(model.physicalSide): fresh encoders with recorded mapping prior. Other joints: scan reference."
             for joint in model.joints where joint.kind != "fixed" && joint.upper > joint.lower {
                 joints.addItem(withTitle: joint.name)
             }
@@ -149,6 +159,35 @@ import simd
         updateHeadInfo()
     }
 
+    @objc(setRawHeadPanTarget:lowerTarget:upperTarget:known:)
+    func setRawHeadPanTarget(_ pan:Int,lowerTarget:Int,upperTarget:Int,known:Bool) {
+        rawHeadTargets = known ? (pan,lowerTarget,upperTarget):nil
+    }
+    @nonobjc private func fittedHeadPose()->ROBNeckRGBPoseDisplay.Pose? {
+        guard headEstimate != nil,let model,let raw=rawHeadTargets else{return nil}
+        return ROBNeckRGBPoseDisplay.pose(model:model,panTarget:raw.pan,lowerTarget:raw.lower,upperTarget:raw.upper)
+    }
+    var depthProjectionIdentity:String {
+        guard let model else{return "unavailable"}
+        return [model.modelID,model.referenceID,model.geometryID,
+            ROBNeckRGBPoseDisplay.configurationIdentity(model:model) ?? fittedHeadPose()?.profileID ?? ROBWorkspaceDepthAlignment.snapshot()?.identity ?? "invalid"].joined(separator:"|")
+    }
+    var headDisplayPoseDescription:String {
+        guard let fitted=fittedHeadPose() else{return "URDF mount prior"}
+        return fitted.usesPhotoHardwareOpticalOrigin
+            ? "photo mount origin · provisional RGB orientation · raw depth"
+            : "provisional RGB neck fit · estimated camera offset · raw depth"
+    }
+    var headDisplayUsesRGBFit:Bool {fittedHeadPose() != nil}
+
+    /// A supplied mount keeps the housing and raw cloud in one display frame.
+    /// It is not a measured camera-to-arm registration.
+    func depthCloudUsesExplicitCameraPose(_ belly:Bool)->Bool {
+        guard belly else {return headDisplayUsesRGBFit}
+        guard let model else {return false}
+        return ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) != nil
+    }
+
     @objc(setHeadCommandPan:lowerPitch:upperPitch:known:)
     func setHeadCommand(pan: Double, lowerPitch: Double, upperPitch: Double, known: Bool) {
         let value = known ? model?.headPositions(pan: pan, lowerPitch: lowerPitch, upperPitch: upperPitch) : nil
@@ -162,6 +201,7 @@ import simd
     }
 
     var headOpticalPitchRadians: NSNumber? {
+        if let fitted=fittedHeadPose() {return NSNumber(value:-fitted.depressionRadians)}
         guard headEstimate != nil, let model,
               let rawCamera = model.frames(renderPositions(model.reference, preview: false))["oak_optical_frame"],
               let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return nil }
@@ -171,22 +211,52 @@ import simd
     }
 
     private func updateHeadInfo() {
+        let lift=model.map{ROBNeckRGBPoseDisplay.robotModelDisplayLiftMeters(model:$0)} ?? 0
+        let modelLabel=lift==0 ? "":String(format:"\nRobot display %+.2f in · presentation only",lift/0.0254)
         guard let pitch = headOpticalPitchRadians else {
-            headInfo.stringValue = "Head: command estimate unavailable"; return
+            headInfo.stringValue = "Head: command estimate unavailable"+modelLabel; return
         }
         let targets = acceptedHeadTargets.map { "L\($0.lowerTarget) / U\($0.upperTarget) · " } ?? ""
         let frozen = previewFrozen ? " · live view; reviewed edits locked" : ""
+        if let fitted=fittedHeadPose() {
+            headInfo.stringValue=String(format:"Provisional RGB neck fit: %@optical tilt %+.1f°%@\nPan → lower → upper · QR-up display gauge · estimated camera offset\nRaw depth unchanged; no grasp authority · profile %@",targets,pitch.doubleValue*180 / .pi,frozen,String(fitted.profileID.prefix(10)))
+            if let mount=fitted.headMount {
+                headInfo.stringValue+=String(format:"\nRigid triangle %.0f/%.0f/%.0f mm · sphere azimuth ASSUMED\nGlass/optical separation %.1f mm is inferred, not measured",mount.upperToSphereMeters*1000,mount.sphereToGlassMeters*1000,mount.upperToGlassMeters*1000,mount.glassToOpticalDistanceMeters*1000)
+            }
+            if fitted.hardwareFrames != nil {
+                headInfo.stringValue += fitted.usesPhotoHardwareOpticalOrigin
+                    ? "\nNeck / face camera: photo mount + RGB orientation estimate"
+                    : "\nNeck / face housing: operator photo pose\nHousing placement is separate from the provisional optical fit"
+            }
+            if let pan=fitted.operatorPanCalibrationDescription {
+                headInfo.stringValue += "\n" + pan
+            }
+            if fitted.bellyFloorDisplayReferenceID != nil {
+                headInfo.stringValue += "\nBelly floor: aligned to captured floor reference"
+            } else if let belly=fitted.bellyPreviewDownwardPitchDegrees {
+                headInfo.stringValue += String(format:"\nBelly mount: %.1f° down · operator estimate",belly)
+            }
+            if fitted.headDepthDisplayLiftMeters != 0 {
+                headInfo.stringValue+=String(format:"\nHead depth preview: %+.2f in up",fitted.headDepthDisplayLiftMeters/0.0254)
+            }
+            if let legacy=ROBWorkspaceDepthAlignment.snapshot() {
+                headInfo.stringValue+=String(format:"\nLegacy %.1f° / %.2f in retained, NOT applied",legacy.downwardPitchDegrees,legacy.towardRobotMeters/0.0254)
+            }
+            headInfo.stringValue+=modelLabel
+            return
+        }
         headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nNeck reference: L6011/U6906 · Insta mount ≈20° back", targets,
             pitch.doubleValue * 180 / .pi, frozen)
         if let alignment = ROBWorkspaceDepthAlignment.snapshot() {
             headInfo.stringValue += String(format: "\nHead depth: %.2f in toward ROB · camera %.1f° down · provisional",
                 alignment.towardRobotMeters / 0.0254, alignment.downwardPitchDegrees)
         }
+        headInfo.stringValue+=modelLabel
     }
 
     @objc private func depthAlignmentDidChange() {
         invalidateReview(); displayedCan = nil
-        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        clearCanVisuals()
         collisionMapOverlay.childNodes.forEach { $0.removeFromParentNode() }
         collisionMapRenderKey = nil
         updateNodes(originalNodes, positions: renderPositions(originalPositions, preview: false))
@@ -202,13 +272,17 @@ import simd
                 belly ? "belly_oak_optical_frame" : "oak_optical_frame"] else { return [] }
         let basis = simd_double4x4(columns: (SIMD4<Double>(modelBasis.columns.0), SIMD4<Double>(modelBasis.columns.1),
             SIMD4<Double>(modelBasis.columns.2), SIMD4<Double>(modelBasis.columns.3)))
+        let fitted=fittedHeadPose()
         let alignedFrame: simd_double4x4
-        if belly { alignedFrame = frame }
+        if belly { alignedFrame = ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)?["belly_oak_optical_frame"] ?? frame }
+        else if let fitted {alignedFrame=fitted.provisionalCameraToModel}
         else {
             guard let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return [] }
             alignedFrame = alignment.applying(to: frame)
         }
-        let transform = basis * alignedFrame
+        let transform:simd_double4x4
+        if !belly,let fitted { transform=basis*fitted.depthCloudCameraToModel }
+        else { transform=basis*(fitted?.modelToDisplay ?? matrix_identity_double4x4)*alignedFrame }
         return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
     }
 
@@ -223,6 +297,7 @@ import simd
     }
 
     @nonobjc private func updateOriginal(_ positions: [String: Double]) {
+        guard originalPositions != positions else { return }
         originalPositions = positions
         updateNodes(originalNodes, positions: renderPositions(positions, preview: false))
     }
@@ -310,15 +385,21 @@ import simd
 
     @objc private func findAndPreviewCan() {
         guard !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
-              !ROBControllerArmApproval.shared.isPending, let model else { return }
+              !ROBControllerArmApproval.shared.isPending, let directory = model?.directory else { return }
+        let side = canArm.indexOfSelectedItem == 1 ? "right" : "left"
+        let model: ROBGhostRobotModel
+        do { model = try ROBGhostRobotModel(directory: directory, physicalSide: side) }
+        catch { status.stringValue = error.localizedDescription; return }
         invalidateReview()
-        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        // The selected side determines both encoder mapping and live baseline;
+        // changing the preview selector never changes actuator ownership.
+        self.model = model
+        clearCanVisuals()
         displayedCan = nil
         canInfo.stringValue = "Finding a fresh RGB-D can target…"
         status.stringValue = "Neck-camera search, then ghost rehearsal. Arms and jaws stay unchanged."
         let request = UUID(); canRequestID = request
-        let side = canArm.indexOfSelectedItem == 1 ? "right" : "left"
-        ROBArmRoutineCoordinator.shared.performCommand("left_search_workspace", target: "") { [weak self] result in
+        ROBArmRoutineCoordinator.shared.performCommand("left_search_workspace", target: "can") { [weak self] result in
             guard let self, self.canRequestID == request else { return }
             guard let can = ROBWorkspaceSearch.shared.locatedObjects[.can] else {
                 self.canInfo.stringValue = "Can target: no confirmed RGB-D position"
@@ -326,12 +407,14 @@ import simd
                 return
             }
             let baseline = self.freshBaseline().map { model.positions(vendorLeft: $0.q) } ?? model.reference
+            let projectionIdentity=ROBWorkspaceSearch.shared.collisionSnapshot?.estimatedCameraProjectionIdentity ?? ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
             self.status.stringValue = "Can measured. Computing the ghost reach…"
             self.canPlanTask = Task { @MainActor [weak self] in
                 do {
                     let preview = try await Task.detached(priority: .userInitiated) {
                         try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: side,
-                            reachOffset:side == "left" ? ROBLeftCanReachCalibration.load(model:model,can:can) : .zero)
+                            reachOffset:side == "left" ? ROBLeftCanReachCalibration.load(model:model,can:can,
+                                estimatedCameraProjectionIdentity:projectionIdentity) : .zero)
                     }.value
                     guard let self, !Task.isCancelled, self.canRequestID == request else { return }
                     self.showCanPreview(preview)
@@ -352,7 +435,7 @@ import simd
         displayedCan = preview.can; presets.selectItem(at: 2)
         canArm.selectItem(at: preview.side == "right" ? 1 : 0)
         tabletopEditing = false; poses = []; name.stringValue = "Coke can grab — ghost only"
-        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        clearCanVisuals()
         let point = preview.can.point
         func material(_ color: NSColor) -> SCNMaterial {
             let value = SCNMaterial(); value.diffuse.contents = color; value.lightingModel = .constant
@@ -417,11 +500,11 @@ import simd
             path.materials = [blue]
             let node = SCNNode(geometry: path); node.name = "Can grab ghost trajectory"; node.renderingOrder = 20
             node.isHidden = collisionPathVisible.state != .on
-            canOverlay.addChildNode(node)
+            canMotionOverlay.addChildNode(node)
         }
         let carried = SCNCylinder(radius: 0.033, height: 0.115); carried.materials = [blue]
         carriedCan.geometry = carried; carriedCan.eulerAngles.x = .pi / 2; carriedCan.opacity = 0.45
-        carriedCan.name = "Simulated held can"; carriedCan.isHidden = true; canOverlay.addChildNode(carriedCan)
+        carriedCan.name = "Simulated held can"; carriedCan.isHidden = true; canMotionOverlay.addChildNode(carriedCan)
         ghost = preview.steps.last?.pose ?? preview.baseline
         joints.selectItem(withTitle: preview.side + "_joint7"); selectJoint()
         for i in 0..<3 { xyz[i].stringValue = String(format: "%.3f", point[i]) }
@@ -436,14 +519,20 @@ import simd
     @objc private func changeCollisionVisibility() {
         collisionMapOverlay.isHidden = collisionMapVisible.state != .on
         collisionPathOverlay.isHidden = collisionPathVisible.state != .on
-        canOverlay.childNode(withName: "Can grab ghost trajectory", recursively: false)?.isHidden = collisionPathVisible.state != .on
+        canMotionOverlay.childNode(withName: "Can grab ghost trajectory", recursively: false)?.isHidden = collisionPathVisible.state != .on
         refreshCollisionScene(force: true)
     }
 
     /// This is a value-only review of the last checked artifact. It deliberately
     /// never assigns the executable proposal or binds a live execution baseline.
     @objc private func showLatestCollisionReview() {
-        guard let model, !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning else { return }
+        guard !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning else { return }
+        let selectedSide = ROBLeftArmTrial.shared.physicalSide
+        if model?.physicalSide != selectedSide, let directory = model?.directory {
+            do { model = try ROBGhostRobotModel(directory:directory,physicalSide:selectedSide) }
+            catch { status.stringValue = error.localizedDescription; return }
+        }
+        guard let model else { return }
         invalidateReview(); liveBaseline = false; poses = []; tabletopEditing = false
         refreshCollisionScene(force: true)
         guard let candidate = ROBLeftArmTrial.shared.collisionReviewProposal else {
@@ -460,8 +549,9 @@ import simd
         presets.selectItem(at: 2); name.stringValue = "Collision route · read-only"
         ghost = model.positions(vendorLeft: candidate.baseline)
         timeline.minValue = 0; timeline.maxValue = candidate.seconds; timeline.doubleValue = 0
-        identity.stringValue = "READ-ONLY PATH · no actuator authority\nProposal \(candidate.id.uuidString)\nModel \(candidate.modelID.prefix(12))… · \(candidate.steps.count) steps"
-        poseCount.stringValue = "All seven left-arm joints · checked route preview"
+        let label = candidate.kind.contains("estimated") ? "ESTIMATED EMPTY-ARM TRIAL" : "READ-ONLY PATH"
+        identity.stringValue = "\(label) · no actuator authority\nPhysical \(model.physicalSide) arm · proposal \(candidate.id.uuidString)\nModel \(candidate.modelID.prefix(12))… · \(candidate.steps.count) steps"
+        poseCount.stringValue = "All seven \(model.physicalSide)-arm joints · route preview"
         status.stringValue = collisionInfo.stringValue
         var points: [SCNVector3] = [], previous = candidate.baseline
         for step in candidate.steps {
@@ -574,6 +664,11 @@ import simd
         canInfo.stringValue = String(format: "Coke can · X %.3f / Y %.3f / Z %.3f m\nLast seen %.0f s ago", point.x, point.y, point.z, age) +
             (age > 60 ? " · historical target; rescan" : " · RGB-D position")
     }
+    private func clearCanVisuals() {
+        canOverlay.childNodes.forEach{$0.removeFromParentNode()}
+        canMotionOverlay.childNodes.forEach{$0.removeFromParentNode()}
+        carriedCan.isHidden=true
+    }
 
     private struct CapturedRig: Decodable {
         struct Segment: Decodable {
@@ -625,7 +720,12 @@ import simd
         let root = SCNNode()
         func add(_ geometry: SCNGeometry, _ name: String, _ position: SCNVector3,
                  angles: SCNVector3 = SCNVector3Zero, parent: SCNNode? = nil) {
-            geometry.materials = [material]
+            let surface: String
+            if name.contains("lens") { surface = "lens" }
+            else if name.contains("antenna") { surface = "rubber" }
+            else if name.contains("mount") || name.contains("stem") || name.contains("axis") || name.contains("support") { surface = "aluminum" }
+            else { surface = "polymer" }
+            geometry.materials = [renderingOrder == 0 ? normalHeadMaterials[surface] ?? material : material]
             let node = SCNNode(geometry: geometry); node.name = name
             node.position = position; node.eulerAngles = angles; node.renderingOrder = renderingOrder
             (parent ?? root).addChildNode(node)
@@ -672,13 +772,52 @@ import simd
         return root
     }
 
+    /// Reuse the captured visual asset's hardware palette for the corrected
+    /// reference shapes. An opaque gray override previously turned the dark
+    /// camera body, optical lenses and aluminum brackets into one white mass.
+    /// These appearance materials do not change geometry or optical poses.
+    private static func loadNormalHeadMaterials() -> [String: SCNMaterial] {
+        struct Surface: Decodable { let color: [Double]; let metalness: Double; let roughness: Double }
+        struct Palette: Decodable { let materials: [String: Surface] }
+        // Same reviewed palette as rob-visual.json; retained if its optional
+        // appearance resource is unavailable in a reduced fixture bundle.
+        var surfaces: [String: Surface] = [
+            "polymer": .init(color: [0.188241, 0.211771, 0.231379], metalness: 0, roughness: 0.64),
+            "aluminum": .init(color: [0.658828, 0.701965, 0.729415], metalness: 0.75, roughness: 0.32),
+            "rubber": .init(color: [0.082357, 0.101966, 0.125495], metalness: 0, roughness: 0.9),
+            "lens": .init(color: [0.027451, 0.101966, 0.133339], metalness: 0.6, roughness: 0.12)
+        ]
+        if let url = Bundle.main.url(forResource: "rob-visual", withExtension: "json"),
+           let bytes = try? Data(contentsOf: url), bytes.count <= 1_000_000,
+           let palette = try? JSONDecoder().decode(Palette.self, from: bytes) {
+            for key in Array(surfaces.keys) {
+                if let value = palette.materials[key], value.color.count == 3,
+                   (value.color + [value.metalness, value.roughness]).allSatisfy({ $0.isFinite && (0...1).contains($0) }) {
+                    surfaces[key] = value
+                }
+            }
+        }
+        return Dictionary(uniqueKeysWithValues: surfaces.map { key, surface in
+            let value = SCNMaterial()
+            // Preserve dark captured housings under the controller's bright
+            // inspection lights; metal and optical surfaces retain highlights.
+            value.lightingModel = key == "polymer" || key == "rubber" ? .constant : .physicallyBased
+            value.diffuse.contents = NSColor(srgbRed: CGFloat(surface.color[0]), green: CGFloat(surface.color[1]), blue: CGFloat(surface.color[2]), alpha: 1)
+            value.metalness.contents = surface.metalness; value.roughness.contents = surface.roughness
+            value.transparency = 1; value.isDoubleSided = true
+            value.readsFromDepthBuffer = true; value.writesToDepthBuffer = true
+            return (key, value)
+        })
+    }
+
     private func reloadPresets() {
         presets.removeAllItems(); presets.addItems(withTitles: ["Center hand · J6 inward", "Wave above shoulder · J2/J4", "New custom gesture"] + saved.map(\.name))
     }
     private func freshBaseline() -> (q: [Double], generation: UInt64)? {
         let gateway = ROBAmberGatewayClient.shared
-        guard gateway.isReady(), let sample = gateway.telemetry(forArm: "right"), sample.effectiveSampleAgeMilliseconds <= 250,
-              sample.positionsRadians.count == 7,
+        let gatewayArm = model?.physicalSide == "right" ? "left" : "right"
+        guard gateway.isReady(), let sample = gateway.telemetry(forArm: gatewayArm), sample.effectiveSampleAgeMilliseconds <= 250,
+              sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
               let generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value,
               generation > 0 else { return nil }
         return (sample.positionsRadians.map(\.doubleValue), generation)
@@ -686,6 +825,7 @@ import simd
     private func invalidateReview() {
         canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil; collisionPreview = nil
         collisionPathOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        canMotionOverlay.childNodes.forEach { $0.removeFromParentNode() }
         canOverlay.childNodes.filter { $0.name != "Detected Coke can RGB-D center" }.forEach { $0.removeFromParentNode() }
         refreshCanInfo()
         if ownsPendingRequest, !ROBLeftArmTrial.shared.isRunning, ROBControllerArmApproval.shared.isPending {
@@ -694,7 +834,7 @@ import simd
         ownsPendingRequest = false
         setPreviewFrozen(false)
         proposal = nil; playing = false; replayingRecording = false; record = []; currentPlot.values = []
-        for node in ghostNodes.values { node.isHidden = false }
+        refreshGhostVisibility()
         executeButton.isEnabled = false; identity.stringValue = "Unreviewed edits · no hardware output"
     }
     @objc private func selectPreset() {
@@ -888,16 +1028,36 @@ import simd
     }
     private func updateNodes(_ nodes: [String: SCNNode], positions: [String: Double]) {
         guard let model else { return }
-        let frames = model.frames(positions)
+        var frames = model.frames(positions)
+        let fitted=fittedHeadPose()
+        if let fitted,["neck_pan","lower_neck","upper_neck"].allSatisfy({positions[$0]==headEstimate?[$0]}) {
+            frames.merge(fitted.headFrames){_,new in new}
+            if let hardware=fitted.hardwareFrames {frames.merge(hardware){_,new in new}}
+            if fitted.usesPhotoHardwareOpticalOrigin,
+               let oak=fitted.hardwareFrames?["oak_link"],let glass=fitted.hardwareFrames?["rgb_glass_frame"] {
+                // Use one provisional ray frame for the visible lens and raw
+                // depth. The photo supplies its origin; RGB supplies rotation.
+                frames["oak_optical_frame"]=fitted.provisionalCameraToModel
+                frames["oak_link"]=fitted.provisionalCameraToModel * simd_inverse(simd_inverse(oak)*glass)
+            }
+        }
+        if let belly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) {frames.merge(belly){_,new in new}}
         let optical = frames["oak_optical_frame"]
         let alignment = ROBWorkspaceDepthAlignment.snapshot()
         var changes: [(SCNNode, simd_float4x4)] = []
         for (link, node) in nodes {
+            if link == "insta360_link", let mount=node.childNode(withName:"reference-insta-mount",recursively:true) {
+                // The old scan's fixed backward tilt is not part of the new
+                // photographed assembly. Tilt the lens ring independently of
+                // the measured sphere/glass centers and optical calibration.
+                let tilt=CGFloat((fitted?.hardwareSphereRingTiltDegrees ?? -20) * .pi / 180)
+                if mount.eulerAngles.y != tilt {mount.eulerAngles.y=tilt}
+            }
             if var transform = frames[link] {
                 // Rotate the face-camera housing about its optical origin.
                 // Cloud translation is not a physical camera-mount movement;
                 // the neck and panoramic camera keep their original frames.
-                if link == "oak_link", let optical, let alignment {
+                if fitted == nil,link == "oak_link", let optical, let alignment {
                     transform = alignment.applyingPitch(to: optical) * simd_inverse(optical) * transform
                 }
                 let value = simd_float4x4(columns: (SIMD4<Float>(transform.columns.0), SIMD4<Float>(transform.columns.1),
@@ -905,9 +1065,32 @@ import simd
                 if node.simdTransform != value { changes.append((node, value)) }
             }
         }
-        guard !changes.isEmpty else { return }
+        if !changes.isEmpty {
+            SCNTransaction.begin(); SCNTransaction.disableActions = true
+            for (node, transform) in changes { node.simdTransform = transform }
+            SCNTransaction.commit()
+        }
+        refreshGhostVisibility()
+    }
+    /// Each node already has its complete physical frame, including upstream
+    /// joints and the shared camera-mount estimate. Compare those frames so an
+    /// unchanged child command still shows its proposed parent motion, while
+    /// coincident surfaces never tint the normal robot or camera sphere.
+    private func refreshGhostVisibility() {
+        let recordingWithoutTarget = replayingRecording && proposal == nil
         SCNTransaction.begin(); SCNTransaction.disableActions = true
-        for (node, transform) in changes { node.simdTransform = transform }
+        for (link, proposed) in ghostNodes {
+            guard let original = originalNodes[link] else {
+                if !proposed.isHidden { proposed.isHidden = true }
+                continue
+            }
+            let a = original.simdTransform, b = proposed.simdTransform
+            let coincident = (0..<4).allSatisfy { column in
+                simd_length(a[column] - b[column]) <= 1e-6
+            }
+            let hidden = recordingWithoutTarget || coincident
+            if proposed.isHidden != hidden { proposed.isHidden = hidden }
+        }
         SCNTransaction.commit()
     }
     private func updateGhost(_ positions: [String: Double], updateFields: Bool = true) {
@@ -921,18 +1104,36 @@ import simd
         guard let model else { return }
         refreshInteractionStage()
         let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
-        let physicalMotion = (ROBLeftArmTrial.shared.isRunning && !ROBLeftArmTrial.shared.isNeckOnlyInspection)
-            || ROBArmRoutineCoordinator.shared.isRunning
-        sceneView?.isHidden = false; sceneView?.rendersContinuously = true; sceneView?.isPlaying = true
-        sceneView?.preferredFramesPerSecond = physicalMotion ? 15 : 30
-        for view in [presets, joints, angle, name] as [NSControl] { view.isEnabled = !busy }
+        if let sceneView {
+            if sceneView.isHidden { sceneView.isHidden = false }
+            if !sceneView.rendersContinuously { sceneView.rendersContinuously = true }
+            if !sceneView.isPlaying { sceneView.isPlaying = true }
+            let framesPerSecond = busy ? 15 : 30
+            if sceneView.preferredFramesPerSecond != framesPerSecond { sceneView.preferredFramesPerSecond = framesPerSecond }
+        }
+        for view in [presets, joints, angle, name] as [NSControl] where view.isEnabled == busy { view.isEnabled = !busy }
         if busy || (ownsPendingRequest && ROBControllerArmApproval.shared.isPending) {
             playing = false; executeButton.isEnabled = false
-            if busy { status.stringValue = ROBLeftArmTrial.shared.status }
+            if busy, status.stringValue != ROBLeftArmTrial.shared.status { status.stringValue = ROBLeftArmTrial.shared.status }
         }
         if previewFrozen && !busy && !ROBControllerArmApproval.shared.isPending { setPreviewFrozen(false) }
-        let base = capturedRobot.presentation.simdWorldTransform * modelBasis
+        let fitted=fittedHeadPose()
+        let displayProfileID=ROBNeckRGBPoseDisplay.configurationIdentity(model:model) ?? fitted?.profileID
+        if displayedRGBProfileID != displayProfileID {
+            displayedRGBProfileID=displayProfileID
+            invalidateReview()
+            updateNodes(originalNodes,positions:renderPositions(originalPositions,preview:false))
+            updateNodes(ghostNodes,positions:renderPositions(ghostDisplayPositions,preview:true))
+            updateHeadInfo()
+        }
+        let gauge=fitted?.modelToDisplay ?? matrix_identity_double4x4
+        let displayGauge=simd_float4x4(columns:(SIMD4<Float>(gauge.columns.0),SIMD4<Float>(gauge.columns.1),SIMD4<Float>(gauge.columns.2),SIMD4<Float>(gauge.columns.3)))
+        let base = capturedRobot.presentation.simdWorldTransform * modelBasis * displayGauge
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
+        let presentation=ROBNeckRGBPoseDisplay.robotModelPresentationTransform(model:model,modelToDisplay:gauge)
+        let meshOffset=simd_float4x4(columns:(SIMD4<Float>(presentation.columns.0),SIMD4<Float>(presentation.columns.1),
+            SIMD4<Float>(presentation.columns.2),SIMD4<Float>(presentation.columns.3)))
+        if robotPresentationRoot.simdTransform != meshOffset {robotPresentationRoot.simdTransform=meshOffset}
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastCanInfoUpdate >= 1 {
             lastCanInfoUpdate = now; refreshCanInfo(); refreshCollisionScene(force: false)
@@ -950,7 +1151,7 @@ import simd
             executeButton.isEnabled = liveBaseline && fresh.generation == proposal.sessionGeneration
                 && ROBArmRoutinePlan.near(fresh.q, proposal.baseline, tolerance: 0.015)
         } else { executeButton.isEnabled = false }
-        if busy { status.stringValue = ROBLeftArmTrial.shared.status }
+        if busy, status.stringValue != ROBLeftArmTrial.shared.status { status.stringValue = ROBLeftArmTrial.shared.status }
         if playing {
             let time = min(timeline.maxValue, (now - animationStarted) * 4)
             timeline.doubleValue = time; renderTime(time)
@@ -996,11 +1197,11 @@ import simd
                 }
             }
             invalidateReview(); record = samples; proposal = frozen; replayingRecording = true; liveBaseline = false
-            for node in ghostNodes.values { node.isHidden = frozen == nil }
+            refreshGhostVisibility()
             timeline.maxValue = samples.last?.time ?? 1; timeline.doubleValue = 0
             currentPlot.values = samples.map { ($0.time, $0.deltas.map(abs).max() ?? 0) }
             identity.stringValue = "RECORDING REPLAY · no execution\n\(url.lastPathComponent)"
-            status.stringValue = "Original: measured left joints. Blue: approved step target when a matching manifest exists. Raw-current trace below; scrub to inspect peaks."
+            status.stringValue = "Original: measured \(model.physicalSide) joints. Blue: approved step target when a matching manifest exists. Raw-current trace below; scrub to inspect peaks."
             renderTime(0)
         } catch { status.stringValue = error.localizedDescription }
     }

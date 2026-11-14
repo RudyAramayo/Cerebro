@@ -3,6 +3,7 @@
 #import "ROBSerialBox.h"
 #import "ROBDepthCloudProjection.h"
 #import "ROBDepthFloorRectification.h"
+#import "ROBAccumulatedSurfaceRenderer.h"
 #import <QuartzCore/QuartzCore.h>
 #import <simd/quaternion.h>
 #import "Cerebro-Swift.h"
@@ -16,6 +17,61 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 static NSUInteger const ROBMaximumDisplayedCloudPoints = 20000;
 static NSUInteger const ROBMaximumFloorCandidatePoints = 2048;
 static NSTimeInterval const ROBFloorNoiseHoldInterval = 0.25;
+
+// Display-only backpressure. Other notification observers and raw camera/vision
+// feeds still receive every frame through their existing independent admission.
+// No SceneKit access or dispatch occurs while this mailbox lock is held.
+@interface ROBSCNDepthCloudDisplayMailbox : NSObject {
+    NSLock *_lock;
+    ROBDepthCloudFrame *_latestHead;
+    ROBDepthCloudFrame *_latestBelly;
+    BOOL _mainDrainScheduled;
+    BOOL _closed;
+}
+- (BOOL)offerFrame:(ROBDepthCloudFrame *)frame;
+- (NSArray<ROBDepthCloudFrame *> *)takeLatestFrames;
+- (void)close;
+@end
+
+@implementation ROBSCNDepthCloudDisplayMailbox
+- (instancetype)init
+{
+    self = [super init];
+    if (self) _lock = [[NSLock alloc] init];
+    return self;
+}
+- (BOOL)offerFrame:(ROBDepthCloudFrame *)frame
+{
+    [_lock lock];
+    if (_closed) { [_lock unlock]; return NO; }
+    if (frame.isBelly) _latestBelly = frame; else _latestHead = frame;
+    BOOL schedule = !_mainDrainScheduled;
+    _mainDrainScheduled = YES;
+    [_lock unlock];
+    return schedule;
+}
+- (NSArray<ROBDepthCloudFrame *> *)takeLatestFrames
+{
+    [_lock lock];
+    ROBDepthCloudFrame *head = _closed ? nil : _latestHead;
+    ROBDepthCloudFrame *belly = _closed ? nil : _latestBelly;
+    _latestHead = nil; _latestBelly = nil;
+    _mainDrainScheduled = NO;
+    [_lock unlock];
+    if (head && belly) return @[head, belly];
+    if (head) return @[head];
+    if (belly) return @[belly];
+    return @[];
+}
+- (void)close
+{
+    [_lock lock];
+    _closed = YES;
+    _latestHead = nil; _latestBelly = nil;
+    _mainDrainScheduled = NO;
+    [_lock unlock];
+}
+@end
 
 // The operator identified the wooden floor as a level reference. Select only
 // lower-image points outside the robot's footprint. The candidate height wedge
@@ -109,8 +165,32 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, retain) SCNNode *liveRGBCloudNode;
 @property (readwrite, retain) SCNNode *liveBellyRGBCloudNode;
 @property (readwrite, strong) dispatch_queue_t cloudQueue;
+@property (nonatomic, strong) ROBSCNDepthCloudDisplayMailbox *cloudDisplayMailbox;
 @property (readwrite, assign) BOOL cloudUpdatePending;
 @property (readwrite, assign) BOOL bellyCloudUpdatePending;
+@property (strong) NSButton *surfaceMode;
+@property (copy) NSString *headCloudStreamID;
+@property (copy) NSString *bellyCloudStreamID;
+@property NSUInteger headCloudSourceEpoch, bellyCloudSourceEpoch;
+@property NSUInteger headSurfaceGeneration, bellySurfaceGeneration;
+@property BOOL headSurfaceUpdatePending, bellySurfaceUpdatePending;
+@property double lastHeadSurfaceResetUptime, lastBellySurfaceResetUptime;
+@property (strong) NSTextField *surfaceStatusLabel;
+@property (strong) SCNNode *headSurfaceNode;
+@property (strong) SCNNode *bellySurfaceNode;
+@property (strong) ROBSurfaceAccumulator *headSurfaceAccumulator;
+@property (strong) ROBSurfaceAccumulator *bellySurfaceAccumulator;
+@property (copy) NSArray *headSurfaceContext;
+@property (copy) NSArray *bellySurfaceContext;
+@property (copy) NSString *headSurfaceSummary;
+@property (copy) NSString *bellySurfaceSummary;
+@property NSUInteger surfaceGeneration;
+@property BOOL surfaceUpdatePending;
+@property double lastHeadSurfaceSubmission, lastBellySurfaceSubmission;
+@property double lastHeadSurfaceCapture, lastBellySurfaceCapture;
+@property double lastSurfaceResetUptime;
+@property (atomic) BOOL headUsesSurfaces;
+@property (atomic) BOOL bellyUsesSurfaces;
 @end
 
 @implementation ROBSCNViewController
@@ -124,10 +204,15 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         [self loadScene];
         self.ghostGestureEditor = [[ROBGhostGestureEditor alloc] initWithSceneView:scnView originalRobot:self.robotNode];
         self.cloudQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.live-rgb-cloud", DISPATCH_QUEUE_SERIAL);
+        self.cloudDisplayMailbox = [[ROBSCNDepthCloudDisplayMailbox alloc] init];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(receivedDepthCloudFrame:)
                                                      name:@"ROBDepthCloudFrame" object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(armTrialViewPrepared:)
                                                      name:@"ROBLeftArmTrialViewPrepared" object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resetAccumulatedSurfaces:)
+                                                     name:@"ROBWorkspaceDepthAlignmentDidChange" object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resetAccumulatedSurfaces:)
+                                                     name:ROBFixedHeadBodyMotionIdentity.changed object:nil];
         self.freshnessTimer = [NSTimer scheduledTimerWithTimeInterval:0.1
                                                                target:self
                                                              selector:@selector(refreshFreshness:)
@@ -144,9 +229,12 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)invalidate
 {
+    [self.cloudDisplayMailbox close];
     [self.ghostGestureEditor invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBDepthCloudFrame" object:nil];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBLeftArmTrialViewPrepared" object:nil];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBWorkspaceDepthAlignmentDidChange" object:nil];
+    [self resetAccumulatedSurfaces:nil];
     [self.freshnessTimer invalidate];
     self.freshnessTimer = nil;
     self.robo_scnView.playing = NO;
@@ -214,7 +302,14 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.floorStatusLabel = [self hudLabelWithSize:10 weight:NSFontWeightRegular];
     self.floorStatusLabel.maximumNumberOfLines = 4;
     self.floorStatusLabel.stringValue = @"FLAT FLOOR REFERENCE: waiting for sufficient visible floor";
-    NSStackView *stack = [NSStackView stackViewWithViews:@[self.statusLabel, self.detailLabel, self.irStatusLabel, self.cloudStatusLabel, self.floorStatusLabel]];
+    self.surfaceMode=[NSButton checkboxWithTitle:@"Accumulate surfaces" target:self action:@selector(surfaceModeChanged:)];
+    self.surfaceMode.toolTip=@"Build separate head/belly surface histories while the base stays still. Cyan cylinders show inferred can geometry.";
+    NSButton *reset=[NSButton buttonWithTitle:@"Reset scan" target:self action:@selector(resetAccumulatedSurfaces:)];
+    NSStackView *surfaceControls=[NSStackView stackViewWithViews:@[self.surfaceMode,reset]];surfaceControls.spacing=8;
+    self.surfaceStatusLabel=[self hudLabelWithSize:10 weight:NSFontWeightRegular];
+    self.surfaceStatusLabel.maximumNumberOfLines=3;
+    self.surfaceStatusLabel.stringValue=@"SURFACES: off · enable to build a stationary-base scan";
+    NSStackView *stack = [NSStackView stackViewWithViews:@[self.statusLabel, self.detailLabel, self.irStatusLabel, self.cloudStatusLabel, self.floorStatusLabel, surfaceControls, self.surfaceStatusLabel]];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 3;
@@ -301,6 +396,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.liveBellyRGBCloudNode = [SCNNode node];
     self.liveBellyRGBCloudNode.name = @"Live Belly RGB point cloud";
     [scene.rootNode addChildNode:self.liveBellyRGBCloudNode];
+    self.headSurfaceNode=[SCNNode node];self.headSurfaceNode.name=@"HEAD surface history · unverified registration";
+    self.bellySurfaceNode=[SCNNode node];self.bellySurfaceNode.name=@"BELLY surface history · unverified registration";
+    [scene.rootNode addChildNode:self.headSurfaceNode];[scene.rootNode addChildNode:self.bellySurfaceNode];
 
     // All three products consume the same scan-informed mesh hierarchy.
     self.leftTreadNode = [self.robotNode childNodeWithName:@"Left Tri-Wheel Tread" recursively:YES];
@@ -661,7 +759,172 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     ROBHeadCameraPoseEstimator *pose = [ROBHeadCameraPoseEstimator estimateDisplayPanRadians:pan * M_PI / 180.0
         lowerTarget:serial.commandedLowerNeckTiltTarget upperTarget:serial.commandedUpperNeckTiltTarget
         known:known];
+    [self.ghostGestureEditor setRawHeadPanTarget:serial.commandedNeckPanTarget lowerTarget:serial.commandedLowerNeckTiltTarget
+        upperTarget:serial.commandedUpperNeckTiltTarget known:known];
     [self.ghostGestureEditor setHeadCommandEstimate:pose];
+}
+
+- (void)surfaceModeChanged:(id)sender
+{
+    [self resetAccumulatedSurfaces:nil];
+}
+
+- (void)resetAccumulatedSurfaces:(id)sender
+{
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self resetAccumulatedSurfaces:sender]; });return;
+    }
+    self.lastSurfaceResetUptime=NSProcessInfo.processInfo.systemUptime;
+    [self resetAccumulatedSurfaceForBelly:NO];
+    [self resetAccumulatedSurfaceForBelly:YES];
+    [self refreshAccumulatedSurfaceStatus];
+}
+
+- (void)resetAccumulatedSurfaceForBelly:(BOOL)belly
+{
+    self.surfaceGeneration++;
+    if (belly) {
+        self.bellySurfaceGeneration++;self.bellySurfaceUpdatePending=NO;
+        self.bellyUsesSurfaces=NO;self.bellySurfaceAccumulator=nil;self.bellySurfaceContext=nil;
+        self.bellySurfaceSummary=nil;self.lastBellySurfaceCapture=0;self.lastBellySurfaceSubmission=0;
+        self.lastBellySurfaceResetUptime=NSProcessInfo.processInfo.systemUptime;
+    } else {
+        self.headSurfaceGeneration++;self.headSurfaceUpdatePending=NO;
+        self.headUsesSurfaces=NO;self.headSurfaceAccumulator=nil;self.headSurfaceContext=nil;
+        self.headSurfaceSummary=nil;self.lastHeadSurfaceCapture=0;self.lastHeadSurfaceSubmission=0;
+        self.lastHeadSurfaceResetUptime=NSProcessInfo.processInfo.systemUptime;
+    }
+    self.surfaceUpdatePending=self.headSurfaceUpdatePending || self.bellySurfaceUpdatePending;
+    SCNNode *node=belly ? self.bellySurfaceNode : self.headSurfaceNode;
+    for (SCNNode *child in node.childNodes.copy) [child removeFromParentNode];
+}
+
+// Called on the main queue before any pending-job or display-rate gate. A
+// calibration change can preserve K while changing every depth coordinate.
+- (void)updateDepthCloudStream:(ROBDepthCloudFrame *)frame
+{
+    BOOL belly=frame.isBelly;
+    NSString *stream=frame.captureStreamID ?: @"unavailable";
+    NSString *previous=belly ? self.bellyCloudStreamID : self.headCloudStreamID;
+    if ([previous isEqual:stream]) return;
+    if (belly) {self.bellyCloudStreamID=stream;self.bellyCloudSourceEpoch++;}
+    else {self.headCloudStreamID=stream;self.headCloudSourceEpoch++;}
+    if (!previous) return;
+    [self resetAccumulatedSurfaceForBelly:belly];
+    if (belly) {
+        self.bellyCloudUpdatePending=NO;self.lastBellyCloudSubmission=0;
+        self.bellyFloorCloudContext=nil;self.bellyFloorAlignmentEstablished=NO;
+        self.bellyFloorHoldingAcceptedFrame=NO;self.lastBellyCloudUptime=0;self.bellyCloudDisplayUntil=0;
+        self.bellyFloorSummary=@"BELLY: waiting for the current capture stream";
+    } else {
+        self.cloudUpdatePending=NO;self.lastHeadCloudSubmission=0;
+        self.headFloorCloudContext=nil;self.headFloorAlignmentEstablished=NO;
+        self.headFloorHoldingAcceptedFrame=NO;self.headCloudHasCalibratedIntrinsics=NO;self.lastHeadCloudUptime=0;
+        self.headFloorSummary=@"HEAD: waiting for the current capture stream";
+    }
+    SCNNode *node=belly ? self.liveBellyRGBCloudNode : self.liveRGBCloudNode;
+    node.hidden=YES;node.geometry=nil;
+    [self refreshAccumulatedSurfaceStatus];
+}
+
+- (BOOL)depthCloudSourceIsCurrentForBelly:(BOOL)belly streamID:(NSString *)streamID epoch:(NSUInteger)epoch
+{
+    return epoch==(belly ? self.bellyCloudSourceEpoch : self.headCloudSourceEpoch) &&
+        [streamID isEqual:(belly ? self.bellyCloudStreamID : self.headCloudStreamID)];
+}
+
+- (void)refreshAccumulatedSurfaceStatus
+{
+    if (self.surfaceMode.state != NSControlStateValueOn) {
+        self.surfaceStatusLabel.stringValue=@"SURFACES: off · enable to build a stationary-base scan";return;
+    }
+    double now=NSProcessInfo.processInfo.systemUptime;
+    NSString *head=self.headSurfaceSummary ?: @"waiting for calibrated depth and a usable camera pose";
+    NSString *belly=self.bellySurfaceSummary ?: @"waiting for calibrated depth and a usable camera pose";
+    self.surfaceStatusLabel.stringValue=[NSString stringWithFormat:@"SURFACE HISTORY · provisional, separate cameras · cyan = inferred\nHEAD %@%@\nBELLY %@%@",
+        head,self.lastHeadSurfaceCapture>0 ? [NSString stringWithFormat:@" · %.1f s old",MAX(0,now-self.lastHeadSurfaceCapture)] : @"",
+        belly,self.lastBellySurfaceCapture>0 ? [NSString stringWithFormat:@" · %.1f s old",MAX(0,now-self.lastBellySurfaceCapture)] : @""];
+}
+
+- (void)offerAccumulatedSurfaceSamples:(NSData *)samples frame:(ROBDepthCloudFrame *)frame
+                                 view:(ROBSurfaceDepthView)view robotTransform:(SCNMatrix4)robot projectionReady:(BOOL)projectionReady
+                   projectionIdentity:(NSString *)projectionIdentity
+{
+    if (self.surfaceMode.state != NSControlStateValueOn) return;
+    BOOL belly=frame.isBelly;
+    NSString *streamID=[(frame.captureStreamID ?: @"unavailable") copy];
+    NSUInteger sourceEpoch=belly ? self.bellyCloudSourceEpoch : self.headCloudSourceEpoch;
+    if (![self depthCloudSourceIsCurrentForBelly:belly streamID:streamID epoch:sourceEpoch]) return;
+    NSString *bodyIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity;
+    NSArray *context=@[[NSValue valueWithSCNMatrix4:robot],frame.captureStreamID ?: @"unavailable",
+        @[@(frame.width),@(frame.height),@(view.fx),@(view.fy),@(view.cx),@(view.cy)],
+        projectionIdentity ?: @"unavailable",bodyIdentity];
+    NSArray *previous=belly ? self.bellySurfaceContext : self.headSurfaceContext;
+    // A rejected/occluded floor cannot preserve a history from another stream
+    // or projection. Invalidate before any ordinary frame admission return.
+    if (previous && ![previous isEqual:context]) {
+        BOOL sharedContextChanged=previous.count<5 || ![previous[0] isEqual:context[0]] ||
+            ![previous[3] isEqual:context[3]] || ![previous[4] isEqual:context[4]];
+        if (sharedContextChanged) [self resetAccumulatedSurfaces:nil];
+        else [self resetAccumulatedSurfaceForBelly:belly];
+    }
+    BOOL armMotion=(ROBLeftArmTrial.shared.isRunning && !ROBLeftArmTrial.shared.isNeckOnlyInspection) || ROBArmRoutineCoordinator.shared.isRunning;
+    NSString *blocked=nil;
+    if (self.treadCommandsAreActive || armMotion) blocked=@"paused during base/arm motion";
+    else if (!frame.hasCalibratedIntrinsics || !frame.captureStreamID.length || !frame.sequence) blocked=@"waiting for calibrated capture provenance";
+    else if (!projectionReady) blocked=@"waiting for an explicit camera pose or fresh floor alignment; previous scan retained";
+    else if (frame.capturedUptime<MAX(self.lastSurfaceResetUptime,belly ? self.lastBellySurfaceResetUptime : self.lastHeadSurfaceResetUptime)) blocked=@"waiting for a capture after Reset";
+    if (blocked) {
+        if (belly) self.bellySurfaceSummary=blocked;else self.headSurfaceSummary=blocked;
+        [self refreshAccumulatedSurfaceStatus];return;
+    }
+    double now=NSProcessInfo.processInfo.systemUptime;
+    if ((belly ? self.bellySurfaceUpdatePending : self.headSurfaceUpdatePending) || now-(belly ? self.lastBellySurfaceSubmission : self.lastHeadSurfaceSubmission)<.25) return;
+    if (belly) {
+        self.lastBellySurfaceSubmission=now;self.bellySurfaceContext=context;
+        if (!self.bellySurfaceAccumulator) self.bellySurfaceAccumulator=[ROBSurfaceAccumulator new];
+    } else {
+        self.lastHeadSurfaceSubmission=now;self.headSurfaceContext=context;
+        if (!self.headSurfaceAccumulator) self.headSurfaceAccumulator=[ROBSurfaceAccumulator new];
+    }
+    if (belly) self.bellySurfaceUpdatePending=YES;else self.headSurfaceUpdatePending=YES;
+    self.surfaceUpdatePending=YES;
+    NSUInteger generation=belly ? self.bellySurfaceGeneration : self.headSurfaceGeneration;
+    ROBSurfaceAccumulator *accumulator=belly ? self.bellySurfaceAccumulator : self.headSurfaceAccumulator;
+    dispatch_async(self.cloudQueue, ^{
+        NSString *summary=nil;
+        SCNNode *result=[accumulator accumulate:samples view:view capturedAt:frame.capturedUptime sequence:frame.sequence
+            rgbPixelBuffer:frame.rgbPixelBuffer summary:&summary];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != (belly ? self.bellySurfaceGeneration : self.headSurfaceGeneration) ||
+                ![self depthCloudSourceIsCurrentForBelly:belly streamID:streamID epoch:sourceEpoch]) return;
+            if (belly) self.bellySurfaceUpdatePending=NO;else self.headSurfaceUpdatePending=NO;
+            self.surfaceUpdatePending=self.headSurfaceUpdatePending || self.bellySurfaceUpdatePending;
+            BOOL armMotionNow=(ROBLeftArmTrial.shared.isRunning && !ROBLeftArmTrial.shared.isNeckOnlyInspection) || ROBArmRoutineCoordinator.shared.isRunning;
+            if (self.surfaceMode.state != NSControlStateValueOn || self.robo_scnView.scene == nil ||
+                !SCNMatrix4EqualToMatrix4(robot,self.robotNode.presentationNode.worldTransform) || self.treadCommandsAreActive || armMotionNow ||
+                ![projectionIdentity isEqual:self.ghostGestureEditor.depthProjectionIdentity] ||
+                ![bodyIdentity isEqual:ROBFixedHeadBodyMotionIdentity.currentIdentity]) return;
+            SCNNode *root=belly ? self.bellySurfaceNode : self.headSurfaceNode;
+            if (result) {
+                result.transform=SCNMatrix4Scale(robot,ROBScanVisualModel.presentationScale,ROBScanVisualModel.presentationScale,ROBScanVisualModel.presentationScale);
+                [SCNTransaction begin];[SCNTransaction setDisableActions:YES];
+                SCNNode *previous=root.childNodes.firstObject;
+                if (previous) [root replaceChildNode:previous with:result];else [root addChildNode:result];
+                [SCNTransaction commit];
+                if (belly) self.lastBellySurfaceCapture=frame.capturedUptime;else self.lastHeadSurfaceCapture=frame.capturedUptime;
+            }
+            if (belly) self.bellySurfaceSummary=summary;else self.headSurfaceSummary=summary;
+            BOOL hasSurfaces=root.childNodes.firstObject.childNodes.count>0;
+            if (belly) self.bellyUsesSurfaces=hasSurfaces;
+            else self.headUsesSurfaces=hasSurfaces;
+            if (hasSurfaces) {
+                if (belly) self.liveBellyRGBCloudNode.hidden=YES;
+                else self.liveRGBCloudNode.hidden=YES;
+            }
+            [self refreshAccumulatedSurfaceStatus];
+        });
+    });
 }
 
 - (void)refreshFloorStatus
@@ -669,7 +932,12 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     NSString *head = self.headFloorSummary ?: @"HEAD: acquiring floor";
     NSString *belly = self.bellyFloorSummary ?: @"BELLY: acquiring floor";
     double now = NSProcessInfo.processInfo.systemUptime;
-    if (self.liveRGBCloudNode.hidden) {
+    BOOL headSurfaces=self.surfaceMode.state == NSControlStateValueOn && self.headSurfaceNode.childNodes.firstObject.childNodes.count>0;
+    BOOL bellySurfaces=self.surfaceMode.state == NSControlStateValueOn && self.bellySurfaceNode.childNodes.firstObject.childNodes.count>0;
+    if (headSurfaces) {
+        head=[head stringByAppendingString:@" · DISPLAYED AS SURFACES"];
+        self.cloudStatusLabel.stringValue=@"HEAD DEPTH: accumulated surface history · cyan geometry is inferred";
+    } else if (self.liveRGBCloudNode.hidden) {
         head = [head stringByAppendingString:@" · CLOUD HIDDEN"];
         self.cloudStatusLabel.stringValue = @"HEAD DEPTH HIDDEN: waiting for a fresh settled view";
     }
@@ -680,12 +948,14 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             MAX(0, now-self.lastHeadCloudUptime)];
     } else {
         self.cloudStatusLabel.stringValue = [NSString stringWithFormat:
-            @"HEAD DEPTH: live captured view · %@ intrinsics · URDF mount prior",
-            self.headCloudHasCalibratedIntrinsics ? @"calibrated" : @"estimated"];
+            @"HEAD DEPTH: live captured view · %@ intrinsics · %@",
+            self.headCloudHasCalibratedIntrinsics ? @"calibrated" : @"estimated",self.ghostGestureEditor.headDisplayPoseDescription];
     }
-    if (self.liveBellyRGBCloudNode.hidden) belly = [belly stringByAppendingString:@" · CLOUD HIDDEN"];
+    if (bellySurfaces) belly=[belly stringByAppendingString:@" · DISPLAYED AS SURFACES"];
+    else if (self.liveBellyRGBCloudNode.hidden) belly = [belly stringByAppendingString:@" · CLOUD HIDDEN"];
     else if (self.bellyFloorHoldingAcceptedFrame) belly = [belly stringByAppendingFormat:@" · last aligned frame %.0f ms old", (now-self.lastBellyCloudUptime)*1000];
     self.floorStatusLabel.stringValue = [NSString stringWithFormat:@"FLAT FLOOR REFERENCE · %@\n%@", head, belly];
+    [self refreshAccumulatedSurfaceStatus];
 }
 
 - (void)armTrialViewPrepared:(NSNotification *)notification
@@ -699,22 +969,52 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)receivedDepthCloudFrame:(NSNotification *)notification
 {
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [self receivedDepthCloudFrame:notification]; });
-        return;
-    }
     ROBDepthCloudFrame *frame = [notification.object isKindOfClass:ROBDepthCloudFrame.class] ? notification.object : nil;
+    if (frame == nil || ![self.cloudDisplayMailbox offerFrame:frame]) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (ROBDepthCloudFrame *latest in [self.cloudDisplayMailbox takeLatestFrames]) {
+            [self displayDepthCloudFrame:latest];
+        }
+    });
+}
+
+// The mailbox hands off only the latest role frame. All existing freshness,
+// pending-job, pose and projection admission remains on the main thread.
+- (void)displayDepthCloudFrame:(ROBDepthCloudFrame *)frame
+{
     if (frame == nil || self.robo_scnView.scene == nil) return;
     BOOL belly = frame.isBelly;
+    [self updateDepthCloudStream:frame];
     if (belly ? self.bellyCloudUpdatePending : self.cloudUpdatePending) return;
     double now = NSProcessInfo.processInfo.systemUptime;
     // Keep display live with one pending background job per camera. Reduce
-    // publication during physical arm operations; capture/watchdogs are separate.
-    BOOL armMotion = (ROBLeftArmTrial.shared.isRunning && !ROBLeftArmTrial.shared.isNeckOnlyInspection) || ROBArmRoutineCoordinator.shared.isRunning;
-    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (armMotion ? 0.5 : 0.125)) return;
+    // publication during all trials, including neck scans; capture/watchdogs are separate.
+    BOOL trialBusy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning;
+    BOOL surfaceDisplay=belly ? self.bellyUsesSurfaces : self.headUsesSurfaces;
+    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (trialBusy ? 0.5 : (surfaceDisplay ? 0.25 : 0.125))) return;
     if (belly) self.lastBellyCloudSubmission = now; else self.lastHeadCloudSubmission = now;
     [self refreshHeadModelEstimate];
     NSArray<NSNumber *> *affine = [self.ghostGestureEditor depthCloudCameraTransform:belly];
+    NSString *projectionIdentity = self.ghostGestureEditor.depthProjectionIdentity;
+    BOOL explicitCameraPose = [self.ghostGestureEditor depthCloudUsesExplicitCameraPose:belly];
+    if (!belly && self.headFloorCloudContext) {
+        double f = (double)frame.width / (2.0 * tan(69.0 * M_PI / 360.0));
+        NSArray *k = @[@(frame.hasCalibratedIntrinsics ? frame.cameraFX : f),
+            @(frame.hasCalibratedIntrinsics ? frame.cameraFY : f),
+            @(frame.hasCalibratedIntrinsics ? frame.cameraCX : (frame.width-1)/2.0),
+            @(frame.hasCalibratedIntrinsics ? frame.cameraCY : (frame.height-1)/2.0)];
+        BOOL changed = self.headFloorCloudContext.count<6 ||
+            ![self.headFloorCloudContext[2] isEqual:k] || ![self.headFloorCloudContext[4] isEqual:projectionIdentity] ||
+            ![self.headFloorCloudContext[5] isEqual:self.headCloudStreamID];
+        if (!changed && affine.count==12) {
+            double candidate[12];for(int i=0;i<12;i++) candidate[i]=affine[i].doubleValue;
+            changed = ![self.headFloorCloudContext[3] isEqual:[NSData dataWithBytes:candidate length:sizeof(candidate)]];
+        }
+        if (changed) {
+            self.liveRGBCloudNode.geometry=nil;self.liveRGBCloudNode.hidden=YES;
+            self.headFloorAlignmentEstablished=NO;self.headFloorHoldingAcceptedFrame=NO;self.headFloorCloudContext=nil;
+        }
+    }
     ROBSerialBox *serial = self.serialBox;
     BOOL settled = serial.isNeckCommandStateKnown && frame.capturedUptime >= serial.neckCommandReadyAtUptime;
     if (affine.count != 12 || now - frame.capturedUptime > 0.7 || (!belly && !settled)) {
@@ -732,7 +1032,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     NSArray<NSNumber *> *targets = @[@(serial.commandedLowerNeckTiltTarget), @(serial.commandedNeckPanTarget), @(serial.commandedUpperNeckTiltTarget)];
     if (belly) self.bellyCloudUpdatePending = YES; else self.cloudUpdatePending = YES;
     SCNMatrix4 robot = self.robotNode.presentationNode.worldTransform;
-    dispatch_async(self.cloudQueue, ^{ [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets]; });
+    NSString *streamID=[(frame.captureStreamID ?: @"unavailable") copy];
+    NSUInteger sourceEpoch=belly ? self.bellyCloudSourceEpoch : self.headCloudSourceEpoch;
+    dispatch_async(self.cloudQueue, ^{ [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets projectionIdentity:projectionIdentity explicitCameraPose:explicitCameraPose sourceStreamID:streamID sourceEpoch:sourceEpoch]; });
 }
 
 - (SCNGeometry *)pointGeometry:(NSArray<NSValue *> *)points colors:(NSArray<NSNumber *> *)colors pointSize:(CGFloat)size
@@ -796,18 +1098,27 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 - (void)refreshFloorCloudVisibilityAtUptime:(NSTimeInterval)now
 {
     SCNMatrix4 robot = self.robotNode.presentationNode.worldTransform;
+    NSArray *surfaceContext=self.headSurfaceContext ?: self.bellySurfaceContext;
+    if (surfaceContext && (self.treadCommandsAreActive ||
+        !SCNMatrix4EqualToMatrix4([surfaceContext[0] SCNMatrix4Value],robot) || surfaceContext.count<5 ||
+        ![surfaceContext[3] isEqual:self.ghostGestureEditor.depthProjectionIdentity] ||
+        ![surfaceContext[4] isEqual:ROBFixedHeadBodyMotionIdentity.currentIdentity])) [self resetAccumulatedSurfaces:nil];
     ROBSerialBox *serial = self.serialBox;
     NSArray *neck = @[@(serial.commandedLowerNeckTiltTarget), @(serial.commandedNeckPanTarget),
         @(serial.commandedUpperNeckTiltTarget), @(serial.neckCommandReadyAtUptime)];
     BOOL headBaseChanged = self.headFloorCloudContext &&
         !SCNMatrix4EqualToMatrix4([self.headFloorCloudContext[0] SCNMatrix4Value], robot);
     BOOL headNeckChanged = self.headFloorCloudContext && ![self.headFloorCloudContext[1] isEqual:neck];
+    BOOL headProjectionChanged = self.headFloorCloudContext &&
+        (self.headFloorCloudContext.count<6 || ![self.headFloorCloudContext[4] isEqual:self.ghostGestureEditor.depthProjectionIdentity] ||
+         ![self.headFloorCloudContext[5] isEqual:self.headCloudStreamID]);
     BOOL bellyPoseChanged = self.bellyFloorCloudContext &&
         !SCNMatrix4EqualToMatrix4([self.bellyFloorCloudContext[0] SCNMatrix4Value], robot);
-    if (headBaseChanged || self.liveRGBCloudNode.geometry == nil) {
+    if (headBaseChanged || headProjectionChanged || self.liveRGBCloudNode.geometry == nil) {
         self.liveRGBCloudNode.hidden = YES;
         self.liveRGBCloudNode.geometry = nil;
         self.headFloorHoldingAcceptedFrame = NO;
+        if (headProjectionChanged) {self.headFloorAlignmentEstablished=NO;self.headFloorCloudContext=nil;}
     } else if (headNeckChanged || !serial.isNeckCommandStateKnown || serial.neckCommandReadyAtUptime > now ||
                now-self.lastHeadCloudUptime > 0.7) {
         self.headFloorHoldingAcceptedFrame = self.liveRGBCloudNode.geometry != nil;
@@ -817,6 +1128,10 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         self.liveBellyRGBCloudNode.geometry = nil;
         self.bellyCloudDisplayUntil = 0;
         self.bellyFloorHoldingAcceptedFrame = NO;
+    }
+    if (self.surfaceMode.state == NSControlStateValueOn) {
+        if (self.headSurfaceNode.childNodes.firstObject.childNodes.count) self.liveRGBCloudNode.hidden=YES;
+        if (self.bellySurfaceNode.childNodes.firstObject.childNodes.count) self.liveBellyRGBCloudNode.hidden=YES;
     }
 }
 
@@ -832,20 +1147,19 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 }
 
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robotTransform
-          cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets
+          cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose sourceStreamID:(NSString *)sourceStreamID sourceEpoch:(NSUInteger)sourceEpoch
 {
+    BOOL isBelly=frame.isBelly;
     if (frame.width <= 0 || frame.height <= 0 || frame.width > 8192 || frame.height > 8192 ||
         frame.millimetersLittleEndian.length < (NSUInteger)frame.width * (NSUInteger)frame.height * 2) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (frame.isBelly) { self.bellyCloudUpdatePending = NO; self.liveBellyRGBCloudNode.hidden = YES; self.liveBellyRGBCloudNode.geometry = nil; }
+            if (![self depthCloudSourceIsCurrentForBelly:isBelly streamID:sourceStreamID epoch:sourceEpoch]) return;
+            if (isBelly) { self.bellyCloudUpdatePending = NO; self.liveBellyRGBCloudNode.hidden = YES; self.liveBellyRGBCloudNode.geometry = nil; }
             else { self.cloudUpdatePending = NO; [self retainHeadCloudForDisplayAtUptime:NSProcessInfo.processInfo.systemUptime]; }
         });
         return;
     }
-    BOOL isBelly = NO;
-    if ([frame respondsToSelector:@selector(isBelly)]) {
-        isBelly = frame.isBelly;
-    }
+    BOOL renderRaw=!(isBelly ? self.bellyUsesSurfaces : self.headUsesSurfaces);
     
     const uint8_t *bytes = frame.millimetersLittleEndian.bytes;
     NSInteger width = frame.width, height = frame.height;
@@ -918,11 +1232,25 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     floorOptions.maximumRMSMeters = 0.010;
     ROBDepthFloorModel floor = ROBDepthFloorFit(floorCandidates.bytes,
         floorCandidates.length / sizeof(ROBDepthFloorPoint), floorOptions);
+    NSMutableData *surfaceSamples=[NSMutableData dataWithCapacity:capacity*sizeof(ROBSurfaceSample)];
+    ROBSurfaceDepthView surfaceView={(int)width,(int)height,bytes,fx,fy,cx,cy,{0}};
+    // An explicit pose already places tabletop-only observations in the same
+    // display frame. It does not need an unrelated floor patch in every view.
+    // Legacy projections still require the fresh rigid floor correction.
+    if (explicitCameraPose || floor.valid) for (int row=0;row<3;row++) for (int column=0;column<4;column++) {
+        double value=explicitCameraPose ? camera.m[row*4+column]/presentationScale : (column==3 ? floor.correction[row*4+3] : 0);
+        if (!explicitCameraPose) for (int k=0;k<3;k++) value+=floor.correction[row*4+k]*camera.m[k*4+column]/presentationScale;
+        surfaceView.cameraToMap[row*4+column]=value;
+    }
     const ROBDepthFloorPoint *metric = metricPoints.bytes;
     for (NSUInteger index = 0; index < metricPoints.length / sizeof(ROBDepthFloorPoint); index++) {
-        // Keep depth noise and object shapes: align the whole cloud rigidly,
-        // rather than snapping near-floor objects or every point to y=0.
-        ROBDepthFloorPoint aligned = ROBDepthFloorRectify(floor, metric[index], false);
+        // An explicit camera pose already defines the display frame for its mesh
+        // and raw rays. Report floor residuals without applying another pose.
+        // Legacy previews still align the whole cloud rigidly, preserving shape.
+        ROBDepthFloorPoint aligned = explicitCameraPose ? metric[index] : ROBDepthFloorRectify(floor, metric[index], false);
+        ROBSurfaceSample sample={aligned,colors[index].unsignedIntValue};
+        [surfaceSamples appendBytes:&sample length:sizeof(sample)];
+        if (!renderRaw) continue;
         SCNVector3 local = SCNVector3Make(aligned.x * presentationScale, aligned.y * presentationScale, aligned.z * presentationScale);
         SCNVector3 world = SCNVector3Make(
             robotTransform.m11 * local.x + robotTransform.m21 * local.y + robotTransform.m31 * local.z + robotTransform.m41,
@@ -930,7 +1258,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             robotTransform.m13 * local.x + robotTransform.m23 * local.y + robotTransform.m33 * local.z + robotTransform.m43);
         [points addObject:[NSValue valueWithSCNVector3:world]];
     }
-    NSString *floorSummary = floor.valid ? [NSString stringWithFormat:@"aligned · %.0f%% support · %.1f mm RMS · %.1f° correction",
+    NSString *floorSummary = floor.valid ? [NSString stringWithFormat:explicitCameraPose ? @"raw depth · %.0f%% floor support · %.1f mm RMS · %.1f° residual (not corrected)" : @"aligned · %.0f%% support · %.1f mm RMS · %.1f° correction",
         floor.inlierFraction * 100, floor.rmsMeters * 1000, floor.tiltRadians * 180 / M_PI]
         : [NSString stringWithFormat:@"fit rejected · %s · candidates %lu/%lu/%lu (image/height/range)",
             ROBDepthFloorRejectionName(floor.rejection), (unsigned long)imageCandidates,
@@ -940,13 +1268,17 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             floor.inlierCount, floor.spanXMeters, floor.spanZMeters, floor.minorRMSMeters,
             floor.coveredCells, floor.rmsMeters * 1000];
     }
-    SCNGeometry *geometry = [self pointGeometry:points colors:colors pointSize:2];
+    SCNGeometry *geometry = renderRaw ? [self pointGeometry:points colors:colors pointSize:2] : nil;
     dispatch_async(dispatch_get_main_queue(), ^{
+        // Do not let a prior stream clear a new stream's pending flag or
+        // restore its raw/floor/surface history after a calibration restart.
+        if (![self depthCloudSourceIsCurrentForBelly:isBelly streamID:sourceStreamID epoch:sourceEpoch]) return;
         NSString *displaySummary = floorSummary;
         double now = NSProcessInfo.processInfo.systemUptime;
         [self refreshFloorCloudVisibilityAtUptime:now];
         SCNNode *node = isBelly ? self.liveBellyRGBCloudNode : self.liveRGBCloudNode;
         if (isBelly) self.bellyCloudUpdatePending = NO; else self.cloudUpdatePending = NO;
+        if (![projectionIdentity isEqual:self.ghostGestureEditor.depthProjectionIdentity]) return;
         ROBSerialBox *serial = self.serialBox;
         BOOL sameNeck = serial.isNeckCommandStateKnown &&
             serial.commandedLowerNeckTiltTarget == targets[0].integerValue &&
@@ -963,22 +1295,29 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             else [self retainHeadCloudForDisplayAtUptime:now];
             return;
         }
-        if (!isBelly && geometry == nil) {
+        if (!isBelly && renderRaw && geometry == nil) {
             self.headFloorSummary = [@"HEAD: " stringByAppendingString:displaySummary];
             [self retainHeadCloudForDisplayAtUptime:now];
             return;
         }
         NSArray *context = @[[NSValue valueWithSCNMatrix4:robotTransform],
             isBelly ? @[] : [targets arrayByAddingObject:@(serial.neckCommandReadyAtUptime)],
-            @[@(fx), @(fy), @(cx), @(cy)], [NSData dataWithBytes:camera.m length:sizeof(camera.m)]];
+            @[@(fx), @(fy), @(cx), @(cy)], [NSData dataWithBytes:camera.m length:sizeof(camera.m)],projectionIdentity,sourceStreamID];
         NSArray *previous = isBelly ? self.bellyFloorCloudContext : self.headFloorCloudContext;
+        BOOL changedProjection = !isBelly && previous &&
+            (previous.count != context.count || ![previous[2] isEqual:context[2]] || ![previous[3] isEqual:context[3]] ||
+             ![previous[4] isEqual:context[4]] || ![previous[5] isEqual:context[5]]);
+        if (changedProjection) {
+            node.geometry = nil; node.hidden = YES;
+            self.headFloorAlignmentEstablished = NO; self.headFloorHoldingAcceptedFrame = NO;
+        }
         if (isBelly && ![previous isEqual:context]) { node.geometry = nil; node.hidden = YES; }
         BOOL alignedBefore = isBelly ? self.bellyFloorAlignmentEstablished : self.headFloorAlignmentEstablished;
         double acceptedAt = isBelly ? self.lastBellyCloudUptime : self.lastHeadCloudUptime;
-        BOOL hold = !floor.valid && alignedBefore && node.geometry != nil &&
+        BOOL hold = !explicitCameraPose && !floor.valid && alignedBefore && node.geometry != nil &&
             (!isBelly || (floor.rejection == ROBDepthFloorExcessNoise && now-acceptedAt <= ROBFloorNoiseHoldInterval));
         double displayUntil = 0;
-        if (floor.valid || !alignedBefore) {
+        if (explicitCameraPose || floor.valid || !alignedBefore) {
             node.geometry = geometry;
             node.hidden = NO;
             if (isBelly) displayUntil = frame.capturedUptime + 0.7;
@@ -1000,15 +1339,20 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         }
         if (isBelly) {
             self.bellyFloorCloudContext = context;
-            self.bellyFloorAlignmentEstablished = alignedBefore || floor.valid;
+            self.bellyFloorAlignmentEstablished = !explicitCameraPose && (alignedBefore || floor.valid);
             self.bellyFloorHoldingAcceptedFrame = hold;
             self.bellyCloudDisplayUntil = displayUntil;
             self.bellyFloorSummary = [@"BELLY: " stringByAppendingString:displaySummary];
         } else {
-            if (floor.valid || !alignedBefore) self.headFloorCloudContext = context;
-            self.headFloorAlignmentEstablished = alignedBefore || floor.valid;
+            if (explicitCameraPose || floor.valid || !alignedBefore) self.headFloorCloudContext = context;
+            self.headFloorAlignmentEstablished = !explicitCameraPose && (alignedBefore || floor.valid);
             self.headFloorHoldingAcceptedFrame = hold;
             self.headFloorSummary = [@"HEAD: " stringByAppendingString:displaySummary];
+        }
+        [self offerAccumulatedSurfaceSamples:surfaceSamples frame:frame view:surfaceView robotTransform:robotTransform projectionReady:(explicitCameraPose || floor.valid) projectionIdentity:projectionIdentity];
+        if (self.surfaceMode.state == NSControlStateValueOn) {
+            SCNNode *surface=isBelly ? self.bellySurfaceNode : self.headSurfaceNode;
+            if (surface.childNodes.firstObject.childNodes.count) node.hidden=YES;
         }
         [self refreshFloorStatus];
     });

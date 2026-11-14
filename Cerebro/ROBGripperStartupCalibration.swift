@@ -148,6 +148,10 @@ extension Notification.Name {
 
     private func start(borrowing owner: UUID?, manualRetry: Bool = false) {
         guard !isRunning, gateway.isReady() else { return }
+        guard !ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload else {
+            update("Startup gripper setup deferred: a possible held object must be cleared before EMPTY-jaw initialization")
+            return
+        }
         let nextGeneration = currentGeneration
         guard nextGeneration > 0, manualRetry || !attemptedGenerations.contains(nextGeneration) else {
             update("Gripper setup already attempted in this connection; inspect the jaws before retrying")
@@ -273,6 +277,9 @@ extension Notification.Name {
     private func check(parked: Bool = true) throws {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
+        guard !ROBControllerArmApproval.shared.standingCanCampaignMayHoldPayload else {
+            throw ROBArmRoutineError.blocked("Possible payload retained across restart; no EMPTY-jaw setup command permitted")
+        }
         guard gateway.isReady(), currentGeneration == generation, generation > 0 else {
             throw ROBArmRoutineError.blocked("Amber connection changed; gripper setup cancelled")
         }

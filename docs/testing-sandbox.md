@@ -11,6 +11,11 @@ The sandbox catalog contains these independent test items:
 | Test | Actions |
 | --- | --- |
 | Recycle can | Run the physical test, search with the neck camera, scan workspace geometry, preview the grasp |
+| Recycle can · right arm | Recycle a configured batch of 1–8 empty cans with physical right/L10, separate reach tuning and visual grasp checks |
+| Camera-to-arm registration | Capture, fit and independently validate one fixed head/body view |
+| Neck / QR calibration | Record fixed targets at held neck poses and inspect calibration evidence |
+| Belly camera calibration | Capture five native RGB-D frames of B01/B02 and report target geometry, pixel alignment and raw depth |
+| Right-arm calibration step | Passively capture the registered view, review one small empty-arm outward step, run and hold |
 | Depth alignment | Adjust head-depth placement toward ROB and the face-camera downward mounting angle, then inspect the live cloud |
 | Estimated calibration trial | Build a small estimated empty-arm ghost movement, inspect it, run the reviewed test and hold for observation |
 | Grip and return | Complete the supervised left-arm object handoff |
@@ -21,6 +26,74 @@ The sandbox catalog contains these independent test items:
 | Spoken feedback | Test the spoken warning without arm movement |
 
 Status is shared across the sandbox. The scrollable status area shows the complete pending operation scope; the spoken prompt remains **“Can I move my arms?”**. Stop + hold stays available regardless of the selected test.
+
+## Fixed-head camera capture
+
+**Camera-to-arm registration → Open fixed-head calibration** offers an optional
+**Full camera height (640 × 480)** checkbox; the default is **640 × 400**. Use it
+to seek one held view containing both rigid base/torso surfaces and a complete
+can. A taller image does not guarantee that body occlusion, depth coverage or
+registration will pass. Capture still requires the exact requested dimensions
+and observed stereo mode, fresh advancing source frames after settling, unchanged
+head/body and camera identity, and the same independent fitter/validation gates.
+
+The FACE worker now uses explicit CPU `ImageManip` undistortion because a Camera
+request flag alone changed metadata without the expected pixel warp. The
+same-exposure pixel check passed, but a **+28.6–31.8 mm** local floor optical-Z
+residual remains and source age was approximately **260 ms**. The belly processing
+path is unchanged pending independent proof. This camera correction supplies no
+depth scale, arm registration or grasp-success claim. See the measured limits in
+[fixed-head commissioning](fixed-head-pickup-commissioning.md#rgb-raster-check-25-october-2026).
+
+## Passive belly calibration
+
+Place the B01 and B02 sheets flat on the floor with their 120 mm black squares
+fully visible, centers 400 mm apart and TOP arrows pointing away from ROB.
+Choose **Belly camera calibration → Open belly QR calibration… → Capture 5 belly frames**.
+The capture temporarily requests native 1280 × 800 RGB and aligned depth,
+waits five seconds for exposure to settle, saves five advancing source frames,
+then restores the previous camera demand. It sends no robot commands.
+
+The concise report separates printed-target consistency, SDK pixel-alignment
+evidence and raw-depth agreement. Equal image dimensions alone do not establish
+alignment. Saved evidence includes the actual RGB/depth intrinsics, source crop,
+SDK transformation comparisons, source distortion metadata, timestamps and
+image/depth hashes. A successful diagnostic process does not mean calibration
+passed or that an arm transform was installed.
+
+The same capture also saves the synchronized, unchanged left/right `GRAY8`
+images with their own dimensions, hashes, source times and SDK transformation
+metadata. RGB exposure time, ISO and color temperature are recorded when the
+frame provides them; unavailable observations retain explicit errors. These
+readbacks never set exposure or change stereo processing. Stereo extrinsic
+matrices use explicit meters and describe SDK **source** coordinates; they do
+not establish rectified optical coordinates or validate triangulation. Missing
+stereo diagnostics do not prevent an otherwise valid RGB-D capture.
+
+The worker also supports an offline, local floor-display reference after the
+operator has confirmed that both sheets lie on a flat floor:
+
+```sh
+"$ROB_CALIBRATION_PYTHON" Cerebro/Resources/ShadowPlanner/belly_qr_diagnostic.py \
+  --input "$ROB_BELLY_CAPTURE/capture-input.json" \
+  --output "$ROB_BELLY_CAPTURE/diagnostic.json" \
+  --local-floor-reference-output "$ROB_BELLY_FLOOR_REFERENCE" \
+  --operator-confirmed-flat-floor
+```
+
+Use the calibration Python environment with OpenCV and NumPy. The first three
+frames fit the raw floor plane inside the verified symbols; two later frames
+validate that unchanged plane. Valid native returns are retained without
+outlier deletion. Missing pixel-alignment evidence, nonplanar data or failed
+held-out checks prevent a reference from being written. Printed-pair PnP
+rejection remains visible independently of this local raw-plane test.
+
+The per-robot display profile can pin the resulting file through
+`bellyFloorDisplayReference.evidencePath` and `evidenceSHA256`. The loader checks
+the reference, capture and individual source hashes. It rotates the belly
+housing and cloud together around the unchanged optical origin, accounting
+for the common display-up gauge. It does not install a height shift, rescale
+depth, change the head projection, register an arm or authorize motion.
 
 ## Startup gripper setup
 
@@ -41,6 +114,20 @@ Starting a session only requests the bounded authorization. It does **not** auto
 One active session covers its included routines and waypoints; there are no extra approvals for each arm segment. Neck-only search, workspace depth scanning and hanging inspection need no arm authorization. Returning an empty arm to hanging also needs no new approval, while still requiring current collision clearance. Stop, expiry, sleep/restart, ownership loss or failed motion ends the session. A perception-only rejection that sent no arm motion can remain inside the existing bounded session; that grant never substitutes for scene registration. A typed sandbox command never supplies spoken approval.
 
 ## Recycling parameters
+
+Both recycling tests expose **Number of cans**, a saved whole-number preference
+from **1 through 8** (default 1). Save the value before starting the batch. The
+count is copied into the pending operation scope; one spoken or controller
+approval covers that batch. Each can requires fresh perception, a newly checked
+path and visual grasp evidence. A failed or uncertain grasp stops in a hold;
+there is no blind next-can retry or automatic timeout extension. A commanded
+gravity release is recorded separately from verified landing inside the bin.
+
+The sandbox uses `left_recycle_cans` or `right_recycle_cans` with the count in
+`target`. Legacy one-can, two-can and right-three-can commands retain their
+counts. This parameter does not alter registration, collision or approval
+requirements. Camera RAM-profile setup and its remaining local depth residual
+are described in [fixed-head commissioning](fixed-head-pickup-commissioning.md#optional-runtime-stereo-calibration).
 
 Test timing parameters are saved in `~/Library/Application Support/Cerebro/TestingSandbox/recycling.json` and snapshotted for the next run. Editing is disabled during an active or pending operation, including startup jaw setup.
 
@@ -88,7 +175,22 @@ This preview is read-only. It never assigns the executable proposal, restores an
 
 ### Current commissioning limits
 
-The concrete depth producer deliberately emits an unregistered map. The existing markerless base/torso fitter can report candidate extrinsics and fit RMS, but it does not yet export the uncertainty and independent validation needed here, or bind each result to the recorded neck pose. Commissioning needs measured base/torso correspondences with separate validation points, per-view neck/camera identities, uncertainty export and repeated-view validation. A small fit residual alone is insufficient.
+The default neck-command projection emits an unregistered map. The separate
+[fixed-head commissioning test](fixed-head-pickup-commissioning.md) can now fit
+raw depth against visible robot surfaces, validate different patches in later
+frames, export an error allowance, and bind a local measurement to its exact
+head/body, camera, model and connection state. Every projected frame must carry
+that evidence for a map to receive measured registration. A small training
+residual alone remains insufficient, and the CAD uncertainty is explicitly an
+assumption. A fixture result does not commission the physical robot.
+
+The physical right-arm model has a genuine convex-proxy overlap with the track
+and upper idler at its hanging reference. The right-arm calibration step is a
+separate estimated empty-arm experiment: J2 −0.039 rad over four seconds, with
+29.399 mm maximum modeled hull travel. It requires improving existing modeled
+self-proxy deficits and fresh local depth, then holds for observation. Its
+endpoint still does not meet the ordinary 30 mm tread margin; the step cannot
+silently unlock a grasp or chain itself into a reach.
 
 The current hanging-tool collision proxy also enters the model's 3 cm tread margin. This requires checking the measured mounting geometry, tool/reference alignment and conservative proxy shapes; it is not proof that the real hanging arm touches a tread. Camera registration will not fix that model-relative discrepancy. The planner currently uses conservative link boxes and an expanded open-jaw envelope. Measured finger geometry, robot self-volume visibility and intentional contact with the grasped target still need commissioning before a live grasp can be admitted. No physical recycling success is claimed for this planner.
 

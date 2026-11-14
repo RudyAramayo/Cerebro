@@ -86,6 +86,8 @@
 - (void) makeTextViewFirstResponder:(NSTextView *)textView;
 - (void) clearInputTextMessage;
 - (void) inputText:(NSString *)textInput;
+/// Local/operator Stop revokes queued work and requests holds; never lowers.
+- (void)performOperatorPriorityStopWithReason:(NSString *)reason;
 - (void) didRespond: (NSString *) responseText;
 //Tracking
 - (void) didSeeNewPeople:(NSArray<VNFaceObservation*>*)observations;
