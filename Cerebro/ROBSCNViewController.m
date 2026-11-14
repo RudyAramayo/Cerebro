@@ -778,6 +778,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)resetAccumulatedSurfaceForBelly:(BOOL)belly
 {
+    [self.ghostGestureEditor clearSurfaceGhostCandidates:belly];
     self.surfaceGeneration++;
     if (belly) {
         self.bellySurfaceGeneration++;self.bellySurfaceUpdatePending=NO;
@@ -871,6 +872,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     else if (!projectionReady) blocked=@"waiting for an explicit camera pose or fresh floor alignment; previous scan retained";
     else if (frame.capturedUptime<MAX(self.lastSurfaceResetUptime,belly ? self.lastBellySurfaceResetUptime : self.lastHeadSurfaceResetUptime)) blocked=@"waiting for a capture after Reset";
     if (blocked) {
+        [self.ghostGestureEditor clearSurfaceGhostCandidates:belly];
         if (belly) self.bellySurfaceSummary=blocked;else self.headSurfaceSummary=blocked;
         [self refreshAccumulatedSurfaceStatus];return;
     }
@@ -903,6 +905,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
                 ![bodyIdentity isEqual:ROBFixedHeadBodyMotionIdentity.currentIdentity]) return;
             SCNNode *root=belly ? self.bellySurfaceNode : self.headSurfaceNode;
             if (result) {
+                [self.ghostGestureEditor publishSurfaceGhostCandidates:((ROBSurfaceTrackedNode *)result).stationaryCanCandidates ?: @[]
+                    capturedUptime:frame.capturedUptime belly:belly];
                 result.transform=SCNMatrix4Scale(robot,ROBScanVisualModel.presentationScale,ROBScanVisualModel.presentationScale,ROBScanVisualModel.presentationScale);
                 [SCNTransaction begin];[SCNTransaction setDisableActions:YES];
                 SCNNode *previous=root.childNodes.firstObject;

@@ -15,3 +15,8 @@ xcrun clang -O2 -std=c11 -Wall -Wextra -Werror \
 xcrun clang -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   "$repo_dir/Tests/ROBAccumulatedSurfaceTemporalFixtureTests.c" -o "$fixture_dir/temporal-sanitized"
 "$fixture_dir/temporal-sanitized"
+
+xcrun clang -O2 -std=c11 -Wall -Wextra -Werror "$repo_dir/Tests/ROBSurfaceStationarityFixtureTests.c" -o "$fixture_dir/stationary"
+"$fixture_dir/stationary"
+xcrun clang -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined "$repo_dir/Tests/ROBSurfaceStationarityFixtureTests.c" -o "$fixture_dir/stationary-sanitized"
+"$fixture_dir/stationary-sanitized"

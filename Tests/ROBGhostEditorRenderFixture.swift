@@ -1,5 +1,6 @@
 import AppKit
 import SceneKit
+import CryptoKit
 
 private extension SCNNode {
     var fixtureDescendants:[SCNNode] {
@@ -752,6 +753,72 @@ final class GhostFixtureSnapshotView: NSView {
         editor.reviewPresetNamed("collision")
         print("Right preview: side-mismatch rejected, all-right FK with unchanged originals, explicit estimated/read-only label, L10-only fresh baseline and disabled execution passed")
         trial.collisionReviewProposal = nil; trial.collisionReviewStatus = [:]
+        // A complete synthetic display profile lets the real editor consume a
+        // stationary submap target. Every hardware entry point above is inert.
+        let surfaceTemp=FileManager.default.temporaryDirectory.appendingPathComponent("surface-ghost-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at:surfaceTemp,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:surfaceTemp)}
+        func hash(_ data:Data)->String {SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined()}
+        func writeJSON(_ value:[String:Any],_ file:URL)throws {try JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]).write(to:file)}
+        let fit=surfaceTemp.appendingPathComponent("fit.json"),floorProof=surfaceTemp.appendingPathComponent("floor.json")
+        let activation=surfaceTemp.appendingPathComponent("profile.json")
+        try writeJSON(["status":"conditional_torso_bundle_candidate_not_registered","modelID":model.modelID,
+            "registrationVerified":false,"pixelModel":["fixedDistortionApplied":false],"parameters":[
+                "panScale":1.9,"lowerScale":1.7,"upperScale":1.8,"lowerOffsetRadians":-0.2,
+                "cameraDeltaRx":-0.08,"cameraDeltaRy":0.015,"cameraDeltaRz":-0.02,
+                "cameraDistanceFromAssumedUpperCenterMeters":0.15,"cameraAzimuthRadians":0.1,"cameraElevationRadians":0.7]],fit)
+        let metadata=Data("Synthetic render fixture; no physical camera evidence".utf8)
+        try metadata.write(to:surfaceTemp.appendingPathComponent("capture-input.json"))
+        var proof:[[String:Any]]=[]
+        for i in 0..<3 {
+            let bytes=Data("Synthetic frame \(i)".utf8);try bytes.write(to:surfaceTemp.appendingPathComponent("frame-\(i).jpg"))
+            proof.append(["targetID":"ROB:FLOOR:R01","floorNormalOptical":[0.0,0.0,-1.0],"frameIndex":i,
+                "imageSHA256":hash(bytes),"reprojectionRMSPixels":0.1,"correlation":0.99,"ambiguous":false])
+        }
+        try writeJSON(["scope":["modelID":model.modelID,"panTarget":6000,"lowerTarget":6495,"upperTarget":5900],
+            "sourceCapturePath":surfaceTemp.path,"sourceCaptureSHA256":hash(metadata),"observations":proof],floorProof)
+        try writeJSON(["schemaVersion":1,"kind":"provisional_rgb_neck_display","modelID":model.modelID,
+            "referenceID":model.referenceID,"geometryID":model.geometryID,"fitArtifactPath":fit.path,
+            "fitArtifactSHA256":hash(try Data(contentsOf:fit)),"floorReferencePath":floorProof.path,
+            "floorReferenceSHA256":hash(try Data(contentsOf:floorProof))],activation)
+        let surfaceButton=controls.compactMap{$0 as? NSButton}.first{$0.title=="Preview stationary surface target"}!
+        let surfaceValue:NSDictionary=["track_id":1,"center":[0.1,0.8,-0.5],"observations":6,
+            "span_seconds":1.2,"max_deviation_m":0.002,"speed_m_s":0.001]
+        let priorProfile=ProcessInfo.processInfo.environment["ROB_NECK_RGB_DISPLAY_PROFILE"]!
+        editor.publishSurfaceGhostCandidates([surfaceValue],capturedUptime:ProcessInfo.processInfo.systemUptime,belly:false)
+        NSApp.sendAction(surfaceButton.action!,to:surfaceButton.target,from:surfaceButton)
+        precondition(!controls.compactMap{$0 as? NSTextField}.contains{$0.stringValue.hasPrefix("3 ghost stages")},"Floor-only map supplied a surface target")
+        setenv("ROB_NECK_RGB_DISPLAY_PROFILE",activation.path,1)
+        editor.setRawHeadPanTarget(6000,lowerTarget:6495,upperTarget:5900,known:true)
+        editor.setHeadCommandEstimate(estimate(6495,5900))
+        precondition(editor.depthCloudUsesExplicitCameraPose(false))
+        let searchBefore=ROBArmRoutineCoordinator.shared.searchRequests
+        editor.publishSurfaceGhostCandidates([surfaceValue],capturedUptime:ProcessInfo.processInfo.systemUptime,belly:false)
+        NSApp.sendAction(surfaceButton.action!,to:surfaceButton.target,from:surfaceButton)
+        precondition(controls.compactMap{$0 as? NSTextField}.contains{$0.stringValue.hasPrefix("3 ghost stages")},"Stationary target did not calculate a real model IK preview")
+        precondition(!execute.isEnabled && ROBArmRoutineCoordinator.shared.searchRequests==searchBefore)
+        let surfaceOriginals=allOriginalNodes.map(\.simdTransform)
+        timeline.doubleValue=timeline.maxValue;NSApp.sendAction(timeline.action!,to:timeline.target,from:timeline)
+        precondition(allGhostNodes.contains{!$0.isHidden} && allOriginalNodes.map(\.simdTransform)==surfaceOriginals,
+            "Surface rehearsal did not move only the blue model")
+        let surfacePath=scene.rootNode.fixtureDescendants.first{$0.name=="Stationary surface ghost trajectory"}!
+        let surfaceVisibility=controls.compactMap{$0 as? NSButton}.first{$0.title=="Show planned route"}!
+        surfaceVisibility.state = .off;NSApp.sendAction(surfaceVisibility.action!,to:surfaceVisibility.target,from:surfaceVisibility)
+        precondition(surfacePath.isHidden)
+        surfaceVisibility.state = .on;NSApp.sendAction(surfaceVisibility.action!,to:surfaceVisibility.target,from:surfaceVisibility)
+        precondition(!surfacePath.isHidden)
+
+        NSApp.sendAction(NSSelectorFromString("review"),to:editor,from:nil)
+        NSApp.sendAction(NSSelectorFromString("executeReviewed"),to:editor,from:nil)
+        NSApp.sendAction(NSSelectorFromString("saveGesture"),to:editor,from:nil)
+        precondition(!execute.isEnabled,"Surface target acquired execution authority")
+        editor.clearSurfaceGhostCandidates(false)
+        precondition(controls.compactMap{$0 as? NSTextField}.contains{$0.stringValue=="No pickup path"},"Reset retained stationary preview")
+        editor.publishSurfaceGhostCandidates([surfaceValue],capturedUptime:ProcessInfo.processInfo.systemUptime-1,belly:false)
+        NSApp.sendAction(surfaceButton.action!,to:surfaceButton.target,from:surfaceButton)
+        precondition(!controls.compactMap{$0 as? NSTextField}.contains{$0.stringValue.hasPrefix("3 ghost stages")},"Stale target recalculated a ghost path")
+        editor.clearSurfaceGhostCandidates(false);setenv("ROB_NECK_RGB_DISPLAY_PROFILE",priorProfile,1)
+        print("Stationary surface editor: explicit-pose gate, real IK preview, no search/motor calls, review/execute/save guards, reset and stale-target rejection passed")
         if CommandLine.arguments.last != "can" {
             presets.selectItem(at: selection); NSApp.sendAction(presets.action!, to: presets.target, from: presets)
             timeline.doubleValue = timeline.maxValue; NSApp.sendAction(timeline.action!, to: timeline.target, from: timeline)

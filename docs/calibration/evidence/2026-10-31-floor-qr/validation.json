@@ -1,0 +1,268 @@
+{
+  "baseline_commit": "ca06db1f5ebf009da9880f1ef114027ad107df4a",
+  "capture": {
+    "height": 400,
+    "independent_live_or_moving_camera_evidence": false,
+    "replay_frames": 6,
+    "synthetic_advance_seconds": 0.5,
+    "unique_rgbd_captures": 1,
+    "width": 640
+  },
+  "checks": {
+    "codesign_deep_strict": "passed",
+    "detail_fixture_pixels": 16382,
+    "detail_optimized_and_asan_ubsan": "passed",
+    "existing_multiview_max_qr_world_error_mm": 1.851,
+    "install_after_build": "NO",
+    "installed": false,
+    "map_temporal_stationarity_optimized_and_asan_ubsan": "passed",
+    "native_controller_photo_and_multiview_fixtures": "passed",
+    "replay_options": [
+      "--require-qr",
+      "--require-native-render-qr",
+      "--warmup-frames",
+      "2",
+      "--max-qr-corner-error-pixels",
+      "2",
+      "--expected-can-count",
+      "1"
+    ],
+    "restarted": false,
+    "signed_debug_build": "passed"
+  },
+  "detail_recovery": {
+    "changed_comparisons": 0,
+    "final_detail_pixels": 60873,
+    "geometry_and_color_comparisons": 153598,
+    "max_capture_pixels": 1048576,
+    "max_patch_pixels": 16384,
+    "max_patches": 4,
+    "plane_fit_tolerance_changed": false,
+    "qr_missing_depth_pixels": 13,
+    "qr_pixels_represented": 1668,
+    "roi_rule": "Integer native pixel centres inside the Vision quadrilateral; no dilation.",
+    "source_tile_xywh": [
+      512,
+      256,
+      128,
+      128
+    ]
+  },
+  "limitations": [
+    "The first extracted scene (capture 2) still misses full-scene QR detection; report retains this failure.",
+    "Frozen pixel footprints are a bounded provisional display, not watertight depth fusion or a registration correction.",
+    "Existing source-depth gaps, unselected regions and large-viewpoint limitations remain.",
+    "Runtime/audio belongs to the resumed pour session; installation/restart deferred."
+  ],
+  "private_artifact_sha256": {
+    "baseline_render": "c1e6e1872023ac7fb349fdfae6c7c170da02eb05d4a6f6b04eb9ccae26a48b8d",
+    "baseline_report": "27488024abc86a8cf08774b82135acfad75349ad8c9e5896a33e30935c969b8e",
+    "build_log": "350e974d5f96810ed29e7f580a5f6c267e987d3f935c5f3861e94e5b0d9b1748",
+    "comparison_still": "d36419519d4b4b2a1ed0b2b01c949b54f4da3a4b9fb1c47bd4fe3b0b9d119bfb",
+    "fixed_render": "9610baf0665c321281995c67722ff01e32b62385036fc14475076c6db692a4a1",
+    "fixed_report": "9dc303482d619a01a2986a969552a26b85f118626e42243ecc5d8d146622b7e4",
+    "map_tests_log": "af3ed03f14977a86d577fc0a184afd78e3b2c2d863e21ac474e9f6af6eae8939",
+    "native_render_tests_log": "fbba211789ee567bb6509cc571e8d5731ce1b43cdcf63c98c54a9d444b9ed24c",
+    "source_depth_u16le": "6c8af8f738606940e068570b0f0de22202a4ad571809e054f1c2c3428bf0715e",
+    "source_rgb": "9fbf34990103c39305ebcdf15b31c6a5fb831a33a838d3567dfa34e0ff410d89",
+    "verified_debug_dylib": "ca3e8c62ada36ed6a45806cd99812fc7826628d64df9e47ed02b3416b7ca0129"
+  },
+  "qr_depth_diagnosis": {
+    "nearest_plane_coverage": {
+      "0.015": 0.61810551558753,
+      "0.018": 0.7278177458033573,
+      "0.03": 0.9964028776978417,
+      "0.06": 1.0
+    },
+    "pixels": 1681,
+    "plane_median_residual_m": {
+      "1": 0.06937379703098406,
+      "2": 0.7764776512590134,
+      "3": 0.026476409053361072,
+      "4": 0.048274838653170504,
+      "5": 0.022983361345831455,
+      "6": 0.6336450098926996
+    },
+    "qr": {
+      "corners": [
+        [
+          532.4205932617188,
+          336.3335266113281
+        ],
+        [
+          564.7659912109375,
+          319.4261474609375
+        ],
+        [
+          598.043212890625,
+          352.1268310546875
+        ],
+        [
+          566.267333984375,
+          371.221923828125
+        ]
+      ],
+      "payload": "ROB:FLOOR:R01"
+    },
+    "valid_depth_fraction": 0.992266508030934,
+    "valid_depth_pixels": 1668
+  },
+  "qr_replay": {
+    "all_frames": [
+      {
+        "canIDs": [],
+        "detailIDs": [],
+        "detailPixels": 0,
+        "frame": 1,
+        "maxRenderQRCornerErrorPixels": 0,
+        "nativeQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "reconstructedQR": [],
+        "renderedNativeResolutionQR": [],
+        "renderedQR": [],
+        "textureProbesChanged": 0,
+        "textureProbesCompared": 0
+      },
+      {
+        "canIDs": [
+          13
+        ],
+        "detailIDs": [
+          1
+        ],
+        "detailPixels": 15984,
+        "frame": 2,
+        "maxRenderQRCornerErrorPixels": 0,
+        "nativeQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "reconstructedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedNativeResolutionQR": [],
+        "renderedQR": [],
+        "textureProbesChanged": 0,
+        "textureProbesCompared": 0
+      },
+      {
+        "canIDs": [
+          13
+        ],
+        "detailIDs": [
+          1,
+          2
+        ],
+        "detailPixels": 30773,
+        "frame": 3,
+        "maxRenderQRCornerErrorPixels": 1.24081826019958,
+        "nativeQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "reconstructedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedNativeResolutionQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "textureProbesChanged": 0,
+        "textureProbesCompared": 15984
+      },
+      {
+        "canIDs": [
+          13
+        ],
+        "detailIDs": [
+          1,
+          2,
+          3
+        ],
+        "detailPixels": 45968,
+        "frame": 4,
+        "maxRenderQRCornerErrorPixels": 1.24081826019958,
+        "nativeQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "reconstructedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedNativeResolutionQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "textureProbesChanged": 0,
+        "textureProbesCompared": 30773
+      },
+      {
+        "canIDs": [
+          13
+        ],
+        "detailIDs": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "detailPixels": 60873,
+        "frame": 5,
+        "maxRenderQRCornerErrorPixels": 1.24081826019958,
+        "nativeQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "reconstructedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedNativeResolutionQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "textureProbesChanged": 0,
+        "textureProbesCompared": 45968
+      },
+      {
+        "canIDs": [
+          13
+        ],
+        "detailIDs": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "detailPixels": 60873,
+        "frame": 6,
+        "maxRenderQRCornerErrorPixels": 1.24081826019958,
+        "nativeQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "reconstructedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedNativeResolutionQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "renderedQR": [
+          "ROB:FLOOR:R01"
+        ],
+        "textureProbesChanged": 0,
+        "textureProbesCompared": 60873
+      }
+    ],
+    "baseline_native_and_2x_render_decodes_after_warmup": 0,
+    "first_native_render_decode_capture": 3,
+    "fixed_native_render_decodes_after_warmup": 4,
+    "fixed_texture_decodes_after_warmup": 4,
+    "max_corner_error_pixels": 1.24081826019958,
+    "warmup_captures": 2
+  },
+  "recorded_at": "2026-11-01T04:00:57.447622+00:00",
+  "schema": 1,
+  "scope": "Offline display reconstruction only; no camera, motion, install, restart, collision or registration authority."
+}

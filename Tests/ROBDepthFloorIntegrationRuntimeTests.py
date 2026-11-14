@@ -82,8 +82,11 @@ __HELPERS__
 @implementation FixtureLabel @end
 @interface FixtureGhostEditor : NSObject
 @property(copy) NSString *depthProjectionIdentity, *headDisplayPoseDescription;
+- (void)clearSurfaceGhostCandidates:(BOOL)belly;
 @end
-@implementation FixtureGhostEditor @end
+@implementation FixtureGhostEditor
+- (void)clearSurfaceGhostCandidates:(BOOL)belly { (void)belly; }
+@end
 @interface ROBFixedHeadBodyMotionIdentity : NSObject
 + (NSString *)currentIdentity;
 @end
